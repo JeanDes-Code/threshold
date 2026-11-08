@@ -1,9 +1,9 @@
-mod charter;
+mod adventure_seed;
 mod handle;
 mod proposal;
 mod types;
 
-pub use charter::{Charter, CharterEntity, CharterFact, PcSeed};
+pub use adventure_seed::{AdventureSeed, PcSeed, SeedEntity, SeedFact};
 pub use handle::{Handle, HandleError};
 pub use proposal::{
     ActionKind, Cancel, Cause, CheckDraft, DecisionProposal, EventDraft, Factor, NewFact, NewNpc,

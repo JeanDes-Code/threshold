@@ -1,6 +1,8 @@
 use schemars::schema_for;
 use threshold_core::{
-    domain::{Charter, CheckDraft, DecisionProposal, EventDraft, Handle, NewNpc, Reaction, Stance},
+    domain::{
+        AdventureSeed, CheckDraft, DecisionProposal, EventDraft, Handle, NewNpc, Reaction, Stance,
+    },
     normalize, proposal_schema,
 };
 
@@ -75,8 +77,8 @@ fn normalize_uses_nfkc_and_strips_english_articles() {
 }
 
 #[test]
-fn charter_parses_from_toml() {
-    let charter: Charter = toml::from_str(
+fn adventure_seed_parses_from_toml() {
+    let adventure_seed: AdventureSeed = toml::from_str(
         r#"
 premise = "A city on the edge"
 story_language = "fr"
@@ -97,10 +99,10 @@ text = "Orsel comes from Aubrac."
     )
     .unwrap();
 
-    assert_eq!(charter.pc.name, "Orsel");
-    assert!(charter.pc.adult);
-    assert_eq!(charter.decided[0].key, "home");
-    assert!(charter.proposed.is_empty());
+    assert_eq!(adventure_seed.pc.name, "Orsel");
+    assert!(adventure_seed.pc.adult);
+    assert_eq!(adventure_seed.decided[0].key, "home");
+    assert!(adventure_seed.proposed.is_empty());
 }
 
 #[test]

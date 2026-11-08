@@ -872,7 +872,8 @@ pub(super) fn historical(db: &Connection, c: u64, seq: u64) -> Result<WorldView,
     let mut tmp = Connection::open_in_memory()?;
     super::migrations::apply(&tmp)?;
     let tx = tmp.transaction()?;
-    let mut stmt = db.prepare("SELECT id,charter_json,clock_min,seed FROM campaign WHERE id=?1")?;
+    let mut stmt =
+        db.prepare("SELECT id,adventure_seed_json,clock_min,seed FROM campaign WHERE id=?1")?;
     let campaign = stmt
         .query_row([c], |r| {
             Ok((
@@ -885,7 +886,7 @@ pub(super) fn historical(db: &Connection, c: u64, seq: u64) -> Result<WorldView,
         .optional()?
         .ok_or_else(|| StoreError::Invalid("unknown campaign".into()))?;
     tx.execute(
-        "INSERT INTO campaign(id,charter_json,clock_min,seed) VALUES(?1,?2,?3,?4)",
+        "INSERT INTO campaign(id,adventure_seed_json,clock_min,seed) VALUES(?1,?2,?3,?4)",
         params![campaign.0, campaign.1, campaign.2, campaign.3],
     )?;
     let mut stmt=db.prepare("SELECT id,campaign_id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration FROM turn WHERE campaign_id=?1 AND seq<?2 ORDER BY seq")?;

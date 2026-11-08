@@ -13,7 +13,7 @@ pub(super) fn apply(db: &Connection) -> Result<(), StoreError> {
     if version == 0 {
         db.execute_batch(r#"
 BEGIN;
-CREATE TABLE campaign (id INTEGER PRIMARY KEY, charter_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL);
+CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL);
 CREATE TABLE entity (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaign(id), kind TEXT NOT NULL, name TEXT NOT NULL, norm_name TEXT NOT NULL, adult INTEGER, CHECK (kind NOT IN ('pc','npc') OR adult IS NOT NULL));
 CREATE TABLE voice_card (npc_id INTEGER PRIMARY KEY REFERENCES entity(id), habits TEXT NOT NULL, vocabulary TEXT NOT NULL, samples_json TEXT NOT NULL);
 CREATE TABLE goal (id INTEGER PRIMARY KEY, npc_id INTEGER NOT NULL REFERENCES entity(id), text TEXT NOT NULL, against_id INTEGER REFERENCES entity(id), status TEXT NOT NULL);

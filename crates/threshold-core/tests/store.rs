@@ -1,10 +1,12 @@
 use threshold_core::{
-    domain::{Canon, Charter, CharterFact, EntityKind, FactSource, Handle, LedgerOp, PcSeed, Slot},
+    domain::{
+        AdventureSeed, Canon, EntityKind, FactSource, Handle, LedgerOp, PcSeed, SeedFact, Slot,
+    },
     store::{CommitError, Store, TurnKind, TurnRecord},
 };
 
-fn charter() -> Charter {
-    Charter {
+fn adventure_seed() -> AdventureSeed {
+    AdventureSeed {
         premise: "A frontier".into(),
         entities: vec![],
         pc: PcSeed {
@@ -13,13 +15,13 @@ fn charter() -> Charter {
             concept: "Scout".into(),
         },
         boundaries: vec![],
-        decided: vec![CharterFact {
+        decided: vec![SeedFact {
             subject: "Ada".into(),
             key: "Home".into(),
             value: "The Hill".into(),
             text: "Ada lives on the hill.".into(),
         }],
-        proposed: vec![CharterFact {
+        proposed: vec![SeedFact {
             subject: "Ada".into(),
             key: "Ally".into(),
             value: "A Raven".into(),
@@ -73,7 +75,13 @@ fn supersede(old: u64, subject: u64, value: &str) -> LedgerOp {
 #[test]
 fn migrations_apply_on_empty_db() {
     let mut db = Store::open_in_memory().unwrap();
-    let id = db.create_campaign(&charter(), 42).unwrap();
+    let id = db.create_campaign(&adventure_seed(), 42).unwrap();
+    let setup = db.turn_by_op(&"__seed__".into()).unwrap().unwrap();
+    assert_eq!(setup.record.kind, TurnKind::Setup);
+    assert_eq!(
+        serde_json::to_string(&setup.record.kind).unwrap(),
+        "\"setup\""
+    );
     let view = db.snapshot(id).unwrap();
     let pc = &view.entities[0];
     assert_eq!(pc.kind, EntityKind::Pc);
@@ -90,7 +98,7 @@ fn migrations_apply_on_empty_db() {
 #[test]
 fn npc_without_adult_status_is_refused() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 42).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 42).unwrap();
     let before = db.snapshot(c).unwrap();
     assert!(
         db.commit(
@@ -109,7 +117,7 @@ fn npc_without_adult_status_is_refused() {
 #[test]
 fn one_live_value_per_slot() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 42).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 42).unwrap();
     let before = db.snapshot(c).unwrap();
     let pc = before.entities[0].id;
     assert!(
@@ -125,7 +133,7 @@ fn one_live_value_per_slot() {
 #[test]
 fn duplicate_op_id_commits_once() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 42).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 42).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     let id = db
         .commit(record(c, "same"), vec![fact(pc, "open")])
@@ -140,8 +148,8 @@ fn duplicate_op_id_commits_once() {
 #[test]
 fn campaign_isolation_and_scoped_op_ids() {
     let mut db = Store::open_in_memory().unwrap();
-    let a = db.create_campaign(&charter(), 1).unwrap();
-    let b = db.create_campaign(&charter(), 2).unwrap();
+    let a = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let b = db.create_campaign(&adventure_seed(), 2).unwrap();
     db.commit(record(a, "same"), vec![]).unwrap();
     db.commit(record(b, "same"), vec![]).unwrap();
     assert!(db.commit(record(99999, "missing"), vec![]).is_err());
@@ -159,7 +167,7 @@ fn restart_keeps_state() {
     ));
     let (c, before) = {
         let mut db = Store::open(&path).unwrap();
-        let c = db.create_campaign(&charter(), 42).unwrap();
+        let c = db.create_campaign(&adventure_seed(), 42).unwrap();
         let pc = db.snapshot(c).unwrap().entities[0].id;
         db.commit(record(c, "one"), vec![fact(pc, "open")]).unwrap();
         (c, db.snapshot(c).unwrap())
@@ -172,7 +180,7 @@ fn restart_keeps_state() {
 #[test]
 fn rebuild_matches_projections() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 42).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 42).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(
         record(c, "one"),
@@ -215,7 +223,7 @@ fn replay_skips_ops_of_reverted_turn_in_hand_built_ledger() {
     ));
     let (c, pc) = {
         let mut db = Store::open(&path).unwrap();
-        let c = db.create_campaign(&charter(), 42).unwrap();
+        let c = db.create_campaign(&adventure_seed(), 42).unwrap();
         (c, db.snapshot(c).unwrap().entities[0].id)
     };
     {
@@ -262,7 +270,7 @@ fn replay_accepts_legacy_supersession_ledger() {
         std::thread::current().id()
     ));
     let mut db = Store::open(&path).unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(record(c, "old"), vec![fact(pc, "closed")])
         .unwrap();
@@ -292,8 +300,8 @@ fn replay_accepts_legacy_supersession_ledger() {
 #[test]
 fn cross_campaign_references_are_rejected_atomically() {
     let mut db = Store::open_in_memory().unwrap();
-    let a = db.create_campaign(&charter(), 1).unwrap();
-    let b = db.create_campaign(&charter(), 2).unwrap();
+    let a = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let b = db.create_campaign(&adventure_seed(), 2).unwrap();
     let foreign = db.snapshot(b).unwrap().entities[0].id;
     let before = db.snapshot(a).unwrap();
     assert!(
@@ -306,8 +314,8 @@ fn cross_campaign_references_are_rejected_atomically() {
 #[test]
 fn duplicate_lookup_is_explicitly_scoped() {
     let mut db = Store::open_in_memory().unwrap();
-    let a = db.create_campaign(&charter(), 1).unwrap();
-    let b = db.create_campaign(&charter(), 2).unwrap();
+    let a = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let b = db.create_campaign(&adventure_seed(), 2).unwrap();
     let one = db.commit(record(a, "same"), vec![]).unwrap();
     let two = db.commit(record(b, "same"), vec![]).unwrap();
     assert!(db.turn_by_op(&"same".into()).is_err());
@@ -331,7 +339,7 @@ fn duplicate_lookup_is_explicitly_scoped() {
 fn proposal_seen_by_pc_is_persistent_and_witnessed() {
     use threshold_core::domain::Knowing;
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(
         record(c, "seen"),
@@ -364,7 +372,7 @@ fn proposal_seen_by_pc_is_persistent_and_witnessed() {
 #[test]
 fn supersede_then_replace_slot_is_atomic_and_rebuildable() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(record(c, "old"), vec![fact(pc, "closed")])
         .unwrap();
@@ -381,7 +389,7 @@ fn supersede_then_replace_slot_is_atomic_and_rebuildable() {
 fn possible_fact_seen_by_pc_becomes_established() {
     use threshold_core::domain::Knowing;
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let view = db.snapshot(c).unwrap();
     let pc = view.entities[0].id;
     let possible = view
@@ -415,7 +423,7 @@ fn possible_fact_seen_by_pc_becomes_established() {
 fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
     use threshold_core::domain::{ClaimDraft, Knowing, Trigger};
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(
         record(c, "one"),
@@ -530,7 +538,7 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
 #[test]
 fn revert_then_replace_slot_in_same_commit() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     let target = db
         .commit(record(c, "old"), vec![fact(pc, "closed")])
@@ -557,7 +565,7 @@ fn revert_then_replace_slot_in_same_commit() {
 #[test]
 fn reverting_a_revert_restores_original_turn() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     let target = db
         .commit(record(c, "old"), vec![fact(pc, "closed")])
@@ -589,7 +597,7 @@ fn reverting_a_revert_restores_original_turn() {
 fn delayed_witness_promotes_possible_only_on_arrival() {
     use threshold_core::domain::Knowing;
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let v = db.snapshot(c).unwrap();
     let pc = v.entities[0].id;
     let f = v
@@ -628,7 +636,7 @@ fn delayed_witness_promotes_possible_only_on_arrival() {
 fn contradicted_delayed_witness_does_not_block_clock() {
     use threshold_core::domain::Knowing;
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let v = db.snapshot(c).unwrap();
     let pc = v.entities[0].id;
     let raven = v.live_fact(pc, "ally").unwrap().id;
@@ -677,8 +685,8 @@ fn contradicted_delayed_witness_does_not_block_clock() {
 #[test]
 fn simultaneous_possible_facts_in_one_slot_do_not_promote() {
     use threshold_core::domain::Knowing;
-    let mut ch = charter();
-    ch.proposed.push(CharterFact {
+    let mut ch = adventure_seed();
+    ch.proposed.push(SeedFact {
         subject: "Ada".into(),
         key: "ally".into(),
         value: "wolf".into(),
@@ -725,7 +733,7 @@ fn simultaneous_possible_facts_in_one_slot_do_not_promote() {
 fn claim_listeners_receive_delayed_told_knowledge() {
     use threshold_core::domain::{ClaimDraft, Knowing};
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(
         record(c, "npc"),
@@ -806,7 +814,7 @@ fn claim_listeners_receive_delayed_told_knowledge() {
 fn supersession_creates_replacement_without_predicted_id() {
     use threshold_core::domain::FactDraft;
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(record(c, "old"), vec![fact(pc, "closed")])
         .unwrap();
@@ -842,22 +850,22 @@ fn supersession_creates_replacement_without_predicted_id() {
 }
 
 #[test]
-fn charter_subjects_require_pc_declared_entity_or_world() {
-    use threshold_core::domain::CharterEntity;
+fn adventure_seed_subjects_require_pc_declared_entity_or_world() {
+    use threshold_core::domain::SeedEntity;
     let mut db = Store::open_in_memory().unwrap();
-    let mut ch = charter();
-    ch.entities.push(CharterEntity {
+    let mut ch = adventure_seed();
+    ch.entities.push(SeedEntity {
         name: "Bela".into(),
         kind: EntityKind::Npc,
         adult: Some(true),
     });
-    ch.decided.push(CharterFact {
+    ch.decided.push(SeedFact {
         subject: "Bela".into(),
         key: "role".into(),
         value: "guide".into(),
         text: "guide".into(),
     });
-    ch.proposed.push(CharterFact {
+    ch.proposed.push(SeedFact {
         subject: "world".into(),
         key: "weather".into(),
         value: "rain".into(),
@@ -896,7 +904,7 @@ fn additional_projections_survive_rebuild() {
         std::thread::current().id()
     ));
     let mut db = Store::open(&path).unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let v = db.snapshot(c).unwrap();
     let pc = v.entities[0].id;
     let cause = v.live_fact(pc, "home").unwrap().id;
@@ -997,7 +1005,7 @@ fn additional_projections_survive_rebuild() {
 #[test]
 fn recent_turns_exclude_reverted_and_keep_last_six_play_or_correction() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let mut turns = Vec::new();
     for n in 0..8 {
         turns.push(db.commit(record(c, &format!("play{n}")), vec![]).unwrap());
@@ -1035,7 +1043,7 @@ fn recent_turns_exclude_reverted_and_keep_last_six_play_or_correction() {
 #[test]
 fn live_fact_normalizes_lookup_key() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     db.commit(
         record(c, "fact"),
@@ -1089,8 +1097,8 @@ fn future_schema_is_rejected_without_changing_version() {
 #[test]
 fn reverted_ids_are_not_reused_by_other_campaigns() {
     let mut db = Store::open_in_memory().unwrap();
-    let a = db.create_campaign(&charter(), 1).unwrap();
-    let b = db.create_campaign(&charter(), 2).unwrap();
+    let a = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let b = db.create_campaign(&adventure_seed(), 2).unwrap();
     let pc_a = db.snapshot(a).unwrap().entities[0].id;
     let pc_b = db.snapshot(b).unwrap().entities[0].id;
     let target = db
@@ -1121,7 +1129,7 @@ fn reverted_ids_are_not_reused_by_other_campaigns() {
 #[test]
 fn cited_possible_fact_is_established_and_replays() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let before = db.snapshot(c).unwrap();
     let id = before
         .live_facts
@@ -1146,7 +1154,7 @@ fn cited_possible_fact_is_established_and_replays() {
 #[test]
 fn normalized_keys_share_the_same_live_slot() {
     let mut db = Store::open_in_memory().unwrap();
-    let c = db.create_campaign(&charter(), 1).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     let a = LedgerOp::AddFact {
         slot: Slot {
@@ -1182,8 +1190,8 @@ fn normalized_keys_share_the_same_live_slot() {
 fn event_effect_cannot_reference_another_campaign() {
     use threshold_core::domain::{Effect, Trigger};
     let mut db = Store::open_in_memory().unwrap();
-    let a = db.create_campaign(&charter(), 1).unwrap();
-    let b = db.create_campaign(&charter(), 2).unwrap();
+    let a = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let b = db.create_campaign(&adventure_seed(), 2).unwrap();
     let foreign = db.snapshot(b).unwrap().entities[0].id;
     let before = db.snapshot(a).unwrap();
     let op = LedgerOp::ScheduleEvent {
@@ -1216,7 +1224,7 @@ fn duplicate_and_failed_commits_leave_ledger_untouched_and_debug_survives() {
         std::thread::current().id()
     ));
     let mut db = Store::open(&path).unwrap();
-    let c = db.create_campaign(&charter(), 5).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 5).unwrap();
     let pc = db.snapshot(c).unwrap().entities[0].id;
     let t = db
         .commit(

@@ -4,7 +4,7 @@ mod project;
 use std::{fmt, path::Path};
 
 use crate::domain::{
-    Canon, Charter, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, FactSource, Handle,
+    AdventureSeed, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, FactSource, Handle,
     Knowing, LedgerOp, Slot, Trigger,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -65,7 +65,7 @@ impl From<rusqlite::Error> for CommitError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnKind {
-    Seed,
+    Setup,
     Play,
     Correction,
     Ooc,
@@ -219,24 +219,24 @@ impl Store {
     }
     pub fn create_campaign(
         &mut self,
-        charter: &Charter,
-        seed: u64,
+        adventure_seed: &AdventureSeed,
+        rng_seed: u64,
     ) -> Result<CampaignId, StoreError> {
-        if crate::normalize::name(&charter.pc.name) == "world" {
+        if crate::normalize::name(&adventure_seed.pc.name) == "world" {
             return Err(StoreError::Invalid(
-                "world is a reserved charter subject".into(),
+                "world is a reserved adventure seed subject".into(),
             ));
         }
         let tx = self.db.transaction()?;
         tx.execute(
-            "INSERT INTO campaign(charter_json,clock_min,seed) VALUES(?1,0,?2)",
-            params![serde_json::to_string(charter)?, seed as i64],
+            "INSERT INTO campaign(adventure_seed_json,clock_min,seed) VALUES(?1,0,?2)",
+            params![serde_json::to_string(adventure_seed)?, rng_seed as i64],
         )?;
         let campaign = tx.last_insert_rowid() as u64;
         let rec = TurnRecord {
             campaign_id: campaign,
             op_id: "__seed__".into(),
-            kind: TurnKind::Seed,
+            kind: TurnKind::Setup,
             intent: String::new(),
             proposal_json: "{}".into(),
             clock_before: 0,
@@ -250,17 +250,17 @@ impl Store {
             turn,
             &LedgerOp::AddEntity {
                 kind: EntityKind::Pc,
-                name: charter.pc.name.clone(),
-                adult: Some(charter.pc.adult),
+                name: adventure_seed.pc.name.clone(),
+                adult: Some(adventure_seed.pc.adult),
             },
         )?
         .ok_or_else(|| StoreError::Invalid("missing PC id".into()))?;
-        names.insert(crate::normalize::name(&charter.pc.name), pc);
-        for e in &charter.entities {
+        names.insert(crate::normalize::name(&adventure_seed.pc.name), pc);
+        for e in &adventure_seed.entities {
             let name = crate::normalize::name(&e.name);
             if name == "world" || names.contains_key(&name) {
                 return Err(StoreError::Invalid(
-                    "duplicate or reserved charter entity name".into(),
+                    "duplicate or reserved adventure seed entity name".into(),
                 ));
             }
             let id = project::append(
@@ -277,8 +277,8 @@ impl Store {
             names.insert(name, id);
         }
         for (facts, canon) in [
-            (&charter.decided, Canon::Persistent),
-            (&charter.proposed, Canon::Possible),
+            (&adventure_seed.decided, Canon::Persistent),
+            (&adventure_seed.proposed, Canon::Possible),
         ] {
             for f in facts {
                 let normalized = crate::normalize::name(&f.subject);
@@ -300,7 +300,7 @@ impl Store {
                     id
                 } else {
                     return Err(StoreError::Invalid(format!(
-                        "unknown charter subject: {}",
+                        "unknown adventure seed subject: {}",
                         f.subject
                     )));
                 };
@@ -316,7 +316,7 @@ impl Store {
                         },
                         text: f.text.clone(),
                         canon,
-                        source: FactSource::Charter,
+                        source: FactSource::AdventureSeed,
                         seen_by: vec![],
                         causes: vec![],
                     },

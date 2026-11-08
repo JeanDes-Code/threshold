@@ -49,6 +49,13 @@ fn same_seed_same_roll() {
 }
 
 #[test]
+fn golden_rolls_are_stable() {
+    for (seed, expected) in [(0, 7), (1, 6), (42, 3), (u64::MAX, 9)] {
+        assert_eq!(D10.roll(6, seed).value, expected);
+    }
+}
+
+#[test]
 fn difficulty_from_factors() {
     let view = view();
     assert_eq!(D10.difficulty(&check(&[]), &view), 6);

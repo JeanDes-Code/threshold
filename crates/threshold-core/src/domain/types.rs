@@ -31,7 +31,7 @@ pub enum Canon {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FactSource {
-    Charter,
+    AdventureSeed,
     Proposal,
     Stake,
     WorldEvent,

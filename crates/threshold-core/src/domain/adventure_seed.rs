@@ -2,19 +2,19 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct Charter {
+pub struct AdventureSeed {
     pub premise: String,
     pub pc: PcSeed,
     #[serde(default)]
-    pub entities: Vec<CharterEntity>,
+    pub entities: Vec<SeedEntity>,
     pub boundaries: Vec<String>,
-    pub decided: Vec<CharterFact>,
-    pub proposed: Vec<CharterFact>,
+    pub decided: Vec<SeedFact>,
+    pub proposed: Vec<SeedFact>,
     pub story_language: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct CharterEntity {
+pub struct SeedEntity {
     pub name: String,
     pub kind: super::EntityKind,
     pub adult: Option<bool>,
@@ -28,7 +28,7 @@ pub struct PcSeed {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct CharterFact {
+pub struct SeedFact {
     pub subject: String,
     pub key: String,
     pub value: String,
