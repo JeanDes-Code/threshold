@@ -109,6 +109,9 @@ pub enum LedgerOp {
         source: FactSource,
         seen_by: Vec<EntityId>,
     },
+    EstablishFact {
+        fact_id: u64,
+    },
     SupersedeFact {
         fact_id: u64,
         superseded_by: u64,

@@ -1,6 +1,7 @@
 pub mod domain;
 pub mod model;
 pub mod normalize;
+pub mod store;
 
 pub use model::{Gm, GmError, Prompt, RecordedGm};
 
