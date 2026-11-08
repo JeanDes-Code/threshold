@@ -38,6 +38,10 @@ _Avoid_: AI, assistant, narrator (for the whole role)
 A person in the world who is not the PC, with goals, limits and loyalties of their own.
 _Avoid_: Character (ambiguous with PC), actor, agent
 
+**Voice Card**:
+The saved description of how one NPC speaks: habits, vocabulary and a few sample lines. It is written once and reused whenever the NPC is in a Scene.
+_Avoid_: Persona, personality prompt, character sheet
+
 **Faction**:
 An organization or group that pursues goals in the world as a unit.
 _Avoid_: Organization, guild, team
@@ -75,6 +79,14 @@ _Avoid_: Save, apply, write
 **Narration**:
 The prose the Player reads. It describes only committed outcomes that the PC can perceive.
 _Avoid_: Response, output, story text
+
+**Shortcut**:
+A GM move that makes the next line easy to write at the cost of the world's consistency. Four kinds: a convenient coincidence, an NPC who folds without cause, an established fact that bends, a tension that evaporates.
+_Avoid_: Plot hole, cheat, railroading
+
+**Content Pack**:
+A removable set of data that extends what the GM may portray: prompt fragments, extra Charter options, model hints. It holds no code and cannot override a Content Boundary.
+_Avoid_: Mod, module, plugin, DLC
 
 ## Resolution
 
