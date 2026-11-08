@@ -102,3 +102,22 @@ text = "Orsel comes from Aubrac."
     assert_eq!(charter.decided[0].key, "home");
     assert!(charter.proposed.is_empty());
 }
+
+#[test]
+fn proposal_parses_handles() {
+    let p: DecisionProposal =
+        serde_json::from_str(r#"{"action":"talk","verdict":"allowed","blockers":["F40"]}"#)
+            .unwrap();
+
+    assert_eq!(p.blockers, [Handle::Fact(40)]);
+}
+
+#[test]
+fn revert_turn_serializes_its_turn_id() {
+    let op = threshold_core::domain::LedgerOp::RevertTurn { turn_id: 12 };
+
+    assert_eq!(
+        serde_json::to_value(op).unwrap(),
+        serde_json::json!({"revert_turn":{"turn_id":12}})
+    );
+}
