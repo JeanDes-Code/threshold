@@ -176,6 +176,7 @@ impl WorldView {
         }
     }
     pub fn live_fact(&self, subject: EntityId, key: &str) -> Option<&Fact> {
+        let key = crate::normalize::key(key);
         self.live_facts
             .iter()
             .find(|f| f.slot.subject == subject && f.slot.key == key && f.canon != Canon::Possible)
@@ -221,6 +222,11 @@ impl Store {
         charter: &Charter,
         seed: u64,
     ) -> Result<CampaignId, StoreError> {
+        if crate::normalize::name(&charter.pc.name) == "world" {
+            return Err(StoreError::Invalid(
+                "world is a reserved charter subject".into(),
+            ));
+        }
         let tx = self.db.transaction()?;
         tx.execute(
             "INSERT INTO campaign(charter_json,clock_min,seed) VALUES(?1,0,?2)",
@@ -250,6 +256,26 @@ impl Store {
         )?
         .ok_or_else(|| StoreError::Invalid("missing PC id".into()))?;
         names.insert(crate::normalize::name(&charter.pc.name), pc);
+        for e in &charter.entities {
+            let name = crate::normalize::name(&e.name);
+            if name == "world" || names.contains_key(&name) {
+                return Err(StoreError::Invalid(
+                    "duplicate or reserved charter entity name".into(),
+                ));
+            }
+            let id = project::append(
+                &tx,
+                campaign,
+                turn,
+                &LedgerOp::AddEntity {
+                    kind: e.kind,
+                    name: e.name.clone(),
+                    adult: e.adult,
+                },
+            )?
+            .ok_or_else(|| StoreError::Invalid("missing entity id".into()))?;
+            names.insert(name, id);
+        }
         for (facts, canon) in [
             (&charter.decided, Canon::Persistent),
             (&charter.proposed, Canon::Possible),
@@ -258,7 +284,7 @@ impl Store {
                 let normalized = crate::normalize::name(&f.subject);
                 let subject = if let Some(id) = names.get(&normalized) {
                     *id
-                } else {
+                } else if normalized == "world" {
                     let id = project::append(
                         &tx,
                         campaign,
@@ -272,6 +298,11 @@ impl Store {
                     .ok_or_else(|| StoreError::Invalid("missing subject id".into()))?;
                     names.insert(normalized, id);
                     id
+                } else {
+                    return Err(StoreError::Invalid(format!(
+                        "unknown charter subject: {}",
+                        f.subject
+                    )));
                 };
                 project::append(
                     &tx,
@@ -287,6 +318,7 @@ impl Store {
                         canon,
                         source: FactSource::Charter,
                         seen_by: vec![],
+                        causes: vec![],
                     },
                 )?;
             }
@@ -329,7 +361,12 @@ impl Store {
                 continue;
             }
             let id = project::append(&tx, rec.campaign_id, turn, op)?;
-            if let LedgerOp::AddFact { seen_by, .. } = op {
+            let seen = match op {
+                LedgerOp::AddFact { seen_by, .. } => Some(seen_by),
+                LedgerOp::SupersedeFact { new, .. } => Some(&new.seen_by),
+                _ => None,
+            };
+            if let Some(seen_by) = seen {
                 let fact_id = id.ok_or_else(|| StoreError::Invalid("missing fact id".into()))?;
                 let clock: u64 = tx.query_row(
                     "SELECT clock_min FROM campaign WHERE id=?1",
@@ -358,14 +395,43 @@ impl Store {
                     }
                 }
             }
+            if let LedgerOp::AddClaim {
+                listeners,
+                delay_min,
+                ..
+            } = op
+            {
+                let claim_id = id.ok_or_else(|| StoreError::Invalid("missing claim id".into()))?;
+                let clock: u64 = tx.query_row(
+                    "SELECT clock_min FROM campaign WHERE id=?1",
+                    [rec.campaign_id],
+                    |r| r.get(0),
+                )?;
+                let arrives_at = clock
+                    .checked_add(u64::from(*delay_min))
+                    .ok_or_else(|| StoreError::Invalid("clock overflow".into()))?;
+                let mut unique = std::collections::HashSet::new();
+                for holder in listeners {
+                    if unique.insert(*holder) {
+                        project::append(
+                            &tx,
+                            rec.campaign_id,
+                            turn,
+                            &LedgerOp::Know {
+                                holder: *holder,
+                                fact_id: None,
+                                claim_id: Some(claim_id),
+                                how: Knowing::Told,
+                                arrives_at,
+                            },
+                        )?;
+                    }
+                }
+            }
         }
         project::validate_supersessions(&tx, rec.campaign_id)?;
         tx.commit()?;
         Ok(turn)
-    }
-    /// Returns the next fact id without reserving it. Commit immediately; a concurrent writer may claim it.
-    pub fn next_fact_id(&self) -> Result<u64, StoreError> {
-        project::next_fact_id(&self.db)
     }
     pub fn turn_by_op(&self, op: &OpId) -> Result<Option<StoredTurn>, StoreError> {
         let mut stmt = self

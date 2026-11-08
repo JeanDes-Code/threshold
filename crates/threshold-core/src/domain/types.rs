@@ -1,6 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn empty_json_array() -> serde_json::Value {
+    serde_json::json!([])
+}
+
 pub type EntityId = u64;
 pub type Key = String;
 pub type Value = String;
@@ -53,6 +57,13 @@ pub enum Knowing {
     Told,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalStatus {
+    Active,
+    Done,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Slot {
     pub subject: EntityId,
@@ -72,6 +83,17 @@ pub struct ClaimDraft {
     pub speaker: EntityId,
     pub slot: Slot,
     pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FactDraft {
+    pub slot: Slot,
+    pub text: String,
+    pub canon: Canon,
+    pub source: FactSource,
+    pub seen_by: Vec<EntityId>,
+    #[serde(default)]
+    pub causes: Vec<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -108,16 +130,42 @@ pub enum LedgerOp {
         canon: Canon,
         source: FactSource,
         seen_by: Vec<EntityId>,
+        #[serde(default)]
+        causes: Vec<u64>,
     },
     EstablishFact {
         fact_id: u64,
     },
     SupersedeFact {
-        fact_id: u64,
-        superseded_by: u64,
+        old: u64,
+        new: FactDraft,
     },
     AddClaim {
         claim: ClaimDraft,
+        #[serde(default)]
+        listeners: Vec<EntityId>,
+        #[serde(default)]
+        delay_min: u32,
+    },
+    AddVoiceCard {
+        npc: EntityId,
+        habits: String,
+        vocabulary: String,
+        samples: Vec<String>,
+    },
+    AddGoal {
+        npc: EntityId,
+        text: String,
+        against: Option<EntityId>,
+    },
+    SetGoalStatus {
+        goal: u64,
+        status: GoalStatus,
+    },
+    RecordCorrection {
+        target_turn: u64,
+        what_wrong: String,
+        why: String,
     },
     Know {
         holder: EntityId,
@@ -159,6 +207,10 @@ pub enum LedgerOp {
     RecordRoll {
         seed: u64,
         difficulty: i8,
+        #[serde(default = "empty_json_array")]
+        stakes: serde_json::Value,
+        #[serde(default = "empty_json_array")]
+        factors: serde_json::Value,
         value: i32,
         outcome: String,
     },

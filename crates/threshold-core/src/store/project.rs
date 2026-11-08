@@ -84,20 +84,24 @@ fn update_one(db: &Connection, sql: &str, id: u64, turn: u64) -> Result<(), Stor
     Ok(())
 }
 
+fn update_one_single(db: &Connection, sql: &str, id: u64) -> Result<(), StoreError> {
+    if db.execute(sql, [id])? != 1 {
+        return Err(StoreError::Invalid("target is not active".into()));
+    }
+    Ok(())
+}
+
 fn next_id(db: &Connection, table: &str, path: &str) -> Result<u64, StoreError> {
     let current: u64 = db.query_row(
         &format!("SELECT COALESCE(MAX(id),0) FROM {table}"),
         [],
         |r| r.get(0),
     )?;
-    let previous: u64 = db.query_row("SELECT COALESCE(MAX(CAST(json_extract(op_json,'$.id') AS INTEGER)),0) FROM ledger WHERE json_type(op_json,?1) IS NOT NULL", [path], |r| r.get(0))?;
+    let previous: u64 = db.query_row("SELECT COALESCE(MAX(CAST(json_extract(op_json,'$.id') AS INTEGER)),0) FROM ledger WHERE json_type(op_json,?1) IS NOT NULL OR (?1='$.op.add_fact' AND json_type(op_json,'$.op.supersede_fact') IS NOT NULL)", [path], |r| r.get(0))?;
     current
         .max(previous)
         .checked_add(1)
         .ok_or_else(|| StoreError::Invalid("id space exhausted".into()))
-}
-pub(super) fn next_fact_id(db: &Connection) -> Result<u64, StoreError> {
-    next_id(db, "fact", "$.op.add_fact")
 }
 
 pub(super) fn append(
@@ -109,10 +113,13 @@ pub(super) fn append(
     let (table, path) = match op {
         LedgerOp::AddEntity { .. } => (Some("entity"), "$.op.add_entity"),
         LedgerOp::AddFact { .. } => (Some("fact"), "$.op.add_fact"),
+        LedgerOp::SupersedeFact { .. } => (Some("fact"), "$.op.add_fact"),
         LedgerOp::AddClaim { .. } => (Some("claim"), "$.op.add_claim"),
         LedgerOp::OpenObstacle { .. } => (Some("obstacle"), "$.op.open_obstacle"),
         LedgerOp::ScheduleEvent { .. } => (Some("world_event"), "$.op.schedule_event"),
         LedgerOp::RecordRoll { .. } => (Some("roll"), "$.op.record_roll"),
+        LedgerOp::AddGoal { .. } => (Some("goal"), "$.op.add_goal"),
+        LedgerOp::RecordCorrection { .. } => (Some("correction"), "$.op.record_correction"),
         _ => (None, ""),
     };
     let reserved = table.map(|table| next_id(db, table, path)).transpose()?;
@@ -142,10 +149,14 @@ fn apply(
             canon,
             source,
             seen_by,
+            causes,
         } => {
             entity(db, slot.subject, c)?;
             for holder in seen_by {
                 entity(db, *holder, c)?;
+            }
+            for cause in causes {
+                fact(db, *cause, c)?;
             }
             let actual_canon = if *source == FactSource::Proposal {
                 let mut pc_seen = false;
@@ -166,6 +177,12 @@ fn apply(
             };
             db.execute("INSERT INTO fact(id,subject_id,key,value,text,canon,source,created_turn) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,slot.subject,normalize::key(&slot.key),normalize::value(&slot.value),text,enum_text(&actual_canon)?,enum_text(source)?,turn])?;
             let fact_id = db.last_insert_rowid();
+            for cause in causes {
+                db.execute(
+                    "INSERT INTO fact_cause(fact_id,cause_fact_id) VALUES(?1,?2)",
+                    params![fact_id, cause],
+                )?;
+            }
             let mut holders = HashSet::new();
             for holder in seen_by {
                 if holders.insert(*holder) {
@@ -182,24 +199,87 @@ fn apply(
             if db.execute("UPDATE fact SET canon='established' WHERE id=?1 AND canon='possible' AND superseded_by IS NULL",[fact_id])? != 1 { return Err(StoreError::Invalid("fact is not live and possible".into())); }
             false
         }
-        LedgerOp::SupersedeFact {
-            fact_id,
-            superseded_by,
-        } => {
-            fact(db, *fact_id, c)?;
+        LedgerOp::SupersedeFact { old, new } => {
+            fact(db, *old, c)?;
+            let replacement =
+                id.ok_or_else(|| StoreError::Invalid("missing replacement id".into()))?;
             if db.execute(
                 "UPDATE fact SET superseded_by=?2 WHERE id=?1 AND superseded_by IS NULL",
-                params![fact_id, superseded_by],
+                params![old, replacement],
             )? != 1
             {
                 return Err(StoreError::Invalid("fact is already superseded".into()));
             }
-            false
+            return apply(
+                db,
+                c,
+                turn,
+                &LedgerOp::AddFact {
+                    slot: new.slot.clone(),
+                    text: new.text.clone(),
+                    canon: new.canon,
+                    source: new.source,
+                    seen_by: new.seen_by.clone(),
+                    causes: new.causes.clone(),
+                },
+                id,
+            );
         }
-        LedgerOp::AddClaim { claim } => {
+        LedgerOp::AddClaim { claim, .. } => {
             entity(db, claim.speaker, c)?;
             entity(db, claim.slot.subject, c)?;
             db.execute("INSERT INTO claim(id,speaker_id,subject_id,key,value,text,turn_id) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,claim.speaker,claim.slot.subject,normalize::key(&claim.slot.key),normalize::value(&claim.slot.value),claim.text,turn])?;
+            true
+        }
+        LedgerOp::AddVoiceCard {
+            npc,
+            habits,
+            vocabulary,
+            samples,
+        } => {
+            entity(db, *npc, c)?;
+            db.execute(
+                "INSERT INTO voice_card(npc_id,habits,vocabulary,samples_json) VALUES(?1,?2,?3,?4)",
+                params![npc, habits, vocabulary, serde_json::to_string(samples)?],
+            )?;
+            false
+        }
+        LedgerOp::AddGoal { npc, text, against } => {
+            entity(db, *npc, c)?;
+            if let Some(other) = against {
+                entity(db, *other, c)?;
+            }
+            db.execute(
+                "INSERT INTO goal(id,npc_id,text,against_id,status) VALUES(?1,?2,?3,?4,'active')",
+                params![id, npc, text, against],
+            )?;
+            true
+        }
+        LedgerOp::SetGoalStatus { goal, status } => {
+            owned(
+                db,
+                "SELECT EXISTS(SELECT 1 FROM goal g JOIN entity e ON e.id=g.npc_id WHERE g.id=?1 AND e.campaign_id=?2)",
+                *goal,
+                c,
+            )?;
+            db.execute(
+                "UPDATE goal SET status=?2 WHERE id=?1",
+                params![goal, enum_text(status)?],
+            )?;
+            false
+        }
+        LedgerOp::RecordCorrection {
+            target_turn,
+            what_wrong,
+            why,
+        } => {
+            owned(
+                db,
+                "SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND campaign_id=?2)",
+                *target_turn,
+                c,
+            )?;
+            db.execute("INSERT INTO correction(id,turn_id,target_turn_id,what_wrong,why) VALUES(?1,?2,?3,?4,?5)",params![id,turn,target_turn,what_wrong,why])?;
             true
         }
         LedgerOp::Know {
@@ -217,7 +297,10 @@ fn apply(
                 claim(db, *a, c)?;
             }
             db.execute("INSERT INTO knowledge(holder_id,fact_id,claim_id,how,learned_at,arrives_at) VALUES(?1,?2,?3,?4,(SELECT clock_min FROM campaign WHERE id=?5),?6)",params![holder,fact_id,claim_id,enum_text(how)?,c,arrives_at])?;
-            promote_seen(db, c)?;
+            let witnessed_now: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM entity e JOIN campaign camp ON camp.id=e.campaign_id WHERE e.id=?1 AND e.kind='pc' AND ?2<=camp.clock_min)", params![holder, arrives_at], |r| r.get(0))?;
+            if *how == Knowing::Witnessed && fact_id.is_some() && witnessed_now {
+                promote_seen(db, c, None, *fact_id)?;
+            }
             false
         }
         LedgerOp::ShiftAttitude { from, to, delta } => {
@@ -326,11 +409,10 @@ fn apply(
         }
         LedgerOp::FireEvent { event_id } => {
             event(db, *event_id, c)?;
-            update_one(
+            update_one_single(
                 db,
-                "UPDATE world_event SET status='fired' WHERE id=?1 AND status='scheduled' AND ?2 IS NOT NULL",
+                "UPDATE world_event SET status='fired' WHERE id=?1 AND status='scheduled'",
                 *event_id,
-                turn,
             )?;
             false
         }
@@ -340,29 +422,34 @@ fn apply(
         } => {
             event(db, *event_id, c)?;
             fact(db, *cause_fact_id, c)?;
-            update_one(
+            update_one_single(
                 db,
-                "UPDATE world_event SET status='cancelled' WHERE id=?1 AND status='scheduled' AND ?2 IS NOT NULL",
+                "UPDATE world_event SET status='cancelled' WHERE id=?1 AND status='scheduled'",
                 *event_id,
-                turn,
             )?;
             false
         }
         LedgerOp::AdvanceClock { minutes } => {
+            let before: u64 =
+                db.query_row("SELECT clock_min FROM campaign WHERE id=?1", [c], |r| {
+                    r.get(0)
+                })?;
             db.execute(
                 "UPDATE campaign SET clock_min=clock_min+?2 WHERE id=?1",
                 params![c, minutes],
             )?;
-            promote_seen(db, c)?;
+            promote_seen(db, c, Some(before), None)?;
             false
         }
         LedgerOp::RecordRoll {
             seed,
             difficulty,
+            stakes,
+            factors,
             value,
             outcome,
         } => {
-            db.execute("INSERT INTO roll(id,turn_id,seed,difficulty,stakes_json,factors_json,value,outcome) VALUES(?1,?2,?3,?4,'[]','[]',?5,?6)",params![id,turn,*seed as i64,difficulty,value,outcome])?;
+            db.execute("INSERT INTO roll(id,turn_id,seed,difficulty,stakes_json,factors_json,value,outcome) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,turn,*seed as i64,difficulty,serde_json::to_string(stakes)?,serde_json::to_string(factors)?,value,outcome])?;
             true
         }
         LedgerOp::RevertTurn { turn_id } => {
@@ -385,8 +472,13 @@ fn apply(
     Ok(made.then(|| db.last_insert_rowid() as u64))
 }
 
-fn promote_seen(db: &Connection, c: u64) -> Result<(), StoreError> {
-    db.execute("UPDATE fact SET canon='established' WHERE canon='possible' AND superseded_by IS NULL AND id IN (SELECT k.fact_id FROM knowledge k JOIN entity holder ON holder.id=k.holder_id JOIN campaign camp ON camp.id=holder.campaign_id WHERE holder.campaign_id=?1 AND holder.kind='pc' AND k.how='witnessed' AND k.arrives_at<=camp.clock_min)",[c])?;
+fn promote_seen(
+    db: &Connection,
+    c: u64,
+    after: Option<u64>,
+    fact_id: Option<u64>,
+) -> Result<(), StoreError> {
+    db.execute("WITH candidates AS (SELECT DISTINCT f.id,f.subject_id,f.key FROM fact f JOIN knowledge k ON k.fact_id=f.id JOIN entity holder ON holder.id=k.holder_id JOIN campaign camp ON camp.id=holder.campaign_id WHERE holder.campaign_id=?1 AND holder.kind='pc' AND k.how='witnessed' AND k.arrives_at<=camp.clock_min AND (?2 IS NULL OR k.arrives_at>?2) AND (?3 IS NULL OR f.id=?3) AND f.canon='possible' AND f.superseded_by IS NULL) UPDATE fact SET canon='established' WHERE id IN (SELECT a.id FROM candidates a WHERE (SELECT count(*) FROM candidates b WHERE b.subject_id=a.subject_id AND b.key=a.key)=1 AND NOT EXISTS(SELECT 1 FROM fact live WHERE live.subject_id=a.subject_id AND live.key=a.key AND live.superseded_by IS NULL AND live.canon<>'possible'))",params![c,after,fact_id])?;
     Ok(())
 }
 pub(super) fn validate_supersessions(db: &Connection, c: u64) -> Result<(), StoreError> {
@@ -408,6 +500,25 @@ fn decode(s: &str) -> Result<(LedgerOp, Option<u64>), StoreError> {
         Ok((serde_json::from_value(value)?, None))
     }
 }
+enum ReplayOp {
+    Current(LedgerOp),
+    LegacySupersede { old: u64, new: u64 },
+}
+
+fn decode_replay(s: &str) -> Result<(ReplayOp, Option<u64>), StoreError> {
+    let value: Value = serde_json::from_str(s)?;
+    let op = value.get("op").unwrap_or(&value);
+    if let Some(legacy) = op.get("supersede_fact")
+        && let (Some(old), Some(new)) = (
+            legacy.get("fact_id").and_then(Value::as_u64),
+            legacy.get("superseded_by").and_then(Value::as_u64),
+        )
+    {
+        return Ok((ReplayOp::LegacySupersede { old, new }, None));
+    }
+    let (op, id) = decode(s)?;
+    Ok((ReplayOp::Current(op), id))
+}
 pub(super) fn rebuild(db: &Connection, c: u64) -> Result<(), StoreError> {
     let exists: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM campaign WHERE id=?1)",
@@ -424,13 +535,13 @@ pub(super) fn rebuild(db: &Connection, c: u64) -> Result<(), StoreError> {
     drop(stmt);
     let mut ops = Vec::new();
     for (turn, s) in rows {
-        let (op, id) = decode(&s)?;
+        let (op, id) = decode_replay(&s)?;
         ops.push((turn, op, id));
     }
     let mut reverted = HashSet::new();
     for (turn, op, _) in ops.iter().rev() {
         if !reverted.contains(turn)
-            && let LedgerOp::RevertTurn { turn_id } = op
+            && let ReplayOp::Current(LedgerOp::RevertTurn { turn_id }) = op
         {
             reverted.insert(*turn_id);
         }
@@ -455,8 +566,23 @@ pub(super) fn rebuild(db: &Connection, c: u64) -> Result<(), StoreError> {
     }
     db.execute("UPDATE campaign SET clock_min=0 WHERE id=?1", [c])?;
     for (turn, op, id) in ops {
-        if !reverted.contains(&turn) && !matches!(op, LedgerOp::RevertTurn { .. }) {
-            apply(db, c, turn, &op, id)?;
+        if !reverted.contains(&turn) {
+            match op {
+                ReplayOp::Current(LedgerOp::RevertTurn { .. }) => {}
+                ReplayOp::Current(op) => {
+                    apply(db, c, turn, &op, id)?;
+                }
+                ReplayOp::LegacySupersede { old, new } => {
+                    fact(db, old, c)?;
+                    if db.execute(
+                        "UPDATE fact SET superseded_by=?2 WHERE id=?1 AND superseded_by IS NULL",
+                        params![old, new],
+                    )? != 1
+                    {
+                        return Err(StoreError::Invalid("fact is already superseded".into()));
+                    }
+                }
+            }
         }
     }
     validate_supersessions(db, c)?;
@@ -673,15 +799,59 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             })
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let recent_turns = ids(
-        db,
-        "SELECT id FROM turn WHERE campaign_id=?1 ORDER BY seq",
-        c,
-    )?
-    .into_iter()
-    .map(|id| read_turn(db, id))
-    .collect::<Result<Vec<_>, _>>()?;
-    let turn_seq = recent_turns.last().map_or(0, |t| t.seq);
+    let mut stmt = db.prepare("SELECT t.id,t.seq,t.op_id,t.kind,t.intent,t.proposal_json,t.clock_before,t.clock_after,t.narration,l.op_json FROM turn t LEFT JOIN ledger l ON l.turn_id=t.id AND (json_type(l.op_json,'$.op.revert_turn') IS NOT NULL OR json_type(l.op_json,'$.revert_turn') IS NOT NULL) WHERE t.campaign_id=?1 ORDER BY t.seq DESC,l.seq DESC")?;
+    let rows = stmt
+        .query_map([c], |r| {
+            Ok((
+                r.get::<_, u64>(0)?,
+                r.get::<_, u64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, u64>(6)?,
+                r.get::<_, u64>(7)?,
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, Option<String>>(9)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let turn_seq = rows.first().map_or(0, |r| r.1);
+    let mut reverted = HashSet::new();
+    let mut recent_turns = Vec::new();
+    let mut visited = HashSet::new();
+    for (id, seq, op_id, kind, intent, proposal_json, clock_before, clock_after, narration, op) in
+        rows
+    {
+        if reverted.contains(&id) {
+            continue;
+        }
+        if let Some(op) = op
+            && let (LedgerOp::RevertTurn { turn_id }, _) = decode(&op)?
+        {
+            reverted.insert(turn_id);
+        }
+        if visited.insert(id) && recent_turns.len() < 6 {
+            let kind: TurnKind = enum_parse(kind)?;
+            if matches!(kind, TurnKind::Play | TurnKind::Correction) {
+                recent_turns.push(StoredTurn {
+                    id,
+                    seq,
+                    record: TurnRecord {
+                        campaign_id: c,
+                        op_id,
+                        kind,
+                        intent,
+                        proposal_json,
+                        clock_before,
+                        clock_after,
+                    },
+                    narration,
+                });
+            }
+        }
+    }
+    recent_turns.reverse();
     Ok(WorldView {
         clock_min: clock,
         entities,

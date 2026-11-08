@@ -6,6 +6,7 @@ use threshold_core::{
 fn charter() -> Charter {
     Charter {
         premise: "A frontier".into(),
+        entities: vec![],
         pc: PcSeed {
             name: "Ada".into(),
             adult: true,
@@ -49,6 +50,24 @@ fn fact(subject: u64, value: &str) -> LedgerOp {
         canon: Canon::Established,
         source: FactSource::Proposal,
         seen_by: vec![],
+        causes: vec![],
+    }
+}
+fn supersede(old: u64, subject: u64, value: &str) -> LedgerOp {
+    LedgerOp::SupersedeFact {
+        old,
+        new: threshold_core::domain::FactDraft {
+            slot: Slot {
+                subject,
+                key: "door".into(),
+                value: value.into(),
+            },
+            text: value.into(),
+            canon: Canon::Established,
+            source: FactSource::Proposal,
+            seen_by: vec![],
+            causes: vec![],
+        },
     }
 }
 #[test]
@@ -236,6 +255,41 @@ fn replay_skips_ops_of_reverted_turn_in_hand_built_ledger() {
 }
 
 #[test]
+fn replay_accepts_legacy_supersession_ledger() {
+    let path = std::env::temp_dir().join(format!(
+        "threshold-legacy-{}-{:?}.db",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let mut db = Store::open(&path).unwrap();
+    let c = db.create_campaign(&charter(), 1).unwrap();
+    let pc = db.snapshot(c).unwrap().entities[0].id;
+    db.commit(record(c, "old"), vec![fact(pc, "closed")])
+        .unwrap();
+    let old = db.snapshot(c).unwrap().live_fact(pc, "door").unwrap().id;
+    db.commit(record(c, "new"), vec![supersede(old, pc, "open")])
+        .unwrap();
+    let v = db.snapshot(c).unwrap();
+    let new = v.live_fact(pc, "door").unwrap().id;
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let turn = v.recent_turns.last().unwrap().id;
+    sql.execute("UPDATE ledger SET op_json=?1 WHERE turn_id=?2", rusqlite::params![serde_json::json!({"op":{"supersede_fact":{"fact_id":old,"superseded_by":new}},"id":null}).to_string(),turn]).unwrap();
+    sql.execute(
+        "INSERT INTO ledger(turn_id,op_json) VALUES(?1,?2)",
+        rusqlite::params![
+            turn,
+            serde_json::json!({"op":fact(pc,"open"),"id":new}).to_string()
+        ],
+    )
+    .unwrap();
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(db.snapshot(c).unwrap(), v);
+    drop(sql);
+    drop(db);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn cross_campaign_references_are_rejected_atomically() {
     let mut db = Store::open_in_memory().unwrap();
     let a = db.create_campaign(&charter(), 1).unwrap();
@@ -291,6 +345,7 @@ fn proposal_seen_by_pc_is_persistent_and_witnessed() {
             canon: Canon::Established,
             source: FactSource::Proposal,
             seen_by: vec![pc],
+            causes: vec![],
         }],
     )
     .unwrap();
@@ -314,18 +369,8 @@ fn supersede_then_replace_slot_is_atomic_and_rebuildable() {
     db.commit(record(c, "old"), vec![fact(pc, "closed")])
         .unwrap();
     let old = db.snapshot(c).unwrap().live_fact(pc, "door").unwrap().id;
-    let next = db.next_fact_id().unwrap();
-    db.commit(
-        record(c, "new"),
-        vec![
-            LedgerOp::SupersedeFact {
-                fact_id: old,
-                superseded_by: next,
-            },
-            fact(pc, "open"),
-        ],
-    )
-    .unwrap();
+    db.commit(record(c, "new"), vec![supersede(old, pc, "open")])
+        .unwrap();
     let before = db.snapshot(c).unwrap();
     assert_eq!(before.live_fact(pc, "door").unwrap().slot.value, "open");
     db.rebuild_projections(c).unwrap();
@@ -399,7 +444,11 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
     db.commit(
         record(c, "two"),
         vec![
-            LedgerOp::AddClaim { claim },
+            LedgerOp::AddClaim {
+                claim,
+                listeners: vec![],
+                delay_min: 0,
+            },
             LedgerOp::Know {
                 holder: pc,
                 fact_id: None,
@@ -438,6 +487,8 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
             LedgerOp::RecordRoll {
                 seed: u64::MAX,
                 difficulty: 4,
+                stakes: serde_json::json!([]),
+                factors: serde_json::json!([]),
                 value: 6,
                 outcome: "win".into(),
             },
@@ -463,11 +514,7 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
                 cause_fact_id: old,
             },
             LedgerOp::AdvanceClock { minutes: 7 },
-            LedgerOp::SupersedeFact {
-                fact_id: old,
-                superseded_by: old + 1,
-            },
-            fact(pc, "open"),
+            supersede(old, pc, "open"),
         ],
     )
     .unwrap();
@@ -578,6 +625,468 @@ fn delayed_witness_promotes_possible_only_on_arrival() {
 }
 
 #[test]
+fn contradicted_delayed_witness_does_not_block_clock() {
+    use threshold_core::domain::Knowing;
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&charter(), 1).unwrap();
+    let v = db.snapshot(c).unwrap();
+    let pc = v.entities[0].id;
+    let raven = v.live_fact(pc, "ally").unwrap().id;
+    db.commit(
+        record(c, "witness"),
+        vec![LedgerOp::Know {
+            holder: pc,
+            fact_id: Some(raven),
+            claim_id: None,
+            how: Knowing::Witnessed,
+            arrives_at: 10,
+        }],
+    )
+    .unwrap();
+    db.commit(
+        record(c, "wolf"),
+        vec![LedgerOp::AddFact {
+            slot: Slot {
+                subject: pc,
+                key: "ally".into(),
+                value: "wolf".into(),
+            },
+            text: "wolf".into(),
+            canon: Canon::Established,
+            source: FactSource::Proposal,
+            seen_by: vec![],
+            causes: vec![],
+        }],
+    )
+    .unwrap();
+    db.commit(
+        record(c, "advance"),
+        vec![LedgerOp::AdvanceClock { minutes: 10 }],
+    )
+    .unwrap();
+    assert_eq!(
+        db.snapshot(c)
+            .unwrap()
+            .fact(Handle::Fact(raven))
+            .unwrap()
+            .canon,
+        Canon::Possible
+    );
+}
+
+#[test]
+fn simultaneous_possible_facts_in_one_slot_do_not_promote() {
+    use threshold_core::domain::Knowing;
+    let mut ch = charter();
+    ch.proposed.push(CharterFact {
+        subject: "Ada".into(),
+        key: "ally".into(),
+        value: "wolf".into(),
+        text: "wolf".into(),
+    });
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&ch, 1).unwrap();
+    let v = db.snapshot(c).unwrap();
+    let pc = v.entities[0].id;
+    let ids: Vec<_> = v
+        .live_facts
+        .iter()
+        .filter(|f| f.slot.key == "ally")
+        .map(|f| f.id)
+        .collect();
+    db.commit(
+        record(c, "knowledge"),
+        ids.iter()
+            .map(|id| LedgerOp::Know {
+                holder: pc,
+                fact_id: Some(*id),
+                claim_id: None,
+                how: Knowing::Witnessed,
+                arrives_at: 10,
+            })
+            .collect(),
+    )
+    .unwrap();
+    db.commit(
+        record(c, "clock"),
+        vec![LedgerOp::AdvanceClock { minutes: 10 }],
+    )
+    .unwrap();
+    let v = db.snapshot(c).unwrap();
+    assert!(
+        ids.iter()
+            .all(|id| v.fact(Handle::Fact(*id)).unwrap().canon == Canon::Possible)
+    );
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(db.snapshot(c).unwrap(), v);
+}
+
+#[test]
+fn claim_listeners_receive_delayed_told_knowledge() {
+    use threshold_core::domain::{ClaimDraft, Knowing};
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&charter(), 1).unwrap();
+    let pc = db.snapshot(c).unwrap().entities[0].id;
+    db.commit(
+        record(c, "npc"),
+        vec![LedgerOp::AddEntity {
+            kind: EntityKind::Npc,
+            name: "Bela".into(),
+            adult: Some(true),
+        }],
+    )
+    .unwrap();
+    let npc = db
+        .snapshot(c)
+        .unwrap()
+        .entities
+        .iter()
+        .find(|e| e.name == "Bela")
+        .unwrap()
+        .id;
+    db.commit(
+        record(c, "claim"),
+        vec![LedgerOp::AddClaim {
+            claim: ClaimDraft {
+                speaker: npc,
+                slot: Slot {
+                    subject: pc,
+                    key: "door".into(),
+                    value: "open".into(),
+                },
+                text: "open".into(),
+            },
+            listeners: vec![pc, npc],
+            delay_min: 120,
+        }],
+    )
+    .unwrap();
+    let v = db.snapshot(c).unwrap();
+    assert_eq!(
+        v.knowledge
+            .iter()
+            .filter(|k| k.how == Knowing::Told && k.arrives_at == 120)
+            .count(),
+        2
+    );
+    db.commit(
+        record(c, "60"),
+        vec![LedgerOp::AdvanceClock { minutes: 60 }],
+    )
+    .unwrap();
+    assert_eq!(
+        db.snapshot(c)
+            .unwrap()
+            .knowledge
+            .iter()
+            .filter(|k| k.how == Knowing::Told && k.arrives_at <= 60)
+            .count(),
+        0
+    );
+    db.commit(
+        record(c, "120"),
+        vec![LedgerOp::AdvanceClock { minutes: 60 }],
+    )
+    .unwrap();
+    assert_eq!(
+        db.snapshot(c)
+            .unwrap()
+            .knowledge
+            .iter()
+            .filter(|k| k.how == Knowing::Told && k.arrives_at <= 120)
+            .count(),
+        2
+    );
+    let before = db.snapshot(c).unwrap();
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(db.snapshot(c).unwrap(), before);
+}
+
+#[test]
+fn supersession_creates_replacement_without_predicted_id() {
+    use threshold_core::domain::FactDraft;
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&charter(), 1).unwrap();
+    let pc = db.snapshot(c).unwrap().entities[0].id;
+    db.commit(record(c, "old"), vec![fact(pc, "closed")])
+        .unwrap();
+    let old = db.snapshot(c).unwrap().live_fact(pc, "door").unwrap().id;
+    db.commit(
+        record(c, "new"),
+        vec![LedgerOp::SupersedeFact {
+            old,
+            new: FactDraft {
+                slot: Slot {
+                    subject: pc,
+                    key: "door".into(),
+                    value: "open".into(),
+                },
+                text: "open".into(),
+                canon: Canon::Established,
+                source: FactSource::Proposal,
+                seen_by: vec![],
+                causes: vec![],
+            },
+        }],
+    )
+    .unwrap();
+    assert_eq!(
+        db.snapshot(c)
+            .unwrap()
+            .live_fact(pc, "door")
+            .unwrap()
+            .slot
+            .value,
+        "open"
+    );
+}
+
+#[test]
+fn charter_subjects_require_pc_declared_entity_or_world() {
+    use threshold_core::domain::CharterEntity;
+    let mut db = Store::open_in_memory().unwrap();
+    let mut ch = charter();
+    ch.entities.push(CharterEntity {
+        name: "Bela".into(),
+        kind: EntityKind::Npc,
+        adult: Some(true),
+    });
+    ch.decided.push(CharterFact {
+        subject: "Bela".into(),
+        key: "role".into(),
+        value: "guide".into(),
+        text: "guide".into(),
+    });
+    ch.proposed.push(CharterFact {
+        subject: "world".into(),
+        key: "weather".into(),
+        value: "rain".into(),
+        text: "rain".into(),
+    });
+    let c = db.create_campaign(&ch, 1).unwrap();
+    let v = db.snapshot(c).unwrap();
+    assert!(
+        v.entities
+            .iter()
+            .any(|e| e.name == "Bela" && e.kind == EntityKind::Npc)
+    );
+    assert!(
+        v.entities
+            .iter()
+            .any(|e| e.name == "world" && e.kind == EntityKind::Place)
+    );
+    ch.decided[0].subject = "unknown".into();
+    assert!(db.create_campaign(&ch, 2).is_err());
+    ch.decided[0].subject = "Ada".into();
+    ch.entities[0].adult = None;
+    assert!(db.create_campaign(&ch, 3).is_err());
+    ch.entities[0].adult = Some(true);
+    ch.pc.name = "world".into();
+    ch.decided[0].subject = "world".into();
+    ch.proposed[0].subject = "world".into();
+    assert!(db.create_campaign(&ch, 4).is_err());
+}
+
+#[test]
+fn additional_projections_survive_rebuild() {
+    use threshold_core::domain::GoalStatus;
+    let path = std::env::temp_dir().join(format!(
+        "threshold-extra-{}-{:?}.db",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let mut db = Store::open(&path).unwrap();
+    let c = db.create_campaign(&charter(), 1).unwrap();
+    let v = db.snapshot(c).unwrap();
+    let pc = v.entities[0].id;
+    let cause = v.live_fact(pc, "home").unwrap().id;
+    db.commit(
+        record(c, "npc"),
+        vec![LedgerOp::AddEntity {
+            kind: EntityKind::Npc,
+            name: "Bela".into(),
+            adult: Some(true),
+        }],
+    )
+    .unwrap();
+    let npc = db
+        .snapshot(c)
+        .unwrap()
+        .entities
+        .iter()
+        .find(|e| e.name == "Bela")
+        .unwrap()
+        .id;
+    let target = db
+        .commit(
+            record(c, "extra"),
+            vec![
+                LedgerOp::AddVoiceCard {
+                    npc,
+                    habits: "pauses".into(),
+                    vocabulary: "formal".into(),
+                    samples: vec!["hello".into()],
+                },
+                LedgerOp::AddGoal {
+                    npc,
+                    text: "escape".into(),
+                    against: Some(pc),
+                },
+                LedgerOp::AddFact {
+                    slot: Slot {
+                        subject: pc,
+                        key: "door".into(),
+                        value: "open".into(),
+                    },
+                    text: "open".into(),
+                    canon: Canon::Established,
+                    source: FactSource::Proposal,
+                    seen_by: vec![],
+                    causes: vec![cause],
+                },
+                LedgerOp::RecordRoll {
+                    seed: 1,
+                    difficulty: 2,
+                    stakes: serde_json::json!({"win":"open"}),
+                    factors: serde_json::json!(["help"]),
+                    value: 3,
+                    outcome: "win".into(),
+                },
+            ],
+        )
+        .unwrap();
+    let goal = db.snapshot(c).unwrap().goals_active[0].id;
+    db.commit(
+        record(c, "correction"),
+        vec![
+            LedgerOp::SetGoalStatus {
+                goal,
+                status: GoalStatus::Done,
+            },
+            LedgerOp::RecordCorrection {
+                target_turn: target,
+                what_wrong: "door".into(),
+                why: "mistake".into(),
+            },
+        ],
+    )
+    .unwrap();
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let read = || -> (String, String, String, String, i64, i64) {
+        sql.query_row("SELECT (SELECT samples_json FROM voice_card), (SELECT status FROM goal), (SELECT stakes_json FROM roll), (SELECT factors_json FROM roll), (SELECT count(*) FROM fact_cause), (SELECT count(*) FROM correction)", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).unwrap()
+    };
+    let before = read();
+    assert_eq!(before.0, "[\"hello\"]");
+    assert_eq!(before.1, "done");
+    assert_eq!((before.4, before.5), (1, 1));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&before.2).unwrap(),
+        serde_json::json!({"win":"open"})
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&before.3).unwrap(),
+        serde_json::json!(["help"])
+    );
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(read(), before);
+    drop(sql);
+    drop(db);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn recent_turns_exclude_reverted_and_keep_last_six_play_or_correction() {
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&charter(), 1).unwrap();
+    let mut turns = Vec::new();
+    for n in 0..8 {
+        turns.push(db.commit(record(c, &format!("play{n}")), vec![]).unwrap());
+    }
+    let mut ooc = record(c, "ooc");
+    ooc.kind = TurnKind::Ooc;
+    db.commit(ooc, vec![]).unwrap();
+    let mut correction = record(c, "correction");
+    correction.kind = TurnKind::Correction;
+    db.commit(correction, vec![LedgerOp::RevertTurn { turn_id: turns[6] }])
+        .unwrap();
+    let v = db.snapshot(c).unwrap();
+    let ops: Vec<_> = v
+        .recent_turns
+        .iter()
+        .map(|t| t.record.op_id.as_str())
+        .collect();
+    assert_eq!(
+        ops,
+        vec!["play2", "play3", "play4", "play5", "play7", "correction"]
+    );
+    assert_eq!(v.turn_seq, 11);
+    assert_eq!(
+        db.snapshot_before(c, 11)
+            .unwrap()
+            .recent_turns
+            .last()
+            .unwrap()
+            .record
+            .op_id,
+        "play7"
+    );
+}
+
+#[test]
+fn live_fact_normalizes_lookup_key() {
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&charter(), 1).unwrap();
+    let pc = db.snapshot(c).unwrap().entities[0].id;
+    db.commit(
+        record(c, "fact"),
+        vec![LedgerOp::AddFact {
+            slot: Slot {
+                subject: pc,
+                key: "Door State".into(),
+                value: "open".into(),
+            },
+            text: "open".into(),
+            canon: Canon::Established,
+            source: FactSource::Proposal,
+            seen_by: vec![],
+            causes: vec![],
+        }],
+    )
+    .unwrap();
+    assert!(
+        db.snapshot(c)
+            .unwrap()
+            .live_fact(pc, " Door State ")
+            .is_some()
+    );
+}
+
+#[test]
+fn future_schema_is_rejected_without_changing_version() {
+    let path = std::env::temp_dir().join(format!(
+        "threshold-future-{}-{:?}.db",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.pragma_update(None, "user_version", 999).unwrap();
+    drop(sql);
+    let err = match Store::open(&path) {
+        Ok(_) => panic!("future version accepted"),
+        Err(e) => e,
+    };
+    assert!(err.to_string().contains("version"));
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        sql.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        999
+    );
+    drop(sql);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn reverted_ids_are_not_reused_by_other_campaigns() {
     let mut db = Store::open_in_memory().unwrap();
     let a = db.create_campaign(&charter(), 1).unwrap();
@@ -649,6 +1158,7 @@ fn normalized_keys_share_the_same_live_slot() {
         canon: Canon::Established,
         source: FactSource::Proposal,
         seen_by: vec![],
+        causes: vec![],
     };
     db.commit(record(c, "one"), vec![a]).unwrap();
     let v = db.snapshot(c).unwrap();
@@ -663,6 +1173,7 @@ fn normalized_keys_share_the_same_live_slot() {
         canon: Canon::Established,
         source: FactSource::Proposal,
         seen_by: vec![],
+        causes: vec![],
     };
     assert!(db.commit(record(c, "two"), vec![b]).is_err());
 }
@@ -715,6 +1226,8 @@ fn duplicate_and_failed_commits_leave_ledger_untouched_and_debug_survives() {
                 LedgerOp::RecordRoll {
                     seed: u64::MAX,
                     difficulty: 3,
+                    stakes: serde_json::json!([]),
+                    factors: serde_json::json!([]),
                     value: 7,
                     outcome: "win".into(),
                 },
