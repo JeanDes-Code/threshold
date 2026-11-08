@@ -180,7 +180,7 @@ The model declares: blockers, causes (`because`, `cause`), stance, the Check tar
 - The model schedules time triggers only. `When` triggers come from the Charter or fixtures.
 - No reschedule or postpone of events.
 - No Faction Beliefs through members. A Faction knows only what is told to it.
-- New NPCs created in play get no Voice Card in this slice.
+- New NPCs created in play get only the one-line Voice Card seed from `NewNpc.voice` (section 9), no richer card.
 - Stance ceiling numbers are constants in `checks`, not Ruleset data.
 - No stored Beliefs, no Belief cache.
 
