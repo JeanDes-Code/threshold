@@ -1,5 +1,8 @@
 pub mod domain;
+pub mod model;
 pub mod normalize;
+
+pub use model::{Gm, GmError, Prompt, RecordedGm};
 
 use domain::DecisionProposal;
 
