@@ -5,19 +5,19 @@ Threshold is a local, single-player tabletop roleplaying game. A language model 
 ## Campaign and setup
 
 **Campaign**:
-One persistent game: its Charter, its world, its PC and its full history.
+One persistent game: its Adventure Seed, its world, its PC and its full history.
 _Avoid_: Game, save, story
 
-**Charter**:
+**Adventure Seed**:
 The editable agreement that frames a Campaign: premise, PC concept, rules, content boundaries and GM-style preferences. Each choice is marked decided, proposed or open.
-_Avoid_: Settings, config, session zero doc
+_Avoid_: Charter, settings, config, session zero doc, "seed" alone (a Roll seed is something else)
 
 **Discovery**:
-The interview that produces a Charter, conducted one question at a time.
+The interview that produces a Adventure Seed, conducted one question at a time.
 _Avoid_: Character creation, onboarding, setup wizard
 
 **Content Boundary**:
-A Charter rule that limits or allows a kind of content, such as sexual or violent content, or names a specific exclusion.
+A Adventure Seed rule that limits or allows a kind of content, such as sexual or violent content, or names a specific exclusion.
 _Avoid_: Filter, safety setting
 
 ## Participants
@@ -85,7 +85,7 @@ A GM move that makes the next line easy to write at the cost of the world's cons
 _Avoid_: Plot hole, cheat, railroading
 
 **Content Pack**:
-A removable set of data that extends what the GM may portray: prompt fragments, extra Charter options, model hints. It holds no code and cannot override a Content Boundary.
+A removable set of data that extends what the GM may portray: prompt fragments, extra Adventure Seed options, model hints. It holds no code and cannot override a Content Boundary.
 _Avoid_: Mod, module, plugin, DLC
 
 ## Resolution

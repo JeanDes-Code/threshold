@@ -25,7 +25,7 @@ With the MoE at 16K context and a 10K-token prompt, we measured a warm Turn (dec
 ## Consequences
 
 - **Keep the model loaded.** The app sends a warm-up call with a long `keep_alive` at start. Without it, the first Turn costs about 45 s more.
-- **Stable context first.** Ollama reuses the processed prompt when its start is unchanged. A fresh 10K-token prompt costs about 11 s to process (about 900 tok/s). A reused one costs almost nothing. The Context Builder therefore puts the Charter, the Ruleset and the world summary first, in a fixed order. It puts recent Turns and the Intent last.
+- **Stable context first.** Ollama reuses the processed prompt when its start is unchanged. A fresh 10K-token prompt costs about 11 s to process (about 900 tok/s). A reused one costs almost nothing. The Context Builder therefore puts the Adventure Seed, the Ruleset and the world summary first, in a fixed order. It puts recent Turns and the Intent last.
 - **Fresh context budget of about 4-6K tokens per Turn.** Above that, a Turn with a cold prompt exceeds 15 s.
 - **One model behind an adapter.** Domain and world logic never name a model. Changing the Ollama tag is a configuration change.
 - The `-64k` tag's `num_ctx 65536` is a ceiling, not a per-Turn setting. A larger context pushes more of the model onto the CPU.

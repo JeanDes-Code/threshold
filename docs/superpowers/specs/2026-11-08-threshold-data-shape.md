@@ -52,7 +52,7 @@ pub trait Gm {
 ```rust
 pub enum EntityKind { Pc, Npc, Faction, Place, Item }   // holders = Pc | Npc | Faction
 pub enum Canon { Possible, Established, Persistent }
-pub enum FactSource { Charter, Proposal, Stake, WorldEvent, Correction }
+pub enum FactSource { AdventureSeed, Proposal, Stake, WorldEvent, Correction }
 pub enum Stance { Oppose, Resist, Neutral, Comply, Help } // ordered, worst to best for the PC
 pub enum Knowing { Witnessed, Told }
 
@@ -72,7 +72,7 @@ Normalization (ported `resolver/normalize.ts`): lowercase, trim, collapse spaces
 ### 3.2 SQLite tables
 
 ```
-campaign      id, charter_json, clock_min, seed
+campaign      id, adventure_seed_json, clock_min, seed
 entity        id, campaign_id, kind, name, norm_name, adult NULL
               CHECK (kind NOT IN ('pc','npc') OR adult IS NOT NULL)
 voice_card    npc_id PK, habits, vocabulary, samples_json
@@ -98,7 +98,7 @@ The ledger is the source of truth. All other world tables are projections, writt
 
 Beliefs are not stored (ADR 0003). A Belief is the latest `knowledge` row per `(holder, subject, key)` with `arrives_at <= clock`. `arrives_at > learned_at` is delayed news. PC Knowledge is the PC's Beliefs. A Commit with `seen_by` holders writes one `Know(Witnessed)` op per holder, so visibility and Beliefs have one source.
 
-Canon rules. Charter choices marked decided are Persistent facts; choices marked proposed are Possible facts. A proposal fact commits as Established. It is Persistent when the PC is in its `seen_by`. A Possible fact becomes Established when a proposal cites it or the PC perceives it. A Claim never writes a slot; it writes `Told` knowledge for its listeners.
+Canon rules. Adventure Seed choices marked decided are Persistent facts; choices marked proposed are Possible facts. A proposal fact commits as Established. It is Persistent when the PC is in its `seen_by`. A Possible fact becomes Established when a proposal cites it or the PC perceives it. A Claim never writes a slot; it writes `Told` knowledge for its listeners.
 
 A retry reuses the `op_id` that the UI sends with `submit_intent`. A duplicate `op_id` returns the stored Turn and commits nothing.
 
@@ -140,7 +140,7 @@ The model declares: blockers, causes (`because`, `cause`), stance, the Check tar
 
 **Valid cause.** A fact that is Established or Persistent, and `created_turn` < this Turn. A fact created in this proposal is never a valid cause. It is also never a valid helping Factor.
 
-**Current obstacle.** When `verdict` is `impossible` or `check`, each `blockers` handle opens an `obstacle` row. A Charter or fixture can also seed obstacles. The current obstacles are the open rows. `context` shows them to the model by handle.
+**Current obstacle.** When `verdict` is `impossible` or `check`, each `blockers` handle opens an `obstacle` row. A Adventure Seed or fixture can also seed obstacles. The current obstacles are the open rows. `context` shows them to the model by handle.
 
 **Coincidence.** Reject when a proposal fact or a scheduled-event effect writes the slot of an open obstacle without a valid cause. A Check's `win` stake may write that slot; it applies only on success, so this is the legal path. Also reject any fact created this Turn that is cited as `helps: true` or as a cause.
 
@@ -177,7 +177,7 @@ The model declares: blockers, causes (`because`, `cause`), stance, the Check tar
 ## 7. YAGNI cuts
 
 - No closed key vocabulary; free normalized keys plus a key list in context. Revisit if key drift shows up.
-- The model schedules time triggers only. `When` triggers come from the Charter or fixtures.
+- The model schedules time triggers only. `When` triggers come from the Adventure Seed or fixtures.
 - No reschedule or postpone of events.
 - No Faction Beliefs through members. A Faction knows only what is told to it.
 - New NPCs created in play get only the one-line Voice Card seed from `NewNpc.voice` (section 9), no richer card.
@@ -190,7 +190,7 @@ A builder implements in this order: `domain`, `store` with migrations and the re
 
 ## 9. Resolutions (Claude Code, 2026-11-08, open to the owner's veto)
 
-- **Where Possible facts come from:** in this slice, only the Charter's "proposed" choices and the fixture's seeded rumors. Play does not create Possible facts. Details that appear only in Narration are not canon (spec §6.2).
+- **Where Possible facts come from:** in this slice, only the Adventure Seed's "proposed" choices and the fixture's seeded rumors. Play does not create Possible facts. Details that appear only in Narration are not canon (spec §6.2).
 - **Voice for NPCs created in play:** `NewNpc` carries a one-line `voice` seed (about 25 tokens), which becomes the NPC's Voice Card. No extra model call. A richer card can come later, between Scenes. Without the seed, new NPCs would bring back the "every NPC sounds the same" breaker.
 - **Persistent facts:** kept as written. Only an earlier-scheduled World Event or a Correction changes one, which matches the glossary.
 - **Proposal token cap:** no cut order yet. The first plan task measures proposal size and validity on the live model; the cut order follows from that data.

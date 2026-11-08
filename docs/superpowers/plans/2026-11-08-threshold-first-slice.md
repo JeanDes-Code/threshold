@@ -14,11 +14,11 @@
 
 - A Turn takes 15 s or less, warm, on the target machine (RTX 4070 SUPER 12 GB, 32 GB RAM). The 15 s covers both model calls, the retry and due World Events. OOC Turns are outside it.
 - Default model `gemma4:26b-a4b-it-qat`, one model for both calls, `think: false`, `num_ctx` 16384, warm-up call with `keep_alive` "30m" at app start. The model tag is configuration only.
-- Prompt order is fixed: system rules + Charter, then the Scene block, then recent Turns + Intent. About 4-6K fresh prompt tokens per Turn.
+- Prompt order is fixed: system rules + Adventure Seed, then the Scene block, then recent Turns + Intent. About 4-6K fresh prompt tokens per Turn.
 - The model never sets a numeric difficulty (ADR 0002). The Ruleset sets difficulty and rolls from a stored seed.
 - One retry per Turn in total, shared by the schema parse and the Commit checks.
 - All Commit writes happen in one SQLite transaction. The ledger is append-only and is the source of truth.
-- Hard limits live in the core: sexual content involves adults only, Charter boundaries always win, and no Content Pack can change a Commit check.
+- Hard limits live in the core: sexual content involves adults only, Adventure Seed boundaries always win, and no Content Pack can change a Commit check.
 - Content Packs are data only: no code.
 - Services bind to localhost only. No telemetry. No cloud call at play time.
 - Everything committed to the repo is English. Never write the assistant's personal name in the repo; write "Claude Code".
@@ -40,7 +40,7 @@
 Cargo.toml                         workspace
 crates/threshold-core/src/
   lib.rs
-  domain/{mod,ids,slot,proposal,entity,event,charter}.rs
+  domain/{mod,ids,slot,proposal,entity,event,adventure seed}.rs
   normalize.rs                     name, key and value normalization
   store/{mod,migrations,project}.rs
   rules.rs                         Ruleset trait + D10
@@ -53,7 +53,7 @@ crates/threshold-core/src/
 crates/threshold-ollama/src/lib.rs
 crates/threshold-ollama/examples/probe.rs
 crates/threshold-eval/src/main.rs
-fixtures/town/{charter.toml,world.toml}
+fixtures/town/{adventure-seed.toml,world.toml}
 fixtures/packs/test-pack/{pack.toml,prompt.md}
 evals/scenarios/*.toml
 src-tauri/                         Tauri 2 shell
@@ -74,7 +74,7 @@ ui/                                React + TS + Vite
 - Produces: `Handle` parsed from strings `E<n>`, `F<n>`, `W<n>`, `G<n>`, `N<n>`: `Handle::parse(&str) -> Result<Handle, HandleError>`, `Display` round-trips.
 - Produces: `pub fn proposal_schema() -> serde_json::Value` (from `schemars`, with `maxItems`: blockers 2, reactions 2, new_npcs 1, facts 2, cancel 1, factors 3, effects 2; `plan` maxLength 90; `voice` maxLength 120).
 - Produces: `normalize::name(&str) -> String`, `normalize::key(&str) -> String`, `normalize::value(&str) -> String`.
-- Produces: `Charter` (from TOML): `premise: String`, `pc: PcSeed { name, adult: true, concept }`, `boundaries: Vec<String>`, `decided: Vec<CharterFact>`, `proposed: Vec<CharterFact>`, `story_language: String`; `CharterFact { subject: String, key: String, value: String, text: String }`.
+- Produces: `AdventureSeed` (from TOML): `premise: String`, `pc: PcSeed { name, adult: true, concept }`, `boundaries: Vec<String>`, `decided: Vec<SeedFact>`, `proposed: Vec<SeedFact>`, `story_language: String`; `SeedFact { subject: String, key: String, value: String, text: String }`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -137,7 +137,7 @@ Normalization rule: NFKC, lowercase, curly apostrophes to `'`, trim, collapse sp
 
 **Interfaces:**
 - Consumes: Task 1 types.
-- Produces: `Store::open(path: &Path) -> Result<Store, StoreError>`, `Store::open_in_memory()`; `create_campaign(&mut self, charter: &Charter, seed: u64) -> Result<CampaignId, StoreError>` (writes Charter facts per data-shape §3.2 canon rules: decided → Persistent, proposed → Possible); `snapshot(&self, c: CampaignId) -> Result<WorldView, StoreError>`; `snapshot_before(&self, c: CampaignId, turn_seq: u64) -> Result<WorldView, StoreError>` (replays the ledger up to that Turn); `commit(&mut self, rec: TurnRecord, ops: Vec<LedgerOp>) -> Result<TurnId, CommitError>` with `CommitError::DuplicateOp(TurnId)`; `turn_by_op(&self, op: &OpId) -> Result<Option<StoredTurn>, StoreError>`; `set_narration(&mut self, t: TurnId, text: &str)`; `rebuild_projections(&mut self, c: CampaignId)`; `log_debug(&self, e: DebugEntry)` (outside any transaction).
+- Produces: `Store::open(path: &Path) -> Result<Store, StoreError>`, `Store::open_in_memory()`; `create_campaign(&mut self, seed: &AdventureSeed, seed: u64) -> Result<CampaignId, StoreError>` (writes Adventure Seed facts per data-shape §3.2 canon rules: decided → Persistent, proposed → Possible); `snapshot(&self, c: CampaignId) -> Result<WorldView, StoreError>`; `snapshot_before(&self, c: CampaignId, turn_seq: u64) -> Result<WorldView, StoreError>` (replays the ledger up to that Turn); `commit(&mut self, rec: TurnRecord, ops: Vec<LedgerOp>) -> Result<TurnId, CommitError>` with `CommitError::DuplicateOp(TurnId)`; `turn_by_op(&self, op: &OpId) -> Result<Option<StoredTurn>, StoreError>`; `set_narration(&mut self, t: TurnId, text: &str)`; `rebuild_projections(&mut self, c: CampaignId)`; `log_debug(&self, e: DebugEntry)` (outside any transaction).
 - Produces: `WorldView { clock_min, entities, live_facts, obstacles_open, events_scheduled, goals_active, attitudes, knowledge, recent_turns, turn_seq }` with lookup helpers `entity(Handle)`, `live_fact(subject, key)`, `fact(Handle)`.
 - Produces: `TurnRecord { op_id, kind: TurnKind /* seed | play | correction | ooc */, intent, proposal_json, clock_before, clock_after }`.
 
@@ -220,7 +220,7 @@ Normalization rule: NFKC, lowercase, curly apostrophes to `'`, trim, collapse sp
 - Test: `crates/threshold-core/tests/context.rs`
 
 **Interfaces:**
-- Produces: `pub fn proposal_prompt(view: &WorldView, packs: &[ContentPack], intent: &str) -> Prompt`; `pub fn narration_prompt(view_after: &WorldView, perceived: &[LedgerOp], reactions: &[Reaction], intent: &str) -> Prompt`; `pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp>`; `ContentPack::load(dir: &Path) -> Result<ContentPack, PackError>` with `ContentPack { name, prompt_fragments: Vec<(InsertPoint, String)>, charter_options: Vec<String>, model_hints: Vec<String> }`; `InsertPoint { Tone, Scenes }`.
+- Produces: `pub fn proposal_prompt(view: &WorldView, packs: &[ContentPack], intent: &str) -> Prompt`; `pub fn narration_prompt(view_after: &WorldView, perceived: &[LedgerOp], reactions: &[Reaction], intent: &str) -> Prompt`; `pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp>`; `ContentPack::load(dir: &Path) -> Result<ContentPack, PackError>` with `ContentPack { name, prompt_fragments: Vec<(InsertPoint, String)>, seed_options: Vec<String>, model_hints: Vec<String> }`; `InsertPoint { Tone, Scenes }`.
 - Retrieval rules (deterministic): live facts whose subject is the current place, an entity present, or an entity named in the Intent or in the last 3 Turns; the open obstacles; the live keys of each entity shown; the Voice Cards of present NPCs. Recent Turns: the last 6, cut from the oldest until the `recent` block is ≤ 6,000 characters.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -248,7 +248,7 @@ Normalization rule: NFKC, lowercase, curly apostrophes to `'`, trim, collapse sp
   `TurnOutcome { turn_id, roll: Option<RollResult>, narration: String, timings: Timings }`; `TurnError { EmptyIntent, IntentTooLong, Model(GmError), Rejected(Vec<Rejection>), Store(StoreError) }`.
 - Pipeline order: duplicate `op_id` check → Intent check (empty or > 2,000 chars) → `proposal_prompt` → `gm.propose` → parse → `checks::validate` → on failure, one retry with the rejection lines appended to `recent` → `Ruleset` → `checks::to_ops` → `world::advance(minutes)` → `store.commit` → `gm.narrate` with `narration_prompt` (streaming) → `store.set_narration`. `debug_log` gets one row per step with its ms.
 - `correct_last`: takes `snapshot_before(last.seq)`, reruns the pipeline with the clarified Intent and the **stored seed** of the corrected Turn, commits a `correction` Turn whose ops start with a `RevertTurn { turn_id }` op (add this `LedgerOp` variant; `rebuild_projections` skips the ops of a reverted Turn), and writes a `correction` row. Only the last play Turn can be corrected.
-- `ooc`: one plain model call with the system rules, the Charter and the PC Knowledge only; no hidden facts; commits nothing.
+- `ooc`: one plain model call with the system rules, the Adventure Seed and the PC Knowledge only; no hidden facts; commits nothing.
 
 - [ ] **Step 1: Write the failing tests (all with `RecordedGm`).**
   - `malformed_twice_commits_nothing`: two invalid proposals → `Err`, ledger unchanged, `narrate` never called.
@@ -266,12 +266,12 @@ Normalization rule: NFKC, lowercase, curly apostrophes to `'`, trim, collapse sp
 ### Task 9: The town demo fixture
 
 **Files:**
-- Create: `fixtures/town/charter.toml`, `fixtures/town/world.toml`, `crates/threshold-core/src/fixture.rs`
+- Create: `fixtures/town/adventure-seed.toml`, `fixtures/town/world.toml`, `crates/threshold-core/src/fixture.rs`
 - Test: `crates/threshold-core/tests/town.rs`
 
 **Interfaces:**
 - Produces: `pub fn load_world(store: &mut Store, campaign: CampaignId, path: &Path) -> Result<(), FixtureError>` that commits the seeded entities, facts, relationships, goals, Voice Cards and obstacles as one Turn of kind `seed`.
-- World content: the town of Varn; the PC (adult, an outsider scribe); Magistrate Orsel (adult, proud, vindictive, polite on the surface; goal "protect his reputation"; Voice Card with formal speech, legal vocabulary, three sample lines); his investigator Doul (adult, terse; goal "serve Orsel"); clerk Hessa (adult, nervous, gossips); the Magistracy (Faction). GM-only fact: Orsel skims the grain tithe. One Possible rumor: "the miller cheats the scales". The Charter boundaries include "adult participants only".
+- World content: the town of Varn; the PC (adult, an outsider scribe); Magistrate Orsel (adult, proud, vindictive, polite on the surface; goal "protect his reputation"; Voice Card with formal speech, legal vocabulary, three sample lines); his investigator Doul (adult, terse; goal "serve Orsel"); clerk Hessa (adult, nervous, gossips); the Magistracy (Faction). GM-only fact: Orsel skims the grain tithe. One Possible rumor: "the miller cheats the scales". The Adventure Seed boundaries include "adult participants only".
 
 - [ ] **Step 1: Write the failing test `town_demo_offscreen_consequence`** with `RecordedGm`: Turn 1, the PC insults Orsel in public. The recorded proposal holds `reactions[Orsel: Resist, plan "smiles, will have the scribe investigated"]` and a `schedule` (Doul, in 3 days, effect `pc.reputation = under_suspicion`, `seen: gm`). Turns 2-3: travel 4 days. Assert: the event fired while the PC was elsewhere; Hessa holds a `Witnessed` Belief about the investigation; PC Knowledge has no fact about it until Turn 4, when the PC meets Hessa and a proposal fact `seen: pc` cites it.
 - [ ] **Step 2: Run, expect FAIL. Step 3: Write the fixture files and loader. Step 4: Run, expect PASS.**
@@ -286,7 +286,7 @@ Normalization rule: NFKC, lowercase, curly apostrophes to `'`, trim, collapse sp
 
 **Interfaces:**
 - Consumes: `Engine` (Task 8), `OllamaGm` (Task 2), `load_world` (Task 9).
-- Produces Tauri commands: `new_campaign(charter_path: String, world_path: String) -> CampaignSummary`, `open_campaign(db_path: String) -> CampaignSummary`, `submit_intent(op_id: String, text: String) -> TurnSummary`, `correct_last(op_id: String, clarified: String, why: String) -> TurnSummary`, `ask_ooc(text: String) -> String`, `renarrate(turn_id: i64) -> String`, `get_character() -> CharacterView`, `get_journal() -> JournalView`, `get_debug(turn_id: i64) -> DebugView` (refused unless debug mode is on).
+- Produces Tauri commands: `new_campaign(seed_path: String, world_path: String) -> CampaignSummary`, `open_campaign(db_path: String) -> CampaignSummary`, `submit_intent(op_id: String, text: String) -> TurnSummary`, `correct_last(op_id: String, clarified: String, why: String) -> TurnSummary`, `ask_ooc(text: String) -> String`, `renarrate(turn_id: i64) -> String`, `get_character() -> CharacterView`, `get_journal() -> JournalView`, `get_debug(turn_id: i64) -> DebugView` (refused unless debug mode is on).
 - Produces events: `narration_chunk { op_id, text }`, `turn_committed { turn_id, roll }`, `turn_failed { op_id, reason }`.
 - The shell runs each Turn in `spawn_blocking`, calls `warm_up` at start, and binds nothing to a network port. The Journal shows observations and Claims apart, and never shows a GM-only fact. Debug mode is a toggle in the menu, shown with a visible banner.
 

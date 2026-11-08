@@ -2,7 +2,7 @@
 
 Date: 2026-11-08. Status: draft for review. Builder check done; owner answered its two open questions on 2026-11-08.
 Sources: the exploratory spec "Threshold — Local AI Game Master Harness, v0.1" (pasted by the owner, not in the repo), the design conversation of 2026-11-08, `GLOSSARY.md`, ADRs 0001 to 0004.
-Terms in capitals (Turn, Commit, Charter, ...) are defined in `GLOSSARY.md`.
+Terms in capitals (Turn, Commit, Adventure Seed, ...) are defined in `GLOSSARY.md`.
 
 ## 1. Intent
 
@@ -29,7 +29,7 @@ The slice proves that the harness plays differently from plain chat. It is done 
 ## 3. Non-goals for this slice
 
 - Bundled Ollama, rig detection, model recommendation, installers. They come before any public release, not now. The slice talks to the Ollama the owner already runs.
-- Discovery as an interview. The slice starts from a hand-written Charter file (section 8). Discovery comes after the slice.
+- Discovery as an interview. The slice starts from a hand-written Adventure Seed file (section 8). Discovery comes after the slice.
 - Content Packs beyond the loading mechanism and one test pack.
 - Fine-tuning, embeddings and vector search, multiple model providers, maps, combat grids, multiplayer, voice.
 - A full economy, many active NPCs, a precomputed world.
@@ -74,13 +74,13 @@ crates/threshold-ollama/ /api/chat client: schema-constrained call, streaming ca
 
 1. **Intent.** The Player's text, unchanged. An OOC message goes down a separate path (6.5).
 2. **Context.** The context builder assembles the prompt in a fixed order:
-   1. system rules and the Charter (stable for the campaign);
+   1. system rules and the Adventure Seed (stable for the campaign);
    2. the Scene block: location, present NPCs with their Voice Cards, relevant facts (stable within a Scene);
    3. recent Turns, then the Intent (changes every Turn).
    Retrieval is deterministic: facts linked to the location, to entities present, and to entities named in the Intent or the last few Turns. No embeddings.
 3. **Decision Proposal.** One model call with a JSON Schema in Ollama's `format` field. The schema is generated from the Rust type (`schemars`). Fields, at minimum: action kind; allowed / impossible / needs a Check; Stakes; Factors, each pointing to an existing fact; NPC reaction intents, as short plans and not prose; proposed new facts, each with its cause; elapsed time. Thinking is off.
 4. **Resolve.** The Ruleset turns Stakes and Factors into a difficulty, rolls with a stored seed, and returns the outcome and its Consequences. The default Ruleset is a small d10 prototype behind a trait.
-5. **World.** The World Clock advances by the elapsed time. Due World Events run. The number of world actions per Turn is capped. World Events come from play: a Decision Proposal may schedule one (for example, from an NPC reaction intent), with its trigger, its visibility and its effects as structured data. A Charter or fixture may also seed some. When an event fires, its effects apply as data, with no model call. The model only narrates what the PC later perceives.
+5. **World.** The World Clock advances by the elapsed time. Due World Events run. The number of world actions per Turn is capped. World Events come from play: a Decision Proposal may schedule one (for example, from an NPC reaction intent), with its trigger, its visibility and its effects as structured data. A Adventure Seed or fixture may also seed some. When an event fires, its effects apply as data, with no model call. The model only narrates what the PC later perceives.
 6. **Validate and Commit.** Checks (6.3), then one SQLite transaction: state changes, event log rows, roll record, Turn record. The Turn carries an operation id, so a retry cannot commit twice.
 7. **Narrate.** A second, streamed model call (owner's decision: stream, do not hold the text back). It receives only committed outcomes that the PC can perceive, the Scene block, and the Voice Cards of NPCs who speak. Narration never mutates state. To portray an NPC, the narrator may receive that NPC's short reaction intent ("polite on the surface, hostile underneath"), never the hidden facts behind it. This is the real protection against leaks.
 8. **Record.** Prompts, raw model outputs, timings and the state revision go to a debug log, visible only in the debug view.
@@ -101,7 +101,7 @@ New in Threshold:
 - **directed relationships** between holders;
 - **Voice Cards**.
 
-Canon levels follow the glossary: Possible, Established, Persistent. A fact is Persistent when it comes from the Charter, or when it is Established and the PC witnessed it directly. Only named or significant details become facts. Throwaway description stays prose. The exact rule is the builder's call; it must be written down and tested.
+Canon levels follow the glossary: Possible, Established, Persistent. A fact is Persistent when it comes from the Adventure Seed, or when it is Established and the PC witnessed it directly. Only named or significant details become facts. Throwaway description stays prose. The exact rule is the builder's call; it must be written down and tested.
 
 ### 6.3 Commit checks
 
@@ -117,7 +117,7 @@ Deterministic code. A failed check sends the proposal back once with the reason.
 | Shortcut: NPC folds | An NPC reaction that goes against that NPC's goals or Beliefs needs a cause: a Check, new information, or leverage. |
 | Shortcut: fact bends | A new fact that contradicts a Persistent fact is rejected. |
 | Shortcut: tension evaporates | Canceling a scheduled World Event needs a cause. |
-| Content Boundary | The Charter's boundaries hold. Every NPC has a stored adult status. A proposal that tags a scene as intimate is rejected if any participant is not an adult. An intimate scene without the tag counts as a failure in the evaluations. No Content Pack can turn this off. This is a structural rule plus measurement, not a proof over free prose; the owner accepted that level on 2026-11-08. |
+| Content Boundary | The Adventure Seed's boundaries hold. Every NPC has a stored adult status. A proposal that tags a scene as intimate is rejected if any participant is not an adult. An intimate scene without the tag counts as a failure in the evaluations. No Content Pack can turn this off. This is a structural rule plus measurement, not a proof over free prose; the owner accepted that level on 2026-11-08. |
 
 How the code detects "the PC's current obstacle" and "against the NPC's goals" is the hardest design question in the slice. The builder proposes a representation and tests it on the scenarios in section 10 before generalising.
 
@@ -125,7 +125,7 @@ How the code detects "the PC's current obstacle" and "against the NPC's goals" i
 
 A Content Pack is a folder of data:
 - prompt fragments added at fixed points of the system prompt;
-- extra Charter options;
+- extra Adventure Seed options;
 - model hints.
 
 It holds no code. Loading or removing a pack never changes a Commit check. The public repository ships no adult pack. The slice ships the loader and one harmless test pack, which proves that a pack cannot weaken a Content Boundary.
@@ -138,9 +138,9 @@ The OOC channel never enters the fiction. A Correction is a Commit of its own: i
 
 A Play view (narration stream, input box, visible roll results), a Character panel, a Journal (what the PC knows, observations separate from Claims), and a debug view behind an explicit toggle and marked as such. Plain styling. Polish comes later.
 
-## 8. The starting Charter
+## 8. The starting Adventure Seed
 
-A hand-written Charter file for the town demo. Discovery replaces it after the slice.
+A hand-written Adventure Seed file for the town demo. Discovery replaces it after the slice.
 
 ## 9. The town demo (test fixture, not the default setting)
 
@@ -183,5 +183,14 @@ The judge for the voice and Shortcut evaluations is the builder's call. A fronti
 - World Events come from play, with effects stored as data and no model call when they fire (6.1 step 5).
 - One retry per Turn in total; the 15 s budget covers the whole normal Turn; OOC is outside it (6.1 step 9).
 - A Correction keeps the stored seed and reaches back one Turn (6.5).
-- Persistent means Charter facts plus Established facts the PC witnessed (6.2).
-- Discovery comes after the slice; a hand-written Charter replaces it for now (sections 3 and 8).
+- Persistent means Adventure Seed facts plus Established facts the PC witnessed (6.2).
+- Discovery comes after the slice; a hand-written Adventure Seed replaces it for now (sections 3 and 8).
+
+## 13. Reference material for later phases
+
+The owner keeps two private reference documents outside this repository, because they hold personal preferences:
+
+- **The Threshold**, a discovery framework: one question per turn, rotating methods, a stop checklist, and a portable Adventure Seed template. It is the source for the Discovery step after this slice.
+- **Player Preferences and Operating Instructions**, the owner's GM rulebook. Its "Internal GM Decision Framework" and "Anti-Patterns" sections map onto the Decision Proposal, the World step and the Shortcut checks. Its "Degrees of success" section needs a richer Ruleset than the pass/fail d10 prototype.
+
+When Threshold opens to other players, Discovery should produce two outputs: a reusable player profile (taste, tone, boundaries) and a per-game Adventure Seed. This is a direction, not a decision.
