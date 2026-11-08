@@ -4,8 +4,8 @@ mod project;
 use std::{fmt, path::Path};
 
 use crate::domain::{
-    AdventureSeed, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, FactSource, Handle,
-    Knowing, LedgerOp, Slot, Trigger,
+    AdventureSeed, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,
+    FactSource, Handle, Knowing, LedgerOp, Slot, Trigger,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -98,7 +98,7 @@ pub struct Entity {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fact {
     pub id: u64,
-    pub slot: Slot,
+    pub slot: Slot<EntityId>,
     pub text: String,
     pub canon: Canon,
     pub source: FactSource,
@@ -109,7 +109,7 @@ pub struct Fact {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {
     pub id: u64,
-    pub claim: ClaimDraft,
+    pub claim: ClaimDraft<EntityId>,
     pub turn_id: TurnId,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,13 +122,20 @@ pub struct Obstacle {
 pub struct WorldEvent {
     pub id: u64,
     pub text: String,
-    pub trigger: Trigger,
+    pub trigger: Trigger<EntityId>,
     pub actors: Vec<EntityId>,
     pub goal_id: Option<u64>,
     pub cause_fact_id: Option<u64>,
     pub scheduled_turn: TurnId,
-    pub effects: Vec<Effect>,
+    pub effects: Vec<Effect<EntityId>>,
     pub seen_by: Vec<EntityId>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VoiceCard {
+    pub npc: EntityId,
+    pub habits: String,
+    pub vocabulary: String,
+    pub samples: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Goal {
@@ -168,6 +175,31 @@ pub struct WorldView {
     pub turn_seq: u64,
 }
 impl WorldView {
+    pub fn present(&self) -> Vec<EntityId> {
+        let Some(pc) = self
+            .entities
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Pc)
+        else {
+            return Vec::new();
+        };
+        let location = self
+            .live_fact(pc.id, "location")
+            .map(|fact| crate::normalize::value(&fact.slot.value));
+        self.entities
+            .iter()
+            .filter(|entity| {
+                entity.id == pc.id
+                    || location.as_ref().is_some_and(|location| {
+                        self.live_fact(entity.id, "location").is_some_and(|fact| {
+                            crate::normalize::value(&fact.slot.value) == *location
+                        })
+                    })
+            })
+            .map(|entity| entity.id)
+            .collect()
+    }
+
     pub fn entity(&self, handle: Handle) -> Option<&Entity> {
         if let Handle::Entity(id) = handle {
             self.entities.iter().find(|e| e.id == id)
@@ -249,6 +281,7 @@ impl Store {
             campaign,
             turn,
             &LedgerOp::AddEntity {
+                local: None,
                 kind: EntityKind::Pc,
                 name: adventure_seed.pc.name.clone(),
                 adult: Some(adventure_seed.pc.adult),
@@ -268,6 +301,7 @@ impl Store {
                 campaign,
                 turn,
                 &LedgerOp::AddEntity {
+                    local: None,
                     kind: e.kind,
                     name: e.name.clone(),
                     adult: e.adult,
@@ -290,6 +324,7 @@ impl Store {
                         campaign,
                         turn,
                         &LedgerOp::AddEntity {
+                            local: None,
                             kind: EntityKind::Place,
                             name: f.subject.clone(),
                             adult: None,
@@ -344,14 +379,28 @@ impl Store {
         if let Some(id) = previous {
             return Err(CommitError::DuplicateOp(id));
         }
+        let mut locals = std::collections::HashSet::new();
+        for op in &ops {
+            if let LedgerOp::AddEntity {
+                local: Some(local), ..
+            } = op
+                && !locals.insert(*local)
+            {
+                return Err(
+                    StoreError::Invalid(format!("duplicate local entity ref {local}")).into(),
+                );
+            }
+        }
         let turn = insert_turn(&tx, &rec)?;
+        let mut assigned = std::collections::HashMap::new();
         let revert = ops
             .iter()
             .any(|op| matches!(op, LedgerOp::RevertTurn { .. }));
         if revert {
             for op in &ops {
                 if matches!(op, LedgerOp::RevertTurn { .. }) {
-                    project::append(&tx, rec.campaign_id, turn, op)?;
+                    let op = resolve(op, &assigned)?;
+                    project::append(&tx, rec.campaign_id, turn, &op)?;
                 }
             }
             project::rebuild(&tx, rec.campaign_id)?;
@@ -360,7 +409,16 @@ impl Store {
             if matches!(op, LedgerOp::RevertTurn { .. }) {
                 continue;
             }
-            let id = project::append(&tx, rec.campaign_id, turn, op)?;
+            let resolved = resolve(op, &assigned)?;
+            let id = project::append(&tx, rec.campaign_id, turn, &resolved)?;
+            if let LedgerOp::AddEntity {
+                local: Some(local), ..
+            } = resolved
+            {
+                let entity = id.ok_or_else(|| StoreError::Invalid("missing entity id".into()))?;
+                assigned.insert(local, entity);
+            }
+            let op = &resolved;
             let seen = match op {
                 LedgerOp::AddFact { seen_by, .. } => Some(seen_by),
                 LedgerOp::SupersedeFact { new, .. } => Some(&new.seen_by),
@@ -378,7 +436,7 @@ impl Store {
                     if !holders.insert(*holder) {
                         continue;
                     }
-                    let explicit = ops.iter().any(|candidate| matches!(candidate, LedgerOp::Know { holder: h, fact_id: Some(f), claim_id: None, how: Knowing::Witnessed, .. } if h == holder && *f == fact_id));
+                    let explicit = ops.iter().any(|candidate| matches!(candidate, LedgerOp::Know { holder: h, fact_id: Some(f), claim_id: None, how: Knowing::Witnessed, .. } if resolve_ref(*h, &assigned).ok() == Some(*holder) && *f == fact_id));
                     if !explicit {
                         project::append(
                             &tx,
@@ -432,6 +490,25 @@ impl Store {
         project::validate_supersessions(&tx, rec.campaign_id)?;
         tx.commit()?;
         Ok(turn)
+    }
+    pub fn voice_card(&self, npc: EntityId) -> Result<Option<VoiceCard>, StoreError> {
+        let row: Option<(String, String, String)> = self
+            .db
+            .query_row(
+                "SELECT habits,vocabulary,samples_json FROM voice_card WHERE npc_id=?1",
+                [npc],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        row.map(|(habits, vocabulary, samples)| {
+            Ok(VoiceCard {
+                npc,
+                habits,
+                vocabulary,
+                samples: serde_json::from_str(&samples)?,
+            })
+        })
+        .transpose()
     }
     pub fn turn_by_op(&self, op: &OpId) -> Result<Option<StoredTurn>, StoreError> {
         let mut stmt = self
@@ -487,6 +564,28 @@ impl Store {
         )?;
         Ok(())
     }
+}
+fn resolve_ref(
+    entity: EntityRef,
+    assigned: &std::collections::HashMap<u8, EntityId>,
+) -> Result<EntityId, StoreError> {
+    match entity {
+        EntityRef::Id(id) => Ok(id),
+        EntityRef::New(local) => assigned.get(&local).copied().ok_or_else(|| {
+            StoreError::Invalid(format!(
+                "local entity ref {local} has no earlier AddEntity in this commit"
+            ))
+        }),
+    }
+}
+/// Replaces every `EntityRef::New(n)` with the id that the earlier `AddEntity`
+/// with `local == Some(n)` received in this Commit.
+fn resolve(
+    op: &LedgerOp,
+    assigned: &std::collections::HashMap<u8, EntityId>,
+) -> Result<LedgerOp<EntityId>, StoreError> {
+    op.clone()
+        .try_map(&mut |entity| resolve_ref(entity, assigned))
 }
 fn insert_turn(db: &Connection, r: &TurnRecord) -> Result<TurnId, StoreError> {
     let kind = project::enum_text(&r.kind)?;

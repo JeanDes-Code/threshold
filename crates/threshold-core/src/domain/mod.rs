@@ -10,6 +10,6 @@ pub use proposal::{
     Reaction, Seen, SlotDraft, Verdict,
 };
 pub use types::{
-    Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, FactDraft, FactSource, GoalStatus,
-    Key, Knowing, LedgerOp, Slot, Stance, Trigger, Value,
+    Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef, FactDraft, FactSource,
+    GoalStatus, Key, Knowing, LedgerOp, Slot, Stance, Trigger, Value,
 };

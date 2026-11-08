@@ -70,7 +70,7 @@ fn event(db: &Connection, id: u64, c: u64) -> Result<(), StoreError> {
         c,
     )
 }
-fn normalized_slot(slot: &Slot) -> Slot {
+fn normalized_slot(slot: &Slot<EntityId>) -> Slot<EntityId> {
     Slot {
         subject: slot.subject,
         key: normalize::key(&slot.key),
@@ -108,7 +108,7 @@ pub(super) fn append(
     db: &Connection,
     c: u64,
     turn: u64,
-    op: &LedgerOp,
+    op: &LedgerOp<EntityId>,
 ) -> Result<Option<u64>, StoreError> {
     let (table, path) = match op {
         LedgerOp::AddEntity { .. } => (Some("entity"), "$.op.add_entity"),
@@ -135,11 +135,13 @@ fn apply(
     db: &Connection,
     c: u64,
     turn: u64,
-    op: &LedgerOp,
+    op: &LedgerOp<EntityId>,
     id: Option<u64>,
 ) -> Result<Option<u64>, StoreError> {
     let made = match op {
-        LedgerOp::AddEntity { kind, name, adult } => {
+        LedgerOp::AddEntity {
+            kind, name, adult, ..
+        } => {
             db.execute("INSERT INTO entity(id,campaign_id,kind,name,norm_name,adult) VALUES(?1,?2,?3,?4,?5,?6)",params![id,c,enum_text(kind)?,name,normalize::name(name),adult])?;
             true
         }
@@ -214,7 +216,7 @@ fn apply(
                 db,
                 c,
                 turn,
-                &LedgerOp::AddFact {
+                &LedgerOp::<EntityId>::AddFact {
                     slot: new.slot.clone(),
                     text: new.text.clone(),
                     canon: new.canon,
@@ -489,7 +491,7 @@ pub(super) fn validate_supersessions(db: &Connection, c: u64) -> Result<(), Stor
     Ok(())
 }
 
-fn decode(s: &str) -> Result<(LedgerOp, Option<u64>), StoreError> {
+fn decode(s: &str) -> Result<(LedgerOp<EntityId>, Option<u64>), StoreError> {
     let value: Value = serde_json::from_str(s)?;
     if let Some(op) = value.get("op") {
         Ok((
@@ -501,7 +503,7 @@ fn decode(s: &str) -> Result<(LedgerOp, Option<u64>), StoreError> {
     }
 }
 enum ReplayOp {
-    Current(LedgerOp),
+    Current(LedgerOp<EntityId>),
     LegacySupersede { old: u64, new: u64 },
 }
 

@@ -1,6 +1,7 @@
 use threshold_core::{
     domain::{
-        AdventureSeed, Canon, EntityKind, FactSource, Handle, LedgerOp, PcSeed, SeedFact, Slot,
+        AdventureSeed, Canon, EntityKind, EntityRef, FactSource, Handle, LedgerOp, PcSeed,
+        SeedFact, Slot,
     },
     store::{CommitError, Store, TurnKind, TurnRecord},
 };
@@ -41,10 +42,189 @@ fn record(campaign_id: u64, op: &str) -> TurnRecord {
         clock_after: 0,
     }
 }
+
+fn local_npc(local: u8) -> LedgerOp {
+    LedgerOp::AddEntity {
+        local: Some(local),
+        kind: EntityKind::Npc,
+        name: "Orsel".into(),
+        adult: Some(true),
+    }
+}
+
+fn local_voice(local: u8) -> LedgerOp {
+    LedgerOp::AddVoiceCard {
+        npc: EntityRef::New(local),
+        habits: "quiet".into(),
+        vocabulary: "plain".into(),
+        samples: vec![],
+    }
+}
+
+#[test]
+fn new_npc_with_voice_card_in_one_commit() {
+    let mut db = Store::open_in_memory().unwrap();
+    let campaign = db.create_campaign(&adventure_seed(), 42).unwrap();
+    db.commit(
+        record(campaign, "local"),
+        vec![local_npc(1), local_voice(1)],
+    )
+    .unwrap();
+    let npc = db
+        .snapshot(campaign)
+        .unwrap()
+        .entities
+        .iter()
+        .find(|entity| entity.name == "Orsel")
+        .unwrap()
+        .id;
+    let card = db.voice_card(npc).unwrap().unwrap();
+    assert_eq!(card.npc, npc);
+    assert_eq!(card.habits, "quiet");
+    assert_eq!(card.vocabulary, "plain");
+    assert!(card.samples.is_empty());
+}
+
+#[test]
+fn unknown_local_ref_rolls_back() {
+    let mut db = Store::open_in_memory().unwrap();
+    let campaign = db.create_campaign(&adventure_seed(), 42).unwrap();
+    let before = db.snapshot(campaign).unwrap();
+    assert!(
+        db.commit(
+            record(campaign, "unknown"),
+            vec![local_npc(1), local_voice(2)]
+        )
+        .is_err()
+    );
+    assert_eq!(db.snapshot(campaign).unwrap(), before);
+    assert!(db.turn_by_op(&"unknown".into()).unwrap().is_none());
+}
+
+#[test]
+fn duplicate_local_ref_rolls_back() {
+    let mut db = Store::open_in_memory().unwrap();
+    let campaign = db.create_campaign(&adventure_seed(), 42).unwrap();
+    let before = db.snapshot(campaign).unwrap();
+    assert!(
+        db.commit(
+            record(campaign, "duplicate"),
+            vec![local_npc(1), local_npc(1)]
+        )
+        .is_err()
+    );
+    assert_eq!(db.snapshot(campaign).unwrap(), before);
+    assert!(db.turn_by_op(&"duplicate".into()).unwrap().is_none());
+}
+
+#[test]
+fn ledger_stores_resolved_ids() {
+    let path = std::env::temp_dir().join(format!(
+        "threshold-local-ref-{}-{:?}.db",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let mut db = Store::open(&path).unwrap();
+    let campaign = db.create_campaign(&adventure_seed(), 42).unwrap();
+    let turn = db
+        .commit(
+            record(campaign, "replay-local"),
+            vec![local_npc(1), local_voice(1)],
+        )
+        .unwrap();
+    let before = db.snapshot(campaign).unwrap();
+    let npc = before
+        .entities
+        .iter()
+        .find(|entity| entity.name == "Orsel")
+        .unwrap()
+        .id;
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let stored: String = sql
+        .query_row(
+            "SELECT op_json FROM ledger WHERE turn_id=?1 AND json_type(op_json,'$.op.add_voice_card') IS NOT NULL",
+            [turn],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let stored: serde_json::Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(
+        stored["op"]["add_voice_card"]["npc"],
+        serde_json::json!(npc)
+    );
+    let ledger: Vec<String> = sql
+        .prepare("SELECT op_json FROM ledger WHERE turn_id=?1")
+        .unwrap()
+        .query_map([turn], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(ledger.iter().all(|op| !op.contains("\"new\"")));
+    db.rebuild_projections(campaign).unwrap();
+    assert_eq!(db.snapshot(campaign).unwrap(), before);
+    assert_eq!(db.voice_card(npc).unwrap().unwrap().habits, "quiet");
+    drop(sql);
+    drop(db);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn present_matches_pc_location() {
+    let mut db = Store::open_in_memory().unwrap();
+    let mut seed = adventure_seed();
+    seed.entities = vec![
+        threshold_core::domain::SeedEntity {
+            kind: EntityKind::Npc,
+            name: "Near".into(),
+            adult: Some(true),
+        },
+        threshold_core::domain::SeedEntity {
+            kind: EntityKind::Npc,
+            name: "Far".into(),
+            adult: Some(true),
+        },
+    ];
+    for (subject, value) in [("Ada", "The Hall"), ("Near", " hall  "), ("Far", "Garden")] {
+        seed.decided.push(SeedFact {
+            subject: subject.into(),
+            key: "location".into(),
+            value: value.into(),
+            text: value.into(),
+        });
+    }
+    let campaign = db.create_campaign(&seed, 42).unwrap();
+    let view = db.snapshot(campaign).unwrap();
+    let pc = view
+        .entities
+        .iter()
+        .find(|entity| entity.name == "Ada")
+        .unwrap()
+        .id;
+    let near = view
+        .entities
+        .iter()
+        .find(|entity| entity.name == "Near")
+        .unwrap()
+        .id;
+    let far = view
+        .entities
+        .iter()
+        .find(|entity| entity.name == "Far")
+        .unwrap()
+        .id;
+    assert!(view.present().contains(&pc));
+    assert!(view.present().contains(&near));
+    assert!(!view.present().contains(&far));
+    let mut without_pc_location = view.clone();
+    without_pc_location
+        .live_facts
+        .retain(|fact| fact.slot.subject != pc || fact.slot.key != "location");
+    assert_eq!(without_pc_location.present(), vec![pc]);
+}
 fn fact(subject: u64, value: &str) -> LedgerOp {
     LedgerOp::AddFact {
         slot: Slot {
-            subject,
+            subject: EntityRef::Id(subject),
             key: "door".into(),
             value: value.into(),
         },
@@ -60,7 +240,7 @@ fn supersede(old: u64, subject: u64, value: &str) -> LedgerOp {
         old,
         new: threshold_core::domain::FactDraft {
             slot: Slot {
-                subject,
+                subject: EntityRef::Id(subject),
                 key: "door".into(),
                 value: value.into(),
             },
@@ -104,6 +284,7 @@ fn npc_without_adult_status_is_refused() {
         db.commit(
             record(c, "bad"),
             vec![LedgerOp::AddEntity {
+                local: None,
                 kind: EntityKind::Npc,
                 name: "Stranger".into(),
                 adult: None
@@ -186,6 +367,7 @@ fn rebuild_matches_projections() {
         record(c, "one"),
         vec![
             LedgerOp::AddEntity {
+                local: None,
                 kind: EntityKind::Npc,
                 name: "Bela".into(),
                 adult: Some(true),
@@ -237,12 +419,12 @@ fn replay_skips_ops_of_reverted_turn_in_hand_built_ledger() {
         .unwrap();
         sql.execute(
             "INSERT INTO ledger(turn_id,op_json) VALUES(100,?1)",
-            [serde_json::to_string(&LedgerOp::AdvanceClock { minutes: 5 }).unwrap()],
+            [serde_json::to_string(&LedgerOp::<EntityRef>::AdvanceClock { minutes: 5 }).unwrap()],
         )
         .unwrap();
         sql.execute(
             "INSERT INTO ledger(turn_id,op_json) VALUES(101,?1)",
-            [serde_json::to_string(&LedgerOp::RevertTurn { turn_id: 100 }).unwrap()],
+            [serde_json::to_string(&LedgerOp::<EntityRef>::RevertTurn { turn_id: 100 }).unwrap()],
         )
         .unwrap();
     }
@@ -345,14 +527,14 @@ fn proposal_seen_by_pc_is_persistent_and_witnessed() {
         record(c, "seen"),
         vec![LedgerOp::AddFact {
             slot: Slot {
-                subject: pc,
+                subject: EntityRef::Id(pc),
                 key: "door".into(),
                 value: "open".into(),
             },
             text: "Door open".into(),
             canon: Canon::Established,
             source: FactSource::Proposal,
-            seen_by: vec![pc],
+            seen_by: vec![EntityRef::Id(pc)],
             causes: vec![],
         }],
     )
@@ -401,7 +583,7 @@ fn possible_fact_seen_by_pc_becomes_established() {
     db.commit(
         record(c, "seen"),
         vec![LedgerOp::Know {
-            holder: pc,
+            holder: EntityRef::Id(pc),
             fact_id: Some(possible),
             claim_id: None,
             how: Knowing::Witnessed,
@@ -429,6 +611,7 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
         record(c, "one"),
         vec![
             LedgerOp::AddEntity {
+                local: None,
                 kind: EntityKind::Npc,
                 name: "Bela".into(),
                 adult: Some(true),
@@ -441,9 +624,9 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
     let npc = v.entities.iter().find(|e| e.name == "Bela").unwrap().id;
     let old = v.live_fact(pc, "door").unwrap().id;
     let claim = ClaimDraft {
-        speaker: npc,
+        speaker: EntityRef::Id(npc),
         slot: Slot {
-            subject: pc,
+            subject: EntityRef::Id(pc),
             key: "door".into(),
             value: "open".into(),
         },
@@ -458,35 +641,35 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
                 delay_min: 0,
             },
             LedgerOp::Know {
-                holder: pc,
+                holder: EntityRef::Id(pc),
                 fact_id: None,
                 claim_id: Some(1),
                 how: Knowing::Told,
                 arrives_at: 7,
             },
             LedgerOp::ShiftAttitude {
-                from: npc,
-                to: pc,
+                from: EntityRef::Id(npc),
+                to: EntityRef::Id(pc),
                 delta: -3,
             },
             LedgerOp::OpenObstacle { fact_id: old },
             LedgerOp::ScheduleEvent {
                 text: "Rain".into(),
                 trigger: Trigger::At(5),
-                actors: vec![npc],
+                actors: vec![EntityRef::Id(npc)],
                 goal_id: None,
                 cause_fact_id: Some(old),
                 effects: vec![],
-                seen_by: vec![pc],
+                seen_by: vec![EntityRef::Id(pc)],
             },
             LedgerOp::ScheduleEvent {
                 text: "Wind".into(),
                 trigger: Trigger::When(Slot {
-                    subject: pc,
+                    subject: EntityRef::Id(pc),
                     key: "door".into(),
                     value: "open".into(),
                 }),
-                actors: vec![npc],
+                actors: vec![EntityRef::Id(npc)],
                 goal_id: None,
                 cause_fact_id: None,
                 effects: vec![],
@@ -609,7 +792,7 @@ fn delayed_witness_promotes_possible_only_on_arrival() {
     db.commit(
         record(c, "know"),
         vec![LedgerOp::Know {
-            holder: pc,
+            holder: EntityRef::Id(pc),
             fact_id: Some(f),
             claim_id: None,
             how: Knowing::Witnessed,
@@ -643,7 +826,7 @@ fn contradicted_delayed_witness_does_not_block_clock() {
     db.commit(
         record(c, "witness"),
         vec![LedgerOp::Know {
-            holder: pc,
+            holder: EntityRef::Id(pc),
             fact_id: Some(raven),
             claim_id: None,
             how: Knowing::Witnessed,
@@ -655,7 +838,7 @@ fn contradicted_delayed_witness_does_not_block_clock() {
         record(c, "wolf"),
         vec![LedgerOp::AddFact {
             slot: Slot {
-                subject: pc,
+                subject: EntityRef::Id(pc),
                 key: "ally".into(),
                 value: "wolf".into(),
             },
@@ -706,7 +889,7 @@ fn simultaneous_possible_facts_in_one_slot_do_not_promote() {
         record(c, "knowledge"),
         ids.iter()
             .map(|id| LedgerOp::Know {
-                holder: pc,
+                holder: EntityRef::Id(pc),
                 fact_id: Some(*id),
                 claim_id: None,
                 how: Knowing::Witnessed,
@@ -738,6 +921,7 @@ fn claim_listeners_receive_delayed_told_knowledge() {
     db.commit(
         record(c, "npc"),
         vec![LedgerOp::AddEntity {
+            local: None,
             kind: EntityKind::Npc,
             name: "Bela".into(),
             adult: Some(true),
@@ -756,15 +940,15 @@ fn claim_listeners_receive_delayed_told_knowledge() {
         record(c, "claim"),
         vec![LedgerOp::AddClaim {
             claim: ClaimDraft {
-                speaker: npc,
+                speaker: EntityRef::Id(npc),
                 slot: Slot {
-                    subject: pc,
+                    subject: EntityRef::Id(pc),
                     key: "door".into(),
                     value: "open".into(),
                 },
                 text: "open".into(),
             },
-            listeners: vec![pc, npc],
+            listeners: vec![EntityRef::Id(pc), EntityRef::Id(npc)],
             delay_min: 120,
         }],
     )
@@ -825,7 +1009,7 @@ fn supersession_creates_replacement_without_predicted_id() {
             old,
             new: FactDraft {
                 slot: Slot {
-                    subject: pc,
+                    subject: EntityRef::Id(pc),
                     key: "door".into(),
                     value: "open".into(),
                 },
@@ -911,6 +1095,7 @@ fn additional_projections_survive_rebuild() {
     db.commit(
         record(c, "npc"),
         vec![LedgerOp::AddEntity {
+            local: None,
             kind: EntityKind::Npc,
             name: "Bela".into(),
             adult: Some(true),
@@ -930,19 +1115,19 @@ fn additional_projections_survive_rebuild() {
             record(c, "extra"),
             vec![
                 LedgerOp::AddVoiceCard {
-                    npc,
+                    npc: EntityRef::Id(npc),
                     habits: "pauses".into(),
                     vocabulary: "formal".into(),
                     samples: vec!["hello".into()],
                 },
                 LedgerOp::AddGoal {
-                    npc,
+                    npc: EntityRef::Id(npc),
                     text: "escape".into(),
-                    against: Some(pc),
+                    against: Some(EntityRef::Id(pc)),
                 },
                 LedgerOp::AddFact {
                     slot: Slot {
-                        subject: pc,
+                        subject: EntityRef::Id(pc),
                         key: "door".into(),
                         value: "open".into(),
                     },
@@ -1049,7 +1234,7 @@ fn live_fact_normalizes_lookup_key() {
         record(c, "fact"),
         vec![LedgerOp::AddFact {
             slot: Slot {
-                subject: pc,
+                subject: EntityRef::Id(pc),
                 key: "Door State".into(),
                 value: "open".into(),
             },
@@ -1158,7 +1343,7 @@ fn normalized_keys_share_the_same_live_slot() {
     let pc = db.snapshot(c).unwrap().entities[0].id;
     let a = LedgerOp::AddFact {
         slot: Slot {
-            subject: pc,
+            subject: EntityRef::Id(pc),
             key: "Door State".into(),
             value: "The Open".into(),
         },
@@ -1173,7 +1358,7 @@ fn normalized_keys_share_the_same_live_slot() {
     assert_eq!(v.live_fact(pc, "door_state").unwrap().slot.value, "open");
     let b = LedgerOp::AddFact {
         slot: Slot {
-            subject: pc,
+            subject: EntityRef::Id(pc),
             key: "door_state".into(),
             value: "closed".into(),
         },
@@ -1202,7 +1387,7 @@ fn event_effect_cannot_reference_another_campaign() {
         cause_fact_id: None,
         effects: vec![Effect::SetFact {
             slot: Slot {
-                subject: foreign,
+                subject: EntityRef::Id(foreign),
                 key: "door".into(),
                 value: "open".into(),
             },

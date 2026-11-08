@@ -116,7 +116,8 @@ fn proposal_parses_handles() {
 
 #[test]
 fn revert_turn_serializes_its_turn_id() {
-    let op = threshold_core::domain::LedgerOp::RevertTurn { turn_id: 12 };
+    let op: threshold_core::domain::LedgerOp =
+        threshold_core::domain::LedgerOp::RevertTurn { turn_id: 12 };
 
     assert_eq!(
         serde_json::to_value(op).unwrap(),
@@ -226,4 +227,26 @@ fn schema_caps_stakes_and_event_text() {
     assert_eq!(slot.pointer("/properties/value/maxLength").unwrap(), 40);
     let event = serde_json::to_value(schema_for!(EventDraft)).unwrap();
     assert_eq!(event.pointer("/properties/text/maxLength").unwrap(), 80);
+}
+
+#[test]
+fn entity_ref_serializes_ids_as_plain_numbers() {
+    use threshold_core::domain::EntityRef;
+
+    assert_eq!(
+        serde_json::to_value(EntityRef::Id(7)).unwrap(),
+        serde_json::json!(7)
+    );
+    assert_eq!(
+        serde_json::to_value(EntityRef::New(1)).unwrap(),
+        serde_json::json!({"new": 1})
+    );
+    assert_eq!(
+        serde_json::from_value::<EntityRef>(serde_json::json!({"new": 2})).unwrap(),
+        EntityRef::New(2)
+    );
+    assert_eq!(
+        serde_json::from_value::<EntityRef>(serde_json::json!(3)).unwrap(),
+        EntityRef::Id(3)
+    );
 }
