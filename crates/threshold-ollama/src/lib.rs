@@ -58,6 +58,8 @@ impl Error for ConfigError {
 pub struct CallMetrics {
     pub prompt_tokens: u64,
     pub eval_tokens: u64,
+    pub eval_duration_ns: u64,
+    pub prompt_eval_duration_ns: u64,
     pub total_ms: u64,
 }
 
@@ -148,6 +150,8 @@ impl OllamaGm {
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(CallMetrics {
                 prompt_tokens: response.prompt_eval_count.unwrap_or(0),
                 eval_tokens: response.eval_count.unwrap_or(0),
+                eval_duration_ns: response.eval_duration.unwrap_or(0),
+                prompt_eval_duration_ns: response.prompt_eval_duration.unwrap_or(0),
                 total_ms: response.total_duration.unwrap_or(0) / 1_000_000,
             });
         }
@@ -192,6 +196,8 @@ struct ChatResponse {
     message: ChatMessage,
     prompt_eval_count: Option<u64>,
     eval_count: Option<u64>,
+    eval_duration: Option<u64>,
+    prompt_eval_duration: Option<u64>,
     total_duration: Option<u64>,
 }
 

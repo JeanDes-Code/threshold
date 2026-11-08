@@ -121,6 +121,8 @@ fn propose_sends_schema_and_concatenated_prompt() {
         "message": { "role": "assistant", "content": "{\"action\":\"wait\",\"verdict\":\"allowed\"}" },
         "prompt_eval_count": 123,
         "eval_count": 45,
+        "eval_duration": 2_000_000_000_u64,
+        "prompt_eval_duration": 500_000_000_u64,
         "total_duration": 1_500_000_000_u64
     })
     .to_string();
@@ -154,6 +156,8 @@ fn propose_sends_schema_and_concatenated_prompt() {
     let metrics = gm.last_metrics().unwrap();
     assert_eq!(metrics.prompt_tokens, 123);
     assert_eq!(metrics.eval_tokens, 45);
+    assert_eq!(metrics.eval_duration_ns, 2_000_000_000);
+    assert_eq!(metrics.prompt_eval_duration_ns, 500_000_000);
     assert_eq!(metrics.total_ms, 1500);
 }
 

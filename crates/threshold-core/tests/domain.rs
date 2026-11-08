@@ -121,3 +121,107 @@ fn revert_turn_serializes_its_turn_id() {
         serde_json::json!({"revert_turn":{"turn_id":12}})
     );
 }
+
+#[test]
+fn schema_for_limits_entity_handles() {
+    use threshold_core::{HandleContext, proposal_schema_for};
+    let ctx = HandleContext {
+        entities: vec![Handle::Entity(1), Handle::Entity(5)],
+        facts: vec![Handle::Fact(2)],
+        events: vec![Handle::WorldEvent(3)],
+        goals: vec![Handle::Goal(4)],
+        new_slots: 1,
+    };
+    let s = proposal_schema_for(&ctx);
+    assert_eq!(
+        s.pointer("/$defs/Reaction/properties/npc/enum").unwrap(),
+        &serde_json::json!(["E1", "E5", "N1"])
+    );
+    assert_eq!(
+        s.pointer("/$defs/SlotDraft/properties/subject/enum")
+            .unwrap(),
+        &serde_json::json!(["E1", "E5", "N1"])
+    );
+    assert_eq!(
+        s.pointer("/$defs/Factor/properties/fact/enum").unwrap(),
+        &serde_json::json!(["F2"])
+    );
+    assert_eq!(
+        s.pointer("/$defs/Cause/oneOf/1/properties/fact/enum")
+            .unwrap(),
+        &serde_json::json!(["F2"])
+    );
+    assert_eq!(
+        s.pointer("/$defs/Cancel/properties/event/enum").unwrap(),
+        &serde_json::json!(["W3"])
+    );
+    assert_eq!(
+        s.pointer("/$defs/NewNpc/properties/id/enum").unwrap(),
+        &serde_json::json!(["N1"])
+    );
+}
+
+#[test]
+fn schema_for_omits_event_fields_without_events() {
+    use threshold_core::{HandleContext, proposal_schema_for};
+    let ctx = HandleContext {
+        entities: vec![Handle::Entity(1)],
+        facts: vec![],
+        events: vec![],
+        goals: vec![],
+        new_slots: 0,
+    };
+    let s = proposal_schema_for(&ctx);
+    assert_eq!(s["additionalProperties"], false);
+    assert_eq!(s["$defs"]["EventDraft"]["additionalProperties"], false);
+    assert_eq!(s["$defs"]["Cause"]["oneOf"].as_array().unwrap().len(), 1);
+    assert!(s.pointer("/properties/cancel").is_none());
+    assert!(s.pointer("/$defs/EventDraft/properties/goal").is_none());
+    assert!(s.pointer("/properties/new_npcs").is_none());
+    assert!(s.pointer("/properties/blockers").is_none());
+    assert_eq!(
+        s.pointer("/$defs/CheckDraft/properties/factors/maxItems")
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn allowed_handle_proposal_parses_and_validates_shape() {
+    use threshold_core::validate_shape;
+    let p: DecisionProposal = serde_json::from_str(r#"{"action":"act","verdict":"check","blockers":["F2"],"check":{"win":{"subject":"E1","key":"locked","value":"no"},"lose":{"subject":"E1","key":"locked","value":"yes"},"factors":[{"fact":"F2","helps":false}]},"reactions":[{"npc":"N1","stance":"neutral","plan":"wait"}]}"#).unwrap();
+    assert!(validate_shape(&p).is_ok());
+}
+
+#[test]
+fn shape_requires_check_iff_verdict_is_check() {
+    use threshold_core::validate_shape;
+    let missing: DecisionProposal =
+        serde_json::from_str(r#"{"action":"act","verdict":"check"}"#).unwrap();
+    assert!(
+        validate_shape(&missing)
+            .unwrap_err()
+            .to_string()
+            .contains("check")
+    );
+    let extra: DecisionProposal = serde_json::from_str(r#"{"action":"act","verdict":"allowed","check":{"win":{"subject":"E1","key":"x","value":"y"},"lose":{"subject":"E1","key":"x","value":"z"},"factors":[]}}"#).unwrap();
+    assert!(
+        validate_shape(&extra)
+            .unwrap_err()
+            .to_string()
+            .contains("check")
+    );
+    let ordinary: DecisionProposal =
+        serde_json::from_str(r#"{"action":"act","verdict":"allowed"}"#).unwrap();
+    assert!(validate_shape(&ordinary).is_ok());
+}
+
+#[test]
+fn schema_caps_stakes_and_event_text() {
+    use threshold_core::domain::SlotDraft;
+    let slot = serde_json::to_value(schema_for!(SlotDraft)).unwrap();
+    assert_eq!(slot.pointer("/properties/key/maxLength").unwrap(), 32);
+    assert_eq!(slot.pointer("/properties/value/maxLength").unwrap(), 40);
+    let event = serde_json::to_value(schema_for!(EventDraft)).unwrap();
+    assert_eq!(event.pointer("/properties/text/maxLength").unwrap(), 80);
+}

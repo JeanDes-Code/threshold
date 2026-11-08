@@ -91,7 +91,9 @@ pub struct NewNpc {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SlotDraft {
     pub subject: Handle,
+    #[schemars(length(max = 32))]
     pub key: String,
+    #[schemars(length(max = 40))]
     pub value: String,
 }
 
@@ -122,6 +124,7 @@ pub struct EventDraft {
     pub in_minutes: u32,
     pub actor: Handle,
     pub goal: Option<Handle>,
+    #[schemars(length(max = 80))]
     pub text: String,
     #[schemars(length(max = 2))]
     pub effects: Vec<SlotDraft>,

@@ -1,11 +1,15 @@
 use std::error::Error;
 
-use threshold_core::{Gm, Prompt, domain::DecisionProposal, proposal_schema};
+use threshold_core::{
+    Gm, HandleContext, Prompt,
+    domain::{DecisionProposal, Handle},
+    proposal_schema_for, validate_shape,
+};
 use threshold_ollama::{OllamaConfig, OllamaGm};
 
 const RUNS: usize = 30;
 
-const SYSTEM: &str = "You are the Game Master for a single-player tabletop role-playing game. The GM never decides the player character's actions, words, or feelings. Return only the JSON decision required by the supplied schema. A reaction plan is a short plan of at most 12 words, not narration or prose. Never set a numeric difficulty: express a Check through its win and lose stakes and its helping or hindering factors. Reference existing entities and facts only by their handles.\n";
+const SYSTEM: &str = "You are the Game Master for a single-player tabletop role-playing game. Never decide the player character's actions, words, or feelings. Return only one-line minified JSON with no spaces or newlines, matching the supplied schema. Stake values and reaction plans must be short snake_case or at most 6 words. Omit optional fields that are empty. Include check only when verdict is check; when verdict is check, include check. Never set numeric difficulty: express a Check through its win and lose stakes and factors. Reference entities and facts only by their handles.\n";
 
 const STABLE: &str = "WORLD\nE1 Orsel, an adult human magistrate\nE2 Hessa, an adult human clerk\nE3 the player character\nE4 Rusk, an adult human clerk\nE5 the archive door\nFACTS\nF1 E1 role = magistrate\nF2 E2 role = clerk\nF3 E4 role = clerk\nF4 E3 location = town_hall\nF5 E5 locked = yes (archive_door.locked = yes; OPEN OBSTACLE)\nF6 E5 location = archive\n";
 
@@ -16,6 +20,10 @@ struct IntentStats {
     valid: usize,
     eval_tokens: Vec<u64>,
     total_ms: Vec<u64>,
+    prompt_tokens: Vec<u64>,
+    eval_millitokens_per_second: Vec<u64>,
+    newline_outputs: usize,
+    unexpected_checks: usize,
     fields: FieldPresence,
 }
 
@@ -70,6 +78,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
     ];
 
+    let schema = proposal_schema_for(&HandleContext {
+        entities: (1..=5).map(Handle::Entity).collect(),
+        facts: (1..=6).map(Handle::Fact).collect(),
+        events: vec![],
+        goals: vec![],
+        new_slots: 1,
+    });
     for (name, intent) in intents {
         let prompt = Prompt {
             system: SYSTEM.into(),
@@ -79,21 +94,43 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         let mut stats = IntentStats::default();
         for run in 1..=RUNS {
-            match gm.propose(&prompt, &proposal_schema()) {
-                Ok(raw) => match serde_json::from_str::<DecisionProposal>(&raw) {
-                    Ok(proposal) => {
-                        stats.valid += 1;
-                        stats.fields.observe(&proposal);
+            match gm.propose(&prompt, &schema) {
+                Ok(raw) => {
+                    stats.newline_outputs += usize::from(raw.contains('\n'));
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        stats.unexpected_checks += usize::from(
+                            value.get("check").is_some_and(|v| !v.is_null())
+                                && value.get("verdict").and_then(|v| v.as_str()) != Some("check"),
+                        );
                     }
-                    Err(error) => {
-                        eprintln!("{name} run {run}: invalid proposal: {error}; raw={raw}")
+                    match serde_json::from_str::<DecisionProposal>(&raw) {
+                        Ok(proposal) => match validate_shape(&proposal) {
+                            Ok(()) => {
+                                stats.valid += 1;
+                                stats.fields.observe(&proposal);
+                            }
+                            Err(error) => {
+                                eprintln!("{name} run {run}: invalid shape: {error}; raw={raw}")
+                            }
+                        },
+                        Err(error) => {
+                            eprintln!("{name} run {run}: invalid proposal: {error}; raw={raw}")
+                        }
                     }
-                },
+                    if let Some(metrics) = gm.last_metrics() {
+                        stats.eval_tokens.push(metrics.eval_tokens);
+                        stats.prompt_tokens.push(metrics.prompt_tokens);
+                        stats.total_ms.push(metrics.total_ms);
+                        if metrics.eval_duration_ns > 0 {
+                            stats.eval_millitokens_per_second.push(
+                                (metrics.eval_tokens as f64 * 1e12
+                                    / metrics.eval_duration_ns as f64)
+                                    as u64,
+                            );
+                        }
+                    }
+                }
                 Err(error) => eprintln!("{name} run {run}: call failed: {error}"),
-            }
-            if let Some(metrics) = gm.last_metrics() {
-                stats.eval_tokens.push(metrics.eval_tokens);
-                stats.total_ms.push(metrics.total_ms);
             }
         }
         print_stats(name, &mut stats);
@@ -107,6 +144,8 @@ fn print_stats(name: &str, stats: &mut IntentStats) {
     println!("valid={}/{} ({valid_percent:.1}%)", stats.valid, RUNS);
     stats.eval_tokens.sort_unstable();
     stats.total_ms.sort_unstable();
+    stats.prompt_tokens.sort_unstable();
+    stats.eval_millitokens_per_second.sort_unstable();
     println!(
         "eval_tokens p50={} p90={} max={}",
         display_stat(percentile(&stats.eval_tokens, 0.50)),
@@ -117,6 +156,18 @@ fn print_stats(name: &str, stats: &mut IntentStats) {
         "total_ms p50={} p90={}",
         display_stat(percentile(&stats.total_ms, 0.50)),
         display_stat(percentile(&stats.total_ms, 0.90)),
+    );
+    let speed = percentile(&stats.eval_millitokens_per_second, 0.50)
+        .map_or_else(|| "n/a".to_owned(), |v| format!("{:.2}", v as f64 / 1000.0));
+    println!("eval_tok_per_s p50={speed}");
+    println!(
+        "prompt_tokens p50={} p90={}",
+        display_stat(percentile(&stats.prompt_tokens, 0.50)),
+        display_stat(percentile(&stats.prompt_tokens, 0.90))
+    );
+    println!(
+        "outputs_with_newline={} check_with_non_check_verdict={}",
+        stats.newline_outputs, stats.unexpected_checks
     );
     let fields = &stats.fields;
     println!(
