@@ -4,6 +4,7 @@ pub mod model;
 pub mod normalize;
 pub mod rules;
 pub mod store;
+pub mod world;
 
 pub use model::{Gm, GmError, Prompt, RecordedGm};
 
