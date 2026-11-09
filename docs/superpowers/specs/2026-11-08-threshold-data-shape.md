@@ -98,7 +98,7 @@ The ledger is the source of truth. All other world tables are projections, writt
 
 Beliefs are not stored (ADR 0003). A Belief is the latest `knowledge` row per `(holder, subject, key)` with `arrives_at <= clock`. `arrives_at > learned_at` is delayed news. PC Knowledge is the PC's Beliefs. A Commit with `seen_by` holders writes one `Know(Witnessed)` op per holder, so visibility and Beliefs have one source.
 
-Canon rules. Adventure Seed choices marked decided are Persistent facts; choices marked proposed are Possible facts. A proposal fact commits as Established. It is Persistent when the PC is in its `seen_by`. A Possible fact becomes Established when a proposal cites it or the PC perceives it. A Claim never writes a slot; it writes `Told` knowledge for its listeners.
+Canon rules. Adventure Seed choices marked decided are Persistent facts; choices marked proposed are Possible facts. A proposal fact commits as Established. It is Persistent when the PC is in its `seen_by`, unless its key is a state key (`STATE_KEYS`: location, condition, injury, fatigue, carrying, mood), which always stays Established and is exempt from Fact bends (ruling of 2026-11-09). A Possible fact becomes Established when a proposal cites it or the PC perceives it. A Claim never writes a slot; it writes `Told` knowledge for its listeners.
 
 A retry reuses the `op_id` that the UI sends with `submit_intent`. A duplicate `op_id` returns the stored Turn and commits nothing.
 

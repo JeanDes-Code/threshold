@@ -147,7 +147,7 @@ A detail that became part of the world through a witnessed event, a Check, or a 
 _Avoid_: Confirmed, real
 
 **Persistent**:
-An Established detail that is protected. Only a causal World Event or a Correction can change it.
+An Established detail that is protected. Only a causal World Event or a Correction can change it. Changing state, such as where someone is or how hurt they are, is never Persistent.
 _Avoid_: Locked, permanent, frozen
 
 **World Truth**:

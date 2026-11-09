@@ -101,7 +101,7 @@ New in Threshold:
 - **directed relationships** between holders;
 - **Voice Cards**.
 
-Canon levels follow the glossary: Possible, Established, Persistent. A fact is Persistent when it comes from the Adventure Seed, or when it is Established and the PC witnessed it directly. Only named or significant details become facts. Throwaway description stays prose. The exact rule is the builder's call; it must be written down and tested.
+Canon levels follow the glossary: Possible, Established, Persistent. A fact is Persistent when it comes from the Adventure Seed, or when it is Established and the PC witnessed it directly. Exception: facts about changing state (`location`, `condition`, `injury`, `fatigue`, `carrying`, `mood`) are never Persistent, so people can move and wounds can heal; `alive` is not one of them. The PC's `location` changes only on a `move` action. (Ruling of 2026-11-09, after the Task 5 review showed the first rule froze all visible state.) Only named or significant details become facts. Throwaway description stays prose. The exact rule is the builder's call; it must be written down and tested.
 
 ### 6.3 Commit checks
 
