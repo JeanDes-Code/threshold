@@ -126,8 +126,8 @@ pub fn create_campaign(
 
 pub struct Engine {
     store: Store,
-    gm: Box<dyn Gm>,
-    rules: Box<dyn Ruleset>,
+    gm: Box<dyn Gm + Send>,
+    rules: Box<dyn Ruleset + Send>,
     packs: Vec<ContentPack>,
     campaign: CampaignId,
 }
@@ -151,8 +151,8 @@ Answer briefly, in plain prose.
 impl Engine {
     pub fn new(
         store: Store,
-        gm: Box<dyn Gm>,
-        rules: Box<dyn Ruleset>,
+        gm: Box<dyn Gm + Send>,
+        rules: Box<dyn Ruleset + Send>,
         packs: Vec<ContentPack>,
         campaign: CampaignId,
     ) -> Self {

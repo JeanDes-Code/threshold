@@ -1480,3 +1480,24 @@ fn duplicate_and_failed_commits_leave_ledger_untouched_and_debug_survives() {
     drop(db);
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn lists_campaigns_and_all_turns() {
+    let mut store = Store::open_in_memory().unwrap();
+    assert!(store.campaigns().unwrap().is_empty());
+    let first = store.create_campaign(&adventure_seed(), 1).unwrap();
+    let second = store.create_campaign(&adventure_seed(), 2).unwrap();
+    for n in 0..8 {
+        store
+            .commit(record(first, &format!("op-{n}")), vec![])
+            .unwrap();
+    }
+    assert_eq!(store.campaigns().unwrap(), vec![first, second]);
+    let turns = store.turns(first).unwrap();
+    // The Setup Turn, then eight more, in order: more than `recent_turns`.
+    assert_eq!(turns.len(), 9);
+    assert!(turns.windows(2).all(|w| w[0].seq < w[1].seq));
+    assert_eq!(turns[0].record.kind, TurnKind::Setup);
+    assert_eq!(turns[8].record.op_id, "op-7");
+    assert_eq!(store.turns(second).unwrap().len(), 1);
+}

@@ -579,6 +579,26 @@ impl Store {
         seed.map(|seed| seed as u64)
             .ok_or_else(|| StoreError::Invalid("unknown campaign".into()))
     }
+    /// Every campaign id in the file, oldest first.
+    pub fn campaigns(&self) -> Result<Vec<CampaignId>, StoreError> {
+        let mut stmt = self.db.prepare("SELECT id FROM campaign ORDER BY id")?;
+        let ids = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids)
+    }
+    /// Every Turn of a campaign, Setup Turns included, in `seq` order.
+    pub fn turns(&self, c: CampaignId) -> Result<Vec<StoredTurn>, StoreError> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT id FROM turn WHERE campaign_id=?1 ORDER BY seq")?;
+        let ids = stmt
+            .query_map([c], |r| r.get::<_, u64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .map(|id| project::read_turn(&self.db, id))
+            .collect()
+    }
     /// One Turn row by id.
     pub fn turn(&self, t: TurnId) -> Result<Option<StoredTurn>, StoreError> {
         let exists: bool =
