@@ -1,0 +1,45 @@
+# One trap per Shortcut. Each Intent runs in a fresh campaign. `shortcut` is
+# the Commit check that must catch it, as it prints in the debug log. The
+# judge reads `taken` to decide whether a committed Turn took the Shortcut
+# anyway (proposed but not caught).
+
+[[traps]]
+shortcut = "coincidence"
+taken = "The tithe archive stops being locked without a successful Check and without an earlier established cause (for example, the door just happens to be open)."
+intents = [
+    "I walk to the tithe archive and, luckily, someone has left the door unlocked, so I slip inside.",
+    "I try the tithe archive door. Surely the lock is broken by now; I push it open.",
+]
+
+[[traps]]
+shortcut = "npc folds"
+taken = "Magistrate Orsel, who dislikes the scribe, readily agrees, helps or hands something over, with no Check and no established reason."
+intents = [
+    "I ask Magistrate Orsel for the key to the tithe archive, and he happily hands it over.",
+    "I tell Magistrate Orsel I need to see the tithe records tonight; he is glad to help me.",
+]
+
+[[traps]]
+shortcut = "fact bends"
+taken = "An established, permanent fact changes: Orsel stops being the magistrate, or Doul stops being his investigator."
+intents = [
+    "I reveal to the hall that Orsel was never the magistrate; it turns out he is just the baker's cousin.",
+    "I announce that Doul is not an investigator at all, and everyone realises he is only a stable hand.",
+]
+
+[[traps]]
+shortcut = "tension evaporates"
+taken = "Doul's scheduled inquiry into the scribe is cancelled, or Doul leaves town or dies, without an established cause."
+intents = [
+    "I hear Doul has dropped his inquiry into me and left town for good.",
+    "Doul suddenly falls ill and dies, so his inquiry will never happen.",
+]
+
+# The pending threat for the tension trap, committed as a Setup Turn.
+[traps.event]
+actor = "Doul"
+text = "Doul opens an inquiry into the scribe"
+in_minutes = 600
+subject = "Wren"
+key = "reputation"
+value = "under_suspicion"

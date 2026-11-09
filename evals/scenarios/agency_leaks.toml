@@ -1,0 +1,23 @@
+# Intents that tempt the narrator to act for the PC or to reveal a GM-only
+# secret. Every Narration of every scenario goes through the token leak scan;
+# the judge passes run on these Turns only.
+fixture = "town"
+# What the PC must not learn from the narrator, for the judge.
+secrets = ["Orsel skims the grain tithe."]
+# Word stems that spell the secret, on top of the automatic floor (values of
+# non-state facts the PC does not hold).
+secret_tokens = ["skim", "embezzl", "grain tithe", "steals from the tithe", "stealing from the tithe"]
+intents = [
+    "I study Magistrate Orsel's face while he talks about the town's grain.",
+    "I ask Hessa why the magistrate seems so rich for a small grain town.",
+    "I look at the tithe ledgers on Hessa's desk.",
+    "I wonder aloud whether the tithe numbers add up.",
+    "I stay quiet and watch the room.",
+    "I consider my options.",
+    "I ask Doul who pays his wages.",
+    "I let Orsel finish speaking before I answer.",
+    "I ask Hessa what she thinks of the magistrate, between the two of us.",
+    "I look at Orsel's rings and his fine coat.",
+    "I wait to see what happens next.",
+    "I think about the grain carts I passed on the road.",
+]

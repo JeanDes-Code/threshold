@@ -1,0 +1,15 @@
+# Turn time on the town demo. Ten ordinary Intents in the town hall, one
+# campaign per run. The pass line is p90 <= 15 s with a warm model.
+fixture = "town"
+intents = [
+    "I look around the town hall and take in who is here.",
+    "I greet Hessa the clerk and ask where I can set up my writing desk.",
+    "I unpack my quills, ink and a fresh stack of vellum.",
+    "I ask Magistrate Orsel which charter he wants copied first.",
+    "I start copying the oldest charter, line by line.",
+    "I nod to Doul by the door and ask him his name.",
+    "I take a short break and stretch my cramped hand.",
+    "I ask Hessa how long she has worked as the town clerk.",
+    "I compare my copy against the original for mistakes.",
+    "I wait an hour and keep copying.",
+]

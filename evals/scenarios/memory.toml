@@ -1,0 +1,23 @@
+# A detail planted on Turn `plant_turn` must be used when it matters on Turn
+# `total_turns`. The other Turns are filler, cycled in order. The PC stays in
+# the town hall, so Hessa is present for the probe.
+fixture = "town"
+total_turns = 40
+plant_turn = 3
+plant = "I hand Hessa a sealed letter for my sister Maren and ask her to lock it in the blue strongbox under her desk until I come back for it."
+probe = "I ask Hessa for the sealed letter I left with her. Where has she been keeping it?"
+detail = "Wren gave Hessa a sealed letter for Wren's sister Maren, to keep locked in the blue strongbox under Hessa's desk."
+# A narration that contains one of these words uses the detail.
+expect = ["strongbox", "blue box", "maren"]
+filler = [
+    "I keep copying the charter in front of me.",
+    "I sharpen my quill and check the ink.",
+    "I look up and watch the hall for a moment.",
+    "I copy another page, slowly and carefully.",
+    "I ask Hessa whether it will rain today.",
+    "I wait half an hour, copying as I go.",
+    "I sand the wet ink and set the page aside to dry.",
+    "I count the pages I have finished so far.",
+    "I rest my eyes for a few minutes.",
+    "I read the next charter through once before I copy it.",
+]

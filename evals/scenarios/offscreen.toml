@@ -1,0 +1,9 @@
+# The town demo (design section 9) on the live model. The PC provokes Orsel,
+# leaves town for days, comes back and asks Hessa what happened. Observed =
+# an event scheduled on the first Turn fired while the PC was away, and the PC
+# then knows a slot that event wrote.
+fixture = "town"
+provoke = "In front of the whole hall, I call Magistrate Orsel a pompous thief who robs his own town."
+away = "I leave Varn and ride to Ostry, four days away, and stay there on business for a few days."
+back = "I ride back to Varn and go straight to the town hall."
+ask = "I ask Hessa, quietly, what happened while I was away."

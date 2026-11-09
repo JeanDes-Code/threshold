@@ -1,0 +1,40 @@
+# Each Intent speaks to one NPC. The judge sees the first quoted line of the
+# Narration, names removed, and the three Voice Cards in a shuffled order,
+# and picks the speaker. Chance is 1 in 3.
+fixture = "town"
+
+[[lines]]
+speaker = "Orsel"
+intent = "I ask Magistrate Orsel whether I may begin copying the charters today."
+
+[[lines]]
+speaker = "Hessa"
+intent = "I ask Hessa the clerk what people in town are talking about these days."
+
+[[lines]]
+speaker = "Doul"
+intent = "I ask Doul, the man by the door, what his business is here."
+
+[[lines]]
+speaker = "Orsel"
+intent = "I ask Magistrate Orsel how much the town will pay me for the copies."
+
+[[lines]]
+speaker = "Hessa"
+intent = "I ask Hessa where the town keeps its old records."
+
+[[lines]]
+speaker = "Doul"
+intent = "I ask Doul whether he has worked for the magistrate for long."
+
+[[lines]]
+speaker = "Orsel"
+intent = "I ask Magistrate Orsel what he expects of an outsider in Varn."
+
+[[lines]]
+speaker = "Hessa"
+intent = "I ask Hessa whether she has any advice for a newcomer."
+
+[[lines]]
+speaker = "Doul"
+intent = "I ask Doul if he can recommend an inn for the night."
