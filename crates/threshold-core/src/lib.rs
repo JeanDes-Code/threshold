@@ -1,3 +1,4 @@
+pub mod checks;
 pub mod domain;
 pub mod model;
 pub mod normalize;

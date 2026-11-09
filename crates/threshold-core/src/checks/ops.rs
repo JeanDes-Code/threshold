@@ -1,0 +1,442 @@
+//! Turns a validated proposal and its Roll into ledger operations.
+
+use std::collections::HashSet;
+
+use super::{ceiling, pc};
+use crate::{
+    domain::{
+        Canon, Cause, ClaimDraft, DecisionProposal, Effect, EntityKind, EntityRef, FactDraft,
+        FactSource, Handle, Knowing, LedgerOp, Reaction, Seen, Slot, SlotDraft, Trigger, Verdict,
+    },
+    normalize,
+    rules::RollResult,
+    store::{Fact, WorldView},
+};
+
+/// The result of `to_ops`: the ops of one Commit, and the final reactions
+/// after any clamp. A stance is Turn output, not world state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resolved {
+    pub ops: Vec<LedgerOp>,
+    pub reactions: Vec<Reaction>,
+}
+
+/// Converts a proposal that passed `validate` into the ops of one Commit.
+///
+/// `roll` is the Roll of the proposal's Check, if any. With a Check and no
+/// Roll, no stake applies and every `Cause::Check` reaction is clamped.
+/// `turn_seq` is the sequence number of this Turn; this slice does not need
+/// it, because every fact in `view` already predates the Turn.
+///
+/// Panics on a handle that `validate` rejects (wrong prefix, `N` above 255).
+pub fn to_ops(
+    p: &DecisionProposal,
+    roll: Option<&RollResult>,
+    view: &WorldView,
+    _turn_seq: u64,
+) -> Resolved {
+    let mut b = Builder {
+        p,
+        view,
+        ops: Vec::new(),
+        promoted: HashSet::new(),
+        cleared: HashSet::new(),
+    };
+    let success = roll.is_some_and(|r| r.success);
+
+    b.new_npcs();
+    b.promote_cited();
+    if let (Some(check), Some(roll)) = (&p.check, roll) {
+        b.ops.push(LedgerOp::RecordRoll {
+            seed: roll.seed,
+            difficulty: i8::try_from(roll.difficulty).unwrap_or(i8::MAX),
+            stakes: serde_json::json!({ "win": check.win, "lose": check.lose }),
+            factors: serde_json::to_value(&check.factors).unwrap_or_default(),
+            value: i32::from(roll.value),
+            outcome: if roll.success { "win" } else { "lose" }.into(),
+        });
+        let stake = if roll.success {
+            &check.win
+        } else {
+            &check.lose
+        };
+        let holders = b.holders(Seen::Present);
+        b.write(stake, FactSource::Stake, holders, Vec::new());
+    }
+    for fact in &p.facts {
+        let holders = b.holders(fact.seen);
+        if let Some(speaker) = fact.said_by {
+            b.ops.push(LedgerOp::AddClaim {
+                claim: ClaimDraft {
+                    speaker: entity_ref(speaker),
+                    slot: slot(&fact.slot),
+                    text: b.text(&fact.slot),
+                },
+                listeners: holders,
+                delay_min: 0,
+            });
+        } else {
+            let causes = fact.because.iter().filter_map(|h| fact_id(*h)).collect();
+            b.write(&fact.slot, FactSource::Proposal, holders, causes);
+        }
+    }
+    b.open_blockers();
+    for cancel in &p.cancel {
+        if let (Handle::WorldEvent(event_id), Some(cause)) = (cancel.event, fact_id(cancel.because))
+        {
+            b.ops.push(LedgerOp::CancelEvent {
+                event_id,
+                cause_fact_id: cause,
+            });
+        }
+    }
+    if let Some(s) = &p.schedule {
+        let at = view.clock_min + u64::from(p.minutes) + u64::from(s.in_minutes);
+        let effects = s
+            .effects
+            .iter()
+            .map(|e| Effect::SetFact {
+                slot: slot(e),
+                text: b.text(e),
+                seen_by: Vec::new(),
+            })
+            .collect();
+        b.ops.push(LedgerOp::ScheduleEvent {
+            text: s.text.clone(),
+            trigger: Trigger::At(at),
+            actors: vec![entity_ref(s.actor)],
+            goal_id: match s.goal {
+                Some(Handle::Goal(g)) => Some(g),
+                _ => None,
+            },
+            cause_fact_id: None,
+            effects,
+            seen_by: Vec::new(),
+        });
+    }
+    if p.minutes > 0 {
+        b.ops.push(LedgerOp::AdvanceClock { minutes: p.minutes });
+    }
+
+    let reactions = p
+        .reactions
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            if r.cause == Some(Cause::Check) && !success {
+                let limit = match r.npc {
+                    Handle::Entity(id) => ceiling(view, id),
+                    _ => ceiling(view, u64::MAX),
+                };
+                r.stance = r.stance.min(limit);
+            }
+            r
+        })
+        .collect();
+    Resolved {
+        ops: b.ops,
+        reactions,
+    }
+}
+
+struct Builder<'a> {
+    p: &'a DecisionProposal,
+    view: &'a WorldView,
+    ops: Vec<LedgerOp>,
+    /// Possible facts this Commit makes Established.
+    promoted: HashSet<u64>,
+    /// Obstacles this Commit clears.
+    cleared: HashSet<u64>,
+}
+
+impl Builder<'_> {
+    /// Each new NPC: the entity, its Voice Card from the one-line voice seed,
+    /// and a `location` fact equal to the PC's, so the NPC is present.
+    fn new_npcs(&mut self) {
+        let pc_location = pc(self.view)
+            .and_then(|pc| self.view.live_fact(pc, "location"))
+            .map(|f| f.slot.value.clone());
+        for npc in &self.p.new_npcs {
+            let local = new_local(npc.id);
+            self.ops.push(LedgerOp::AddEntity {
+                local: Some(local),
+                kind: EntityKind::Npc,
+                name: npc.name.clone(),
+                adult: Some(npc.adult),
+            });
+            self.ops.push(LedgerOp::AddVoiceCard {
+                npc: EntityRef::New(local),
+                habits: npc.voice.clone(),
+                vocabulary: String::new(),
+                samples: Vec::new(),
+            });
+            if let Some(location) = &pc_location {
+                self.ops.push(LedgerOp::AddFact {
+                    slot: Slot {
+                        subject: EntityRef::New(local),
+                        key: "location".into(),
+                        value: location.clone(),
+                    },
+                    text: format!("{} is at {location}.", npc.name),
+                    canon: Canon::Established,
+                    source: FactSource::Proposal,
+                    seen_by: Vec::new(),
+                    causes: Vec::new(),
+                });
+            }
+        }
+    }
+
+    /// A Possible fact that the proposal cites (blocker, factor, cause,
+    /// `because`) becomes Established.
+    fn promote_cited(&mut self) {
+        let p = self.p;
+        let cited = p
+            .blockers
+            .iter()
+            .chain(
+                p.check
+                    .iter()
+                    .flat_map(|c| c.factors.iter().map(|f| &f.fact)),
+            )
+            .chain(p.reactions.iter().filter_map(|r| match &r.cause {
+                Some(Cause::Fact(f)) => Some(f),
+                _ => None,
+            }))
+            .chain(p.facts.iter().flat_map(|f| &f.because))
+            .chain(p.cancel.iter().map(|c| &c.because));
+        for handle in cited {
+            if let Some(fact) = self.view.fact(*handle) {
+                self.promote(fact);
+            }
+        }
+    }
+
+    /// Emits `EstablishFact` for a live Possible fact, unless its slot already
+    /// has a live Established or Persistent value (the store allows one).
+    fn promote(&mut self, fact: &Fact) -> bool {
+        let live = self.view.live_facts.iter().any(|f| f.id == fact.id);
+        let slot_taken = self.current(fact.slot.subject, &fact.slot.key).is_some();
+        if fact.canon != Canon::Possible || !live || slot_taken {
+            return false;
+        }
+        if self.promoted.insert(fact.id) {
+            self.ops.push(LedgerOp::EstablishFact { fact_id: fact.id });
+        }
+        true
+    }
+
+    /// The live non-Possible fact of a slot, counting promotions made by this
+    /// Commit.
+    fn current(&self, subject: u64, key: &str) -> Option<&Fact> {
+        let key = normalize::key(key);
+        self.view.live_facts.iter().find(|f| {
+            f.slot.subject == subject
+                && f.slot.key == key
+                && (f.canon != Canon::Possible || self.promoted.contains(&f.id))
+        })
+    }
+
+    /// Each blocker opens an obstacle when the verdict is impossible or check,
+    /// unless it is already open or a write of this Commit changes its slot.
+    fn open_blockers(&mut self) {
+        if !matches!(self.p.verdict, Verdict::Impossible | Verdict::Check) {
+            return;
+        }
+        let mut opened = HashSet::new();
+        for handle in &self.p.blockers {
+            let Some(fact) = self.view.fact(*handle) else {
+                continue;
+            };
+            let open = self
+                .view
+                .obstacles_open
+                .iter()
+                .any(|o| o.fact_id == fact.id);
+            let removed = self
+                .view
+                .live_fact(fact.slot.subject, &fact.slot.key)
+                .is_none_or(|live| {
+                    normalize::value(&live.slot.value) != normalize::value(&fact.slot.value)
+                })
+                || self.ops.iter().any(|op| writes_slot(op, &fact.slot));
+            if !open && !removed && opened.insert(fact.id) {
+                self.ops.push(LedgerOp::OpenObstacle { fact_id: fact.id });
+            }
+        }
+    }
+
+    /// Writes one slot. A value equal to the live one writes no new fact: the
+    /// holders witness the existing fact, and a Possible one is Established.
+    /// A changed value supersedes the live fact and clears the obstacles on
+    /// that slot.
+    fn write(
+        &mut self,
+        draft: &SlotDraft,
+        source: FactSource,
+        seen_by: Vec<EntityRef>,
+        causes: Vec<u64>,
+    ) {
+        let text = self.text(draft);
+        let new = FactDraft {
+            slot: slot(draft),
+            text,
+            canon: Canon::Established,
+            source,
+            seen_by,
+            causes,
+        };
+        let Handle::Entity(subject) = draft.subject else {
+            self.ops.push(add_fact(new));
+            return;
+        };
+        let value = normalize::value(&draft.value);
+        let same_possible = self
+            .view
+            .live_facts
+            .iter()
+            .find(|f| {
+                f.slot.subject == subject
+                    && f.slot.key == normalize::key(&draft.key)
+                    && f.canon == Canon::Possible
+                    && f.slot.value == value
+            })
+            .cloned();
+        match self.current(subject, &draft.key).cloned() {
+            Some(live) if live.slot.value == value => self.witness(live.id, &new.seen_by),
+            Some(live) => {
+                self.clear_obstacles(subject, &draft.key);
+                self.ops.push(LedgerOp::SupersedeFact { old: live.id, new });
+            }
+            None => match same_possible {
+                Some(possible) if self.promote(&possible) => {
+                    self.witness(possible.id, &new.seen_by)
+                }
+                _ => {
+                    self.clear_obstacles(subject, &draft.key);
+                    self.ops.push(add_fact(new));
+                }
+            },
+        }
+    }
+
+    fn witness(&mut self, fact_id: u64, holders: &[EntityRef]) {
+        for holder in holders {
+            self.ops.push(LedgerOp::Know {
+                holder: *holder,
+                fact_id: Some(fact_id),
+                claim_id: None,
+                how: Knowing::Witnessed,
+                arrives_at: self.view.clock_min,
+            });
+        }
+    }
+
+    fn clear_obstacles(&mut self, subject: u64, key: &str) {
+        let key = normalize::key(key);
+        for o in &self.view.obstacles_open {
+            let on_slot = self
+                .view
+                .fact(Handle::Fact(o.fact_id))
+                .is_some_and(|f| f.slot.subject == subject && f.slot.key == key);
+            if on_slot && self.cleared.insert(o.id) {
+                self.ops.push(LedgerOp::ClearObstacle { obstacle_id: o.id });
+            }
+        }
+    }
+
+    /// `Seen::Pc`: the PC. `Seen::Present`: every present holder plus the new
+    /// NPCs, who stand at the PC's location. `Seen::Gm`: nobody.
+    fn holders(&self, seen: Seen) -> Vec<EntityRef> {
+        match seen {
+            Seen::Gm => Vec::new(),
+            Seen::Pc => pc(self.view).map(EntityRef::Id).into_iter().collect(),
+            Seen::Present => {
+                let present = self.view.present();
+                self.view
+                    .entities
+                    .iter()
+                    .filter(|e| {
+                        present.contains(&e.id)
+                            && matches!(
+                                e.kind,
+                                EntityKind::Pc | EntityKind::Npc | EntityKind::Faction
+                            )
+                    })
+                    .map(|e| EntityRef::Id(e.id))
+                    .chain(
+                        self.p
+                            .new_npcs
+                            .iter()
+                            .map(|n| EntityRef::New(new_local(n.id))),
+                    )
+                    .collect()
+            }
+        }
+    }
+
+    fn text(&self, draft: &SlotDraft) -> String {
+        let name = match draft.subject {
+            Handle::Entity(_) => self.view.entity(draft.subject).map(|e| e.name.clone()),
+            Handle::NewNpc(_) => self
+                .p
+                .new_npcs
+                .iter()
+                .find(|n| n.id == draft.subject)
+                .map(|n| n.name.clone()),
+            _ => None,
+        }
+        .unwrap_or_else(|| draft.subject.to_string());
+        format!("{name}: {} = {}", draft.key, draft.value)
+    }
+}
+
+fn add_fact(new: FactDraft) -> LedgerOp {
+    LedgerOp::AddFact {
+        slot: new.slot,
+        text: new.text,
+        canon: new.canon,
+        source: new.source,
+        seen_by: new.seen_by,
+        causes: new.causes,
+    }
+}
+
+fn writes_slot(op: &LedgerOp, slot: &Slot<u64>) -> bool {
+    let target = match op {
+        LedgerOp::AddFact { slot, .. } => slot,
+        LedgerOp::SupersedeFact { new, .. } => &new.slot,
+        _ => return false,
+    };
+    target.subject == EntityRef::Id(slot.subject) && normalize::key(&target.key) == slot.key
+}
+
+fn new_local(handle: Handle) -> u8 {
+    match handle {
+        Handle::NewNpc(n) => u8::try_from(n).expect("validate rejects N handles above 255"),
+        other => panic!("{other} is not an N handle; validate rejects it"),
+    }
+}
+
+fn entity_ref(handle: Handle) -> EntityRef {
+    match handle {
+        Handle::Entity(id) => EntityRef::Id(id),
+        Handle::NewNpc(_) => EntityRef::New(new_local(handle)),
+        other => panic!("{other} is not an entity handle; validate rejects it"),
+    }
+}
+
+fn fact_id(handle: Handle) -> Option<u64> {
+    match handle {
+        Handle::Fact(id) => Some(id),
+        _ => None,
+    }
+}
+
+fn slot(draft: &SlotDraft) -> Slot {
+    Slot {
+        subject: entity_ref(draft.subject),
+        key: normalize::key(&draft.key),
+        value: normalize::value(&draft.value),
+    }
+}
