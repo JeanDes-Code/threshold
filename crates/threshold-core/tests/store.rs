@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use threshold_core::{
     domain::{
         AdventureSeed, Canon, EntityKind, EntityRef, FactSource, Handle, LedgerOp, PcSeed,
@@ -1500,4 +1502,33 @@ fn lists_campaigns_and_all_turns() {
     assert_eq!(turns[0].record.kind, TurnKind::Setup);
     assert_eq!(turns[8].record.op_id, "op-7");
     assert_eq!(store.turns(second).unwrap().len(), 1);
+}
+
+#[test]
+fn open_existing_refuses_a_foreign_file() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("open-existing");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let missing = dir.join("missing.sqlite");
+    assert!(Store::open_existing(&missing).is_err());
+    assert!(!missing.exists());
+
+    let empty = dir.join("empty.sqlite");
+    std::fs::write(&empty, b"").unwrap();
+    assert!(Store::open_existing(&empty).is_err());
+    assert_eq!(std::fs::metadata(&empty).unwrap().len(), 0);
+
+    let real = dir.join("real.sqlite");
+    let mut store = Store::open(&real).unwrap();
+    store.create_campaign(&adventure_seed(), 1).unwrap();
+    drop(store);
+    assert_eq!(
+        Store::open_existing(&real)
+            .unwrap()
+            .campaigns()
+            .unwrap()
+            .len(),
+        1
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

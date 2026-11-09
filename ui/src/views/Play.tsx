@@ -15,11 +15,13 @@ interface Props {
   lines: TurnLine[];
   onLine: (line: TurnLine) => void;
   onNarration: (turnId: number, narration: string) => void;
+  /** Told whenever a Turn starts or ends. */
+  onBusy: (busy: boolean) => void;
 }
 
-export default function Play({ campaign, lines, onLine, onNarration }: Props) {
+export default function Play({ campaign, lines, onLine, onNarration, onBusy }: Props) {
   const [intent, setIntent] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusyHere] = useState(false);
   const [stream, setStream] = useState("");
   const [failure, setFailure] = useState<string | null>(null);
   const [ooc, setOoc] = useState("");
@@ -29,6 +31,13 @@ export default function Play({ campaign, lines, onLine, onNarration }: Props) {
   const [why, setWhy] = useState("");
   // The op_id whose narration chunks this view shows.
   const streaming = useRef<string | null>(null);
+
+  // App hears it directly, so it stays right even if this view unmounts
+  // (a tab switch) while a Turn runs.
+  const setBusy = (on: boolean) => {
+    setBusyHere(on);
+    onBusy(on);
+  };
 
   useEvent<NarrationChunk>("narration_chunk", (chunk) => {
     if (chunk.op_id === streaming.current) setStream((s) => s + chunk.text);

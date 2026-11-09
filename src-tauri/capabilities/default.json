@@ -4,5 +4,5 @@
   "description": "The main window: app commands and event listening only.",
   "windows": ["main"],
   "local": true,
-  "permissions": ["core:event:default"]
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

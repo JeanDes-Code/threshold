@@ -3,6 +3,10 @@
 use std::{
     fmt, fs,
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -11,9 +15,10 @@ use threshold_core::{
     Gm,
     domain::{EntityKind, Knowing},
     fixture::{load_adventure_seed, load_world},
+    model::GmError,
     rules::{D10, RollResult},
     store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
-    turn::{Engine, TurnOutcome, create_campaign},
+    turn::{Engine, TurnError, TurnOutcome, create_campaign},
     world::pc_knowledge,
 };
 use threshold_ollama::OllamaConfig;
@@ -149,7 +154,8 @@ pub struct Session {
     data_dir: PathBuf,
     make_gm: MakeGm,
     open: Option<Open>,
-    debug: bool,
+    /// Shared with the shell, so toggling never waits for a running Turn.
+    debug: Arc<AtomicBool>,
 }
 
 impl Session {
@@ -158,7 +164,7 @@ impl Session {
             data_dir,
             make_gm,
             open: None,
-            debug: false,
+            debug: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -211,10 +217,7 @@ impl Session {
 
     /// Opens an existing campaign file: its last campaign.
     pub fn open_campaign(&mut self, db_path: &Path) -> Result<CampaignSummary, AppError> {
-        if !db_path.is_file() {
-            return Err(failed(format!("no campaign file at {}", db_path.display())));
-        }
-        let store = Store::open(db_path).map_err(failed)?;
+        let store = Store::open_existing(db_path).map_err(failed)?;
         let campaign = *store
             .campaigns()
             .map_err(failed)?
@@ -279,7 +282,7 @@ impl Session {
         let outcome = open
             .engine
             .play_turn(op_id, text, on_chunk)
-            .map_err(failed)?;
+            .map_err(|e| player_error(&e))?;
         Ok(turn_summary(outcome))
     }
 
@@ -294,7 +297,7 @@ impl Session {
         let outcome = open
             .engine
             .correct_last(op_id, clarified, why, on_chunk)
-            .map_err(failed)?;
+            .map_err(|e| player_error(&e))?;
         Ok(turn_summary(outcome))
     }
 
@@ -302,7 +305,7 @@ impl Session {
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         open.engine
             .ooc(format!("ooc-{}", clock_nanos()), text)
-            .map_err(failed)
+            .map_err(|e| player_error(&e))
     }
 
     /// The `op_id` a Turn was played under.
@@ -316,7 +319,9 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, AppError> {
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
-        open.engine.renarrate(turn_id, on_chunk).map_err(failed)
+        open.engine
+            .renarrate(turn_id, on_chunk)
+            .map_err(|e| player_error(&e))
     }
 
     /// The PC as the PC knows itself: only its own Beliefs about itself.
@@ -375,17 +380,23 @@ impl Session {
     }
 
     pub fn set_debug(&mut self, on: bool) {
-        self.debug = on;
+        self.debug.store(on, Ordering::SeqCst);
     }
 
     pub fn debug(&self) -> bool {
-        self.debug
+        self.debug.load(Ordering::SeqCst)
+    }
+
+    /// The debug toggle itself, for the shell to read and set without
+    /// locking the session.
+    pub fn debug_flag(&self) -> Arc<AtomicBool> {
+        self.debug.clone()
     }
 
     /// Prompts, raw model output and timings of one Turn. Refused unless
     /// debug mode is on: it shows GM-only facts.
     pub fn get_debug(&self, turn_id: u64) -> Result<DebugView, AppError> {
-        if !self.debug {
+        if !self.debug() {
             return Err(AppError::DebugOff);
         }
         let turn = self.turn(turn_id)?;
@@ -423,6 +434,38 @@ impl Session {
             .filter(|t| t.record.campaign_id == open.campaign)
             .ok_or_else(|| failed(format!("no turn {turn_id}")))
     }
+}
+
+/// The text of a Turn error that the Player may see. Rejection reasons and
+/// model or store messages can quote GM-only facts (a Persistent key, a
+/// model's echo), so only the check kind and its handle get through. The
+/// full reasons stay in the debug log.
+pub fn player_error(e: &TurnError) -> AppError {
+    let text = match e {
+        TurnError::EmptyIntent | TurnError::IntentTooLong | TurnError::NotCorrectable(_) => {
+            e.to_string()
+        }
+        TurnError::Model(GmError::Unreachable(_)) => "the game model is unreachable".into(),
+        TurnError::Model(GmError::Timeout) => "the game model request timed out".into(),
+        TurnError::Model(GmError::BadStatus(status, _)) => {
+            format!("the game model returned HTTP {status}")
+        }
+        TurnError::Rejected(errs) => {
+            let mut text = String::from("the proposal was rejected twice:");
+            for r in errs {
+                text.push_str(&format!("\n- {}", r.check));
+                if let Some(handle) = r.handle {
+                    text.push_str(&format!(" {handle}"));
+                }
+            }
+            text.push_str("\n(details in the debug view)");
+            text
+        }
+        TurnError::Store(_) => {
+            "a storage error stopped the Turn (details in the debug view)".into()
+        }
+    };
+    AppError::Failed(text)
 }
 
 fn kind_name(kind: TurnKind) -> String {

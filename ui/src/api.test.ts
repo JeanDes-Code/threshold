@@ -75,4 +75,27 @@ describe("createTurnClient", () => {
     expect(calls[1]?.args).toEqual({ op_id: "op-2", text: "two" });
     expect(client.pending()).toBeNull();
   });
+
+  it("reset() clears the pending Turn so retry() returns null", async () => {
+    const { calls, invoke } = fakeInvoke(["fail"]);
+    const client = createTurnClient(invoke, counter());
+    await expect(client.submit("I insult Orsel.").result).rejects.toThrow();
+    expect(client.pending()).not.toBeNull();
+
+    client.reset();
+    expect(client.pending()).toBeNull();
+    expect(client.retry()).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reset() during a Turn keeps its late result from reviving it", async () => {
+    let fail: (e: Error) => void = () => undefined;
+    const invoke: Invoke = <T,>() => new Promise<T>((_, reject) => (fail = reject));
+    const client = createTurnClient(invoke, counter());
+    const attempt = client.submit("I wait.");
+    client.reset();
+    fail(new Error("timeout"));
+    await expect(attempt.result).rejects.toThrow();
+    expect(client.pending()).toBeNull();
+  });
 });

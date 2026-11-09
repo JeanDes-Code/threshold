@@ -47,3 +47,6 @@ label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 13px;
 .muted { color: var(--muted); }
 pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: rgba(127,127,127,0.1); padding: 8px; max-height: 360px; overflow: auto; }
 h2 { font-size: 17px; margin: 16px 0 6px; }
+.toggle { display: flex; gap: 6px; align-items: center; margin: 0; color: var(--fg); font-size: 15px; }
+.toggle input { width: auto; }
+.page { padding: 0 16px; }

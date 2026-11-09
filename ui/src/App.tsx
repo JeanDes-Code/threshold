@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { errorText, type CampaignSummary, type Defaults, type TurnLine } from "./api";
-import { api, useEvent } from "./tauri";
+import { api, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
 import Debug from "./views/Debug";
 import Journal from "./views/Journal";
@@ -15,13 +15,17 @@ export default function App() {
   const [debug, setDebug] = useState(false);
   const [model, setModel] = useState("warming");
   const [showSetup, setShowSetup] = useState(true);
+  const [turnBusy, setTurnBusy] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
 
   useEffect(() => {
-    void api.modelStatus().then(setModel);
+    api.modelStatus().then(setModel, (e: unknown) => setModel(`unknown (${errorText(e)})`));
   }, []);
   useEvent<string>("model_status", setModel);
 
   const opened = (summary: CampaignSummary) => {
+    // A Turn that failed in the previous campaign must not be retried here.
+    turns.reset();
     setCampaign(summary);
     setLines(summary.turns);
     setShowSetup(false);
@@ -29,9 +33,15 @@ export default function App() {
   };
 
   const toggleDebug = async (on: boolean) => {
-    const now = await api.setDebug(on);
-    setDebug(now);
-    if (!now && tab === "debug") setTab("play");
+    try {
+      const now = await api.setDebug(on);
+      setDebug(now);
+      setAppError(null);
+      if (!now && tab === "debug") setTab("play");
+    } catch (e) {
+      // The checkbox keeps showing the last state the shell confirmed.
+      setAppError(`Could not change debug mode: ${errorText(e)}`);
+    }
   };
 
   return (
@@ -44,10 +54,9 @@ export default function App() {
       <nav className="menu">
         <strong>Threshold</strong>
         <button onClick={() => setShowSetup((s) => !s)}>Campaign…</button>
-        <label className="row" style={{ margin: 0 }}>
+        <label className="toggle">
           <input
             type="checkbox"
-            style={{ width: "auto" }}
             checked={debug}
             onChange={(e) => void toggleDebug(e.target.checked)}
           />
@@ -56,7 +65,8 @@ export default function App() {
         <span className="spacer" />
         <span className="status">Model: {model}</span>
       </nav>
-      {showSetup && <Setup onOpened={opened} />}
+      {appError && <p className="error page">{appError}</p>}
+      {showSetup && <Setup onOpened={opened} locked={turnBusy} />}
       {campaign && (
         <>
           <div className="tabs">
@@ -74,7 +84,9 @@ export default function App() {
           <main>
             {tab === "play" && (
               <Play
+                key={campaign.db_path}
                 campaign={campaign}
+                onBusy={setTurnBusy}
                 lines={lines}
                 onLine={(line) => setLines((all) => [...all, line])}
                 onNarration={(turnId, narration) =>
@@ -94,7 +106,13 @@ export default function App() {
   );
 }
 
-function Setup({ onOpened }: { onOpened: (summary: CampaignSummary) => void }) {
+interface SetupProps {
+  onOpened: (summary: CampaignSummary) => void;
+  /** True while a Turn runs: no campaign may open then. */
+  locked: boolean;
+}
+
+function Setup({ onOpened, locked }: SetupProps) {
   const [defaults, setDefaults] = useState<Defaults | null>(null);
   const [seedPath, setSeedPath] = useState("");
   const [worldPath, setWorldPath] = useState("");
@@ -104,12 +122,17 @@ function Setup({ onOpened }: { onOpened: (summary: CampaignSummary) => void }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void api.defaults().then((d) => {
-      setDefaults(d);
-      setSeedPath(d.seed_path);
-      setWorldPath(d.world_path);
-    });
-    void api.listCampaigns().then(setFiles);
+    api.defaults().then(
+      (d) => {
+        setDefaults(d);
+        setSeedPath(d.seed_path);
+        setWorldPath(d.world_path);
+      },
+      (e: unknown) => setError(`Could not read the default paths: ${errorText(e)}`),
+    );
+    api.listCampaigns().then(setFiles, (e: unknown) =>
+      setError(`Could not list campaign files: ${errorText(e)}`),
+    );
   }, []);
 
   const run = async (call: () => Promise<CampaignSummary>) => {
@@ -132,7 +155,10 @@ function Setup({ onOpened }: { onOpened: (summary: CampaignSummary) => void }) {
       <label htmlFor="world">World file</label>
       <input id="world" value={worldPath} onChange={(e) => setWorldPath(e.target.value)} />
       <div className="row">
-        <button disabled={busy} onClick={() => void run(() => api.newCampaign(seedPath, worldPath))}>
+        <button
+          disabled={busy || locked}
+          onClick={() => void run(() => api.newCampaign(seedPath, worldPath))}
+        >
           New campaign
         </button>
       </div>
@@ -141,7 +167,10 @@ function Setup({ onOpened }: { onOpened: (summary: CampaignSummary) => void }) {
       <label htmlFor="db">Campaign file</label>
       <input id="db" value={dbPath} onChange={(e) => setDbPath(e.target.value)} />
       <div className="row">
-        <button disabled={busy || !dbPath} onClick={() => void run(() => api.openCampaign(dbPath))}>
+        <button
+          disabled={busy || locked || !dbPath}
+          onClick={() => void run(() => api.openCampaign(dbPath))}
+        >
           Open
         </button>
       </div>
@@ -157,6 +186,7 @@ function Setup({ onOpened }: { onOpened: (summary: CampaignSummary) => void }) {
         </ul>
       )}
       {defaults && <p className="muted">Data and config (threshold.toml): {defaults.data_dir}</p>}
+      {locked && <p className="muted">A Turn is running; wait for it to finish.</p>}
       {error && <p className="error">{error}</p>}
     </main>
   );

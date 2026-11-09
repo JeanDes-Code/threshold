@@ -109,6 +109,8 @@ export interface TurnClient {
   retry(): Attempt | null;
   /** The Turn that failed and can be retried, if any. */
   pending(): PendingTurn | null;
+  /** Forgets the pending Turn. Call it when another campaign opens. */
+  reset(): void;
 }
 
 /**
@@ -141,6 +143,9 @@ export function createTurnClient(
     correct: (clarified, why) => fresh("correct_last", { clarified, why }),
     retry: () => (pending ? send(pending) : null),
     pending: () => pending,
+    reset: () => {
+      pending = null;
+    },
   };
 }
 

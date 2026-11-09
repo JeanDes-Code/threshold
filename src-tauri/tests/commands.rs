@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use threshold_app::session::{AppError, Session};
 use threshold_core::{
     Gm, RecordedGm,
-    domain::{ActionKind, DecisionProposal, Verdict},
+    domain::{ActionKind, DecisionProposal, Handle, NewFact, Seen, SlotDraft, Verdict},
+    store::Store,
 };
 
 fn town_dir() -> PathBuf {
@@ -14,7 +15,11 @@ fn town_dir() -> PathBuf {
 }
 
 fn allowed() -> String {
-    serde_json::to_string(&DecisionProposal {
+    serde_json::to_string(&base()).unwrap()
+}
+
+fn base() -> DecisionProposal {
+    DecisionProposal {
         action: ActionKind::Observe,
         verdict: Verdict::Allowed,
         blockers: vec![],
@@ -26,8 +31,31 @@ fn allowed() -> String {
         schedule: None,
         minutes: 0,
         intimate: false,
-    })
-    .unwrap()
+    }
+}
+
+/// The id of a town entity, read from the campaign file.
+fn entity(db: &str, name: &str) -> u64 {
+    let store = Store::open(Path::new(db)).unwrap();
+    let campaign = *store.campaigns().unwrap().last().unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    view.entities.iter().find(|e| e.name == name).unwrap().id
+}
+
+/// A proposal with one new fact about `subject`.
+fn with_fact(subject: u64, key: &str, value: &str, said_by: Option<u64>) -> String {
+    let mut p = base();
+    p.facts = vec![NewFact {
+        slot: SlotDraft {
+            subject: Handle::Entity(subject),
+            key: key.into(),
+            value: value.into(),
+        },
+        seen: Seen::Present,
+        said_by: said_by.map(Handle::Entity),
+        because: vec![],
+    }];
+    serde_json::to_string(&p).unwrap()
 }
 
 /// A session on a fresh data dir whose every Engine shares `gm`.
@@ -160,4 +188,92 @@ fn config_is_created_once() {
     std::fs::write(&path, "model = \"other:tag\"\n").unwrap();
     let config = threshold_app::session::load_config(dir.path()).unwrap();
     assert_eq!(config.model, "other:tag");
+}
+
+#[test]
+fn journal_lists_claims_with_their_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec!["Hessa leans in.".into()]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let db = s.summary().unwrap().db_path;
+    let (hessa, tobin) = (entity(&db, "Hessa"), entity(&db, "Tobin"));
+    gm.push_proposal(with_fact(tobin, "cheats", "the scales", Some(hessa)));
+    s.submit_intent("op-1".into(), "I ask Hessa about the miller.", &mut |_| {})
+        .unwrap();
+
+    let journal = s.get_journal().unwrap();
+    let claim = journal
+        .claims
+        .iter()
+        .find(|c| c.subject == "Tobin")
+        .expect("the told Belief is a Claim");
+    assert_eq!(claim.source.as_deref(), Some("Hessa"));
+    assert!(
+        journal
+            .observations
+            .iter()
+            .all(|o| o.subject != "Tobin" || !o.text.contains("cheats"))
+    );
+}
+
+#[test]
+fn open_campaign_refuses_a_foreign_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+
+    let empty = dir.path().join("empty.sqlite");
+    std::fs::write(&empty, b"").unwrap();
+    assert!(s.open_campaign(&empty).is_err());
+    // Refused before any migration: the file is still empty.
+    assert_eq!(std::fs::metadata(&empty).unwrap().len(), 0);
+
+    let text = dir.path().join("notes.sqlite");
+    std::fs::write(&text, b"just some notes, not a database at all").unwrap();
+    assert!(s.open_campaign(&text).is_err());
+    assert!(matches!(s.summary(), Err(AppError::NoCampaign)));
+}
+
+#[test]
+fn rejected_turn_error_hides_gm_only_facts() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let db = s.summary().unwrap().db_path;
+    let orsel = entity(&db, "Orsel");
+    // Both attempts try to bend the GM-only secret.
+    let bend = with_fact(orsel, "skims", "nothing at all", None);
+    gm.push_proposal(bend.clone());
+    gm.push_proposal(bend);
+
+    let err = s
+        .submit_intent("op-1".into(), "I accuse Orsel.", &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("fact bends"), "{err}");
+    for secret in ["skims", "grain tithe"] {
+        assert!(!err.contains(secret), "{err}");
+    }
+    // The raw reason did name the secret's key: the formatter removed it.
+    s.set_debug(true);
+    let raw = Store::open(Path::new(&db))
+        .unwrap()
+        .debug_log("op-1")
+        .unwrap();
+    assert!(
+        raw.iter()
+            .any(|e| e.step == "validate" && e.raw.contains("skims"))
+    );
+}
+
+#[test]
+fn debug_flag_is_shared_outside_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let s = session(dir.path(), &gm);
+    let flag = s.debug_flag();
+    flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(s.debug());
 }

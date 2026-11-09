@@ -250,6 +250,38 @@ impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         Self::init(Connection::open(path)?)
     }
+    /// Opens a campaign file that already exists. Refuses, before any
+    /// migration runs, a missing file or one that is not a Threshold
+    /// database, so it never writes to a foreign file.
+    pub fn open_existing(path: &Path) -> Result<Self, StoreError> {
+        let not_ours = || {
+            StoreError::Invalid(format!(
+                "{} is not a Threshold campaign file",
+                path.display()
+            ))
+        };
+        if !path.is_file() {
+            return Err(StoreError::Invalid(format!(
+                "no file at {}",
+                path.display()
+            )));
+        }
+        let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let version: u32 = db
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .map_err(|_| not_ours())?;
+        let has_campaign: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='campaign')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|_| not_ours())?;
+        if version == 0 || !has_campaign {
+            return Err(not_ours());
+        }
+        Self::init(db)
+    }
     pub fn open_in_memory() -> Result<Self, StoreError> {
         Self::init(Connection::open_in_memory()?)
     }

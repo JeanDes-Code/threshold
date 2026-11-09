@@ -8,7 +8,10 @@ pub mod session;
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use serde::Serialize;
@@ -22,6 +25,10 @@ use threshold_ollama::OllamaGm;
 
 /// The session every command shares.
 struct Shared(Arc<Mutex<Session>>);
+
+/// The debug toggle, shared with the session but set without its lock, so
+/// toggling never waits for a running Turn.
+struct DebugFlag(Arc<AtomicBool>);
 
 /// The model's warm-up state: "warming", "ready", or the error text.
 struct ModelStatus(Arc<Mutex<String>>);
@@ -212,12 +219,9 @@ async fn get_journal(state: State<'_, Shared>) -> Result<JournalView, AppError> 
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn set_debug(state: State<'_, Shared>, on: bool) -> Result<bool, AppError> {
-    blocking(&state, move |s| {
-        s.set_debug(on);
-        Ok(s.debug())
-    })
-    .await
+fn set_debug(flag: State<'_, DebugFlag>, on: bool) -> bool {
+    flag.0.store(on, Ordering::SeqCst);
+    flag.0.load(Ordering::SeqCst)
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -248,6 +252,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         data_dir,
         Box::new(move || Box::new(OllamaGm::new(config.clone()))),
     );
+    app.manage(DebugFlag(session.debug_flag()));
     app.manage(Shared(Arc::new(Mutex::new(session))));
     Ok(())
 }
