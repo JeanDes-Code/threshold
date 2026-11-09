@@ -18,6 +18,10 @@ pub struct SeedEntity {
     pub name: String,
     pub kind: super::EntityKind,
     pub adult: Option<bool>,
+    /// A hidden entity is not seen on arrival: the PC does not witness its
+    /// location just by entering its place.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

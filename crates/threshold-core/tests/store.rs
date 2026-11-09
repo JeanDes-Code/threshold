@@ -177,11 +177,13 @@ fn present_matches_pc_location() {
             kind: EntityKind::Npc,
             name: "Near".into(),
             adult: Some(true),
+            hidden: false,
         },
         threshold_core::domain::SeedEntity {
             kind: EntityKind::Npc,
             name: "Far".into(),
             adult: Some(true),
+            hidden: false,
         },
     ];
     for (subject, value) in [("Ada", "The Hall"), ("Near", " hall  "), ("Far", "Garden")] {
@@ -1042,6 +1044,7 @@ fn adventure_seed_subjects_require_pc_declared_entity_or_world() {
         name: "Bela".into(),
         kind: EntityKind::Npc,
         adult: Some(true),
+        hidden: false,
     });
     ch.decided.push(SeedFact {
         subject: "Bela".into(),

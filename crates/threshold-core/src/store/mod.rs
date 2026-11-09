@@ -262,6 +262,16 @@ impl Store {
         adventure_seed: &AdventureSeed,
         rng_seed: u64,
     ) -> Result<CampaignId, StoreError> {
+        self.create_campaign_with(adventure_seed, rng_seed, |_| Vec::new())
+    }
+    /// `create_campaign`, plus the ops `setup` returns for the projected
+    /// setup state, in the same Setup Turn and the same transaction.
+    pub fn create_campaign_with(
+        &mut self,
+        adventure_seed: &AdventureSeed,
+        rng_seed: u64,
+        setup: impl FnOnce(&WorldView) -> Vec<LedgerOp>,
+    ) -> Result<CampaignId, StoreError> {
         if crate::normalize::name(&adventure_seed.pc.name) == "world" {
             return Err(StoreError::Invalid(
                 "world is a reserved adventure seed subject".into(),
@@ -371,6 +381,11 @@ impl Store {
                     },
                 )?;
             }
+        }
+        let view = project::snapshot(&tx, campaign)?;
+        let assigned = std::collections::HashMap::new();
+        for op in setup(&view) {
+            project::append(&tx, campaign, turn, &resolve(&op, &assigned)?)?;
         }
         tx.commit()?;
         Ok(campaign)
@@ -555,6 +570,29 @@ impl Store {
             .optional()?;
         id.map(|id| project::read_turn(&self.db, id)).transpose()
     }
+    /// The campaign's Roll seed, as given to `create_campaign`.
+    pub fn campaign_seed(&self, c: CampaignId) -> Result<u64, StoreError> {
+        let seed: Option<i64> = self
+            .db
+            .query_row("SELECT seed FROM campaign WHERE id=?1", [c], |r| r.get(0))
+            .optional()?;
+        seed.map(|seed| seed as u64)
+            .ok_or_else(|| StoreError::Invalid("unknown campaign".into()))
+    }
+    /// One Turn row by id.
+    pub fn turn(&self, t: TurnId) -> Result<Option<StoredTurn>, StoreError> {
+        let exists: bool =
+            self.db
+                .query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1)", [t], |r| {
+                    r.get(0)
+                })?;
+        exists.then(|| project::read_turn(&self.db, t)).transpose()
+    }
+    /// The resolved ledger ops of one Turn, in ledger order. The store adds
+    /// the `Know` rows of witnesses and listeners, so they are included.
+    pub fn turn_ops(&self, t: TurnId) -> Result<Vec<LedgerOp<EntityId>>, StoreError> {
+        project::turn_ops(&self.db, t)
+    }
     pub fn set_narration(&mut self, t: TurnId, text: &str) -> Result<(), StoreError> {
         if self
             .db
@@ -570,6 +608,24 @@ impl Store {
         project::rebuild(&tx, c)?;
         tx.commit()?;
         Ok(())
+    }
+    /// The debug rows of one operation, in the order they were written.
+    pub fn debug_log(&self, op_id: &str) -> Result<Vec<DebugEntry>, StoreError> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT op_id,step,prompt,raw,ms FROM debug_log WHERE op_id=?1 ORDER BY id")?;
+        let rows = stmt
+            .query_map([op_id], |r| {
+                Ok(DebugEntry {
+                    op_id: r.get(0)?,
+                    step: r.get(1)?,
+                    prompt: r.get(2)?,
+                    raw: r.get(3)?,
+                    ms: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
     pub fn log_debug(&self, e: DebugEntry) -> Result<(), StoreError> {
         self.db.execute(

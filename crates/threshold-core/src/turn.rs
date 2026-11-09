@@ -1,0 +1,733 @@
+//! The Turn engine (design §6.1 and §6.5, data-shape §2).
+//!
+//! `turn` is the only module that follows time order. A play Turn runs:
+//! duplicate `op_id` check, Intent check, proposal prompt, `Gm::propose`,
+//! parse, shape check, Commit checks (one shared retry with the errors in
+//! `recent`), Roll, `to_ops`, World Clock, perception on arrival, one Commit,
+//! then the streamed Narration and `set_narration`. Validation, `to_ops` and
+//! the World Clock all read the snapshot taken before the Turn, so a fact a
+//! World Event writes in this Turn is never a valid cause.
+//!
+//! Every step writes one `debug_log` row with its milliseconds. The debug log
+//! sits outside the Commit transaction, so a failed Turn stays visible.
+
+use std::{fmt, time::Instant};
+
+use serde_json::json;
+
+use crate::{
+    checks::{self, CheckKind, Rejection, Validated},
+    context::{narration_prompt, perceived_by_pc, proposal_context, seen_present},
+    domain::{
+        AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource, Handle,
+        Knowing, LedgerOp, Reaction,
+    },
+    model::{Gm, GmError, Prompt},
+    normalize,
+    pack::ContentPack,
+    proposal_schema_for,
+    rules::{RollResult, Ruleset, turn_seed},
+    store::{
+        CampaignId, CommitError, DebugEntry, OpId, Store, StoreError, StoredTurn, TurnId, TurnKind,
+        TurnRecord, WorldView,
+    },
+    validate_shape,
+    world::{self, pc_knowledge},
+};
+
+/// The longest Intent, in characters.
+pub const MAX_INTENT_CHARS: usize = 2_000;
+
+/// Milliseconds per pipeline step, and the prompt tokens the adapter
+/// reported for the last proposal call (`None` when it reports none).
+/// `propose` and `validate` add up both attempts when the retry runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Timings {
+    pub propose_ms: u64,
+    pub validate_ms: u64,
+    pub roll_ms: u64,
+    pub world_ms: u64,
+    pub commit_ms: u64,
+    pub narrate_ms: u64,
+    pub total_ms: u64,
+    pub prompt_tokens: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnOutcome {
+    pub turn_id: TurnId,
+    pub roll: Option<RollResult>,
+    pub narration: String,
+    pub timings: Timings,
+}
+
+#[derive(Debug)]
+pub enum TurnError {
+    EmptyIntent,
+    IntentTooLong,
+    Model(GmError),
+    /// Both attempts failed; these are the errors of the second one.
+    Rejected(Vec<Rejection>),
+    Store(StoreError),
+    /// Only the last play Turn can be corrected.
+    NotCorrectable(String),
+}
+
+impl fmt::Display for TurnError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyIntent => f.write_str("the intent is empty"),
+            Self::IntentTooLong => {
+                write!(f, "the intent is longer than {MAX_INTENT_CHARS} characters")
+            }
+            Self::Model(e) => e.fmt(f),
+            Self::Rejected(errs) => {
+                f.write_str("the proposal was rejected twice:")?;
+                for e in errs {
+                    write!(f, "\n{e}")?;
+                }
+                Ok(())
+            }
+            Self::Store(e) => e.fmt(f),
+            Self::NotCorrectable(why) => write!(f, "nothing to correct: {why}"),
+        }
+    }
+}
+
+impl std::error::Error for TurnError {}
+
+impl From<StoreError> for TurnError {
+    fn from(e: StoreError) -> Self {
+        Self::Store(e)
+    }
+}
+
+impl From<GmError> for TurnError {
+    fn from(e: GmError) -> Self {
+        Self::Model(e)
+    }
+}
+
+/// Creates a campaign and, in its Setup Turn, lets the PC witness who openly
+/// stands at the starting place (perception on arrival).
+pub fn create_campaign(
+    store: &mut Store,
+    adventure_seed: &AdventureSeed,
+    rng_seed: u64,
+) -> Result<CampaignId, StoreError> {
+    store.create_campaign_with(adventure_seed, rng_seed, |view| {
+        let pc = view.entities.iter().find(|e| e.kind == EntityKind::Pc);
+        match pc.and_then(|pc| view.live_fact(pc.id, "location")) {
+            Some(location) => world::arrival(view, &location.slot.value, view.clock_min),
+            None => Vec::new(),
+        }
+    })
+}
+
+pub struct Engine {
+    store: Store,
+    gm: Box<dyn Gm>,
+    rules: Box<dyn Ruleset>,
+    packs: Vec<ContentPack>,
+    campaign: CampaignId,
+}
+
+/// The result of the steps before the Commit.
+struct Planned {
+    ops: Vec<LedgerOp>,
+    proposal_json: String,
+    roll: Option<RollResult>,
+    reactions: Vec<Reaction>,
+    minutes: u32,
+}
+
+pub const OOC_RULES: &str = "\
+You answer the player's out-of-character question about a single-player tabletop role-playing game.
+Answer only from the adventure and what the player character (PC) knows, given below. If the answer is not there, say the PC does not know.
+Never invent facts about the world, and never continue the story.
+Answer briefly, in plain prose.
+";
+
+impl Engine {
+    pub fn new(
+        store: Store,
+        gm: Box<dyn Gm>,
+        rules: Box<dyn Ruleset>,
+        packs: Vec<ContentPack>,
+        campaign: CampaignId,
+    ) -> Self {
+        Self {
+            store,
+            gm,
+            rules,
+            packs,
+            campaign,
+        }
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// Plays one Turn. A second call with the same `op_id` returns the stored
+    /// Turn and makes no model call, unless its Narration is missing: then it
+    /// narrates again.
+    pub fn play_turn(
+        &mut self,
+        op_id: OpId,
+        intent: &str,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<TurnOutcome, TurnError> {
+        let start = Instant::now();
+        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+            return self.stored_outcome(stored, on_chunk);
+        }
+        check_intent(intent)?;
+        let view = self.store.snapshot(self.campaign)?;
+        let seed = turn_seed(self.store.campaign_seed(self.campaign)?, view.turn_seq + 1);
+        let mut timings = Timings::default();
+        let planned = self.plan(&op_id, &view, intent, seed, &mut timings)?;
+        let record = TurnRecord {
+            campaign_id: self.campaign,
+            op_id,
+            kind: TurnKind::Play,
+            intent: intent.to_owned(),
+            proposal_json: planned.proposal_json.clone(),
+            clock_before: view.clock_min,
+            clock_after: view.clock_min + ClockMin::from(planned.minutes),
+        };
+        self.finish(record, planned, Vec::new(), timings, start, on_chunk)
+    }
+
+    /// Corrects the last play Turn: re-plans it from the state before it,
+    /// with the clarified Intent and the corrected Turn's stored Roll seed,
+    /// and commits a Correction Turn whose ops revert the old one first.
+    /// History stays: the old Turn row and its ops remain in the ledger.
+    pub fn correct_last(
+        &mut self,
+        op_id: OpId,
+        clarified_intent: &str,
+        why: &str,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<TurnOutcome, TurnError> {
+        let start = Instant::now();
+        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+            return self.stored_outcome(stored, on_chunk);
+        }
+        check_intent(clarified_intent)?;
+        let now = self.store.snapshot(self.campaign)?;
+        let last = now
+            .recent_turns
+            .last()
+            .filter(|t| t.seq == now.turn_seq)
+            .ok_or_else(|| TurnError::NotCorrectable("the last Turn is not a play Turn".into()))?;
+        if last.record.kind != TurnKind::Play {
+            return Err(TurnError::NotCorrectable(
+                "a Correction reaches back one play Turn only".into(),
+            ));
+        }
+        let view = self.store.snapshot_before(self.campaign, last.seq)?;
+        let seed = stored_roll(&last.record.proposal_json).map_or_else(
+            || {
+                self.store
+                    .campaign_seed(self.campaign)
+                    .map(|campaign| turn_seed(campaign, last.seq))
+            },
+            |roll| Ok(roll.seed),
+        )?;
+        let mut timings = Timings::default();
+        let planned = self.plan(&op_id, &view, clarified_intent, seed, &mut timings)?;
+        let head = vec![
+            LedgerOp::RevertTurn { turn_id: last.id },
+            LedgerOp::RecordCorrection {
+                target_turn: last.id,
+                what_wrong: format!("The intent was read as: {}", last.record.intent),
+                why: why.to_owned(),
+            },
+        ];
+        let record = TurnRecord {
+            campaign_id: self.campaign,
+            op_id,
+            kind: TurnKind::Correction,
+            intent: clarified_intent.to_owned(),
+            proposal_json: planned.proposal_json.clone(),
+            clock_before: view.clock_min,
+            clock_after: view.clock_min + ClockMin::from(planned.minutes),
+        };
+        self.finish(record, planned, head, timings, start, on_chunk)
+    }
+
+    /// Answers an out-of-character question with one plain model call. The
+    /// model sees the rules, the Adventure Seed's premise, PC and boundaries,
+    /// and PC Knowledge; never a decided or proposed seed fact, a hidden
+    /// fact, a goal or an event. Nothing is committed.
+    pub fn ooc(&mut self, question: &str) -> Result<String, TurnError> {
+        check_intent(question)?;
+        let view = self.store.snapshot(self.campaign)?;
+        let prompt = ooc_prompt(&view, question);
+        let start = Instant::now();
+        let answer = self.gm.narrate(&prompt, &mut |_| {});
+        self.log("ooc", "ooc", &prompt, answer_text(&answer), start)?;
+        Ok(answer?)
+    }
+
+    /// Narrates a committed Turn again, from the state right after it, and
+    /// stores the new Narration. This recovers a Turn whose Narration was
+    /// interrupted.
+    pub fn renarrate(
+        &mut self,
+        turn: TurnId,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<String, TurnError> {
+        let stored = self
+            .store
+            .turn(turn)?
+            .filter(|t| t.record.campaign_id == self.campaign)
+            .ok_or_else(|| StoreError::Invalid("unknown turn".into()))?;
+        let view_after = self.store.snapshot_before(self.campaign, stored.seq + 1)?;
+        let ops: Vec<LedgerOp> = self
+            .store
+            .turn_ops(turn)?
+            .into_iter()
+            .map(|op| {
+                op.try_map(&mut |id| Ok::<_, std::convert::Infallible>(EntityRef::Id(id)))
+                    .unwrap_or_else(|never| match never {})
+            })
+            .collect();
+        let reactions = stored_reactions(&stored.record.proposal_json);
+        let narration = self.narrate(
+            &stored.record.op_id,
+            &view_after,
+            &ops,
+            &reactions,
+            &stored.record.intent,
+            on_chunk,
+        )?;
+        self.store.set_narration(turn, &narration)?;
+        Ok(narration)
+    }
+
+    /// The outcome of a Turn already stored under this `op_id`.
+    fn stored_outcome(
+        &mut self,
+        stored: StoredTurn,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<TurnOutcome, TurnError> {
+        let narration = match stored.narration {
+            Some(narration) => narration,
+            None => self.renarrate(stored.id, on_chunk)?,
+        };
+        Ok(TurnOutcome {
+            turn_id: stored.id,
+            roll: stored_roll(&stored.record.proposal_json),
+            narration,
+            timings: Timings::default(),
+        })
+    }
+
+    /// Commits the planned ops (after `head`), then narrates.
+    fn finish(
+        &mut self,
+        record: TurnRecord,
+        planned: Planned,
+        head: Vec<LedgerOp>,
+        mut timings: Timings,
+        start: Instant,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<TurnOutcome, TurnError> {
+        let op_id = record.op_id.clone();
+        let intent = record.intent.clone();
+        let mut ops = head;
+        ops.extend(planned.ops);
+        let step = Instant::now();
+        let committed = self.store.commit(record, ops.clone());
+        timings.commit_ms = ms(step);
+        let raw = match &committed {
+            Ok(id) => format!("turn {id}"),
+            Err(e) => e.to_string(),
+        };
+        self.log(&op_id, "commit", &Prompt::default(), &raw, step)?;
+        let turn_id = match committed {
+            Ok(id) => id,
+            Err(CommitError::DuplicateOp(_)) => {
+                let stored = self
+                    .store
+                    .turn_by_campaign_op(self.campaign, &op_id)?
+                    .ok_or_else(|| StoreError::Invalid("duplicate op without a turn".into()))?;
+                return self.stored_outcome(stored, on_chunk);
+            }
+            Err(CommitError::Store(e)) => return Err(e.into()),
+        };
+
+        let view_after = self.store.snapshot(self.campaign)?;
+        let step = Instant::now();
+        let narration = self.narrate(
+            &op_id,
+            &view_after,
+            &ops,
+            &planned.reactions,
+            &intent,
+            on_chunk,
+        )?;
+        timings.narrate_ms = ms(step);
+        self.store.set_narration(turn_id, &narration)?;
+        timings.total_ms = ms(start);
+        Ok(TurnOutcome {
+            turn_id,
+            roll: planned.roll,
+            narration,
+            timings,
+        })
+    }
+
+    /// The narration call. Only what the PC perceives reaches it, and only
+    /// the reactions of NPCs the PC knows are here: the others are offscreen
+    /// intents.
+    fn narrate(
+        &mut self,
+        op_id: &str,
+        view_after: &WorldView,
+        ops: &[LedgerOp],
+        reactions: &[Reaction],
+        intent: &str,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<String, TurnError> {
+        let perceived = perceived_by_pc(ops, view_after);
+        let seen = seen_present(view_after);
+        let reactions: Vec<Reaction> = reactions
+            .iter()
+            .filter(|r| {
+                match r.npc {
+                Handle::Entity(id) => seen.contains(&id),
+                Handle::NewNpc(n) => perceived.iter().any(|op| {
+                    matches!(op, LedgerOp::AddEntity { local: Some(l), .. } if u64::from(*l) == n)
+                }),
+                _ => false,
+            }
+            })
+            .cloned()
+            .collect();
+        let prompt = narration_prompt(view_after, &self.packs, &perceived, &reactions, intent);
+        let start = Instant::now();
+        let narration = self.gm.narrate(&prompt, on_chunk);
+        self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
+        Ok(narration?)
+    }
+
+    /// Every step before the Commit, against `view` (the state before the
+    /// Turn). One retry in total, shared by parse, shape and Commit checks.
+    fn plan(
+        &mut self,
+        op_id: &str,
+        view: &WorldView,
+        intent: &str,
+        seed: u64,
+        timings: &mut Timings,
+    ) -> Result<Planned, TurnError> {
+        let ctx = proposal_context(view, &self.packs, intent);
+        let schema = proposal_schema_for(&ctx.handles);
+        let mut prompt = ctx.prompt;
+        for attempt in ["propose", "propose_retry"] {
+            let step = Instant::now();
+            let raw = self.gm.propose(&prompt, &schema);
+            timings.propose_ms += ms(step);
+            timings.prompt_tokens = self.gm.last_prompt_tokens();
+            self.log(op_id, attempt, &prompt, answer_text(&raw), step)?;
+            let raw = raw?;
+
+            let step = Instant::now();
+            let parsed = parse(&raw);
+            let checked = parsed
+                .as_ref()
+                .map_err(Clone::clone)
+                .and_then(|p| checks::validate(p, view));
+            timings.validate_ms += ms(step);
+            let errs = match checked {
+                Ok(valid) => {
+                    self.log(op_id, "validate", &Prompt::default(), "ok", step)?;
+                    return self.resolve(op_id, valid, view, seed, timings);
+                }
+                Err(errs) => errs,
+            };
+            let lines: Vec<String> = errs.iter().map(ToString::to_string).collect();
+            self.log(
+                op_id,
+                "validate",
+                &Prompt::default(),
+                &lines.join("\n"),
+                step,
+            )?;
+            if attempt == "propose_retry" {
+                return Err(TurnError::Rejected(errs));
+            }
+            prompt
+                .recent
+                .push_str("REJECTED PROPOSAL (fix every error below, then answer again)\n");
+            for line in &lines {
+                prompt.recent.push_str(&format!("- {line}\n"));
+            }
+        }
+        unreachable!("the loop returns on its second attempt")
+    }
+
+    /// Roll, `to_ops`, World Clock and perception on arrival, for a valid
+    /// proposal.
+    fn resolve(
+        &mut self,
+        op_id: &str,
+        valid: Validated<'_>,
+        view: &WorldView,
+        seed: u64,
+        timings: &mut Timings,
+    ) -> Result<Planned, TurnError> {
+        let p = valid.proposal();
+        let step = Instant::now();
+        let roll = p.check.as_ref().map(|check| {
+            let difficulty = self.rules.difficulty(check, view);
+            self.rules.roll(difficulty, seed)
+        });
+        timings.roll_ms = ms(step);
+        let raw = roll.map_or_else(|| "no check".into(), |r| format!("{r:?}"));
+        self.log(op_id, "roll", &Prompt::default(), &raw, step)?;
+
+        let step = Instant::now();
+        let resolved = checks::to_ops(valid, roll.as_ref(), view, view.turn_seq + 1);
+        let mut ops = resolved.ops;
+        // `to_ops` already advances the clock by the proposal's minutes.
+        ops.extend(
+            world::advance(view, p.minutes)
+                .into_iter()
+                .filter(|op| !matches!(op, LedgerOp::AdvanceClock { .. })),
+        );
+        let clock_after = view.clock_min + ClockMin::from(p.minutes);
+        ops = with_arrival(view, ops, clock_after);
+        timings.world_ms = ms(step);
+        self.log(op_id, "world", &Prompt::default(), "", step)?;
+
+        let proposal_json = json!({
+            "proposal": p,
+            "reactions": resolved.reactions,
+            "roll": roll,
+        })
+        .to_string();
+        Ok(Planned {
+            ops,
+            proposal_json,
+            roll,
+            reactions: resolved.reactions,
+            minutes: p.minutes,
+        })
+    }
+
+    fn log(
+        &self,
+        op_id: &str,
+        step: &str,
+        prompt: &Prompt,
+        raw: &str,
+        start: Instant,
+    ) -> Result<(), StoreError> {
+        self.store.log_debug(DebugEntry {
+            op_id: op_id.to_owned(),
+            step: step.to_owned(),
+            prompt: format!(
+                "{}{}{}{}",
+                prompt.system, prompt.stable, prompt.scene, prompt.recent
+            ),
+            raw: raw.to_owned(),
+            ms: ms(start),
+        })
+    }
+}
+
+fn ms(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn answer_text(result: &Result<String, GmError>) -> &str {
+    match result {
+        Ok(text) => text,
+        Err(_) => "model error",
+    }
+}
+
+fn check_intent(intent: &str) -> Result<(), TurnError> {
+    if intent.trim().is_empty() {
+        Err(TurnError::EmptyIntent)
+    } else if intent.chars().count() > MAX_INTENT_CHARS {
+        Err(TurnError::IntentTooLong)
+    } else {
+        Ok(())
+    }
+}
+
+fn schema_error(reason: String) -> Vec<Rejection> {
+    vec![Rejection {
+        check: CheckKind::Schema,
+        handle: None,
+        reason,
+    }]
+}
+
+/// Parses the model text and checks its shape.
+fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
+    let p: DecisionProposal =
+        serde_json::from_str(raw.trim()).map_err(|e| schema_error(format!("invalid JSON: {e}")))?;
+    validate_shape(&p).map_err(|e| schema_error(e.to_string()))?;
+    Ok(p)
+}
+
+fn stored_roll(proposal_json: &str) -> Option<RollResult> {
+    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
+    serde_json::from_value(record.get("roll")?.clone()).ok()
+}
+
+fn stored_reactions(proposal_json: &str) -> Vec<Reaction> {
+    serde_json::from_str::<serde_json::Value>(proposal_json)
+        .ok()
+        .and_then(|record| serde_json::from_value(record.get("reactions")?.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// The `location` slot an op writes, as `(subject, value)`.
+fn location_write(op: &LedgerOp) -> Option<(EntityRef, &str)> {
+    let slot = match op {
+        LedgerOp::AddFact { slot, .. } => slot,
+        LedgerOp::SupersedeFact { new, .. } => &new.slot,
+        _ => return None,
+    };
+    (normalize::key(&slot.key) == "location").then_some((slot.subject, slot.value.as_str()))
+}
+
+/// Perception on arrival. When the ops move the PC to a new place, the PC
+/// witnesses the location of each entity that openly stands there:
+/// - an entity already there (and not moved by this Turn) gets a `Know` op,
+///   added at the end, after the clock reaches `clock_after`;
+/// - a World Event that moves an entity there this Turn gets the PC among
+///   the witnesses of that location fact.
+///
+/// Hidden entities and locations placed with `seen = gm` stay unseen
+/// (`world::arrival`).
+fn with_arrival(view: &WorldView, mut ops: Vec<LedgerOp>, clock_after: ClockMin) -> Vec<LedgerOp> {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return ops;
+    };
+    let pc_ref = EntityRef::Id(pc.id);
+    let Some(location) = ops
+        .iter()
+        .filter_map(location_write)
+        .filter(|(subject, _)| *subject == pc_ref)
+        .map(|(_, value)| normalize::value(value))
+        .next_back()
+    else {
+        return ops;
+    };
+    let before = view
+        .live_fact(pc.id, "location")
+        .map(|f| normalize::value(&f.slot.value));
+    if before.as_deref() == Some(location.as_str()) {
+        return ops;
+    }
+    let moved: Vec<EntityRef> = ops
+        .iter()
+        .filter_map(location_write)
+        .map(|(subject, _)| subject)
+        .collect();
+    for op in &mut ops {
+        if let LedgerOp::SupersedeFact { new: fact, .. } = op
+            && fact.source == FactSource::WorldEvent
+            && normalize::key(&fact.slot.key) == "location"
+            && normalize::value(&fact.slot.value) == location
+            && fact.slot.subject != pc_ref
+            && !hidden_ref(view, fact.slot.subject)
+            && !fact.seen_by.contains(&pc_ref)
+        {
+            fact.seen_by.push(pc_ref);
+        }
+        if let LedgerOp::AddFact {
+            slot,
+            source: FactSource::WorldEvent,
+            seen_by,
+            ..
+        } = op
+            && normalize::key(&slot.key) == "location"
+            && normalize::value(&slot.value) == location
+            && slot.subject != pc_ref
+            && !hidden_ref(view, slot.subject)
+            && !seen_by.contains(&pc_ref)
+        {
+            seen_by.push(pc_ref);
+        }
+    }
+    let arrivals: Vec<LedgerOp> = world::arrival(view, &location, clock_after)
+        .into_iter()
+        .filter(|op| match op {
+            LedgerOp::Know {
+                fact_id: Some(id), ..
+            } => view
+                .facts
+                .iter()
+                .find(|f| f.id == *id)
+                .is_none_or(|f| !moved.contains(&EntityRef::Id(f.slot.subject))),
+            _ => true,
+        })
+        .collect();
+    ops.extend(arrivals);
+    ops
+}
+
+fn hidden_ref(view: &WorldView, entity: EntityRef) -> bool {
+    match entity {
+        EntityRef::Id(id) => view
+            .entities
+            .iter()
+            .find(|e| e.id == id)
+            .is_some_and(|e| world::hidden(view, &e.norm_name)),
+        EntityRef::New(_) => false,
+    }
+}
+
+/// The OOC prompt: rules, the Adventure Seed's premise, PC, language and
+/// boundaries, then PC Knowledge, then the question.
+fn ooc_prompt(view: &WorldView, question: &str) -> Prompt {
+    let mut stable = String::from("ADVENTURE\n");
+    if let Some(seed) = &view.adventure_seed {
+        stable.push_str(&format!("Premise: {}\n", one_line(&seed.premise)));
+        stable.push_str(&format!(
+            "PC: {}, {}\n",
+            one_line(&seed.pc.name),
+            one_line(&seed.pc.concept)
+        ));
+        stable.push_str(&format!("Story language: {}\n", seed.story_language));
+        for b in &seed.boundaries {
+            stable.push_str(&format!("Boundary: {}\n", one_line(b)));
+        }
+    }
+    let mut scene = String::from("WHAT THE PC KNOWS\n");
+    let name = |id: u64| {
+        view.entities
+            .iter()
+            .find(|e| e.id == id)
+            .map_or_else(|| "someone".to_owned(), |e| e.name.clone())
+    };
+    for belief in pc_knowledge(view) {
+        match (belief.how, belief.source) {
+            (Knowing::Told, Some(speaker)) => scene.push_str(&format!(
+                "- {} (told by {})\n",
+                one_line(&belief.text),
+                name(speaker)
+            )),
+            _ => scene.push_str(&format!("- {}\n", one_line(&belief.text))),
+        }
+    }
+    Prompt {
+        system: OOC_RULES.to_owned(),
+        stable,
+        scene,
+        recent: format!("QUESTION\n{}\n", one_line(question)),
+    }
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}

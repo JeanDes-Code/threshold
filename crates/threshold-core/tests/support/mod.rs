@@ -57,6 +57,7 @@ fn npc(name: &str, adult: bool) -> SeedEntity {
         name: name.into(),
         kind: EntityKind::Npc,
         adult: Some(adult),
+        hidden: false,
     }
 }
 
@@ -76,6 +77,7 @@ pub fn adventure_seed() -> AdventureSeed {
                 name: "Gate".into(),
                 kind: EntityKind::Place,
                 adult: None,
+                hidden: false,
             },
         ],
         boundaries: vec![],

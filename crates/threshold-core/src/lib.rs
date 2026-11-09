@@ -6,9 +6,10 @@ pub mod normalize;
 pub mod pack;
 pub mod rules;
 pub mod store;
+pub mod turn;
 pub mod world;
 
-pub use model::{Gm, GmError, Prompt, RecordedGm};
+pub use model::{CallKind, Gm, GmError, Prompt, RecordedCall, RecordedGm};
 
 use domain::DecisionProposal;
 

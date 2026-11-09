@@ -1,4 +1,9 @@
-use std::{collections::VecDeque, error::Error, fmt, sync::Mutex};
+use std::{
+    collections::VecDeque,
+    error::Error,
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Prompt {
@@ -32,25 +37,68 @@ impl Error for GmError {}
 pub trait Gm {
     fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError>;
     fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError>;
+    /// The prompt tokens the model reported for the last call, if the adapter
+    /// knows them.
+    fn last_prompt_tokens(&self) -> Option<u64> {
+        None
+    }
 }
 
-#[derive(Debug)]
+/// Which `Gm` method a recorded call went to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallKind {
+    Propose,
+    Narrate,
+}
+
+/// One call a `RecordedGm` received.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecordedCall {
+    pub kind: CallKind,
+    pub prompt: Prompt,
+}
+
+/// A `Gm` that replays recorded responses in order and records every call.
+/// Clones share the same queues and call log, so a test can keep one clone
+/// and hand another to the engine.
+#[derive(Clone, Debug)]
 pub struct RecordedGm {
-    proposals: Mutex<VecDeque<String>>,
-    narrations: Mutex<VecDeque<String>>,
+    proposals: Arc<Mutex<VecDeque<String>>>,
+    narrations: Arc<Mutex<VecDeque<String>>>,
+    calls: Arc<Mutex<Vec<RecordedCall>>>,
 }
 
 impl RecordedGm {
     pub fn new(proposals: Vec<String>, narrations: Vec<String>) -> Self {
         Self {
-            proposals: Mutex::new(proposals.into()),
-            narrations: Mutex::new(narrations.into()),
+            proposals: Arc::new(Mutex::new(proposals.into())),
+            narrations: Arc::new(Mutex::new(narrations.into())),
+            calls: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Every call received so far, in order.
+    pub fn calls(&self) -> Vec<RecordedCall> {
+        self.calls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn record(&self, kind: CallKind, prompt: &Prompt) {
+        self.calls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(RecordedCall {
+                kind,
+                prompt: prompt.clone(),
+            });
     }
 }
 
 impl Gm for RecordedGm {
-    fn propose(&self, _prompt: &Prompt, _schema: &serde_json::Value) -> Result<String, GmError> {
+    fn propose(&self, prompt: &Prompt, _schema: &serde_json::Value) -> Result<String, GmError> {
+        self.record(CallKind::Propose, prompt);
         self.proposals
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -58,7 +106,8 @@ impl Gm for RecordedGm {
             .ok_or_else(|| GmError::Unreachable("no recorded proposal remains".into()))
     }
 
-    fn narrate(&self, _prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+        self.record(CallKind::Narrate, prompt);
         let narration = self
             .narrations
             .lock()

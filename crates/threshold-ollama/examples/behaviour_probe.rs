@@ -37,6 +37,7 @@ fn npc(name: &str) -> SeedEntity {
         name: name.into(),
         kind: EntityKind::Npc,
         adult: Some(true),
+        hidden: false,
     }
 }
 

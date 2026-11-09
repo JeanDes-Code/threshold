@@ -510,6 +510,15 @@ fn decode(s: &str) -> Result<(LedgerOp<EntityId>, Option<u64>), StoreError> {
         Ok((serde_json::from_value(value)?, None))
     }
 }
+pub(super) fn turn_ops(db: &Connection, turn: u64) -> Result<Vec<LedgerOp<EntityId>>, StoreError> {
+    let mut stmt = db.prepare("SELECT op_json FROM ledger WHERE turn_id=?1 ORDER BY seq")?;
+    let rows = stmt
+        .query_map([turn], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.iter()
+        .map(|row| decode(row).map(|(op, _)| op))
+        .collect()
+}
 enum ReplayOp {
     Current(LedgerOp<EntityId>),
     LegacySupersede { old: u64, new: u64 },

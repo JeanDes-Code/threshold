@@ -189,6 +189,10 @@ impl Gm for OllamaGm {
         }
         Ok(narration)
     }
+
+    fn last_prompt_tokens(&self) -> Option<u64> {
+        self.last_metrics().map(|metrics| metrics.prompt_tokens)
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,5 +1,6 @@
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use serde::{Deserialize, Serialize};
 
 use crate::{domain::CheckDraft, store::WorldView};
 
@@ -8,7 +9,7 @@ pub trait Ruleset {
     fn roll(&self, difficulty: u8, seed: u64) -> RollResult;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RollResult {
     pub seed: u64,
     pub difficulty: u8,
