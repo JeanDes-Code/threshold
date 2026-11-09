@@ -45,30 +45,48 @@ pub fn advance(view: &WorldView, minutes: u32) -> Vec<LedgerOp> {
         .map(|entity| entity.id);
     let mut written: HashSet<(EntityId, Key)> = HashSet::new();
     for (_, event) in due.into_iter().take(MAX_EVENTS_PER_TURN) {
-        // Two writes to one slot in one Turn would supersede the same live
-        // fact twice. The later event waits for the next Turn, and so do the
-        // events after it, to keep trigger order.
-        let mut slots = HashSet::new();
-        let collides = event.effects.iter().any(|effect| match effect {
-            Effect::SetFact { slot, .. } => {
-                let target = (slot.subject, normalize::key(&slot.key));
-                written.contains(&target) || !slots.insert(target)
-            }
-            _ => false,
-        });
-        if collides {
+        let effects = last_write_per_slot(&event.effects);
+        // Two events writing one slot in one Turn would supersede the same
+        // live fact twice. The later event waits for the next Turn, and so do
+        // the events after it, to keep trigger order.
+        let slots: Vec<(EntityId, Key)> = effects.iter().filter_map(|e| set_fact_slot(e)).collect();
+        if slots.iter().any(|target| written.contains(target)) {
             break;
         }
         written.extend(slots);
         ops.push(LedgerOp::FireEvent { event_id: event.id });
         ops.extend(
-            event
-                .effects
-                .iter()
+            effects
+                .into_iter()
                 .map(|effect| effect_op(view, event, effect, pc)),
         );
     }
     ops
+}
+
+fn set_fact_slot(effect: &Effect<EntityId>) -> Option<(EntityId, Key)> {
+    match effect {
+        Effect::SetFact { slot, .. } => Some((slot.subject, normalize::key(&slot.key))),
+        _ => None,
+    }
+}
+
+/// The event's effects with only the last `SetFact` per slot kept, in their
+/// order. Checks reject such an event at proposal time; one already scheduled
+/// still fires instead of blocking the queue.
+fn last_write_per_slot(effects: &[Effect<EntityId>]) -> Vec<&Effect<EntityId>> {
+    effects
+        .iter()
+        .enumerate()
+        .filter(|(i, effect)| {
+            set_fact_slot(effect).is_none_or(|target| {
+                !effects[i + 1..]
+                    .iter()
+                    .any(|later| set_fact_slot(later).as_ref() == Some(&target))
+            })
+        })
+        .map(|(_, effect)| effect)
+        .collect()
 }
 
 fn slot_holds(view: &WorldView, slot: &Slot<EntityId>) -> bool {

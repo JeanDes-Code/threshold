@@ -163,6 +163,18 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         }
     }
 
+    if let Some(s) = &p.schedule {
+        let mut effects = HashSet::new();
+        for effect in &s.effects {
+            if !effects.insert(key(effect.subject, &effect.key)) {
+                err(
+                    Some(effect.subject),
+                    format!("schedule.effects write the slot {} twice", effect.key),
+                );
+            }
+        }
+    }
+
     if let Err(shape) = crate::validate_shape(p) {
         errs.push(Rejection::new(CheckKind::Schema, None, shape.to_string()));
     }

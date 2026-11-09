@@ -322,3 +322,140 @@ fn when_trigger_fires_on_live_slot() {
         .unwrap();
     assert_eq!(attitude.attitude, -3);
 }
+
+fn set_fact(subject: u64, key: &str, value: &str) -> Effect {
+    Effect::SetFact {
+        slot: slot(subject, key, value),
+        text: format!("{key} {value}"),
+        seen_by: vec![],
+    }
+}
+
+#[test]
+fn self_colliding_event_does_not_block_queue() {
+    let mut w = world();
+    w.commit(vec![
+        schedule(
+            10,
+            "The gate is marked twice",
+            vec![
+                set_fact(w.gate, "mark", "first"),
+                set_fact(w.gate, "Mark", "second"),
+            ],
+            vec![],
+        ),
+        schedule(
+            11,
+            "Another mark",
+            vec![set_fact(w.gate, "other", "yes")],
+            vec![],
+        ),
+    ]);
+    let ids: Vec<u64> = w.view.events_scheduled.iter().map(|e| e.id).collect();
+    let ops = advance_and_commit(&mut w, 20);
+    assert_eq!(fired(&ops), ids);
+    let mark_writes = ops
+        .iter()
+        .filter(|op| matches!(op, LedgerOp::AddFact { slot, .. } if slot.key == "mark"))
+        .count();
+    assert_eq!(mark_writes, 1);
+    let fresh = w.store.snapshot(w.campaign).unwrap();
+    assert!(fresh.events_scheduled.is_empty());
+    assert_eq!(
+        fresh.live_fact(w.gate, "mark").unwrap().slot.value,
+        "second"
+    );
+    assert!(fresh.live_fact(w.gate, "other").is_some());
+}
+
+#[test]
+fn cross_event_collision_waits_one_turn() {
+    let mut w = world();
+    w.commit(vec![
+        schedule(10, "Mark a", vec![set_fact(w.gate, "mark", "a")], vec![]),
+        schedule(11, "Mark b", vec![set_fact(w.gate, "mark", "b")], vec![]),
+        schedule(12, "Other", vec![set_fact(w.gate, "other", "yes")], vec![]),
+    ]);
+    let ids: Vec<u64> = w.view.events_scheduled.iter().map(|e| e.id).collect();
+    let first = advance_and_commit(&mut w, 20);
+    assert_eq!(fired(&first), ids[..1].to_vec());
+    let fresh = w.store.snapshot(w.campaign).unwrap();
+    assert_eq!(fresh.live_fact(w.gate, "mark").unwrap().slot.value, "a");
+    assert!(fresh.live_fact(w.gate, "other").is_none());
+
+    let second = advance_and_commit(&mut w, 0);
+    assert_eq!(fired(&second), ids[1..].to_vec());
+    let fresh = w.store.snapshot(w.campaign).unwrap();
+    assert_eq!(fresh.live_fact(w.gate, "mark").unwrap().slot.value, "b");
+    assert!(fresh.live_fact(w.gate, "other").is_some());
+    assert!(fresh.events_scheduled.is_empty());
+}
+
+#[test]
+fn when_event_fires_after_earlier_at_event() {
+    let mut w = world();
+    // The When event has the lower id, but its time is the new clock (10),
+    // so the At(5) event fires first; the At(10) event ties on time and
+    // fires after it by id.
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: "Orsel notices the locked gate".into(),
+        trigger: Trigger::When(slot(w.gate, "locked", "yes")),
+        actors: vec![],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![],
+        seen_by: vec![],
+    }]);
+    w.commit(vec![
+        schedule(5, "Early", vec![], vec![]),
+        schedule(10, "On time", vec![], vec![]),
+    ]);
+    let ids: Vec<u64> = w.view.events_scheduled.iter().map(|e| e.id).collect();
+    let ops = advance_and_commit(&mut w, 10);
+    assert_eq!(fired(&ops), vec![ids[1], ids[0], ids[2]]);
+}
+
+#[test]
+fn late_news_does_not_override_newer_witness() {
+    let mut w = world();
+    // Said at minute 10, arrives at 200.
+    w.commit(vec![tell_event(&w, 10, "no", 190)]);
+    advance_and_commit(&mut w, 10);
+    // At minute 100 the PC sees the gate chained.
+    w.commit(vec![schedule(
+        100,
+        "Orsel chains the gate",
+        vec![set_fact(w.gate, "locked", "chained")],
+        vec![w.ada],
+    )]);
+    advance_and_commit(&mut w, 90);
+    advance_and_commit(&mut w, 110);
+    let fresh = w.store.snapshot(w.campaign).unwrap();
+    assert_eq!(fresh.clock_min, 210);
+    let belief = gate_belief(&pc_knowledge(&fresh), w.gate).cloned().unwrap();
+    assert_eq!(belief.value, "chained");
+    assert_eq!(belief.how, Knowing::Witnessed);
+}
+
+#[test]
+fn same_learned_time_goes_to_row_written_last() {
+    let mut w = world();
+    let tell = |speaker: u64, value: &str, delay_min: u32| Effect::Tell {
+        to: EntityRef::Id(w.ada),
+        claim: ClaimDraft {
+            speaker: EntityRef::Id(speaker),
+            slot: slot(w.gate, "locked", value),
+            text: format!("the gate is {value}"),
+        },
+        delay_min,
+    };
+    // Both learned at minute 10; Brann's row arrives later but is written
+    // first, so Orsel's row (written last) is the Belief.
+    let effects = vec![tell(w.brann, "open", 30), tell(w.orsel, "shut", 0)];
+    w.commit(vec![schedule(10, "Two voices", effects, vec![])]);
+    advance_and_commit(&mut w, 60);
+    let fresh = w.store.snapshot(w.campaign).unwrap();
+    let belief = gate_belief(&pc_knowledge(&fresh), w.gate).cloned().unwrap();
+    assert_eq!(belief.value, "shut");
+    assert_eq!(belief.source, Some(w.orsel));
+}

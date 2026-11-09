@@ -17,8 +17,9 @@ pub struct Belief {
 }
 
 /// The holder's Beliefs: the latest `knowledge` row per `(subject, key)` that
-/// has arrived (`arrives_at <= clock`). Latest means the highest `arrives_at`;
-/// on a tie, the row written last. Sorted by subject, then key.
+/// has arrived (`arrives_at <= clock`). Latest means the highest `learned_at`,
+/// the time the information was true or said, so late news never overrides a
+/// newer witness. On a tie, the row written last. Sorted by subject, then key.
 pub fn beliefs(view: &WorldView, holder: EntityId) -> Vec<Belief> {
     let mut latest: BTreeMap<(EntityId, Key), (ClockMin, Belief)> = BTreeMap::new();
     for row in view
@@ -56,9 +57,9 @@ pub fn beliefs(view: &WorldView, holder: EntityId) -> Vec<Belief> {
         let key = (belief.subject, belief.key.clone());
         if latest
             .get(&key)
-            .is_none_or(|(arrived, _)| row.arrives_at >= *arrived)
+            .is_none_or(|(learned, _)| row.learned_at >= *learned)
         {
-            latest.insert(key, (row.arrives_at, belief));
+            latest.insert(key, (row.learned_at, belief));
         }
     }
     latest.into_values().map(|(_, belief)| belief).collect()

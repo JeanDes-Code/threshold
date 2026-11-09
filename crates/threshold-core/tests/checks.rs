@@ -388,6 +388,36 @@ fn two_writes_to_one_slot_rejected() {
 }
 
 #[test]
+fn event_effects_writing_one_slot_twice_rejected() {
+    let w = World::new();
+    let draft = |second_key: &str| EventDraft {
+        in_minutes: 5,
+        actor: e(w.orsel),
+        goal: None,
+        text: "Orsel paces".into(),
+        effects: vec![
+            slot(e(w.orsel), "mood", "calm"),
+            slot(e(w.orsel), second_key, "angry"),
+        ],
+    };
+    let mut p = proposal(Verdict::Allowed);
+    p.schedule = Some(draft("Mood"));
+    let errs = rejected(validate(&p, &w.view), CheckKind::References);
+    assert!(
+        errs.iter()
+            .any(|r| r.check == CheckKind::References && r.reason.contains("schedule.effects"))
+    );
+
+    p.schedule = Some(draft("fatigue"));
+    if let Err(errs) = validate(&p, &w.view) {
+        assert!(
+            !errs.iter().any(|r| r.check == CheckKind::References),
+            "{errs:?}"
+        );
+    }
+}
+
+#[test]
 fn shape_mismatch_rejected() {
     let w = World::new();
     let p = proposal(Verdict::Check);
