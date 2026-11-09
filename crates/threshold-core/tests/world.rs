@@ -5,7 +5,10 @@ mod support;
 use support::World;
 use threshold_core::{
     domain::{ClaimDraft, Effect, EntityRef, Knowing, LedgerOp, Slot, Trigger},
-    world::{Belief, MAX_EVENTS_PER_TURN, advance, beliefs, pc_knowledge},
+    world::{
+        Belief, MAX_EVENTS_PER_TURN, WAIT_DEFAULT_MIN, WAIT_MAX_MIN, advance, beliefs,
+        pc_knowledge, wait_minutes,
+    },
 };
 
 /// Minute 0 is day 1 00:00, so day 4 18:00 is three days and 18 hours later.
@@ -510,4 +513,101 @@ fn canon_of_a_world_event_fact() {
         fresh.live_fact(w.gate, "seal").unwrap().canon,
         Canon::Established
     );
+}
+
+// --- Engine-owned wait --------------------------------------------------------
+
+/// Schedules a World Event with `actor` and `seen_by`, and no effects.
+fn schedule_by(w: &mut World, trigger: Trigger, actor: u64, seen_by: Vec<u64>) {
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: "something happens".into(),
+        trigger,
+        actors: vec![EntityRef::Id(actor)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![],
+        seen_by: seen_by.into_iter().map(EntityRef::Id).collect(),
+    }]);
+}
+
+/// The World fixture with its clock moved past the bell (a GM-only event at
+/// minute 30) to minute 100.
+fn waiting_world() -> World {
+    let mut w = World::new();
+    w.commit(vec![LedgerOp::AdvanceClock { minutes: 100 }]);
+    w
+}
+
+#[test]
+fn wait_without_minutes_takes_the_default() {
+    let w = waiting_world();
+    assert_eq!(wait_minutes(&w.view, 0), WAIT_DEFAULT_MIN);
+    assert!(WAIT_DEFAULT_MIN >= 1);
+}
+
+#[test]
+fn wait_keeps_the_players_duration() {
+    let mut w = waiting_world();
+    let (orsel, brann) = (w.orsel, w.brann);
+    schedule_by(&mut w, Trigger::At(400), orsel, vec![brann]);
+    assert_eq!(wait_minutes(&w.view, 25), 25);
+}
+
+#[test]
+fn wait_is_clamped_to_the_maximum() {
+    let w = waiting_world();
+    assert_eq!(wait_minutes(&w.view, 10_000), WAIT_MAX_MIN);
+}
+
+#[test]
+fn wait_stops_at_the_next_witnessed_event() {
+    let mut w = waiting_world();
+    let (orsel, brann) = (w.orsel, w.brann);
+    schedule_by(&mut w, Trigger::At(150), orsel, vec![brann]);
+    schedule_by(
+        &mut w,
+        Trigger::When(slot(brann, "mood", "angry")),
+        orsel,
+        vec![brann],
+    );
+    schedule_by(&mut w, Trigger::At(130), orsel, vec![brann]);
+    assert_eq!(wait_minutes(&w.view, 0), 30);
+    assert_eq!(wait_minutes(&w.view, 45), 30);
+    // An event exactly at the end of the wait changes nothing.
+    assert_eq!(wait_minutes(&w.view, 30), 30);
+}
+
+#[test]
+fn wait_ignores_past_and_conditional_events() {
+    let mut w = waiting_world();
+    let (orsel, brann) = (w.orsel, w.brann);
+    schedule_by(&mut w, Trigger::At(100), orsel, vec![brann]);
+    schedule_by(&mut w, Trigger::At(40), orsel, vec![brann]);
+    schedule_by(
+        &mut w,
+        Trigger::When(slot(brann, "mood", "angry")),
+        orsel,
+        vec![brann],
+    );
+    assert_eq!(wait_minutes(&w.view, 0), WAIT_DEFAULT_MIN);
+}
+
+/// A GM-only event would end the wait with nothing to show, and its timing
+/// would leak. It does not cut the wait.
+#[test]
+fn wait_ignores_a_gm_only_event() {
+    let mut w = waiting_world();
+    let orsel = w.orsel;
+    schedule_by(&mut w, Trigger::At(130), orsel, vec![]);
+    assert_eq!(wait_minutes(&w.view, 60), 60);
+}
+
+/// An event whose actor is elsewhere happens offscreen. It does not cut
+/// the wait.
+#[test]
+fn wait_ignores_an_event_elsewhere() {
+    let mut w = waiting_world();
+    let (pip, brann) = (w.pip, w.brann);
+    schedule_by(&mut w, Trigger::At(130), pip, vec![brann]);
+    assert_eq!(wait_minutes(&w.view, 60), 60);
 }

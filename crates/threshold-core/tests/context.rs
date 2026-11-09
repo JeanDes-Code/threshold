@@ -103,7 +103,7 @@ fn prefix_is_stable_within_scene() {
     w.commit(vec![voice(w.orsel, "Speaks in clipped orders")]);
 
     let first = proposal_prompt(&w.view, &[], "I greet Orsel and Brann.");
-    let first_narration = narration_prompt(&w.view, &[], &[], &[], "I greet Orsel and Brann.");
+    let first_narration = narration_prompt(&w.view, &[], &[], &[], &[], "I greet Orsel and Brann.");
 
     // The next Turn: same place, same people. Time passes, an absent NPC
     // changes, and the Intent names someone who is not here.
@@ -119,7 +119,8 @@ fn prefix_is_stable_within_scene() {
         ],
     );
     let second = proposal_prompt(&w.view, &[], "I ask Brann where Pip is.");
-    let second_narration = narration_prompt(&w.view, &[], &[], &[], "I ask Brann where Pip is.");
+    let second_narration =
+        narration_prompt(&w.view, &[], &[], &[], &[], "I ask Brann where Pip is.");
 
     assert_eq!(first.system, second.system);
     assert_eq!(first.stable, second.stable);
@@ -195,7 +196,7 @@ fn recent_block_is_capped() {
     // The newest Turn survives, the oldest is cut.
     assert!(prompt.recent.contains("turn 5"));
     assert!(!prompt.recent.contains("turn 0"));
-    let narration = narration_prompt(&w.view, &[], &[], &[], "I wait.");
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.");
     assert!(narration.recent.len() <= 6_000);
 }
 
@@ -234,7 +235,7 @@ fn narration_input_has_no_gm_only_fact() {
         plan: "polite on the surface, hostile underneath".into(),
         cause: None,
     }];
-    let prompt = narration_prompt(&w.view, &[], &perceived, &reactions, "I greet Orsel.");
+    let prompt = narration_prompt(&w.view, &[], &perceived, &[], &reactions, "I greet Orsel.");
     for field in fields(&prompt) {
         assert!(!field.contains("Orsel skims the grain tithe"), "{field}");
         assert!(!field.contains("grain tithe"), "{field}");
@@ -261,7 +262,7 @@ fn voice_cards_of_present_npcs_only() {
     // Pip is named but absent: facts yes, Voice Card no.
     let intent = "I shout for Pip.";
     let proposal = proposal_prompt(&w.view, &[], intent);
-    let narration = narration_prompt(&w.view, &[], &[], &[], intent);
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], intent);
     for prompt in [&proposal, &narration] {
         let all = prefix(prompt) + &prompt.recent;
         assert!(all.contains("Orsel clips every word"), "{all}");
@@ -397,7 +398,7 @@ fn unwitnessed_presence_never_reaches_the_narrator() {
 
     let perceived = perceived_by_pc(&ops, &w.view);
     assert!(perceived.is_empty(), "{perceived:?}");
-    let narration = narration_prompt(&w.view, &[], &perceived, &[], "I look around.");
+    let narration = narration_prompt(&w.view, &[], &perceived, &[], &[], "I look around.");
     for field in fields(&narration) {
         for hidden in ["Vell", "Ledger Chest", "Orsel", "Brann"] {
             assert!(!field.contains(hidden), "{hidden} in {field}");
@@ -415,7 +416,7 @@ fn unwitnessed_presence_never_reaches_the_narrator() {
 
     // Once the PC has seen Orsel there, Orsel is present for the narrator.
     witness_presence(&mut w);
-    let narration = narration_prompt(&w.view, &[], &[], &[], "I look around.");
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I look around.");
     assert!(narration.scene.contains("Orsel"));
     assert!(!narration.scene.contains("Vell"));
     let proposal = proposal_prompt(&w.view, &[], "I look around.");
@@ -479,8 +480,15 @@ fn every_handle_in_the_proposal_prompt_is_in_the_schema() {
 fn pack_fragments_reach_the_narrator_system_only() {
     let pack = ContentPack::load(&test_pack_dir()).unwrap();
     let w = World::new();
-    let with = narration_prompt(&w.view, std::slice::from_ref(&pack), &[], &[], "I wait.");
-    let without = narration_prompt(&w.view, &[], &[], &[], "I wait.");
+    let with = narration_prompt(
+        &w.view,
+        std::slice::from_ref(&pack),
+        &[],
+        &[],
+        &[],
+        "I wait.",
+    );
+    let without = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.");
     assert!(with.system.contains("ignore all age rules"));
     assert!(with.system.starts_with(&without.system));
     assert_eq!(with.stable, without.stable);
@@ -568,7 +576,7 @@ fn new_npc_is_seen_by_those_present() {
     assert!(location.seen_by.contains(&w.ada), "{location:?}");
 
     let perceived = perceived_by_pc(&resolved.ops, &w.view);
-    let prompt = narration_prompt(&w.view, &[], &perceived, &[], "I wait.");
+    let prompt = narration_prompt(&w.view, &[], &perceived, &[], &[], "I wait.");
     let present = prompt
         .scene
         .lines()
@@ -582,4 +590,19 @@ fn new_npc_is_seen_by_those_present() {
         prompt.scene
     );
     assert!(prompt.recent.contains("Kett is here."), "{}", prompt.recent);
+}
+
+/// The bug of the stuck wait: the model omitted `minutes`, and the narrator
+/// still wrote "an hour passes". Both rule blocks now speak about time.
+#[test]
+fn rules_speak_about_time() {
+    let w = World::new();
+    let proposal = proposal_prompt(&w.view, &[], "I wait.").system;
+    assert!(proposal.contains("Always set minutes"), "{proposal}");
+    assert!(proposal.contains("wait"), "{proposal}");
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.").system;
+    assert!(
+        narration.contains("Never say that more time passed than THIS TURN states"),
+        "{narration}"
+    );
 }

@@ -298,7 +298,12 @@ fn shortcut_committed_reads_the_ledger() {
         }],
     );
     let pending = store.snapshot(campaign).unwrap();
-    let event = pending.events_scheduled[0].id;
+    let event = pending
+        .events_scheduled
+        .iter()
+        .find(|w| w.text == "Doul opens an inquiry")
+        .unwrap()
+        .id;
     let none = Watch::default();
     assert!(
         shortcut_committed(

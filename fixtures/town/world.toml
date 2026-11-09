@@ -52,3 +52,11 @@ samples = [
 [[obstacles]]
 subject = "Tithe archive"
 key = "condition"
+
+# A PC who waits in the town hall does not wait forever: this ends the wait.
+[[events]]
+at = 90
+actor = "Orsel"
+text = "Orsel ends the morning session and summons the scribe to his bench"
+effects = [{ subject = "Wren", key = "standing", value = "summoned by the magistrate" }]
+seen_by = ["Doul", "Hessa"]

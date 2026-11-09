@@ -3,9 +3,12 @@
 //! The narrator gets only what the PC can perceive: the PC's place, who the
 //! PC knows is here (`seen_present`), the PC's own Beliefs about them, their
 //! Voice Cards, Content Pack fragments,
-//! the committed ops the PC perceived, and short NPC reaction intents. It
-//! never gets a fact by id, a hidden fact, a key list, a goal or a scheduled
-//! event. This is the real protection against leaks.
+//! the committed ops the PC perceived, the texts of the World Events the PC
+//! witnessed fire this Turn (`world::with_witnessed_events`, filtered by
+//! `guard_events`), and short NPC reaction intents (filtered by
+//! `guard_plans`). It never gets a fact by id, a hidden fact, a key list, a
+//! goal, or a World Event that is still scheduled or that the PC did not
+//! witness. This is the real protection against leaks.
 
 use std::collections::HashSet;
 
@@ -16,7 +19,7 @@ use crate::{
     normalize,
     pack::ContentPack,
     store::WorldView,
-    world::pc_knowledge,
+    world::{hidden, openly_here, pc_knowledge},
 };
 
 pub const NARRATION_RULES: &str = "\
@@ -25,6 +28,7 @@ Narrate only the outcome given under THIS TURN. Never add a fact that changes th
 Never decide the PC's actions, words, or feelings beyond the player's intent.
 NPC intentions tell you how to portray an NPC. Show them through words and manner; never state them as fact.
 Give each NPC the voice of their Voice Card.
+Never say that more time passed than THIS TURN states. If no minutes pass, time does not pass.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
 ";
 
@@ -80,13 +84,59 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
 /// (case, articles, `_` and punctuation count as word breaks). A key or
 /// value that is an entity name is not a secret word: names are public.
 pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
+    let secrets = secret_terms(view);
+    reactions
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            if quotes(&secrets, &r.plan) {
+                r.plan.clear();
+            }
+            r
+        })
+        .collect()
+}
+
+/// The texts of witnessed World Events as the narrator may see them. An
+/// event text is model text, like a plan: a text that names a secret (the
+/// same whole-word match as `guard_plans`) is dropped. So is a text that
+/// names an NPC the PC must not know of: one the Adventure Seed hides, or
+/// one that neither stands openly here (`world::openly_here`) nor is known
+/// to the PC (seen here, or the subject of a PC Belief).
+pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
+    let mut forbidden = secret_terms(view);
+    let present = seen_present(view);
+    let known: HashSet<EntityId> = pc_knowledge(view).into_iter().map(|b| b.subject).collect();
+    forbidden.extend(
+        view.entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::Npc)
+            .filter(|e| {
+                hidden(view, &e.norm_name)
+                    || !(openly_here(view, e.id)
+                        || present.contains(&e.id)
+                        || known.contains(&e.id))
+            })
+            .map(|e| words(&e.name))
+            .filter(|name| !name.is_empty()),
+    );
+    events
+        .iter()
+        .filter(|text| !quotes(&forbidden, text))
+        .cloned()
+        .collect()
+}
+
+/// The words of every live fact the PC holds no Belief about, on a key that
+/// is not a state key: its key and its value. Entity names are public, so a
+/// key or value that is an entity name is left out.
+fn secret_terms(view: &WorldView) -> Vec<Vec<String>> {
     let known: HashSet<(EntityId, String, String)> = pc_knowledge(view)
         .into_iter()
         .map(|b| (b.subject, b.key, normalize::value(&b.value)))
         .collect();
     let names: HashSet<Vec<String>> = view.entities.iter().map(|e| words(&e.name)).collect();
-    let secrets: Vec<Vec<String>> = view
-        .live_facts
+    view.live_facts
         .iter()
         .filter(|f| !is_state_key(&f.slot.key))
         .filter(|f| {
@@ -98,22 +148,16 @@ pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
         })
         .flat_map(|f| [words(&f.slot.key), words(&f.slot.value)])
         .filter(|term| !term.is_empty() && !names.contains(term))
-        .collect();
-    reactions
-        .iter()
-        .map(|r| {
-            let plan = words(&r.plan);
-            let quotes = secrets.iter().any(|term| {
-                plan.windows(term.len())
-                    .any(|window| window == term.as_slice())
-            });
-            let mut r = r.clone();
-            if quotes {
-                r.plan.clear();
-            }
-            r
-        })
         .collect()
+}
+
+/// True when `text` contains one of `terms` as whole words.
+fn quotes(terms: &[Vec<String>], text: &str) -> bool {
+    let text = words(text);
+    terms.iter().any(|term| {
+        text.windows(term.len())
+            .any(|window| window == term.as_slice())
+    })
 }
 
 /// The words of a text after normalization: lowercase, article dropped, and
@@ -131,6 +175,7 @@ pub fn narration_prompt(
     view_after: &WorldView,
     packs: &[ContentPack],
     perceived: &[LedgerOp],
+    events: &[String],
     reactions: &[Reaction],
     intent: &str,
 ) -> Prompt {
@@ -139,7 +184,7 @@ pub fn narration_prompt(
         system: with_fragments(NARRATION_RULES, packs),
         stable: adventure_block(view_after),
         scene: scene(&r),
-        recent: recent(&r, perceived, reactions, intent),
+        recent: recent(&r, perceived, events, reactions, intent),
     }
 }
 
@@ -245,6 +290,7 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
 fn recent(
     r: &Retrieval<'_>,
     perceived: &[LedgerOp],
+    events: &[String],
     reactions: &[Reaction],
     intent: &str,
 ) -> String {
@@ -252,6 +298,7 @@ fn recent(
     let outcome: Vec<String> = perceived
         .iter()
         .filter_map(|op| outcome_line(r, op, perceived))
+        .chain(events.iter().map(|text| format!("- {}\n", one_line(text))))
         .collect();
     if !outcome.is_empty() {
         tail.push_str("Outcome:\n");

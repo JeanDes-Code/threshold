@@ -10,7 +10,7 @@ use threshold_core::{
     CallKind, RecordedGm,
     domain::{
         ActionKind, Canon, DecisionProposal, EntityKind, EventDraft, Handle, Knowing, LedgerOp,
-        NewFact, Reaction, Seen, Stance, Verdict,
+        NewFact, Reaction, Seen, Stance, Trigger, Verdict,
     },
     fixture::{load_adventure_seed, load_world},
     rules::D10,
@@ -113,6 +113,66 @@ fn town_fixture_loads() {
     assert_eq!(world_turn.unwrap().unwrap().record.kind, TurnKind::Setup);
     // The PC witnessed who stands in the town hall at the start.
     assert!(pc_knowledge(&view).iter().any(|b| b.subject == orsel));
+}
+
+/// `world.toml` schedules one World Event: Orsel ends the morning session
+/// at minute 90 and summons the scribe.
+#[test]
+fn town_fixture_schedules_the_summons() {
+    let (store, campaign) = town();
+    let view = store.snapshot(campaign).unwrap();
+    let orsel = id(&view, "Orsel");
+    assert_eq!(view.events_scheduled.len(), 1);
+    let event = &view.events_scheduled[0];
+    assert_eq!(event.trigger, Trigger::At(90));
+    assert_eq!(event.actors, [orsel]);
+    assert!(!event.seen_by.is_empty(), "not a GM-only event");
+    assert!(!event.effects.is_empty());
+}
+
+/// The stuck wait, replayed in the town hall: two waits with `minutes: 0`.
+/// The first takes the default hour; the second ends when Orsel's summons
+/// fires, and the PC, who stands in the same hall, perceives it.
+#[test]
+fn waiting_in_the_town_hall_ends_with_the_summons() {
+    let (store, campaign) = town();
+    let mut wait = proposal(Verdict::Allowed);
+    wait.action = ActionKind::Wait;
+    let gm = RecordedGm::new(
+        vec![json(&wait), json(&wait)],
+        vec!["An hour passes.".into(), "Orsel calls you.".into()],
+    );
+    let mut engine = Engine::new(store, Box::new(gm.clone()), Box::new(D10), vec![], campaign);
+    engine
+        .play_turn("t1".into(), "I wait.", &mut |_: &str| {})
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert_eq!(view.clock_min, 60);
+    assert_eq!(view.events_scheduled.len(), 1);
+    engine
+        .play_turn("t2".into(), "I wait an hour", &mut |_: &str| {})
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert_eq!(view.clock_min, 90);
+    assert!(view.events_scheduled.is_empty(), "the summons fired");
+    let narration = gm
+        .calls()
+        .into_iter()
+        .filter(|c| c.kind == CallKind::Narrate)
+        .map(|c| c.prompt.recent)
+        .next_back()
+        .unwrap();
+    assert!(narration.contains("- 30 minutes pass."), "{narration}");
+    assert!(narration.contains("summons the scribe"), "{narration}");
+    // The PC witnessed what the event wrote.
+    let pc = id(&view, "Wren");
+    assert!(
+        pc_knowledge(&view)
+            .iter()
+            .any(|b| b.subject == pc && b.key == "standing"),
+        "{:?}",
+        pc_knowledge(&view)
+    );
 }
 
 #[test]
@@ -393,4 +453,20 @@ fn plan_guard_matches_whole_words_of_unknown_facts_only() {
         .unwrap();
     let view = store.snapshot(campaign).unwrap();
     assert_eq!(threshold_core::context::guard_plans(&view, &secret), secret);
+}
+
+/// An event text that names an NPC the PC has no reason to know of (Tobin,
+/// at the mill) never reaches the narrator. An NPC in the hall may be named.
+#[test]
+fn event_text_naming_an_unknown_npc_is_dropped() {
+    let (store, campaign) = town();
+    let view = store.snapshot(campaign).unwrap();
+    let texts = vec![
+        "Orsel calls the scribe to his bench".to_owned(),
+        "Tobin slips in by the side door".to_owned(),
+    ];
+    assert_eq!(
+        threshold_core::context::guard_events(&view, &texts),
+        texts[..1]
+    );
 }

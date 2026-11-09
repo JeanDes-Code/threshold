@@ -2,8 +2,8 @@
 //!
 //! `turn` is the only module that follows time order. A play Turn runs:
 //! duplicate `op_id` check, Intent check, proposal prompt, `Gm::propose`,
-//! parse, shape check, Commit checks (one shared retry with the errors in
-//! `recent`), Roll, `to_ops`, World Clock, perception on arrival, one Commit,
+//! parse, shape check, engine-owned wait, Commit checks (one shared retry
+//! with the errors in `recent`), Roll, `to_ops`, World Clock, perception on arrival, one Commit,
 //! then the streamed Narration and `set_narration`. Validation, `to_ops` and
 //! the World Clock all read the snapshot taken before the Turn, so a fact a
 //! World Event writes in this Turn is never a valid cause.
@@ -18,12 +18,12 @@ use serde_json::json;
 use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     context::{
-        adventure_block, guard_plans, narration_prompt, one_line, perceived_by_pc,
+        adventure_block, guard_events, guard_plans, narration_prompt, one_line, perceived_by_pc,
         proposal_context, seen_present,
     },
     domain::{
-        AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource, Handle,
-        Knowing, LedgerOp, Reaction,
+        ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource,
+        Handle, Knowing, LedgerOp, Reaction,
     },
     model::{Gm, GmError, Prompt},
     pack::ContentPack,
@@ -148,12 +148,23 @@ pub struct Engine {
     campaign: CampaignId,
 }
 
+/// What one committed Turn hands to the narrator, before the perception
+/// filter.
+struct Committed<'a> {
+    ops: &'a [LedgerOp],
+    /// Texts of the World Events the PC witnessed.
+    events: &'a [String],
+    reactions: &'a [Reaction],
+}
+
 /// The result of the steps before the Commit.
 struct Planned {
     ops: Vec<LedgerOp>,
     proposal_json: String,
     roll: Option<RollResult>,
     reactions: Vec<Reaction>,
+    /// Texts of the World Events the PC witnessed this Turn.
+    events: Vec<String>,
     minutes: u32,
 }
 
@@ -315,11 +326,16 @@ impl Engine {
             })
             .collect();
         let reactions = stored_reactions(&stored.record.proposal_json);
+        let events = stored_events(&stored.record.proposal_json);
+        let committed = Committed {
+            ops: &ops,
+            events: &events,
+            reactions: &reactions,
+        };
         let narration = self.narrate(
             &stored.record.op_id,
             &view_after,
-            &ops,
-            &reactions,
+            &committed,
             &stored.record.intent,
             on_chunk,
         )?;
@@ -383,15 +399,13 @@ impl Engine {
 
         let view_after = self.store.snapshot(self.campaign)?;
         let step = Instant::now();
+        let committed = Committed {
+            ops: &ops,
+            events: &planned.events,
+            reactions: &planned.reactions,
+        };
         let narration = self
-            .narrate(
-                &op_id,
-                &view_after,
-                &ops,
-                &planned.reactions,
-                &intent,
-                on_chunk,
-            )
+            .narrate(&op_id, &view_after, &committed, &intent, on_chunk)
             .map_err(|e| narration_failed(turn_id, e))?;
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
@@ -407,19 +421,20 @@ impl Engine {
 
     /// The narration call. Only what the PC perceives reaches it, and only
     /// the reactions of NPCs the PC knows are here: the others are offscreen
-    /// intents. A plan that names a secret is dropped (`guard_plans`).
+    /// intents. A plan or a World Event text that names a secret is dropped
+    /// (`guard_plans`, `guard_events`).
     fn narrate(
         &mut self,
         op_id: &str,
         view_after: &WorldView,
-        ops: &[LedgerOp],
-        reactions: &[Reaction],
+        committed: &Committed<'_>,
         intent: &str,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, TurnError> {
-        let perceived = perceived_by_pc(ops, view_after);
+        let perceived = perceived_by_pc(committed.ops, view_after);
         let seen = seen_present(view_after);
-        let reactions: Vec<Reaction> = reactions
+        let reactions: Vec<Reaction> = committed
+            .reactions
             .iter()
             .filter(|r| {
                 match r.npc {
@@ -433,7 +448,15 @@ impl Engine {
             .cloned()
             .collect();
         let reactions = guard_plans(view_after, &reactions);
-        let prompt = narration_prompt(view_after, &self.packs, &perceived, &reactions, intent);
+        let events = guard_events(view_after, committed.events);
+        let prompt = narration_prompt(
+            view_after,
+            &self.packs,
+            &perceived,
+            &events,
+            &reactions,
+            intent,
+        );
         let start = Instant::now();
         let narration = self.gm.narrate(&prompt, on_chunk);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
@@ -462,7 +485,7 @@ impl Engine {
             let raw = raw?;
 
             let step = Instant::now();
-            let parsed = parse(&raw);
+            let parsed = parse(&raw).map(|p| engine_wait(p, view));
             let checked = parsed
                 .as_ref()
                 .map_err(Clone::clone)
@@ -496,8 +519,8 @@ impl Engine {
         unreachable!("the loop returns on its second attempt")
     }
 
-    /// Roll, `to_ops`, World Clock and perception on arrival, for a valid
-    /// proposal.
+    /// Roll, `to_ops`, World Clock, perception on arrival and of World
+    /// Events, for a valid proposal.
     fn resolve(
         &mut self,
         op_id: &str,
@@ -529,12 +552,14 @@ impl Engine {
         );
         let clock_after = view.clock_min + ClockMin::from(p.minutes);
         ops = world::with_arrival(view, ops, clock_after);
+        let (ops, events) = world::with_witnessed_events(view, ops);
         timings.world_ms = ms(step);
         self.log(op_id, "world", &Prompt::default(), "", step)?;
 
         let proposal_json = json!({
             "proposal": p,
             "reactions": resolved.reactions,
+            "events": events,
             "roll": roll,
         })
         .to_string();
@@ -543,6 +568,7 @@ impl Engine {
             proposal_json,
             roll,
             reactions: resolved.reactions,
+            events,
             minutes: p.minutes,
         })
     }
@@ -626,6 +652,16 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
     Ok(p)
 }
 
+/// The engine owns the length of a wait (`world::wait_minutes`), so the
+/// model cannot freeze the World Clock with `minutes: 0`. It runs before the
+/// Commit checks, so they see the final minutes.
+fn engine_wait(mut p: DecisionProposal, view: &WorldView) -> DecisionProposal {
+    if p.action == ActionKind::Wait {
+        p.minutes = world::wait_minutes(view, p.minutes);
+    }
+    p
+}
+
 /// The Roll stored in a Turn's `proposal_json`, if the Turn had a Check.
 pub fn stored_roll(proposal_json: &str) -> Option<RollResult> {
     let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
@@ -636,6 +672,13 @@ fn stored_reactions(proposal_json: &str) -> Vec<Reaction> {
     serde_json::from_str::<serde_json::Value>(proposal_json)
         .ok()
         .and_then(|record| serde_json::from_value(record.get("reactions")?.clone()).ok())
+        .unwrap_or_default()
+}
+
+fn stored_events(proposal_json: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(proposal_json)
+        .ok()
+        .and_then(|record| serde_json::from_value(record.get("events")?.clone()).ok())
         .unwrap_or_default()
 }
 

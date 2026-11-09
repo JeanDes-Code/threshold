@@ -7,7 +7,9 @@
 //! - `world.toml`: what an Adventure Seed cannot express: attitudes, goals,
 //!   Voice Cards and open obstacles. `load_world` commits it as one more
 //!   Setup Turn. Entities are named, never numbered; an obstacle names the
-//!   live fact it stands on by subject and key.
+//!   live fact it stands on by subject and key. An event is a World Event
+//!   due `at` minutes after the campaign starts; `seen_by` names the NPCs
+//!   who witness it (empty means GM only).
 //!
 //! ```toml
 //! [[attitudes]]
@@ -29,6 +31,13 @@
 //! [[obstacles]]
 //! subject = "Tithe archive"
 //! key = "condition"
+//!
+//! [[events]]
+//! at = 90
+//! actor = "Orsel"
+//! text = "Orsel ends the session and summons the scribe"
+//! effects = [{ subject = "Wren", key = "standing", value = "summoned" }]
+//! seen_by = ["Doul"]
 //! ```
 
 use std::{fmt, fs, path::Path};
@@ -36,7 +45,7 @@ use std::{fmt, fs, path::Path};
 use serde::Deserialize;
 
 use crate::{
-    domain::{AdventureSeed, Canon, EntityId, EntityRef, LedgerOp},
+    domain::{AdventureSeed, Canon, Effect, EntityId, EntityRef, LedgerOp, Slot, Trigger},
     normalize,
     store::{CampaignId, CommitError, Store, StoreError, TurnKind, TurnRecord, WorldView},
 };
@@ -79,6 +88,8 @@ struct WorldFile {
     voice_cards: Vec<VoiceCardEntry>,
     #[serde(default)]
     obstacles: Vec<ObstacleEntry>,
+    #[serde(default)]
+    events: Vec<EventEntry>,
 }
 
 #[derive(Deserialize)]
@@ -113,6 +124,27 @@ struct ObstacleEntry {
     key: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EventEntry {
+    /// Minutes from the campaign's start.
+    at: u64,
+    actor: String,
+    text: String,
+    #[serde(default)]
+    effects: Vec<EffectEntry>,
+    #[serde(default)]
+    seen_by: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EffectEntry {
+    subject: String,
+    key: String,
+    value: String,
+}
+
 /// Reads an `adventure-seed.toml` file.
 pub fn load_adventure_seed(path: &Path) -> Result<AdventureSeed, FixtureError> {
     toml::from_str(&read(path)?)
@@ -120,7 +152,8 @@ pub fn load_adventure_seed(path: &Path) -> Result<AdventureSeed, FixtureError> {
 }
 
 /// Commits the `world.toml` at `path` into `campaign` as one Setup Turn:
-/// attitudes, goals, Voice Cards, then obstacles. Every name must match an
+/// attitudes, goals, Voice Cards, obstacles, then World Events (the same
+/// `ScheduleEvent` op a proposal's `schedule` commits). Every name must match an
 /// entity of the campaign. Loading twice fails and commits nothing.
 pub fn load_world(
     store: &mut Store,
@@ -168,6 +201,33 @@ pub fn load_world(
             .filter(|f| f.canon != Canon::Possible)
             .ok_or_else(|| invalid(format!("no live fact {} of {}", o.key, o.subject)))?;
         ops.push(LedgerOp::OpenObstacle { fact_id: fact.id });
+    }
+    for ev in &world.events {
+        let mut effects = Vec::new();
+        for e in &ev.effects {
+            effects.push(Effect::SetFact {
+                slot: Slot {
+                    subject: EntityRef::Id(id(&e.subject)?),
+                    key: normalize::key(&e.key),
+                    value: normalize::value(&e.value),
+                },
+                text: format!("{}: {} = {}", e.subject, e.key, e.value),
+                seen_by: Vec::new(),
+            });
+        }
+        ops.push(LedgerOp::ScheduleEvent {
+            text: ev.text.clone(),
+            trigger: Trigger::At(ev.at),
+            actors: vec![EntityRef::Id(id(&ev.actor)?)],
+            goal_id: None,
+            cause_fact_id: None,
+            effects,
+            seen_by: ev
+                .seen_by
+                .iter()
+                .map(|n| id(n).map(EntityRef::Id))
+                .collect::<Result<_, _>>()?,
+        });
     }
 
     let record = TurnRecord {

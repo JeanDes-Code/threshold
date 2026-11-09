@@ -1,6 +1,8 @@
-use crate::domain::{ClockMin, EntityKind, EntityRef, FactSource, Knowing, LedgerOp};
+use crate::domain::{
+    Canon, ClockMin, EntityId, EntityKind, EntityRef, FactSource, Knowing, LedgerOp,
+};
 use crate::normalize;
-use crate::store::{Fact, WorldView};
+use crate::store::{Fact, WorldEvent, WorldView};
 
 /// Perception on arrival: the PC witnesses the live `location` fact of each
 /// entity that truly stands at `location` in `view`.
@@ -153,6 +155,106 @@ pub fn with_arrival(
         .collect();
     ops.extend(arrivals);
     ops
+}
+
+/// True when the PC would witness `event` if it fired now: the event is not
+/// GM-only (its `seen_by` is not empty), and one of its actors openly stands
+/// at the PC's place (not hidden, not placed with `seen = gm`).
+///
+/// `with_witnessed_events` and the engine-owned wait (`wait_minutes`) share
+/// this rule, so a wait never ends at an event the PC does not see.
+pub fn pc_witnesses(view: &WorldView, event: &WorldEvent) -> bool {
+    !event.seen_by.is_empty() && event.actors.iter().any(|a| openly_here(view, *a))
+}
+
+/// True when `entity` openly stands at the PC's place: it is not the PC, the
+/// Adventure Seed does not hide it, and its location was not placed with
+/// `seen = gm` (`arrival` uses the same two rules).
+pub fn openly_here(view: &WorldView, entity: EntityId) -> bool {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return false;
+    };
+    let Some(here) = view
+        .live_fact(pc.id, "location")
+        .map(|f| normalize::value(&f.slot.value))
+    else {
+        return false;
+    };
+    entity != pc.id
+        && view
+            .entities
+            .iter()
+            .find(|e| e.id == entity)
+            .is_some_and(|e| !hidden(view, &e.norm_name))
+        && view
+            .live_fact(entity, "location")
+            .is_some_and(|f| normalize::value(&f.slot.value) == here && !placed_unseen(f, pc.id))
+}
+
+/// Perception of a World Event: the PC witnesses an event that fires in
+/// `ops` when the PC stays at its place this Turn and `pc_witnesses` holds
+/// for the event before the Turn.
+///
+/// The PC joins the witnesses of each fact the witnessed event writes, and
+/// that fact becomes Persistent, as for any fact the PC sees (the store keeps
+/// state keys Established). Returns the ops and the texts of the witnessed
+/// events, in firing order, for the narrator. The texts are model text: the
+/// narrator receives them only through `context::guard_events`.
+pub fn with_witnessed_events(
+    view: &WorldView,
+    mut ops: Vec<LedgerOp>,
+) -> (Vec<LedgerOp>, Vec<String>) {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return (ops, Vec::new());
+    };
+    let pc_ref = EntityRef::Id(pc.id);
+    let here = view
+        .live_fact(pc.id, "location")
+        .map(|f| normalize::value(&f.slot.value));
+    let moves = ops
+        .iter()
+        .filter_map(location_write)
+        .any(|(subject, value)| subject == pc_ref && Some(normalize::value(value)) != here);
+    if moves {
+        return (ops, Vec::new());
+    }
+    let mut texts = Vec::new();
+    // Whether the event whose effect ops follow is witnessed. `advance` puts
+    // each event's effect ops right after its `FireEvent`.
+    let mut witnessed = false;
+    for op in &mut ops {
+        match op {
+            LedgerOp::FireEvent { event_id } => {
+                let event = view.events_scheduled.iter().find(|e| e.id == *event_id);
+                witnessed = event.is_some_and(|e| pc_witnesses(view, e));
+                if let Some(event) = event.filter(|_| witnessed) {
+                    texts.push(event.text.clone());
+                }
+            }
+            LedgerOp::AddFact {
+                source: FactSource::WorldEvent,
+                seen_by,
+                canon,
+                ..
+            } if witnessed => {
+                if !seen_by.contains(&pc_ref) {
+                    seen_by.push(pc_ref);
+                }
+                *canon = Canon::Persistent;
+            }
+            LedgerOp::SupersedeFact { new, .. }
+                if witnessed && new.source == FactSource::WorldEvent =>
+            {
+                if !new.seen_by.contains(&pc_ref) {
+                    new.seen_by.push(pc_ref);
+                }
+                new.canon = Canon::Persistent;
+            }
+            LedgerOp::ShiftAttitude { .. } | LedgerOp::AddClaim { .. } => {}
+            _ => witnessed = false,
+        }
+    }
+    (ops, texts)
 }
 
 fn hidden_ref(view: &WorldView, entity: EntityRef) -> bool {

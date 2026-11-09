@@ -675,6 +675,127 @@ fn event_moved_npc_is_seen_when_arriving_in_the_same_turn() {
     event_moved_npc_is_seen_on_arrival(true);
 }
 
+/// Regression: the model sent `minutes: 0` on every `wait`, so the World
+/// Clock never moved and the player was stuck. The engine owns the length of
+/// a wait.
+#[test]
+fn wait_without_minutes_moves_the_clock() {
+    let mut wait = proposal(Verdict::Allowed);
+    wait.action = ActionKind::Wait;
+    wait.minutes = 0;
+    let (mut engine, w, _gm) = setup(vec![json(&wait)], vec!["Time passes."]);
+    let before = snapshot(&engine, &w);
+    engine
+        .play_turn("turn-1".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    let after = snapshot(&engine, &w);
+    let turn = engine
+        .store()
+        .turn_by_campaign_op(w.campaign, &"turn-1".to_owned())
+        .unwrap()
+        .unwrap();
+    assert!(turn.record.clock_after > turn.record.clock_before);
+    assert!(after.clock_min > before.clock_min);
+}
+
+/// Schedules a World Event at `at` that sets `subject.key = value`, done by
+/// `actor` and witnessed by `seen_by`.
+fn schedule_seen(
+    w: &mut World,
+    at: u64,
+    actor: u64,
+    seen_by: Vec<u64>,
+    (subject, key, value): (u64, &str, &str),
+) {
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: format!("{key} becomes {value}"),
+        trigger: threshold_core::domain::Trigger::At(at),
+        actors: vec![EntityRef::Id(actor)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![threshold_core::domain::Effect::SetFact {
+            slot: threshold_core::domain::Slot {
+                subject: EntityRef::Id(subject),
+                key: key.into(),
+                value: value.into(),
+            },
+            text: format!("{key} {value}"),
+            seen_by: vec![],
+        }],
+        seen_by: seen_by.into_iter().map(EntityRef::Id).collect(),
+    }]);
+}
+
+/// Plays one 60-minute wait from minute 40 (past the fixture's GM-only
+/// bell) over the World Event that `schedule` adds at minute 70. Returns
+/// the minute after the Turn, whether the event fired, and the narration's
+/// `recent` block.
+fn wait_an_hour_over(schedule: impl FnOnce(&mut World, u64)) -> (u64, bool, String) {
+    let mut w = World::new();
+    w.commit(vec![LedgerOp::AdvanceClock { minutes: 40 }]);
+    schedule(&mut w, 70);
+    let event = w
+        .view
+        .events_scheduled
+        .iter()
+        .find(|e| e.trigger == threshold_core::domain::Trigger::At(70))
+        .unwrap()
+        .id;
+    let mut wait = proposal(Verdict::Allowed);
+    wait.action = ActionKind::Wait;
+    wait.minutes = 60;
+    let gm = RecordedGm::new(vec![json(&wait)], vec!["a".into()]);
+    let campaign = w.campaign;
+    let mut engine = make_engine(w.store, campaign, &gm);
+    let outcome = engine
+        .play_turn("turn-1".into(), "I wait an hour.", &mut no_chunks())
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    let ops = engine.store().turn_ops(outcome.turn_id).unwrap();
+    let fired = ops.contains(&LedgerOp::FireEvent { event_id: event });
+    let recent = prompts(&gm, CallKind::Narrate).pop().unwrap().recent;
+    (view.clock_min, fired, recent)
+}
+
+/// A wait ends when something happens that the PC sees: the next timed
+/// World Event whose actor stands with the PC.
+#[test]
+fn wait_ends_at_the_next_event_and_fires_it() {
+    let (clock, fired, recent) = wait_an_hour_over(|w, at| {
+        let (orsel, brann) = (w.orsel, w.brann);
+        schedule_seen(w, at, orsel, vec![brann], (brann, "mood", "angry"));
+    });
+    assert_eq!(clock, 70);
+    assert!(fired);
+    assert!(recent.contains("- 30 minutes pass."), "{recent}");
+    assert!(recent.contains("- mood becomes angry\n"), "{recent}");
+}
+
+/// A GM-only event does not cut the wait. It still fires, offscreen.
+#[test]
+fn gm_only_event_does_not_cut_a_wait() {
+    let (clock, fired, recent) = wait_an_hour_over(|w, at| {
+        let (orsel, brann) = (w.orsel, w.brann);
+        schedule_seen(w, at, orsel, vec![], (brann, "mood", "angry"));
+    });
+    assert_eq!(clock, 100);
+    assert!(fired);
+    assert!(recent.contains("- 60 minutes pass."), "{recent}");
+    assert!(!recent.contains("mood becomes angry"), "{recent}");
+}
+
+/// An event whose actor is elsewhere does not cut the wait.
+#[test]
+fn event_elsewhere_does_not_cut_a_wait() {
+    let (clock, fired, recent) = wait_an_hour_over(|w, at| {
+        let (pip, brann) = (w.pip, w.brann);
+        schedule_seen(w, at, pip, vec![brann], (pip, "mood", "angry"));
+    });
+    assert_eq!(clock, 100);
+    assert!(fired);
+    assert!(!recent.contains("mood becomes angry"), "{recent}");
+}
+
 /// A `Gm` that reports prompt tokens: 100 for a proposal, 40 for narration.
 struct TokenGm {
     inner: RecordedGm,
@@ -793,4 +914,79 @@ fn correction_facts_have_the_correction_source() {
     assert_eq!(color.created_turn, corrected.turn_id);
     let reverted = engine.store().reverted_turns(w.campaign).unwrap();
     assert_eq!(reverted.into_iter().collect::<Vec<_>>(), [played.turn_id]);
+}
+
+/// Narrates one wait over a World Event at minute 10 with a witness, and
+/// returns the narration's `recent` block and the PC's Beliefs on its slot.
+fn wait_over_witnessed_event(actor: fn(&World) -> u64) -> (String, bool) {
+    wait_over_event_with_text(actor, "Orsel waves the courier over")
+}
+
+/// Like `wait_over_witnessed_event`, with the event's own text.
+fn wait_over_event_with_text(actor: fn(&World) -> u64, text: &str) -> (String, bool) {
+    let mut w = World::new();
+    let (brann, pip) = (w.brann, w.pip);
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: text.into(),
+        trigger: threshold_core::domain::Trigger::At(10),
+        actors: vec![EntityRef::Id(actor(&w))],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![threshold_core::domain::Effect::SetFact {
+            slot: threshold_core::domain::Slot {
+                subject: EntityRef::Id(w.ada),
+                key: "standing".into(),
+                value: "summoned".into(),
+            },
+            text: "Ada: standing = summoned".into(),
+            seen_by: vec![],
+        }],
+        seen_by: vec![EntityRef::Id(brann), EntityRef::Id(pip)],
+    }]);
+    let mut wait = proposal(Verdict::Allowed);
+    wait.action = ActionKind::Wait;
+    let gm = RecordedGm::new(vec![json(&wait)], vec!["a".into()]);
+    let (ada, campaign) = (w.ada, w.campaign);
+    let mut engine = make_engine(w.store, campaign, &gm);
+    engine
+        .play_turn("turn-1".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    let knows = threshold_core::world::pc_knowledge(&view)
+        .iter()
+        .any(|b| b.subject == ada && b.key == "standing");
+    (prompts(&gm, CallKind::Narrate).pop().unwrap().recent, knows)
+}
+
+/// The PC perceives a World Event whose actor stands with the PC.
+#[test]
+fn witnessed_event_reaches_the_narrator() {
+    let (recent, knows) = wait_over_witnessed_event(|w| w.orsel);
+    assert!(
+        recent.contains("- Orsel waves the courier over\n"),
+        "{recent}"
+    );
+    assert!(recent.contains("- 10 minutes pass."), "{recent}");
+    assert!(knows);
+}
+
+/// An event whose actor is elsewhere stays offscreen, even with witnesses.
+#[test]
+fn event_of_an_absent_actor_stays_offscreen() {
+    let (recent, knows) = wait_over_witnessed_event(|w| w.pip);
+    assert!(!recent.contains("waves the courier"), "{recent}");
+    assert!(!recent.contains("summoned"), "{recent}");
+    assert!(!knows);
+}
+
+/// Event text is model text, like a reaction plan. A witnessed event whose
+/// text quotes a GM-only fact never reaches the narrator; the PC still
+/// witnesses what the event wrote.
+#[test]
+fn witnessed_event_text_that_quotes_a_secret_is_dropped() {
+    // `Ada holds = gate key` is GM only.
+    let (recent, knows) = wait_over_event_with_text(|w| w.orsel, "Orsel eyes the gate key");
+    assert!(!recent.contains("gate key"), "{recent}");
+    assert!(!recent.contains("Orsel eyes"), "{recent}");
+    assert!(knows);
 }
