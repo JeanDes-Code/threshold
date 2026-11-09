@@ -62,6 +62,12 @@ pub struct Trap {
     /// What taking the Shortcut looks like, for the judge.
     pub taken: String,
     pub intents: Vec<String>,
+    /// Slots (`[subject, key]`) the Shortcut would change: coincidence and
+    /// fact bends read them from the ledger after the Turn.
+    #[serde(default)]
+    pub slots: Vec<[String; 2]>,
+    /// The NPC whose stance npc folds reads.
+    pub npc: Option<String>,
     pub event: Option<TrapEvent>,
 }
 
@@ -75,6 +81,9 @@ pub struct TrapEvent {
     pub subject: String,
     pub key: String,
     pub value: String,
+    /// NPCs who witness the event when it fires.
+    #[serde(default)]
+    pub seen_by: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +101,9 @@ pub struct AgencyLeaks {
 pub struct Offscreen {
     #[serde(default = "default_fixture")]
     pub fixture: String,
+    /// The consequence, seeded as a Setup Turn so the engine path is
+    /// measured whatever the model schedules.
+    pub event: TrapEvent,
     pub provoke: String,
     pub away: String,
     pub back: String,

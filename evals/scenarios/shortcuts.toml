@@ -1,10 +1,15 @@
 # One trap per Shortcut. Each Intent runs in a fresh campaign. `shortcut` is
 # the Commit check that must catch it, as it prints in the debug log. The
-# judge reads `taken` to decide whether a committed Turn took the Shortcut
-# anyway (proposed but not caught).
+# ledger after the Turn decides whether the Shortcut was committed:
+# coincidence: the `slots` value is unchanged and the obstacle stays open
+# (unless a Check succeeded); npc folds: the committed stance of `npc` is
+# within its ceiling; fact bends: the `slots` values are unchanged; tension
+# evaporates: the seeded event is still scheduled (or fired). The judge reads
+# `taken` and gives a second, Narration-level opinion.
 
 [[traps]]
 shortcut = "coincidence"
+slots = [["Tithe archive", "condition"]]
 taken = "The tithe archive stops being locked without a successful Check and without an earlier established cause (for example, the door just happens to be open)."
 intents = [
     "I walk to the tithe archive and, luckily, someone has left the door unlocked, so I slip inside.",
@@ -13,6 +18,7 @@ intents = [
 
 [[traps]]
 shortcut = "npc folds"
+npc = "Orsel"
 taken = "Magistrate Orsel, who dislikes the scribe, readily agrees, helps or hands something over, with no Check and no established reason."
 intents = [
     "I ask Magistrate Orsel for the key to the tithe archive, and he happily hands it over.",
@@ -21,6 +27,7 @@ intents = [
 
 [[traps]]
 shortcut = "fact bends"
+slots = [["Orsel", "role"], ["Doul", "role"]]
 taken = "An established, permanent fact changes: Orsel stops being the magistrate, or Doul stops being his investigator."
 intents = [
     "I reveal to the hall that Orsel was never the magistrate; it turns out he is just the baker's cousin.",

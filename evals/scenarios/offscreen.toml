@@ -1,9 +1,20 @@
 # The town demo (design section 9) on the live model. The PC provokes Orsel,
-# leaves town for days, comes back and asks Hessa what happened. Observed =
-# an event scheduled on the first Turn fired while the PC was away, and the PC
-# then knows a slot that event wrote.
+# leaves the town hall for the day, comes back and asks Hessa what happened.
+# The consequence is seeded as a Setup Turn before Turn 1, so the engine path
+# (fire offscreen, witness, tell) is measured whatever the model schedules;
+# the report counts the model's own scheduling separately.
 fixture = "town"
 provoke = "In front of the whole hall, I call Magistrate Orsel a pompous thief who robs his own town."
-away = "I leave Varn and ride to Ostry, four days away, and stay there on business for a few days."
-back = "I ride back to Varn and go straight to the town hall."
+# Varn mill is a location in the town fixture (Tobin's).
+away = "I leave the town hall and walk to the Varn mill, where I spend the whole day helping Tobin weigh grain until evening."
+back = "I walk back from the mill to the Varn town hall."
 ask = "I ask Hessa, quietly, what happened while I was away."
+
+[event]
+actor = "Doul"
+text = "Doul opens an inquiry into the scribe"
+in_minutes = 90
+subject = "Wren"
+key = "reputation"
+value = "under_suspicion"
+seen_by = ["Hessa"]

@@ -21,13 +21,14 @@ use std::{
 pub use judge::{GmJudge, JUDGE_RULES, Judge, JudgeError};
 use threshold_core::{
     Gm,
-    domain::{Effect, EntityKind, EntityRef, LedgerOp, Slot, Trigger},
+    checks::ceiling,
+    domain::{Cause, Effect, EntityKind, EntityRef, Handle, LedgerOp, Reaction, Slot, Trigger},
     fixture::{load_adventure_seed, load_world},
     normalize,
     rules::D10,
     store::{CampaignId, Store, TurnKind, TurnRecord, WorldView},
     turn::{Engine, TurnOutcome, create_campaign},
-    world::pc_knowledge,
+    world::{beliefs, pc_knowledge},
 };
 
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
@@ -144,10 +145,12 @@ pub fn run(
     );
     let _ = writeln!(
         out,
-        "- Turn time over every scenario: p50 {}, p90 {} ({} committed Turns)",
+        "- Turn time over every scenario, over committed Turns only: p50 {}, p90 {} ({} committed Turns; not timed: {} failed Turns, of which {} timed out)",
         secs(percentile(&t.total_ms, 50)),
         secs(percentile(&t.total_ms, 90)),
-        t.total_ms.len()
+        t.total_ms.len(),
+        t.failed,
+        t.timed_out
     );
     let _ = writeln!(
         out,
@@ -160,7 +163,10 @@ pub fn run(
         }
     }
     if !t.errors.is_empty() {
-        let _ = writeln!(out, "\n## Turn failures\n");
+        let _ = writeln!(
+            out,
+            "\n## Turn failures\n\nGrouped by cause; a rejected Turn is grouped by the checks that rejected its last attempt.\n"
+        );
         for (error, n) in &t.errors {
             let _ = writeln!(out, "- {n} x {error}");
         }
@@ -183,6 +189,8 @@ struct Ctx<'a> {
 struct Totals {
     turns: usize,
     failed: usize,
+    /// Failed Turns whose model request timed out.
+    timed_out: usize,
     retried: usize,
     total_ms: Vec<u64>,
     /// Turns with at least one proposal attempt the agency check rejected.
@@ -211,16 +219,19 @@ impl Played {
     fn rejected_by(&self) -> Vec<Vec<&'static str>> {
         self.attempts
             .iter()
-            .map(|lines| {
-                let mut kinds: Vec<&'static str> = lines
-                    .iter()
-                    .filter_map(|l| CHECK_NAMES.iter().copied().find(|k| l.starts_with(k)))
-                    .collect();
-                kinds.dedup();
-                kinds
-            })
+            .map(|lines| check_kinds(lines))
             .collect()
     }
+}
+
+/// The distinct checks named in one attempt's rejection lines, in
+/// `CHECK_NAMES` order.
+pub fn check_kinds(lines: &[String]) -> Vec<&'static str> {
+    CHECK_NAMES
+        .iter()
+        .copied()
+        .filter(|k| lines.iter().any(|l| l.starts_with(k)))
+        .collect()
 }
 
 struct Session {
@@ -325,8 +336,23 @@ impl Ctx<'_> {
             }
             Err(e) => {
                 t.failed += 1;
-                let first: String = e.lines().next().unwrap_or("").chars().take(160).collect();
-                *t.errors.entry(first.clone()).or_default() += 1;
+                let rejected = played.rejected_by();
+                let key = match rejected.last() {
+                    Some(kinds)
+                        if !kinds.is_empty() && e.starts_with("the proposal was rejected") =>
+                    {
+                        format!(
+                            "proposal rejected twice; last attempt by: {}",
+                            kinds.join(", ")
+                        )
+                    }
+                    _ if e.contains("timed out") => {
+                        t.timed_out += 1;
+                        "game model request timed out".to_owned()
+                    }
+                    _ => e.lines().next().unwrap_or("").chars().take(160).collect(),
+                };
+                *t.errors.entry(key).or_default() += 1;
                 format!("FAILED {}", e.replace('\n', " | "))
             }
         };
@@ -398,7 +424,7 @@ fn pc_location(view: &WorldView) -> Option<String> {
 fn latency(ctx: &mut Ctx) -> Result<String, String> {
     let sc: scenario::Latency = scenario::load(&ctx.config.root, "latency")?;
     let (mut total, mut propose, mut narrate) = (Vec::new(), Vec::new(), Vec::new());
-    let mut failed = 0;
+    let (mut failed, mut timed_out) = (0, 0);
     for run in 1..=ctx.config.runs {
         let mut s = ctx.session(
             &sc.fixture,
@@ -413,7 +439,10 @@ fn latency(ctx: &mut Ctx) -> Result<String, String> {
                     propose.push(o.timings.propose_ms);
                     narrate.push(o.timings.narrate_ms);
                 }
-                Err(_) => failed += 1,
+                Err(e) => {
+                    failed += 1;
+                    timed_out += usize::from(e.contains("timed out"));
+                }
             }
         }
     }
@@ -426,14 +455,18 @@ fn latency(ctx: &mut Ctx) -> Result<String, String> {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{} Intents per run, {} committed Turns, {failed} failed. Turn time = proposal (with the retry when it runs), checks, Commit and the full streamed Narration.\n",
+        "{} Intents per run, {} committed Turns, {failed} failed ({timed_out} timed out). Turn time = proposal (with the retry when it runs), checks, Commit and the full streamed Narration. The percentiles cover committed Turns only: a failed Turn has no time, so a timeout (60 s) is not in them.\n",
         sc.intents.len(),
         total.len()
     );
-    let _ = writeln!(out, "- Turn time p50: {}", secs(percentile(&total, 50)));
     let _ = writeln!(
         out,
-        "- Turn time p90: {} (pass line <= 15 s warm: {verdict})",
+        "- Turn time p50 (committed Turns only): {}",
+        secs(percentile(&total, 50))
+    );
+    let _ = writeln!(
+        out,
+        "- Turn time p90 (committed Turns only): {} (pass line <= 15 s warm: {verdict}); failed Turns not timed: {failed}, of which {timed_out} timed out",
         secs(p90)
     );
     let _ = writeln!(
@@ -456,6 +489,26 @@ fn latency(ctx: &mut Ctx) -> Result<String, String> {
     Ok(out)
 }
 
+/// True when the ledger state names the detail: an entity name, a fact
+/// (value or text), a Claim, or any holder's Knowledge mentions one of the
+/// `expect` stems. Turn records (Intents, Narrations) do not count.
+pub fn detail_in_ledger(view: &WorldView, expect: &[String]) -> bool {
+    view.entities.iter().any(|e| mentions_any(&e.name, expect))
+        || view
+            .facts
+            .iter()
+            .any(|f| mentions_any(&format!("{} {}", f.slot.value, f.text), expect))
+        || view
+            .claims
+            .iter()
+            .any(|c| mentions_any(&format!("{} {}", c.claim.slot.value, c.claim.text), expect))
+        || view.entities.iter().any(|e| {
+            beliefs(view, e.id)
+                .iter()
+                .any(|b| mentions_any(&format!("{} {}", b.value, b.text), expect))
+        })
+}
+
 fn memory(ctx: &mut Ctx) -> Result<String, String> {
     let sc: scenario::Memory = scenario::load(&ctx.config.root, "memory")?;
     let total = ctx.config.memory_turns.unwrap_or(sc.total_turns);
@@ -475,7 +528,9 @@ fn memory(ctx: &mut Ctx) -> Result<String, String> {
             |_, _| Ok(()),
         )?;
         let mut filler = sc.filler.iter().cycle();
-        let mut was_stored = false;
+        let mut first_seen: Option<usize> = None;
+        let mut at_probe = false;
+        let mut plant_failed = false;
         let mut probe = None;
         for t in 1..=total {
             let intent = if t == sc.plant_turn {
@@ -487,26 +542,25 @@ fn memory(ctx: &mut Ctx) -> Result<String, String> {
             };
             let played = ctx.play(&mut s, intent);
             if t == sc.plant_turn {
+                plant_failed = played.outcome.is_err();
+            }
+            if t >= sc.plant_turn {
                 let view = s.engine.store().snapshot(s.campaign).unwrap_or_default();
-                was_stored = view
-                    .facts
-                    .iter()
-                    .any(|f| mentions_any(&format!("{} {}", f.slot.value, f.text), &sc.expect))
-                    || view.claims.iter().any(|c| {
-                        mentions_any(
-                            &format!("{} {}", c.claim.slot.value, c.claim.text),
-                            &sc.expect,
-                        )
-                    });
+                let present = detail_in_ledger(&view, &sc.expect);
+                if present && first_seen.is_none() {
+                    first_seen = Some(t);
+                }
+                if t + 1 == total {
+                    at_probe = present;
+                }
             }
             if t == total {
                 probe = Some(played);
             }
         }
-        stored += usize::from(was_stored);
+        stored += usize::from(first_seen.is_some());
         let verdict = match probe.as_ref().and_then(Played::narration) {
             None => "failed",
-            Some(text) if mentions_any(text, &sc.expect) => "correct",
             Some(text) => {
                 let task = format!(
                     "Earlier in the game this detail was established: {}\n\nMuch later, the player asked: {}\n\nThe game master narrated:\n{text}\n\nDoes the narration use the detail correctly (correct), state a different detail that contradicts it (wrong), or not use it at all (missing)?",
@@ -514,41 +568,49 @@ fn memory(ctx: &mut Ctx) -> Result<String, String> {
                 );
                 match ctx.ask(&task, &["correct", "wrong", "missing"]).as_deref() {
                     Some("correct") => "correct",
-                    Some("wrong") => "wrong",
-                    Some(_) => "missing",
+                    Some(_) => "not recalled",
                     None => "judge error",
                 }
             }
         };
+        let keyword = probe
+            .as_ref()
+            .and_then(Played::narration)
+            .is_some_and(|text| mentions_any(text, &sc.expect));
         *counts.entry(verdict).or_default() += 1;
         rows.push(format!(
-            "| {run} | {} | {verdict} |",
-            if was_stored { "yes" } else { "no" }
+            "| {run} | {} | {} | {} | {} | {verdict} |",
+            if plant_failed { "failed" } else { "committed" },
+            first_seen.map_or_else(|| "never".to_owned(), |t| format!("Turn {t}")),
+            if at_probe { "yes" } else { "no" },
+            if keyword { "yes" } else { "no" },
         ));
     }
     let n = |k: &str| counts.get(k).copied().unwrap_or(0);
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Detail planted on Turn {}, probed on Turn {total} (the scenario file asks for {}). Correct when the Narration names the detail; otherwise the judge decides wrong or missing.\n",
+        "Detail planted on Turn {}, probed on Turn {total} (the scenario file asks for {}). After every Turn from the plant on, the runner searches the ledger state (entity names, facts, Claims, every holder's Knowledge) for the detail. Correct = the judge confirms the probe Narration uses the detail correctly; a keyword alone is not enough. Wrong and missing are one bucket, not recalled.\n",
         sc.plant_turn, sc.total_turns
     );
     let _ = writeln!(
         out,
-        "- Memory: correct {} / wrong {} / missing {} / Turn failed {} / judge error {} (of {} runs)",
+        "- Memory: correct {} / not recalled {} / Turn failed {} / judge error {} (of {} runs)",
         n("correct"),
-        n("wrong"),
-        n("missing"),
+        n("not recalled"),
         n("failed"),
         n("judge error"),
         ctx.config.runs
     );
     let _ = writeln!(
         out,
-        "- Detail stored in the ledger after the plant Turn (a fact or Claim naming it): {stored} of {} runs\n",
+        "- Detail found in the ledger on some Turn after the plant: {stored} of {} runs\n",
         ctx.config.runs
     );
-    let _ = writeln!(out, "| run | stored | verdict |\n|---|---|---|");
+    let _ = writeln!(
+        out,
+        "| run | plant Turn | first in ledger | in ledger before the probe | keyword in probe Narration | verdict |\n|---|---|---|---|---|---|"
+    );
     for row in rows {
         let _ = writeln!(out, "{row}");
     }
@@ -673,18 +735,23 @@ fn voices(ctx: &mut Ctx) -> Result<String, String> {
     Ok(out)
 }
 
-/// The Setup Turn that schedules a trap's World Event.
-fn schedule_trap_event(
+/// The Setup Turn that schedules a seeded World Event. Returns its id.
+fn schedule_event(
     store: &mut Store,
     campaign: CampaignId,
     event: &scenario::TrapEvent,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let view = store.snapshot(campaign).map_err(|e| e.to_string())?;
     let actor = entity_id(&view, &event.actor)?;
     let subject = entity_id(&view, &event.subject)?;
+    let seen_by = event
+        .seen_by
+        .iter()
+        .map(|n| entity_id(&view, n).map(EntityRef::Id))
+        .collect::<Result<Vec<_>, _>>()?;
     let record = TurnRecord {
         campaign_id: campaign,
-        op_id: "__trap_event__".into(),
+        op_id: "__seeded_event__".into(),
         kind: TurnKind::Setup,
         intent: String::new(),
         proposal_json: "{}".into(),
@@ -707,26 +774,108 @@ fn schedule_trap_event(
                 "{}: {} {} {}",
                 event.text, event.subject, event.key, event.value
             ),
-            seen_by: vec![],
+            seen_by: seen_by.clone(),
         }],
-        seen_by: vec![],
+        seen_by,
     }];
     store.commit(record, ops).map_err(|e| format!("{e:?}"))?;
     let after = store.snapshot(campaign).map_err(|e| e.to_string())?;
-    if after.events_scheduled.is_empty() {
-        return Err("the trap event was not scheduled".into());
-    }
-    Ok(())
+    after
+        .events_scheduled
+        .iter()
+        .filter(|w| w.text == event.text)
+        .map(|w| w.id)
+        .max()
+        .ok_or_else(|| "the seeded event was not scheduled".to_owned())
+}
+
+/// What a trap watches in the ledger, as entity ids.
+#[derive(Clone, Debug, Default)]
+pub struct Watch {
+    /// `(subject, key)` slots that must keep their value.
+    pub slots: Vec<(u64, String)>,
+    /// The NPC whose stance must stay within its ceiling.
+    pub npc: Option<u64>,
+}
+
+/// Did the committed Turn take the Shortcut? Read from the ledger only:
+/// - `coincidence`: a watched slot changed, or its open obstacle closed,
+///   and no Check succeeded this Turn (a won Check is the legal path);
+/// - `fact bends`: a watched slot changed;
+/// - `npc folds`: the stored reaction of the watched NPC is above its
+///   ceiling (computed before the Turn), unless it cites a Check that
+///   succeeded;
+/// - `tension evaporates`: an event scheduled before the Turn is gone
+///   without a `FireEvent` in this Turn's ops.
+pub fn shortcut_committed(
+    shortcut: &str,
+    watch: &Watch,
+    before: &WorldView,
+    after: &WorldView,
+    turn_ops: &[LedgerOp<u64>],
+    proposal_json: &str,
+    roll_success: bool,
+) -> Result<bool, String> {
+    let value = |view: &WorldView, (subject, key): &(u64, String)| {
+        view.live_fact(*subject, key).map(|f| f.slot.value.clone())
+    };
+    let slot_changed = || {
+        watch
+            .slots
+            .iter()
+            .any(|s| value(before, s) != value(after, s))
+    };
+    let obstacle_on = |view: &WorldView, (subject, key): &(u64, String)| {
+        view.obstacles_open.iter().any(|o| {
+            view.facts.iter().any(|f| {
+                f.id == o.fact_id && f.slot.subject == *subject && f.slot.key == normalize::key(key)
+            })
+        })
+    };
+    Ok(match shortcut {
+        "coincidence" => {
+            let closed = watch
+                .slots
+                .iter()
+                .any(|s| obstacle_on(before, s) && !obstacle_on(after, s));
+            (slot_changed() || closed) && !roll_success
+        }
+        "fact bends" => slot_changed(),
+        "npc folds" => {
+            let npc = watch.npc.ok_or("npc folds needs an npc to watch")?;
+            let record: serde_json::Value =
+                serde_json::from_str(proposal_json).map_err(|e| e.to_string())?;
+            let reactions: Vec<Reaction> = record
+                .get("reactions")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|e| e.to_string())?
+                .unwrap_or_default();
+            let limit = ceiling(before, npc);
+            reactions.iter().any(|r| {
+                r.npc == Handle::Entity(npc)
+                    && r.stance > limit
+                    && !(r.cause == Some(Cause::Check) && roll_success)
+            })
+        }
+        "tension evaporates" => before.events_scheduled.iter().any(|w| {
+            !after.events_scheduled.iter().any(|a| a.id == w.id)
+                && !turn_ops.contains(&LedgerOp::FireEvent { event_id: w.id })
+        }),
+        other => return Err(format!("no ledger rule for {other}")),
+    })
 }
 
 #[derive(Default)]
 struct TrapStats {
     turns: usize,
+    failed: usize,
+    committed: usize,
+    shortcut: usize,
     attempts: usize,
     caught: usize,
-    missed: usize,
-    committed: usize,
-    failed: usize,
+    judge_taken: usize,
     judge_errors: usize,
     other: BTreeMap<&'static str, usize>,
 }
@@ -748,8 +897,25 @@ fn shortcuts(ctx: &mut Ctx) -> Result<String, String> {
                 let mut s = ctx.session(&sc.fixture, label, seed, |store, campaign| {
                     trap.event
                         .as_ref()
-                        .map_or(Ok(()), |e| schedule_trap_event(store, campaign, e))
+                        .map_or(Ok(()), |e| schedule_event(store, campaign, e).map(|_| ()))
                 })?;
+                let before = s
+                    .engine
+                    .store()
+                    .snapshot(s.campaign)
+                    .map_err(|e| e.to_string())?;
+                let watch = Watch {
+                    slots: trap
+                        .slots
+                        .iter()
+                        .map(|[subject, key]| Ok((entity_id(&before, subject)?, key.clone())))
+                        .collect::<Result<_, String>>()?,
+                    npc: trap
+                        .npc
+                        .as_deref()
+                        .map(|n| entity_id(&before, n))
+                        .transpose()?,
+                };
                 let played = ctx.play(&mut s, intent);
                 st.turns += 1;
                 st.attempts += played.attempts.len();
@@ -766,20 +932,25 @@ fn shortcuts(ctx: &mut Ctx) -> Result<String, String> {
                     continue;
                 };
                 st.committed += 1;
-                let decision = s
-                    .engine
-                    .store()
+                let store = s.engine.store();
+                let after = store.snapshot(s.campaign).map_err(|e| e.to_string())?;
+                let ops = store.turn_ops(outcome.turn_id).map_err(|e| e.to_string())?;
+                let decision = store
                     .turn(outcome.turn_id)
-                    .ok()
-                    .flatten()
+                    .map_err(|e| e.to_string())?
                     .map(|t| t.record.proposal_json)
                     .unwrap_or_default();
+                let success = outcome.roll.is_some_and(|r| r.success);
+                if shortcut_committed(target, &watch, &before, &after, &ops, &decision, success)? {
+                    st.shortcut += 1;
+                    (ctx.log)(&format!("{} SHORTCUT COMMITTED ({target})", played.op_id));
+                }
                 let task = format!(
-                    "The player tried to make the story take a shortcut. The shortcut is taken when: {}\n\nPlayer intent: {intent}\n\nThe committed decision (JSON; E, F, W and G handles are ids of entities, facts, events and goals):\n{decision}\n\nThe narration:\n{}\n\nWas the shortcut taken?",
+                    "The player tried to make the story take a shortcut. The shortcut is taken when: {}\n\nPlayer intent: {intent}\n\nThe narration:\n{}\n\nDoes the narration show the shortcut taken?",
                     trap.taken, outcome.narration
                 );
                 match ctx.ask(&task, &["yes", "no"]).as_deref() {
-                    Some("yes") => st.missed += 1,
+                    Some("yes") => st.judge_taken += 1,
                     Some(_) => {}
                     None => st.judge_errors += 1,
                 }
@@ -795,14 +966,16 @@ fn shortcuts(ctx: &mut Ctx) -> Result<String, String> {
                 .join(", ")
         };
         table.push(format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} of {} | {} | {} | {} of {} ({} errors) | {} |",
             trap.shortcut,
             st.turns,
-            st.attempts,
-            st.caught + st.missed,
-            st.caught,
-            st.missed,
             st.failed,
+            st.shortcut,
+            st.committed,
+            st.attempts,
+            st.caught,
+            st.judge_taken,
+            st.committed,
             st.judge_errors,
             other
         ));
@@ -810,11 +983,11 @@ fn shortcuts(ctx: &mut Ctx) -> Result<String, String> {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Each trap Intent runs once per run in a fresh campaign. An attempt is one proposal call (the retry is a second attempt). Caught = attempts the named check rejected, read from the debug log. Missed = committed Turns where the judge says the Shortcut was taken anyway. Proposed = caught + missed.\n"
+        "Each trap Intent runs once per run in a fresh campaign. Units: Turns, except the two attempt columns (one attempt = one proposal call; the retry is a second attempt). \"Shortcut committed\" comes from the ledger only, read after the Turn: coincidence = the archive lock slot changed or its obstacle closed without a won Check; npc folds = Orsel's committed stance is above his ceiling; fact bends = a Persistent role changed; tension evaporates = the seeded event left the schedule without firing. Rejected by the check = attempts the named check rejected, read from the debug log. The judge column is a second opinion on the Narration, not the metric.\n"
     );
     let _ = writeln!(
         out,
-        "| Shortcut | trap Turns | attempts | proposed | caught | missed (judge) | Turns failed | judge errors | other rejections |\n|---|---|---|---|---|---|---|---|---|"
+        "| Shortcut | trap Turns | Turns failed | Shortcut committed (ledger, of committed Turns) | attempts | attempts rejected by the named check | judge: Narration shows it taken | other rejections (attempts) |\n|---|---|---|---|---|---|---|---|"
     );
     for row in table {
         let _ = writeln!(out, "{row}");
@@ -931,106 +1104,166 @@ fn agency_leaks(ctx: &mut Ctx) -> Result<String, String> {
     Ok(out)
 }
 
+/// The `action` of a stored proposal record, if any.
+fn stored_action(proposal_json: &str) -> Option<String> {
+    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
+    record
+        .pointer("/proposal/action")
+        .and_then(|a| a.as_str())
+        .map(str::to_owned)
+}
+
 fn offscreen(ctx: &mut Ctx) -> Result<String, String> {
     let sc: scenario::Offscreen = scenario::load(&ctx.config.root, "offscreen")?;
-    let mut observed_runs = 0;
+    let (mut model_scheduled, mut fired_away, mut learned, mut away_runs, mut observed) =
+        (0, 0, 0, 0, 0);
     let mut rows = Vec::new();
     for run in 1..=ctx.config.runs {
+        let mut seeded = 0;
         let mut s = ctx.session(
             &sc.fixture,
             format!("offscreen-r{run}"),
             6_000 + run as u64,
-            |_, _| Ok(()),
+            |store, campaign| {
+                seeded = schedule_event(store, campaign, &sc.event)?;
+                Ok(())
+            },
         )?;
         let snapshot = |s: &Session| s.engine.store().snapshot(s.campaign).unwrap_or_default();
-        let start_at = pc_location(&snapshot(&s));
-        let t1 = ctx.play(&mut s, &sc.provoke);
-        let view1 = snapshot(&s);
-        let scheduled: Vec<_> = match &t1.outcome {
-            Ok(o) => view1
-                .events_scheduled
-                .iter()
-                .filter(|w| w.scheduled_turn == o.turn_id)
-                .cloned()
-                .collect(),
-            Err(_) => Vec::new(),
+        let ops_of = |s: &Session, p: &Played| -> Vec<LedgerOp<u64>> {
+            p.outcome
+                .as_ref()
+                .ok()
+                .and_then(|o| s.engine.store().turn_ops(o.turn_id).ok())
+                .unwrap_or_default()
         };
+        let start_at = pc_location(&snapshot(&s));
+        let fires = |ops: &[LedgerOp<u64>]| ops.contains(&LedgerOp::FireEvent { event_id: seeded });
+
+        // (a) Did the model schedule an event of its own on the provocation?
+        let t1 = ctx.play(&mut s, &sc.provoke);
+        let t1_ops = ops_of(&s, &t1);
+        let scheduled_by_model = t1_ops
+            .iter()
+            .filter(|op| matches!(op, LedgerOp::ScheduleEvent { .. }))
+            .count();
+        model_scheduled += usize::from(scheduled_by_model > 0);
+
         let t2 = ctx.play(&mut s, &sc.away);
+        let t2_ops = ops_of(&s, &t2);
         let away_at = pc_location(&snapshot(&s));
+        let t2_action = t2
+            .outcome
+            .as_ref()
+            .ok()
+            .and_then(|o| s.engine.store().turn(o.turn_id).ok().flatten())
+            .and_then(|t| stored_action(&t.record.proposal_json));
+        let was_away = t2.outcome.is_ok() && away_at.is_some() && away_at != start_at;
+        away_runs += usize::from(was_away);
+
         let t3 = ctx.play(&mut s, &sc.back);
-        let fired_ops: Vec<LedgerOp<u64>> = [&t2, &t3]
-            .iter()
-            .filter_map(|p| p.outcome.as_ref().ok())
-            .flat_map(|o| s.engine.store().turn_ops(o.turn_id).unwrap_or_default())
-            .collect();
-        let fired: Vec<_> = scheduled
-            .iter()
-            .filter(|w| fired_ops.contains(&LedgerOp::FireEvent { event_id: w.id }))
-            .collect();
-        let was_away = away_at.is_some() && away_at != start_at;
+        let t3_ops = ops_of(&s, &t3);
         let t4 = ctx.play(&mut s, &sc.ask);
         let view4 = snapshot(&s);
-        let slots: Vec<(u64, String)> = fired
-            .iter()
-            .flat_map(|w| &w.effects)
-            .filter_map(|e| match e {
-                Effect::SetFact { slot, .. } => Some((slot.subject, slot.key.clone())),
-                _ => None,
-            })
-            .collect();
-        let knows = pc_knowledge(&view4)
-            .iter()
-            .any(|b| slots.contains(&(b.subject, b.key.clone())));
-        let (observed, how) = if fired.is_empty() || !was_away {
-            (false, "no event fired while the PC was away")
-        } else if knows {
-            (true, "PC Knowledge holds a slot the event wrote")
-        } else if let Some(text) = t4.narration() {
-            let events: Vec<&str> = fired.iter().map(|w| w.text.as_str()).collect();
-            let task = format!(
-                "While the player character was away, this happened offscreen: {}\n\nBack in town, the player asked: {}\n\nThe narration:\n{text}\n\nDoes the narration let the player character learn about this event or its result?",
-                events.join("; "),
-                sc.ask
-            );
-            match ctx.ask(&task, &["yes", "no"]).as_deref() {
-                Some("yes") => (true, "the judge reads it in the Narration"),
-                Some(_) => (false, "fired, but the PC did not learn of it"),
-                None => (false, "fired; judge error"),
-            }
+
+        // (b) Did the seeded event fire while the PC was away (on Turn 2)?
+        let fired_on = if fires(&t1_ops) {
+            Some(1)
+        } else if fires(&t2_ops) {
+            Some(2)
+        } else if fires(&t3_ops) {
+            Some(3)
+        } else if fires(&ops_of(&s, &t4)) {
+            Some(4)
         } else {
-            (false, "fired; the last Turn failed")
+            None
         };
-        observed_runs += usize::from(observed);
-        let event_text: Vec<String> = scheduled
+        let fired_while_away = fired_on == Some(2) && was_away;
+        fired_away += usize::from(fired_while_away);
+
+        // (c) Did the PC learn of it through play, by the end of Turn 4?
+        let subject = entity_id(&view4, &sc.event.subject)?;
+        let key = normalize::key(&sc.event.key);
+        let value = normalize::value(&sc.event.value);
+        let belief = pc_knowledge(&view4)
+            .into_iter()
+            .find(|b| b.subject == subject && b.key == key && normalize::value(&b.value) == value);
+        learned += usize::from(belief.is_some());
+        observed += usize::from(fired_while_away && belief.is_some());
+
+        let failed: Vec<String> = [&t1, &t2, &t3, &t4]
             .iter()
-            .map(|w| w.text.chars().take(70).collect())
+            .enumerate()
+            .filter(|(_, p)| p.outcome.is_err())
+            .map(|(i, _)| format!("Turn {} failed", i + 1))
             .collect();
+        let mut how = Vec::new();
+        if !failed.is_empty() {
+            how.push(failed.join(", "));
+        }
+        if !was_away {
+            how.push(format!(
+                "PC did not leave on Turn 2 (action {}, location after: {})",
+                t2_action.as_deref().unwrap_or("none"),
+                away_at.as_deref().unwrap_or("none")
+            ));
+        }
+        how.push(match fired_on {
+            None => "seeded event never fired".to_owned(),
+            Some(2) if was_away => "seeded event fired on Turn 2 while the PC was away".to_owned(),
+            Some(t) => format!("seeded event fired on Turn {t}, not while the PC was away"),
+        });
+        how.push(match &belief {
+            Some(b) => format!(
+                "PC learned it ({:?}{})",
+                b.how,
+                b.source
+                    .and_then(|id| view4.entities.iter().find(|e| e.id == id))
+                    .map_or_else(String::new, |e| format!(" by {}", e.name))
+            ),
+            None => "PC Knowledge does not hold it after Turn 4".to_owned(),
+        });
         rows.push(format!(
-            "| {run} | {} | {} | {} | {} | {how} |",
-            if event_text.is_empty() {
-                "none".into()
-            } else {
-                event_text.join("; ")
-            },
-            if was_away { "yes" } else { "no" },
-            fired.len(),
-            if observed { "yes" } else { "no" }
+            "| {run} | {scheduled_by_model} | {} | {} | {} | {} | {} |",
+            t2_action.as_deref().unwrap_or("failed"),
+            away_at.as_deref().unwrap_or("none"),
+            fired_on.map_or_else(|| "never".to_owned(), |t| format!("Turn {t}")),
+            if belief.is_some() { "yes" } else { "no" },
+            how.join("; ")
         ));
     }
+    let n = ctx.config.runs;
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "Four Turns per run: provoke Orsel, leave for days, ride back, ask Hessa. Observed = an event scheduled on Turn 1 fired while the PC was away and the PC then learned of it.\n"
+        "Four Turns per run: provoke Orsel, leave town for the day, come back, ask Hessa. Before Turn 1 the runner seeds the consequence as a Setup Turn (\"{}\", {} minutes later, witnessed by {}), so the engine path is measured whatever the model schedules. (a) reads the model's own ScheduleEvent ops on Turn 1; (b) needs the seeded event's FireEvent on Turn 2 with the PC's location after Turn 2 away from where it started; (c) needs a PC Belief on the slot the event wrote after Turn 4.\n",
+        sc.event.text,
+        sc.event.in_minutes,
+        if sc.event.seen_by.is_empty() {
+            "nobody".to_owned()
+        } else {
+            sc.event.seen_by.join(", ")
+        }
     );
     let _ = writeln!(
         out,
-        "- Offscreen consequence observed: {} ({observed_runs} of {} runs)\n",
-        if observed_runs > 0 { "yes" } else { "no" },
-        ctx.config.runs
+        "- (a) Model scheduled an event on the provocation Turn: {model_scheduled} of {n}"
     );
     let _ = writeln!(
         out,
-        "| run | event scheduled on Turn 1 | PC away | fired while away | observed | how |\n|---|---|---|---|---|---|"
+        "- (b) Seeded event fired while the PC was away: {fired_away} of {n} (PC away after Turn 2: {away_runs} of {n})"
+    );
+    let _ = writeln!(
+        out,
+        "- (c) PC later learned of it through play: {learned} of {n}"
+    );
+    let _ = writeln!(
+        out,
+        "- Offscreen consequence observed (b and c in the same run): {observed} of {n}\n"
+    );
+    let _ = writeln!(
+        out,
+        "| run | model events on Turn 1 | Turn 2 action | PC location after Turn 2 | seeded event fired | PC learned | how |\n|---|---|---|---|---|---|---|"
     );
     for row in rows {
         let _ = writeln!(out, "{row}");
