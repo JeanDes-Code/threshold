@@ -1,0 +1,35 @@
+# First slice: rulings made during execution
+
+Decisions the controller (Claude Code) took on the owner's behalf while executing the plan, in order. Each line: what was decided — why — what it costs if wrong. Review and undo any you disagree with.
+
+- Ruling: T3 implements rebuild_projections skipping ops of any turn targeted by a RevertTurn op (even though RevertTurn is first used in T8) — data-shape §3.2 ledger is truth; cheap now, costly to retrofit — if wrong, one unused branch.
+- Ruling: T7 tests reuse crates/threshold-core/tests/support/mod.rs from T5 — avoids duplicate fixtures — if wrong, minor duplication.
+- Ruling: Task 2b added as plan amendment (owner approved 2026-11-08): per-Turn handle-enum schema, compact output, shape validation, prompt-reuse measurement — gate unchanged — if wrong, extra schema code only
+- Ruling: Task 2 gate passed despite lock_picking token p90 196 > 180 — the token cap was a proxy for time, and proposal p90 is 4.6 s, well inside 15 s — if wrong, Check Turns run ~1 s longer than planned.
+- Ruling: prompt reuse works on gemma4 (3044-token prompt: 3.3 s cold, ~0.33 s warm; prompt_eval_count always reports the full count) — ADR 0001 ordering stands — if wrong, +3 s per Turn.
+- Ruling: voxtype-off probe skipped — budget met with voxtype on — no cost.
+- Kimi task fd91b6b8 ended with no output (second silent Kimi CLI failure). Ruling: remaining tasks go to gpt-6.1-terra xhigh this run — avoid repeated failed attempts per owner policy — cost: Kimi allowance unused. Terra task f7cd9030 dispatched (BASE 41356f5).
+- Ruling: TurnRecord and turn table get campaign_id (NOT NULL FK); op_id unique per (campaign_id, op_id); store does not assume one campaign per file — data-shape §3.2 omitted it; API already takes CampaignId — if wrong, one extra column. Terra task eb48b6d7 dispatched.
+- Ruling: Task 3 fix round 1 rulings in task-3-fix1.md (promote only newly visible, skip on conflict; SupersedeFact carries the new fact; AddClaim carries listeners+delay; Charter declares entities, subject must be PC/declared/world; new ops for voice cards, goals, corrections, fact causes, roll stakes; recent_turns excludes reverted, limit 6) — review findings + data-shape §3.2 — if wrong, op payload rework in T5/T8.
+- Ruling: Charter renamed Adventure Seed (owner, 2026-11-09). Docs done; code rename (Charter->AdventureSeed, CharterFact->SeedFact, CharterEntity->SeedEntity, charter_json->adventure_seed_json, FactSource::Charter->AdventureSeed, TurnKind::Seed->Setup to avoid "seed" overload) batched as Task 4b after Task 4.
+- Ruling: golden roll test + rand/rand_chacha default-features=false folded into Task 4b — reproducibility from stored seeds is an acceptance criterion — cost: none
+- Ruling: Task 5 blockers — EntityRef::New(n) local refs resolved in store.commit (ledger stores resolved ids); presence = live location equals PC location, NewNpc gets PC location; to_ops returns Resolved{ops, reactions} with clamped stances, no attitude write — see task-5-rulings.md — if wrong, store payload rework.
+- second run stopped INCOMPLETE (only RED store tests, uncommitted). Ruling: split into 5a (store refs + present(), Terra high, task fe6f3eb4) and 5b (checks) — one run could not finish both — cost: one extra review.
+- Ruling: remaining implementation tasks go to a native Claude subagent (Opus) — Kimi CLI failed twice silently, Terra stopped early twice on Task 5 — owner fallback chain ends at Claude — cost: Claude usage instead of Kimi/ChatGPT allowance
+- Ruling: STATE_KEYS (location, condition, injury, fatigue, carrying, mood) are never Persistent and exempt from Fact bends; alive stays protectable; PC location writable only when action == move — the spec's "witnessed = Persistent" froze all changing state, incl. movement — if wrong, some changing state is less protected than intended. Docs (data-shape §3.2 canon, design §6.2) to update after the fix commit.
+- Ruling: Task 8 must validate against the pre-Turn snapshot, so facts from World Events fired in the same Turn are never valid causes.
+- Ruling: checks reject EventDraft with two effects on one slot; advance de-dupes a self-colliding event (last write wins) instead of blocking; Beliefs pick latest learned_at among arrived rows (ties: last written) — stale late news must not override newer witness — if wrong, belief ordering rework
+- Ruling: narrator "present" = entities whose location the PC believes equals the PC's; world-truth present() stays for checks — §6.1 step 7 forbids GM-only facts at narration — if wrong, narrator misses some present NPCs
+- Ruling: reputation, standing, debt join PC_INVOLUNTARY_KEYS and STATE_KEYS — they are others' views and obligations, not PC choices, and they change — if wrong, a slightly wider agency surface
+- Ruling: narration_prompt takes Content Packs (Tone/Scenes) — packs mostly shape narration — cost none
+- Ruling (for Task 8): on Turn setup and whenever the PC location changes, the PC witnesses the location of entities truly present, except entities declared hidden in the Adventure Seed/fixture and except location facts a proposal or event committed with seen=gm.
+- Ruling (for Task 8): the narrator receives only reactions of NPCs in seen_present(); other reactions are offscreen intents — re-review found a hidden NPC's name could reach narration via reactions — cost none
+- Ruling: advance defers events whose writes collide with the proposal's slots — mirrors event-vs-event rule — cost none
+- Ruling: AMENDED 4(b): event-placed presence is open on arrival; covert presence only via seed hidden flag or proposal seen=gm — a strict rule would hide every NPC an event moves — cost: a covert event (assassin) is visible in this slice; a `covert` flag on EventDraft is future work
+- Ruling: accept EventDraft.seen_by (max 2, never the PC) added in Task 9 — without it no NPC can learn of an offscreen event; design §6.1 gives events visibility — cost: proposal schema/prompt changed, live behaviour probe must be re-run (Task 11)
+- Ruling: two Setup Turns (seed via create_campaign, world via load_world "__world__") satisfy "one Setup Turn" in intent — each is atomic — cost none
+- Ruling: Task 10 fix round 1 items in task-10-fix1.md, incl. sanitized error text in the Play failure box — design invariant "no secret reaches the player" — cost small
+- Ruling: fix the metrics per task-11-fix1.md, then the controller re-runs the baseline — numbers must not guide design until each metric measures what it claims — cost ~45 min GPU
+- Ruling: one fix wave per final-fix.md, incl. a deterministic plan-text guard — invariant "no GM-only fact reaches narration" — if wrong, some plans dropped unnecessarily
+- plan guard drops plans that mention public role words (magistrate, clerk) — Ruling: ship as is (fails safe, cannot leak); if the next eval shows the loss matters, exempt only terms already present in the narrator's own prompt text — cost: some plan nuance lost
+- paraphrased plans ("steals from the town") pass the guard — Ruling: measured by the eval judge, not fixable by word matching — cost: residual leak rate
