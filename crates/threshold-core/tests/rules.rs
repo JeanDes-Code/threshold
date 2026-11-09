@@ -5,20 +5,7 @@ use threshold_core::{
 };
 
 fn view() -> WorldView {
-    WorldView {
-        clock_min: 0,
-        entities: vec![],
-        live_facts: vec![],
-        facts: vec![],
-        claims: vec![],
-        obstacles_open: vec![],
-        events_scheduled: vec![],
-        goals_active: vec![],
-        attitudes: vec![],
-        knowledge: vec![],
-        recent_turns: vec![],
-        turn_seq: 0,
-    }
+    WorldView::default()
 }
 
 fn check(helps: &[bool]) -> CheckDraft {

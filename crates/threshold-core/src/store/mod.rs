@@ -159,9 +159,11 @@ pub struct Knowledge {
     pub learned_at: ClockMin,
     pub arrives_at: ClockMin,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WorldView {
     pub clock_min: ClockMin,
+    /// The campaign's Adventure Seed. `None` only in hand-built views.
+    pub adventure_seed: Option<AdventureSeed>,
     pub entities: Vec<Entity>,
     pub live_facts: Vec<Fact>,
     pub facts: Vec<Fact>,
@@ -173,8 +175,14 @@ pub struct WorldView {
     pub knowledge: Vec<Knowledge>,
     pub recent_turns: Vec<StoredTurn>,
     pub turn_seq: u64,
+    /// Every Voice Card, ordered by NPC id.
+    pub voice_cards: Vec<VoiceCard>,
 }
 impl WorldView {
+    pub fn voice_card(&self, npc: EntityId) -> Option<&VoiceCard> {
+        self.voice_cards.iter().find(|card| card.npc == npc)
+    }
+
     pub fn present(&self) -> Vec<EntityId> {
         let Some(pc) = self
             .entities

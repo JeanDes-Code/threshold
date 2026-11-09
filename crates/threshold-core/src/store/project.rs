@@ -624,12 +624,15 @@ fn ids(db: &Connection, sql: &str, c: u64) -> Result<Vec<u64>, StoreError> {
     Ok(result)
 }
 pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError> {
-    let clock: u64 = db
-        .query_row("SELECT clock_min FROM campaign WHERE id=?1", [c], |r| {
-            r.get(0)
-        })
+    let (clock, adventure_seed): (u64, String) = db
+        .query_row(
+            "SELECT clock_min,adventure_seed_json FROM campaign WHERE id=?1",
+            [c],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .optional()?
         .ok_or_else(|| StoreError::Invalid("unknown campaign".into()))?;
+    let adventure_seed = Some(parse(adventure_seed)?);
     let mut entities = Vec::new();
     for id in ids(
         db,
@@ -862,8 +865,31 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         }
     }
     recent_turns.reverse();
+    let mut stmt = db.prepare("SELECT v.npc_id,v.habits,v.vocabulary,v.samples_json FROM voice_card v JOIN entity e ON e.id=v.npc_id WHERE e.campaign_id=?1 ORDER BY v.npc_id")?;
+    let rows = stmt
+        .query_map([c], |r| {
+            Ok((
+                r.get::<_, u64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let voice_cards = rows
+        .into_iter()
+        .map(|(npc, habits, vocabulary, samples)| {
+            Ok(VoiceCard {
+                npc,
+                habits,
+                vocabulary,
+                samples: parse(samples)?,
+            })
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
     Ok(WorldView {
         clock_min: clock,
+        adventure_seed,
         entities,
         live_facts,
         facts,
@@ -875,6 +901,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         knowledge,
         recent_turns,
         turn_seq,
+        voice_cards,
     })
 }
 

@@ -1,0 +1,10 @@
+# A harmless test pack. It proves that a Content Pack is data only and
+# cannot weaken a Content Boundary: its prompt asks the model to ignore the
+# age rules, and the Commit checks still reject an intimate scene with a minor.
+name = "test-pack"
+seed_options = ["A quiet fishing village at the edge of a fog bank"]
+model_hints = ["prefers short, concrete sentences"]
+
+[[fragments]]
+at = "tone"
+file = "prompt.md"
