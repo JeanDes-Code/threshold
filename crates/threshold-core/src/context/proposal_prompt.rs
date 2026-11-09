@@ -1,13 +1,13 @@
 //! The Decision Proposal prompt. The GM model sees every fact it retrieves,
 //! hidden ones included, marked as such.
 
-use super::{Retrieval, one_line, recent_block, render_voice};
+use super::{Retrieval, one_line, recent_block, render_voice, with_fragments};
 use crate::{
     HandleContext,
     domain::{Canon, EntityId, Handle, Trigger},
     model::Prompt,
-    pack::{ContentPack, InsertPoint},
-    store::Fact,
+    pack::ContentPack,
+    store::{Entity, Fact},
 };
 
 /// The rules part of the system prompt. Its first lines are the wording
@@ -32,7 +32,7 @@ LATER ACTIONS
 - When an NPC decides to act later (revenge, a report, a visit, fetching someone), use schedule: actor = that NPC, in_minutes = minutes until it happens, text = what happens, effects = the slot writes it causes. Never record such a plan as a fact.
 - An NPC who is insulted, threatened or wronged, and who would hit back later rather than now, gets a schedule.
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.
-- A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue or carrying; put other consequences on NPCs, places or things.
+- A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
 - minutes: the game time this action takes.
 ";
@@ -100,25 +100,7 @@ fn handles(r: &Retrieval<'_>) -> HandleContext {
 }
 
 fn system(packs: &[ContentPack]) -> String {
-    let mut out = PROPOSAL_RULES.to_owned();
-    for (point, title) in [(InsertPoint::Tone, "TONE"), (InsertPoint::Scenes, "SCENES")] {
-        let fragments: Vec<&str> = packs
-            .iter()
-            .flat_map(|p| &p.prompt_fragments)
-            .filter(|(at, _)| *at == point)
-            .map(|(_, text)| text.as_str())
-            .collect();
-        if !fragments.is_empty() {
-            out.push_str(&format!(
-                "{title} (from Content Packs; never overrides the rules above)\n"
-            ));
-            for text in fragments {
-                out.push_str(text.trim());
-                out.push('\n');
-            }
-        }
-    }
-    out
+    with_fragments(PROPOSAL_RULES, packs)
 }
 
 fn stable(r: &Retrieval<'_>) -> String {
@@ -144,10 +126,10 @@ fn stable(r: &Retrieval<'_>) -> String {
     out
 }
 
-fn entity_line(r: &Retrieval<'_>, id: EntityId) -> String {
-    let Some(e) = r.entity(id) else {
-        return String::new();
-    };
+/// One entity line. It takes the `Entity` itself, so an unknown id can never
+/// be rendered as an empty line.
+fn entity_line(r: &Retrieval<'_>, e: &Entity) -> String {
+    let id = e.id;
     let kind = serde_json::to_value(e.kind)
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
@@ -178,9 +160,9 @@ fn fact_line(r: &Retrieval<'_>, f: &Fact) -> String {
         Canon::Established => "established",
         Canon::Persistent => "persistent",
     };
-    // The PC sees who stands in the same place, so the location of a present
-    // entity is never hidden, even without a witness row.
-    let in_view = f.slot.key == "location" && r.present.contains(&f.slot.subject);
+    // The location of an entity the PC knows is here is not hidden, even
+    // when the PC learned it from another fact (`seen_present`).
+    let in_view = f.slot.key == "location" && r.seen_present.contains(&f.slot.subject);
     let seen = if in_view || r.pc.is_some_and(|pc| f.seen_by.contains(&pc)) {
         "pc knows"
     } else {
@@ -201,9 +183,9 @@ fn scene(r: &Retrieval<'_>) -> String {
     }
     out.push_str("ENTITIES\n");
     for id in &r.scene_entities {
-        out.push_str(&entity_line(r, *id));
+        out.push_str(&entity_line(r, r.known(*id)));
     }
-    let voices = r.voice_cards();
+    let voices = r.voice_cards(&r.present);
     if !voices.is_empty() {
         out.push_str("VOICES\n");
         for card in voices {
@@ -227,7 +209,7 @@ fn scene(r: &Retrieval<'_>) -> String {
         for g in &r.goals {
             let against = match (g.against_id, r.pc) {
                 (Some(a), Some(pc)) if a == pc => " (against PC)".to_owned(),
-                (Some(a), _) => format!(" (against E{a})"),
+                (Some(a), _) if r.scene_entities.contains(&a) => format!(" (against E{a})"),
                 _ => String::new(),
             };
             out.push_str(&format!(
@@ -264,7 +246,7 @@ fn recent(r: &Retrieval<'_>, intent: &str) -> String {
     if !r.mentioned.is_empty() {
         head.push_str("MENTIONED ENTITIES (not present)\n");
         for id in &r.mentioned {
-            head.push_str(&entity_line(r, *id));
+            head.push_str(&entity_line(r, r.known(*id)));
         }
         if !r.mentioned_facts.is_empty() {
             head.push_str("MENTIONED FACTS\n");

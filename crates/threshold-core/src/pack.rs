@@ -24,7 +24,10 @@ use serde::Deserialize;
 
 /// File extensions that mark code. A pack folder that holds one is refused,
 /// whatever the file contains.
-pub const CODE_EXTENSIONS: &[&str] = &["js", "wasm", "so", "dylib", "dll", "rs", "py", "sh"];
+pub const CODE_EXTENSIONS: &[&str] = &[
+    "js", "mjs", "cjs", "ts", "wasm", "so", "dylib", "dll", "exe", "rs", "py", "sh", "bat", "ps1",
+    "lua",
+];
 
 /// Where a fragment goes in the system prompt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -46,6 +49,8 @@ pub struct ContentPack {
 pub enum PackError {
     /// The folder holds a file with a code extension (`CODE_EXTENSIONS`).
     CodeNotAllowed(PathBuf),
+    /// The folder holds a symbolic link, which could point outside the pack.
+    SymlinkNotAllowed(PathBuf),
     Io(String),
     Invalid(String),
 }
@@ -55,6 +60,13 @@ impl fmt::Display for PackError {
         match self {
             Self::CodeNotAllowed(path) => {
                 write!(f, "content packs hold no code: {}", path.display())
+            }
+            Self::SymlinkNotAllowed(path) => {
+                write!(
+                    f,
+                    "content packs hold no symbolic links: {}",
+                    path.display()
+                )
             }
             Self::Io(message) | Self::Invalid(message) => f.write_str(message),
         }
@@ -122,8 +134,9 @@ fn read(path: &Path) -> Result<String, PackError> {
     fs::read_to_string(path).map_err(|e| PackError::Io(format!("{}: {e}", path.display())))
 }
 
-/// Walks `dir` without following symbolic links and refuses any entry whose
-/// extension is in `CODE_EXTENSIONS` (case does not matter).
+/// Walks `dir` and refuses any symbolic link (file or folder: it could point
+/// outside the pack) and any entry whose extension is in `CODE_EXTENSIONS`
+/// (case does not matter).
 fn refuse_code(dir: &Path) -> Result<(), PackError> {
     let entries =
         fs::read_dir(dir).map_err(|e| PackError::Io(format!("{}: {e}", dir.display())))?;
@@ -140,6 +153,9 @@ fn refuse_code(dir: &Path) -> Result<(), PackError> {
         let kind = entry
             .file_type()
             .map_err(|e| PackError::Io(format!("{}: {e}", path.display())))?;
+        if kind.is_symlink() {
+            return Err(PackError::SymlinkNotAllowed(path));
+        }
         if kind.is_dir() {
             refuse_code(&path)?;
         }

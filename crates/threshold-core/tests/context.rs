@@ -7,9 +7,12 @@ use threshold_core::{
     Prompt,
     checks::{CheckKind, validate},
     context::{handle_context, narration_prompt, perceived_by_pc, proposal_prompt},
-    domain::{Canon, EntityRef, FactSource, Handle, LedgerOp, Reaction, Slot, Stance, Verdict},
+    domain::{
+        Canon, EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, Reaction, Slot,
+        Stance, Trigger, Verdict,
+    },
     pack::{ContentPack, InsertPoint, PackError},
-    store::{TurnKind, TurnRecord},
+    store::{Entity, Goal, TurnKind, TurnRecord, WorldView},
 };
 
 fn fields(p: &Prompt) -> [&str; 4] {
@@ -70,13 +73,37 @@ fn play_turn(w: &mut World, op_id: &str, intent: &str, narration: &str, ops: Vec
     w.view = w.store.snapshot(w.campaign).unwrap();
 }
 
+/// Gives the PC a Witnessed row for the seeded locations of Orsel and
+/// Brann, so the PC knows they stand in the gate square.
+fn witness_presence(w: &mut World) {
+    let ops = [w.orsel, w.brann]
+        .into_iter()
+        .map(|npc| LedgerOp::Know {
+            holder: EntityRef::Id(w.ada),
+            fact_id: Some(w.view.live_fact(npc, "location").unwrap().id),
+            claim_id: None,
+            how: Knowing::Witnessed,
+            arrives_at: 0,
+        })
+        .collect();
+    w.commit(ops);
+}
+
+/// Every `E`, `F`, `W` or `G` handle written in a text.
+fn handle_tokens(text: &str) -> Vec<Handle> {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| t.starts_with(['E', 'F', 'W', 'G']))
+        .filter_map(|t| Handle::parse(t).ok())
+        .collect()
+}
+
 #[test]
 fn prefix_is_stable_within_scene() {
     let mut w = World::new();
     w.commit(vec![voice(w.orsel, "Speaks in clipped orders")]);
 
     let first = proposal_prompt(&w.view, &[], "I greet Orsel and Brann.");
-    let first_narration = narration_prompt(&w.view, &[], &[], "I greet Orsel and Brann.");
+    let first_narration = narration_prompt(&w.view, &[], &[], &[], "I greet Orsel and Brann.");
 
     // The next Turn: same place, same people. Time passes, an absent NPC
     // changes, and the Intent names someone who is not here.
@@ -92,7 +119,7 @@ fn prefix_is_stable_within_scene() {
         ],
     );
     let second = proposal_prompt(&w.view, &[], "I ask Brann where Pip is.");
-    let second_narration = narration_prompt(&w.view, &[], &[], "I ask Brann where Pip is.");
+    let second_narration = narration_prompt(&w.view, &[], &[], &[], "I ask Brann where Pip is.");
 
     assert_eq!(first.system, second.system);
     assert_eq!(first.stable, second.stable);
@@ -168,7 +195,7 @@ fn recent_block_is_capped() {
     // The newest Turn survives, the oldest is cut.
     assert!(prompt.recent.contains("turn 5"));
     assert!(!prompt.recent.contains("turn 0"));
-    let narration = narration_prompt(&w.view, &[], &[], "I wait.");
+    let narration = narration_prompt(&w.view, &[], &[], &[], "I wait.");
     assert!(narration.recent.len() <= 6_000);
 }
 
@@ -207,7 +234,7 @@ fn narration_input_has_no_gm_only_fact() {
         plan: "polite on the surface, hostile underneath".into(),
         cause: None,
     }];
-    let prompt = narration_prompt(&w.view, &perceived, &reactions, "I greet Orsel.");
+    let prompt = narration_prompt(&w.view, &[], &perceived, &reactions, "I greet Orsel.");
     for field in fields(&prompt) {
         assert!(!field.contains("Orsel skims the grain tithe"), "{field}");
         assert!(!field.contains("grain tithe"), "{field}");
@@ -226,6 +253,7 @@ fn narration_input_has_no_gm_only_fact() {
 #[test]
 fn voice_cards_of_present_npcs_only() {
     let mut w = World::new();
+    witness_presence(&mut w);
     w.commit(vec![
         voice(w.orsel, "Orsel clips every word"),
         voice(w.pip, "Pip giggles between sentences"),
@@ -233,7 +261,7 @@ fn voice_cards_of_present_npcs_only() {
     // Pip is named but absent: facts yes, Voice Card no.
     let intent = "I shout for Pip.";
     let proposal = proposal_prompt(&w.view, &[], intent);
-    let narration = narration_prompt(&w.view, &[], &[], intent);
+    let narration = narration_prompt(&w.view, &[], &[], &[], intent);
     for prompt in [&proposal, &narration] {
         let all = prefix(prompt) + &prompt.recent;
         assert!(all.contains("Orsel clips every word"), "{all}");
@@ -295,6 +323,13 @@ fn pack_with_code_is_refused() {
         ("rs", "main.rs"),
         ("py", "run.py"),
         ("sh", "run.sh"),
+        ("mjs", "mod.mjs"),
+        ("cjs", "mod.cjs"),
+        ("ts", "mod.ts"),
+        ("lua", "init.lua"),
+        ("exe", "tool.exe"),
+        ("bat", "run.bat"),
+        ("ps1", "run.ps1"),
         ("nested", "assets/deep/x.js"),
     ] {
         let dir = base.join(case);
@@ -328,4 +363,187 @@ fn pack_fragment_path_stays_inside_pack() {
     let result = ContentPack::load(&dir);
     assert!(matches!(result, Err(PackError::Invalid(_))), "{result:?}");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn unwitnessed_presence_never_reaches_the_narrator() {
+    let mut w = World::new();
+    w.commit(vec![
+        LedgerOp::AddEntity {
+            local: Some(1),
+            kind: EntityKind::Npc,
+            name: "Vell".into(),
+            adult: Some(true),
+        },
+        LedgerOp::AddEntity {
+            local: Some(2),
+            kind: EntityKind::Item,
+            name: "Ledger Chest".into(),
+            adult: None,
+        },
+    ]);
+    let id = |w: &World, name: &str| w.view.entities.iter().find(|e| e.name == name).unwrap().id;
+    let (vell, chest) = (id(&w, "Vell"), id(&w, "Ledger Chest"));
+    let hidden_at_gate = |subject| add_fact(subject, "location", "gate square", "hidden", vec![]);
+    let ops = vec![LedgerOp::AddEntity {
+        local: Some(1),
+        kind: EntityKind::Npc,
+        name: "Vell".into(),
+        adult: Some(true),
+    }];
+    w.commit(vec![hidden_at_gate(vell), hidden_at_gate(chest)]);
+    // World truth: both stand in the gate square.
+    assert!(w.view.present().contains(&vell) && w.view.present().contains(&chest));
+
+    let perceived = perceived_by_pc(&ops, &w.view);
+    assert!(perceived.is_empty(), "{perceived:?}");
+    let narration = narration_prompt(&w.view, &[], &perceived, &[], "I look around.");
+    for field in fields(&narration) {
+        for hidden in ["Vell", "Ledger Chest", "Orsel", "Brann"] {
+            assert!(!field.contains(hidden), "{hidden} in {field}");
+        }
+    }
+    let proposal = proposal_prompt(&w.view, &[], "I look around.");
+    let all = prefix(&proposal) + &proposal.recent;
+    for subject in [vell, chest, w.orsel] {
+        let line = all
+            .lines()
+            .find(|l| l.contains(&format!(" E{subject} location = ")))
+            .unwrap_or_else(|| panic!("location of E{subject} missing:\n{all}"));
+        assert!(line.contains("hidden"), "{line}");
+    }
+
+    // Once the PC has seen Orsel there, Orsel is present for the narrator.
+    witness_presence(&mut w);
+    let narration = narration_prompt(&w.view, &[], &[], &[], "I look around.");
+    assert!(narration.scene.contains("Orsel"));
+    assert!(!narration.scene.contains("Vell"));
+    let proposal = proposal_prompt(&w.view, &[], "I look around.");
+    let line = proposal
+        .scene
+        .lines()
+        .find(|l| l.contains(&format!(" E{} location = ", w.orsel)))
+        .unwrap();
+    assert!(line.contains("pc knows"), "{line}");
+}
+
+#[test]
+fn every_handle_in_the_proposal_prompt_is_in_the_schema() {
+    let mut w = World::new();
+    let (orsel, brann, pip, gate) = (w.orsel, w.brann, w.pip, w.gate);
+    w.commit(vec![
+        LedgerOp::AddGoal {
+            npc: EntityRef::Id(brann),
+            text: "Shield Pip".into(),
+            against: Some(EntityRef::Id(gate)),
+        },
+        LedgerOp::ScheduleEvent {
+            text: "Orsel and Pip meet".into(),
+            trigger: Trigger::When(Slot {
+                subject: EntityRef::Id(pip),
+                key: "mood".into(),
+                value: "angry".into(),
+            }),
+            actors: vec![EntityRef::Id(orsel), EntityRef::Id(pip)],
+            goal_id: None,
+            cause_fact_id: None,
+            effects: vec![],
+            seen_by: vec![],
+        },
+    ]);
+    let intent = "I wait.";
+    let prompt = proposal_prompt(&w.view, &[], intent);
+    let handles = handle_context(&w.view, intent);
+    assert!(handles.entities.contains(&Handle::Entity(pip)));
+    for field in fields(&prompt) {
+        for h in handle_tokens(field) {
+            let listed = match h {
+                Handle::Entity(_) => &handles.entities,
+                Handle::Fact(_) => &handles.facts,
+                Handle::WorldEvent(_) => &handles.events,
+                Handle::Goal(_) => &handles.goals,
+                Handle::NewNpc(_) => continue,
+            };
+            assert!(listed.contains(&h), "{h} shown but not in the schema");
+        }
+    }
+    // Pip is shown as an entity with a line of its own.
+    assert!(
+        prompt.scene.contains(&format!("E{pip} Pip")),
+        "{}",
+        prompt.scene
+    );
+}
+
+#[test]
+fn pack_fragments_reach_the_narrator_system_only() {
+    let pack = ContentPack::load(&test_pack_dir()).unwrap();
+    let w = World::new();
+    let with = narration_prompt(&w.view, std::slice::from_ref(&pack), &[], &[], "I wait.");
+    let without = narration_prompt(&w.view, &[], &[], &[], "I wait.");
+    assert!(with.system.contains("ignore all age rules"));
+    assert!(with.system.starts_with(&without.system));
+    assert_eq!(with.stable, without.stable);
+    assert_eq!(with.scene, without.scene);
+    assert_eq!(with.recent, without.recent);
+}
+
+#[cfg(unix)]
+#[test]
+fn pack_with_symlink_is_refused() {
+    let base = Path::new(env!("CARGO_TARGET_TMPDIR")).join("packs-symlink");
+    let pack_toml = std::fs::read_to_string(test_pack_dir().join("pack.toml")).unwrap();
+    let prompt_md = std::fs::read_to_string(test_pack_dir().join("prompt.md")).unwrap();
+    for case in ["file", "dir"] {
+        let dir = base.join(case);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pack.toml"), &pack_toml).unwrap();
+        std::fs::write(dir.join("prompt.md"), &prompt_md).unwrap();
+        assert!(ContentPack::load(&dir).is_ok());
+        let target = if case == "file" {
+            dir.join("prompt.md")
+        } else {
+            base.clone()
+        };
+        std::os::unix::fs::symlink(&target, dir.join("link")).unwrap();
+        let result = ContentPack::load(&dir);
+        assert!(
+            matches!(result, Err(PackError::SymlinkNotAllowed(_))),
+            "{case}: {result:?}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[test]
+fn unknown_entity_ids_are_never_rendered() {
+    let entity = |id, kind, name: &str| Entity {
+        id,
+        kind,
+        name: name.into(),
+        norm_name: name.to_lowercase(),
+        adult: Some(true),
+    };
+    let view = WorldView {
+        entities: vec![
+            entity(1, EntityKind::Pc, "Ada"),
+            entity(2, EntityKind::Npc, "Orsel"),
+        ],
+        // Orsel has no location, so only the PC is present; the goal points
+        // at an entity that does not exist.
+        goals_active: vec![Goal {
+            id: 1,
+            npc_id: 1,
+            text: "Find the stranger".into(),
+            against_id: Some(99),
+        }],
+        ..WorldView::default()
+    };
+    let prompt = proposal_prompt(&view, &[], "I wait.");
+    let handles = handle_context(&view, "I wait.");
+    assert!(!handles.entities.contains(&Handle::Entity(99)));
+    for field in fields(&prompt) {
+        assert!(!field.contains("E99"), "{field}");
+    }
 }

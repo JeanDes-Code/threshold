@@ -1,16 +1,18 @@
 //! The Narration prompt and the narration filter (design §6.1 step 7).
 //!
-//! The narrator gets only what the PC can perceive: the PC's place, who is
-//! present, the PC's own Beliefs about them, the Voice Cards of present NPCs,
+//! The narrator gets only what the PC can perceive: the PC's place, who the
+//! PC knows is here (`seen_present`), the PC's own Beliefs about them, their
+//! Voice Cards, Content Pack fragments,
 //! the committed ops the PC perceived, and short NPC reaction intents. It
 //! never gets a fact by id, a hidden fact, a key list, a goal or a scheduled
 //! event. This is the real protection against leaks.
 
-use super::{Retrieval, one_line, recent_block, render_voice};
+use super::{Retrieval, one_line, recent_block, render_voice, seen_present, with_fragments};
 use crate::{
     domain::{EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction},
     model::Prompt,
     normalize,
+    pack::ContentPack,
     store::WorldView,
     world::pc_knowledge,
 };
@@ -26,7 +28,8 @@ Write two short paragraphs at most. Plain prose, no headings, no lists.
 
 /// The ops of one Turn that the PC perceives, in their order. A fact or a
 /// supersession counts when the PC is among its witnesses; a Claim when the
-/// PC hears it now; a new entity when it is present after the Commit; a Roll
+/// PC hears it now; a new entity when the PC knows it is here after the
+/// Commit (`seen_present`); a Roll
 /// and the passing of time always. Everything else (hidden facts, scheduled
 /// events, goals, attitudes, knowledge rows, Voice Cards) is dropped.
 pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp> {
@@ -39,7 +42,7 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
         return Vec::new();
     };
     let pc_ref = EntityRef::Id(pc);
-    let present = view_after.present();
+    let present = seen_present(view_after);
     ops.iter()
         .filter(|op| match op {
             LedgerOp::AddFact { seen_by, .. } => seen_by.contains(&pc_ref),
@@ -67,13 +70,14 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
 
 pub fn narration_prompt(
     view_after: &WorldView,
+    packs: &[ContentPack],
     perceived: &[LedgerOp],
     reactions: &[Reaction],
     intent: &str,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
     Prompt {
-        system: NARRATION_RULES.to_owned(),
+        system: with_fragments(NARRATION_RULES, packs),
         stable: stable(view_after),
         scene: scene(&r),
         recent: recent(&r, perceived, reactions, intent),
@@ -103,8 +107,10 @@ fn scene(r: &Retrieval<'_>) -> String {
         "Place: {}\n",
         r.location.as_deref().unwrap_or("unknown")
     ));
+    // Only who the PC knows is here (`seen_present`), never world truth: a
+    // hidden watcher must not reach the narrator.
     let others: Vec<String> = r
-        .present
+        .seen_present
         .iter()
         .filter(|id| Some(**id) != r.pc)
         .map(|id| r.name(*id))
@@ -112,14 +118,14 @@ fn scene(r: &Retrieval<'_>) -> String {
     if !others.is_empty() {
         out.push_str(&format!("Present: {}\n", others.join(", ")));
     }
-    let voices = r.voice_cards();
+    let voices = r.voice_cards(&r.seen_present);
     if !voices.is_empty() {
         out.push_str("VOICES\n");
         for card in voices {
             out.push_str(&render_voice(&r.name(card.npc), card));
         }
     }
-    let mut shown: Vec<EntityId> = r.present.clone();
+    let mut shown: Vec<EntityId> = r.seen_present.clone();
     shown.extend(r.place);
     let known: Vec<String> = pc_knowledge(r.view)
         .into_iter()

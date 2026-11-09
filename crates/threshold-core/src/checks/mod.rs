@@ -87,8 +87,18 @@ pub const STANCE_CEILINGS: [(i8, Stance); 4] = [
 pub const GOAL_AGAINST_PC_CEILING: Stance = Stance::Resist;
 
 /// The only keys a proposal fact may set on the PC: things that happen to the
-/// PC, never what the PC chooses, says, feels or wants.
-pub const PC_INVOLUNTARY_KEYS: &[&str] = &["condition", "injury", "fatigue", "carrying"];
+/// PC, never what the PC chooses, says, feels or wants. `reputation`,
+/// `standing` and `debt` are how others see the PC and what the PC owes, not
+/// PC choices.
+pub const PC_INVOLUNTARY_KEYS: &[&str] = &[
+    "condition",
+    "injury",
+    "fatigue",
+    "carrying",
+    "reputation",
+    "standing",
+    "debt",
+];
 
 /// The highest stance `npc` may take toward the PC without a cause. An NPC with
 /// no attitude row (for example one created this Turn) has attitude 0.

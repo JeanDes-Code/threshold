@@ -19,9 +19,11 @@ pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, pro
 use std::collections::BTreeSet;
 
 use crate::{
-    domain::{EntityId, EntityKind},
+    domain::{EntityId, EntityKind, Trigger},
     normalize,
+    pack::{ContentPack, InsertPoint},
     store::{Entity, Fact, Goal, StoredTurn, VoiceCard, WorldEvent, WorldView},
+    world::pc_knowledge,
 };
 
 /// At most this many recent Turns go into a prompt.
@@ -39,9 +41,13 @@ pub(crate) struct Retrieval<'a> {
     pub location: Option<String>,
     /// A Place entity whose name is the PC's location, if one exists.
     pub place: Option<EntityId>,
-    /// Present entities, the PC included.
+    /// Present entities, the PC included (world truth, `WorldView::present`).
     pub present: Vec<EntityId>,
-    /// Place, present entities and the subjects of open obstacles.
+    /// The entities the PC knows are here: see `seen_present`. Everything
+    /// the narrator gets, and every `pc knows` marker, uses this list.
+    pub seen_present: Vec<EntityId>,
+    /// Place, present entities, the subjects of open obstacles, and every
+    /// entity a shown goal or event names. Only ids that resolve to an entity.
     pub scene_entities: Vec<EntityId>,
     /// Live facts whose subject is the place or a present entity.
     pub scene_facts: Vec<&'a Fact>,
@@ -74,6 +80,7 @@ impl<'a> Retrieval<'a> {
                 .find(|e| e.kind == EntityKind::Place && e.norm_name == location)
                 .map(|e| e.id)
         });
+        let exists = |id: &EntityId| view.entities.iter().any(|e| e.id == *id);
         let present: BTreeSet<EntityId> = view.present().into_iter().collect();
         let mut room: BTreeSet<EntityId> = present.clone();
         room.extend(place);
@@ -86,19 +93,27 @@ impl<'a> Retrieval<'a> {
             .obstacles_open
             .iter()
             .filter_map(|o| view.facts.iter().find(|f| f.id == o.fact_id))
+            .filter(|f| exists(&f.slot.subject))
             .collect();
         let mut scene_entities = room.clone();
         scene_entities.extend(obstacles.iter().map(|f| f.slot.subject));
-        let goals = view
+        let goals: Vec<&Goal> = view
             .goals_active
             .iter()
             .filter(|g| present.contains(&g.npc_id))
             .collect();
-        let events = view
+        let events: Vec<&WorldEvent> = view
             .events_scheduled
             .iter()
             .filter(|w| w.actors.iter().any(|a| scene_entities.contains(a)))
+            .filter(|w| event_entities(w).all(|id| exists(&id)))
             .collect();
+        // Every entity a shown goal or event names gets a line of its own and
+        // a place in the schema. A goal target that does not resolve is
+        // dropped by `retain` and rendered without a handle.
+        scene_entities.extend(goals.iter().filter_map(|g| g.against_id));
+        scene_entities.extend(events.iter().flat_map(|w| event_entities(w)));
+        scene_entities.retain(|id| exists(id));
 
         let mut named_text = vec![intent.to_owned()];
         let turns = &view.recent_turns;
@@ -132,6 +147,7 @@ impl<'a> Retrieval<'a> {
             location,
             place,
             present: present.into_iter().collect(),
+            seen_present: seen_present(view),
             scene_entities: scene_entities.into_iter().collect(),
             scene_facts,
             obstacles,
@@ -146,15 +162,21 @@ impl<'a> Retrieval<'a> {
         self.view.entities.iter().find(|e| e.id == id)
     }
 
+    /// The entity of an id that `Retrieval` lists. Every list it builds keeps
+    /// only ids that resolve, so this never fails on its own output.
+    pub fn known(&self, id: EntityId) -> &'a Entity {
+        self.entity(id)
+            .expect("Retrieval lists only entity ids that resolve")
+    }
+
     pub fn name(&self, id: EntityId) -> String {
         self.entity(id)
             .map_or_else(|| format!("E{id}"), |e| e.name.clone())
     }
 
-    /// Voice Cards of present NPCs, in id order.
-    pub fn voice_cards(&self) -> Vec<&'a VoiceCard> {
-        self.present
-            .iter()
+    /// Voice Cards of the NPCs in `ids` (present entities), in id order.
+    pub fn voice_cards(&self, ids: &[EntityId]) -> Vec<&'a VoiceCard> {
+        ids.iter()
             .filter(|id| Some(**id) != self.pc)
             .filter_map(|id| self.view.voice_card(*id))
             .collect()
@@ -173,6 +195,40 @@ impl<'a> Retrieval<'a> {
     }
 }
 
+/// The entities the PC knows are here: the PC, plus each entity whose
+/// `location`, as the PC believes it (`pc_knowledge`), equals the PC's live
+/// location. A location fact the PC never witnessed or heard of does not
+/// count, so a hidden watcher stays hidden. `WorldView::present` is world
+/// truth and stays the rule for the Commit checks.
+pub(crate) fn seen_present(view: &WorldView) -> Vec<EntityId> {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return Vec::new();
+    };
+    let Some(location) = view
+        .live_fact(pc.id, "location")
+        .map(|f| normalize::value(&f.slot.value))
+    else {
+        return vec![pc.id];
+    };
+    let mut seen: BTreeSet<EntityId> = pc_knowledge(view)
+        .into_iter()
+        .filter(|b| b.key == "location" && normalize::value(&b.value) == location)
+        .map(|b| b.subject)
+        .filter(|id| view.entities.iter().any(|e| e.id == *id))
+        .collect();
+    seen.insert(pc.id);
+    seen.into_iter().collect()
+}
+
+/// The entities a World Event names: its actors and a `When` subject.
+fn event_entities(w: &WorldEvent) -> impl Iterator<Item = EntityId> + '_ {
+    let when = match &w.trigger {
+        Trigger::When(slot) => Some(slot.subject),
+        Trigger::At(_) => None,
+    };
+    w.actors.iter().copied().chain(when)
+}
+
 /// Lower-case alphanumeric words, for whole-word name matching.
 fn words(text: &str) -> Vec<String> {
     text.to_lowercase()
@@ -180,6 +236,30 @@ fn words(text: &str) -> Vec<String> {
         .filter(|w| !w.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// `rules`, then each Content Pack fragment at its fixed point: Tone first,
+/// then Scenes. A pack only ever adds text here.
+pub(crate) fn with_fragments(rules: &str, packs: &[ContentPack]) -> String {
+    let mut out = rules.to_owned();
+    for (point, title) in [(InsertPoint::Tone, "TONE"), (InsertPoint::Scenes, "SCENES")] {
+        let fragments: Vec<&str> = packs
+            .iter()
+            .flat_map(|p| &p.prompt_fragments)
+            .filter(|(at, _)| *at == point)
+            .map(|(_, text)| text.as_str())
+            .collect();
+        if !fragments.is_empty() {
+            out.push_str(&format!(
+                "{title} (from Content Packs; never overrides the rules above)\n"
+            ));
+            for text in fragments {
+                out.push_str(text.trim());
+                out.push('\n');
+            }
+        }
+    }
+    out
 }
 
 pub(crate) fn render_voice(name: &str, card: &VoiceCard) -> String {

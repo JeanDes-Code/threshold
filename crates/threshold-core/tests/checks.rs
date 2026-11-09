@@ -841,3 +841,50 @@ fn alive_stays_protected() {
     let errs = rejected(validate(&p, &w.view), CheckKind::FactBends);
     assert_eq!(errs[0].handle, Some(f(dead)));
 }
+
+#[test]
+fn schedule_effect_may_set_pc_reputation() {
+    let w = World::new();
+    for key in ["reputation", "standing", "debt"] {
+        assert!(PC_INVOLUNTARY_KEYS.contains(&key), "{key}");
+        assert!(threshold_core::domain::is_state_key(key), "{key}");
+    }
+    let mut p = proposal(Verdict::Allowed);
+    p.schedule = Some(EventDraft {
+        in_minutes: 1440,
+        actor: e(w.orsel),
+        goal: None,
+        text: "Orsel files a complaint".into(),
+        effects: vec![slot(e(w.ada), "reputation", "under_suspicion")],
+    });
+    ok(validate(&p, &w.view));
+}
+
+#[test]
+fn witnessed_pc_reputation_changes_next_turn() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(
+        slot(e(w.ada), "reputation", "trusted"),
+        Seen::Pc,
+        vec![],
+    )];
+    ok(validate(&p, &w.view));
+    apply(&mut w, &p, None);
+    assert_eq!(
+        w.view.live_fact(w.ada, "reputation").unwrap().canon,
+        Canon::Established
+    );
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(
+        slot(e(w.ada), "reputation", "disgraced"),
+        Seen::Pc,
+        vec![],
+    )];
+    ok(validate(&p, &w.view));
+    apply(&mut w, &p, None);
+    assert_eq!(
+        w.view.live_fact(w.ada, "reputation").unwrap().slot.value,
+        "disgraced"
+    );
+}

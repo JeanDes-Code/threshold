@@ -20,6 +20,9 @@ pub const STATE_KEYS: &[&str] = &[
     "fatigue",
     "carrying",
     "mood",
+    "reputation",
+    "standing",
+    "debt",
 ];
 
 /// True when `key`, once normalized, is in `STATE_KEYS`.
