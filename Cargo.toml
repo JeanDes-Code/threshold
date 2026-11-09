@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/threshold-core", "crates/threshold-ollama"]
+members = ["crates/threshold-core", "crates/threshold-ollama", "src-tauri"]
 resolver = "3"
 
 [workspace.package]
