@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use support::*;
 use threshold_core::{
     Prompt,
-    checks::{CheckKind, validate},
+    checks::{CheckKind, to_ops, validate},
     context::{handle_context, narration_prompt, perceived_by_pc, proposal_prompt},
     domain::{
         Canon, EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, Reaction, Slot,
@@ -546,4 +546,40 @@ fn unknown_entity_ids_are_never_rendered() {
     for field in fields(&prompt) {
         assert!(!field.contains("E99"), "{field}");
     }
+}
+
+#[test]
+fn new_npc_is_seen_by_those_present() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.new_npcs = vec![new_npc(1, "Kett", true)];
+    let valid = validate(&p, &w.view).expect("valid proposal");
+    let resolved = to_ops(valid, None, &w.view, w.view.turn_seq + 1);
+    play_turn(&mut w, "turn-kett", "I wait.", "", resolved.ops.clone());
+
+    let kett = w
+        .view
+        .entities
+        .iter()
+        .find(|e| e.name == "Kett")
+        .unwrap()
+        .id;
+    let location = w.view.live_fact(kett, "location").unwrap();
+    assert!(location.seen_by.contains(&w.ada), "{location:?}");
+
+    let perceived = perceived_by_pc(&resolved.ops, &w.view);
+    let prompt = narration_prompt(&w.view, &[], &perceived, &[], "I wait.");
+    let present = prompt
+        .scene
+        .lines()
+        .find(|l| l.starts_with("Present:"))
+        .unwrap_or_else(|| panic!("no Present line:\n{}", prompt.scene));
+    assert!(present.contains("Kett"), "{present}");
+    let voices = prompt.scene.split("VOICES\n").nth(1).expect("VOICES block");
+    assert!(
+        voices.contains("Kett: Clipped words, never says please."),
+        "{}",
+        prompt.scene
+    );
+    assert!(prompt.recent.contains("Kett is here."), "{}", prompt.recent);
 }

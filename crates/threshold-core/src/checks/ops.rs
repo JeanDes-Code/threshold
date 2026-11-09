@@ -148,11 +148,14 @@ struct Builder<'a> {
 
 impl Builder<'_> {
     /// Each new NPC: the entity, its Voice Card from the one-line voice seed,
-    /// and a `location` fact equal to the PC's, so the NPC is present.
+    /// and a `location` fact equal to the PC's, so the NPC is present. The
+    /// NPC is introduced into the Scene, so everyone present witnesses that
+    /// location, the PC included (as `Seen::Present`).
     fn new_npcs(&mut self) {
         let pc_location = pc(self.view)
             .and_then(|pc| self.view.live_fact(pc, "location"))
             .map(|f| f.slot.value.clone());
+        let witnesses = self.holders(Seen::Present);
         for npc in &self.p.new_npcs {
             let local = new_local(npc.id);
             self.ops.push(LedgerOp::AddEntity {
@@ -177,7 +180,7 @@ impl Builder<'_> {
                     text: format!("{} is at {location}.", npc.name),
                     canon: Canon::Established,
                     source: FactSource::Proposal,
-                    seen_by: Vec::new(),
+                    seen_by: witnesses.clone(),
                     causes: Vec::new(),
                 });
             }
