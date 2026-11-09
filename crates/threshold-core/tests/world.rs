@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 mod support;
 
 use support::World;
@@ -43,7 +45,7 @@ fn world() -> World {
 /// Runs `advance`, commits its ops through the real store as one Turn, and
 /// returns the ops.
 fn advance_and_commit(w: &mut World, minutes: u32) -> Vec<LedgerOp> {
-    let ops = advance(&w.view, minutes);
+    let ops = advance(&w.view, minutes, &HashSet::new());
     w.commit(ops.clone());
     ops
 }

@@ -229,12 +229,22 @@ fn correction_keeps_seed() {
         "the reverted Turn leaves the recent Turns"
     );
     // Only one Roll is live: the reverted one is gone from the projections.
-    if !b.success {
+    // The fixed seed decides the branch; both branches are checked.
+    let seq = before.turn_seq + 1;
+    assert_eq!(b, D10.roll(b.difficulty, turn_seed(7, seq)));
+    assert!(
+        after.live_fact(w.ada, "fatigue").is_none(),
+        "old stake reverted"
+    );
+    if b.success {
+        assert_eq!(after.live_fact(w.gate, "locked").unwrap().slot.value, "no");
+        assert!(after.live_fact(w.ada, "injury").is_none());
+    } else {
         assert_eq!(
             after.live_fact(w.ada, "injury").unwrap().slot.value,
             "bruised hand"
         );
-        assert!(after.live_fact(w.ada, "fatigue").is_none());
+        assert_eq!(after.live_fact(w.gate, "locked").unwrap().slot.value, "yes");
     }
 }
 
@@ -276,7 +286,10 @@ fn empty_and_long_intents_refused() {
         engine.correct_last("turn-3".into(), "", "why", &mut no_chunks()),
         Err(TurnError::EmptyIntent)
     ));
-    assert!(matches!(engine.ooc(" "), Err(TurnError::EmptyIntent)));
+    assert!(matches!(
+        engine.ooc("ooc-0".into(), " "),
+        Err(TurnError::EmptyIntent)
+    ));
     assert!(gm.calls().is_empty(), "no model call for a refused Intent");
     assert_eq!(snapshot(&engine, &w), before);
 }
@@ -366,7 +379,9 @@ fn ooc_never_sees_secrets() {
     let before = w.view.clone();
     let gm = RecordedGm::new(vec![], vec!["You are Ada, a courier.".into()]);
     let mut engine = make_engine(w.store, w.campaign, &gm);
-    let answer = engine.ooc("Who am I, and what do I know?").unwrap();
+    let answer = engine
+        .ooc("ooc-1".into(), "Who am I, and what do I know?")
+        .unwrap();
     assert_eq!(answer, "You are Ada, a courier.");
     assert_eq!(kinds(&gm), [CallKind::Narrate]);
     let prompt = &gm.calls()[0].prompt;
@@ -384,6 +399,20 @@ fn ooc_never_sees_secrets() {
         assert!(!all.contains(secret), "{secret} leaked:\n{all}");
     }
     assert_eq!(engine.store().snapshot(w.campaign).unwrap(), before);
+
+    // Each OOC question has its own debug rows.
+    engine.ooc("ooc-2".into(), "And now?").unwrap_err();
+    let steps = |op: &str| -> Vec<String> {
+        engine
+            .store()
+            .debug_log(op)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.step)
+            .collect()
+    };
+    assert_eq!(steps("ooc-1"), ["ooc"]);
+    assert_eq!(steps("ooc-2"), ["ooc"]);
 }
 
 // --- Controller rulings -----------------------------------------------------
@@ -518,7 +547,11 @@ fn proposal_prefix_is_stable_within_a_scene() {
     let prefix = |p: &Prompt| format!("{}{}{}", p.system, p.stable, p.scene);
     assert_eq!(prefix(&proposals[0]), prefix(&proposals[1]));
     assert_ne!(proposals[0].recent, proposals[1].recent);
-    assert_eq!(first.timings.prompt_tokens, None, "RecordedGm reports none");
+    assert_eq!(
+        first.timings.proposal_prompt_tokens, None,
+        "RecordedGm reports none"
+    );
+    assert_eq!(first.timings.narration_prompt_tokens, None);
     let steps: Vec<String> = engine
         .store()
         .debug_log("turn-1")
@@ -530,4 +563,149 @@ fn proposal_prefix_is_stable_within_a_scene() {
         steps,
         ["propose", "validate", "roll", "world", "commit", "narrate"]
     );
+}
+
+// --- Fix round 1 -----------------------------------------------------------
+
+/// Schedules a World Event due at `at` that sets `subject.key = value`,
+/// with no witnesses.
+fn schedule_write(w: &mut World, at: u64, subject: u64, key: &str, value: &str) {
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: format!("{key} becomes {value}"),
+        trigger: threshold_core::domain::Trigger::At(at),
+        actors: vec![EntityRef::Id(w.orsel)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![threshold_core::domain::Effect::SetFact {
+            slot: threshold_core::domain::Slot {
+                subject: EntityRef::Id(subject),
+                key: key.into(),
+                value: value.into(),
+            },
+            text: format!("{key} {value}"),
+            seen_by: vec![],
+        }],
+        seen_by: vec![],
+    }]);
+}
+
+/// A due World Event that writes a slot the proposal also writes waits for
+/// the next Turn instead of breaking the Commit.
+#[test]
+fn colliding_event_waits_for_the_next_turn() {
+    let mut w = World::new();
+    let brann = w.brann;
+    schedule_write(&mut w, 0, brann, "mood", "angry");
+    let event = w
+        .view
+        .events_scheduled
+        .iter()
+        .find(|e| e.text == "mood becomes angry")
+        .unwrap()
+        .id;
+    let mut calm = proposal(Verdict::Allowed);
+    calm.facts = vec![fact(
+        slot(e(w.brann), "mood", "calm"),
+        Seen::Present,
+        vec![],
+    )];
+    let wait = proposal(Verdict::Allowed);
+    let gm = RecordedGm::new(vec![json(&calm), json(&wait)], vec!["a".into(), "b".into()]);
+    let campaign = w.campaign;
+    let mut engine = make_engine(w.store, campaign, &gm);
+    engine
+        .play_turn("turn-1".into(), "I calm Brann.", &mut no_chunks())
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert_eq!(view.live_fact(brann, "mood").unwrap().slot.value, "calm");
+    assert!(view.events_scheduled.iter().any(|e| e.id == event));
+
+    engine
+        .play_turn("turn-2".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert_eq!(view.live_fact(brann, "mood").unwrap().slot.value, "angry");
+    assert!(view.events_scheduled.iter().all(|e| e.id != event));
+}
+
+/// Amended ruling 4(b): presence placed by a World Event is open. Event
+/// `seen_by` decides who witnesses the event itself; on arrival the PC sees
+/// the NPC it moved. `same_turn` fires the event in the arrival Turn.
+fn event_moved_npc_is_seen_on_arrival(same_turn: bool) {
+    let mut w = World::new();
+    let brann = w.brann;
+    schedule_write(&mut w, 5, brann, "location", "market");
+    let mut wait = proposal(Verdict::Allowed);
+    wait.minutes = 10;
+    let mut walk = proposal(Verdict::Allowed);
+    walk.action = ActionKind::Move;
+    walk.minutes = 10;
+    walk.facts = vec![fact(slot(e(w.ada), "location", "market"), Seen::Pc, vec![])];
+    let mut proposals = vec![json(&walk)];
+    if !same_turn {
+        proposals.insert(0, json(&wait));
+    }
+    let gm = RecordedGm::new(proposals, vec!["a".into(), "b".into()]);
+    let (ada, campaign) = (w.ada, w.campaign);
+    let mut engine = make_engine(w.store, campaign, &gm);
+    if !same_turn {
+        engine
+            .play_turn("turn-1".into(), "I wait.", &mut no_chunks())
+            .unwrap();
+        let view = engine.store().snapshot(campaign).unwrap();
+        let moved = view.live_fact(brann, "location").unwrap();
+        assert_eq!(moved.slot.value, "market");
+        assert!(!moved.seen_by.contains(&ada), "the absent PC saw nothing");
+    }
+    engine
+        .play_turn("turn-2".into(), "I walk to the market.", &mut no_chunks())
+        .unwrap();
+    let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(narration.scene.contains("Brann"), "{}", narration.scene);
+    assert!(narration.scene.contains("Pip"), "{}", narration.scene);
+}
+
+#[test]
+fn event_moved_npc_is_seen_on_later_arrival() {
+    event_moved_npc_is_seen_on_arrival(false);
+}
+
+#[test]
+fn event_moved_npc_is_seen_when_arriving_in_the_same_turn() {
+    event_moved_npc_is_seen_on_arrival(true);
+}
+
+/// A `Gm` that reports prompt tokens: 100 for a proposal, 40 for narration.
+struct TokenGm {
+    inner: RecordedGm,
+    last: std::sync::Mutex<Option<u64>>,
+}
+
+impl Gm for TokenGm {
+    fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
+        *self.last.lock().unwrap() = Some(100);
+        self.inner.propose(prompt, schema)
+    }
+    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+        *self.last.lock().unwrap() = Some(40);
+        self.inner.narrate(prompt, on_chunk)
+    }
+    fn last_prompt_tokens(&self) -> Option<u64> {
+        *self.last.lock().unwrap()
+    }
+}
+
+#[test]
+fn timings_record_prompt_tokens_of_both_calls() {
+    let w = World::new();
+    let gm = TokenGm {
+        inner: RecordedGm::new(vec![json(&proposal(Verdict::Allowed))], vec!["n".into()]),
+        last: std::sync::Mutex::new(None),
+    };
+    let mut engine = Engine::new(w.store, Box::new(gm), Box::new(D10), vec![], w.campaign);
+    let outcome = engine
+        .play_turn("turn-1".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(outcome.timings.proposal_prompt_tokens, Some(100));
+    assert_eq!(outcome.timings.narration_prompt_tokens, Some(40));
 }

@@ -22,7 +22,16 @@ pub const MAX_EVENTS_PER_TURN: usize = 3;
 /// Every event in `view` was scheduled in a committed Turn, so it is always
 /// earlier than the Turn these ops commit in. Its `SetFact` may therefore
 /// supersede a Persistent fact (data shape section 4, Fact bends).
-pub fn advance(view: &WorldView, minutes: u32) -> Vec<LedgerOp> {
+///
+/// `already_written` holds the slots (subject, normalized key) that other
+/// ops of the same Commit write, such as the proposal's. A due event that
+/// would write one of them waits for the next Turn, and so do the events
+/// after it, like two events colliding with each other.
+pub fn advance(
+    view: &WorldView,
+    minutes: u32,
+    already_written: &HashSet<(EntityId, Key)>,
+) -> Vec<LedgerOp> {
     let clock = view.clock_min.saturating_add(ClockMin::from(minutes));
     let mut ops = Vec::new();
     if minutes > 0 {
@@ -43,7 +52,7 @@ pub fn advance(view: &WorldView, minutes: u32) -> Vec<LedgerOp> {
         .iter()
         .find(|entity| entity.kind == EntityKind::Pc)
         .map(|entity| entity.id);
-    let mut written: HashSet<(EntityId, Key)> = HashSet::new();
+    let mut written: HashSet<(EntityId, Key)> = already_written.clone();
     for (_, event) in due.into_iter().take(MAX_EVENTS_PER_TURN) {
         let effects = last_write_per_slot(&event.effects);
         // Two events writing one slot in one Turn would supersede the same
@@ -62,6 +71,22 @@ pub fn advance(view: &WorldView, minutes: u32) -> Vec<LedgerOp> {
         );
     }
     ops
+}
+
+/// The slots (subject, normalized key) that `ops` write with an existing
+/// subject. A new entity (`EntityRef::New`) cannot collide with an event.
+pub fn written_slots(ops: &[LedgerOp]) -> HashSet<(EntityId, Key)> {
+    ops.iter()
+        .filter_map(|op| match op {
+            LedgerOp::AddFact { slot, .. } => Some(slot),
+            LedgerOp::SupersedeFact { new, .. } => Some(&new.slot),
+            _ => None,
+        })
+        .filter_map(|slot| match slot.subject {
+            EntityRef::Id(id) => Some((id, normalize::key(&slot.key))),
+            EntityRef::New(_) => None,
+        })
+        .collect()
 }
 
 fn set_fact_slot(effect: &Effect<EntityId>) -> Option<(EntityId, Key)> {

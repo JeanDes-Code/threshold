@@ -7,6 +7,6 @@ mod arrival;
 mod beliefs;
 mod clock;
 
-pub use arrival::{arrival, hidden};
+pub use arrival::{arrival, hidden, with_arrival};
 pub use beliefs::{Belief, beliefs, pc_knowledge};
-pub use clock::{MAX_EVENTS_PER_TURN, advance};
+pub use clock::{MAX_EVENTS_PER_TURN, advance, written_slots};

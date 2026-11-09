@@ -19,11 +19,10 @@ use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     context::{narration_prompt, perceived_by_pc, proposal_context, seen_present},
     domain::{
-        AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource, Handle,
-        Knowing, LedgerOp, Reaction,
+        AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, Handle, Knowing,
+        LedgerOp, Reaction,
     },
     model::{Gm, GmError, Prompt},
-    normalize,
     pack::ContentPack,
     proposal_schema_for,
     rules::{RollResult, Ruleset, turn_seed},
@@ -50,7 +49,8 @@ pub struct Timings {
     pub commit_ms: u64,
     pub narrate_ms: u64,
     pub total_ms: u64,
-    pub prompt_tokens: Option<u64>,
+    pub proposal_prompt_tokens: Option<u64>,
+    pub narration_prompt_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -260,14 +260,15 @@ impl Engine {
     /// Answers an out-of-character question with one plain model call. The
     /// model sees the rules, the Adventure Seed's premise, PC and boundaries,
     /// and PC Knowledge; never a decided or proposed seed fact, a hidden
-    /// fact, a goal or an event. Nothing is committed.
-    pub fn ooc(&mut self, question: &str) -> Result<String, TurnError> {
+    /// fact, a goal or an event. Nothing is committed; the call writes one
+    /// debug row under `op_id`.
+    pub fn ooc(&mut self, op_id: OpId, question: &str) -> Result<String, TurnError> {
         check_intent(question)?;
         let view = self.store.snapshot(self.campaign)?;
         let prompt = ooc_prompt(&view, question);
         let start = Instant::now();
         let answer = self.gm.narrate(&prompt, &mut |_| {});
-        self.log("ooc", "ooc", &prompt, answer_text(&answer), start)?;
+        self.log(&op_id, "ooc", &prompt, answer_text(&answer), start)?;
         Ok(answer?)
     }
 
@@ -370,6 +371,7 @@ impl Engine {
             on_chunk,
         )?;
         timings.narrate_ms = ms(step);
+        timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
         self.store.set_narration(turn_id, &narration)?;
         timings.total_ms = ms(start);
         Ok(TurnOutcome {
@@ -431,7 +433,7 @@ impl Engine {
             let step = Instant::now();
             let raw = self.gm.propose(&prompt, &schema);
             timings.propose_ms += ms(step);
-            timings.prompt_tokens = self.gm.last_prompt_tokens();
+            timings.proposal_prompt_tokens = self.gm.last_prompt_tokens();
             self.log(op_id, attempt, &prompt, answer_text(&raw), step)?;
             let raw = raw?;
 
@@ -493,14 +495,16 @@ impl Engine {
         let step = Instant::now();
         let resolved = checks::to_ops(valid, roll.as_ref(), view, view.turn_seq + 1);
         let mut ops = resolved.ops;
+        // A due event that writes a slot the proposal writes waits a Turn.
+        let written = world::written_slots(&ops);
         // `to_ops` already advances the clock by the proposal's minutes.
         ops.extend(
-            world::advance(view, p.minutes)
+            world::advance(view, p.minutes, &written)
                 .into_iter()
                 .filter(|op| !matches!(op, LedgerOp::AdvanceClock { .. })),
         );
         let clock_after = view.clock_min + ClockMin::from(p.minutes);
-        ops = with_arrival(view, ops, clock_after);
+        ops = world::with_arrival(view, ops, clock_after);
         timings.world_ms = ms(step);
         self.log(op_id, "world", &Prompt::default(), "", step)?;
 
@@ -587,104 +591,6 @@ fn stored_reactions(proposal_json: &str) -> Vec<Reaction> {
         .ok()
         .and_then(|record| serde_json::from_value(record.get("reactions")?.clone()).ok())
         .unwrap_or_default()
-}
-
-/// The `location` slot an op writes, as `(subject, value)`.
-fn location_write(op: &LedgerOp) -> Option<(EntityRef, &str)> {
-    let slot = match op {
-        LedgerOp::AddFact { slot, .. } => slot,
-        LedgerOp::SupersedeFact { new, .. } => &new.slot,
-        _ => return None,
-    };
-    (normalize::key(&slot.key) == "location").then_some((slot.subject, slot.value.as_str()))
-}
-
-/// Perception on arrival. When the ops move the PC to a new place, the PC
-/// witnesses the location of each entity that openly stands there:
-/// - an entity already there (and not moved by this Turn) gets a `Know` op,
-///   added at the end, after the clock reaches `clock_after`;
-/// - a World Event that moves an entity there this Turn gets the PC among
-///   the witnesses of that location fact.
-///
-/// Hidden entities and locations placed with `seen = gm` stay unseen
-/// (`world::arrival`).
-fn with_arrival(view: &WorldView, mut ops: Vec<LedgerOp>, clock_after: ClockMin) -> Vec<LedgerOp> {
-    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
-        return ops;
-    };
-    let pc_ref = EntityRef::Id(pc.id);
-    let Some(location) = ops
-        .iter()
-        .filter_map(location_write)
-        .filter(|(subject, _)| *subject == pc_ref)
-        .map(|(_, value)| normalize::value(value))
-        .next_back()
-    else {
-        return ops;
-    };
-    let before = view
-        .live_fact(pc.id, "location")
-        .map(|f| normalize::value(&f.slot.value));
-    if before.as_deref() == Some(location.as_str()) {
-        return ops;
-    }
-    let moved: Vec<EntityRef> = ops
-        .iter()
-        .filter_map(location_write)
-        .map(|(subject, _)| subject)
-        .collect();
-    for op in &mut ops {
-        if let LedgerOp::SupersedeFact { new: fact, .. } = op
-            && fact.source == FactSource::WorldEvent
-            && normalize::key(&fact.slot.key) == "location"
-            && normalize::value(&fact.slot.value) == location
-            && fact.slot.subject != pc_ref
-            && !hidden_ref(view, fact.slot.subject)
-            && !fact.seen_by.contains(&pc_ref)
-        {
-            fact.seen_by.push(pc_ref);
-        }
-        if let LedgerOp::AddFact {
-            slot,
-            source: FactSource::WorldEvent,
-            seen_by,
-            ..
-        } = op
-            && normalize::key(&slot.key) == "location"
-            && normalize::value(&slot.value) == location
-            && slot.subject != pc_ref
-            && !hidden_ref(view, slot.subject)
-            && !seen_by.contains(&pc_ref)
-        {
-            seen_by.push(pc_ref);
-        }
-    }
-    let arrivals: Vec<LedgerOp> = world::arrival(view, &location, clock_after)
-        .into_iter()
-        .filter(|op| match op {
-            LedgerOp::Know {
-                fact_id: Some(id), ..
-            } => view
-                .facts
-                .iter()
-                .find(|f| f.id == *id)
-                .is_none_or(|f| !moved.contains(&EntityRef::Id(f.slot.subject))),
-            _ => true,
-        })
-        .collect();
-    ops.extend(arrivals);
-    ops
-}
-
-fn hidden_ref(view: &WorldView, entity: EntityRef) -> bool {
-    match entity {
-        EntityRef::Id(id) => view
-            .entities
-            .iter()
-            .find(|e| e.id == id)
-            .is_some_and(|e| world::hidden(view, &e.norm_name)),
-        EntityRef::New(_) => false,
-    }
 }
 
 /// The OOC prompt: rules, the Adventure Seed's premise, PC, language and
