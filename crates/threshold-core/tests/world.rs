@@ -461,3 +461,53 @@ fn same_learned_time_goes_to_row_written_last() {
     assert_eq!(belief.value, "shut");
     assert_eq!(belief.source, Some(w.orsel));
 }
+
+/// Final fix 2: a World Event fact is Persistent when the PC witnesses it,
+/// Established otherwise, and a state key stays Established.
+#[test]
+fn canon_of_a_world_event_fact() {
+    use threshold_core::domain::{Canon, FactSource};
+    let mut w = world();
+    w.commit(vec![
+        schedule(
+            5,
+            "A notice goes up",
+            vec![
+                Effect::SetFact {
+                    slot: slot(w.gate, "notice", "curfew"),
+                    text: "A curfew notice hangs on the gate".into(),
+                    seen_by: vec![],
+                },
+                Effect::SetFact {
+                    slot: slot(w.brann, "mood", "grim"),
+                    text: "Brann looks grim".into(),
+                    seen_by: vec![],
+                },
+            ],
+            vec![w.ada],
+        ),
+        schedule(
+            5,
+            "A seal is broken in secret",
+            vec![Effect::SetFact {
+                slot: slot(w.gate, "seal", "broken"),
+                text: "The gate seal is broken".into(),
+                seen_by: vec![],
+            }],
+            vec![],
+        ),
+    ]);
+    advance_and_commit(&mut w, 5);
+    let fresh = w.store.snapshot(w.campaign).unwrap();
+    let notice = fresh.live_fact(w.gate, "notice").unwrap();
+    assert_eq!(notice.source, FactSource::WorldEvent);
+    assert_eq!(notice.canon, Canon::Persistent);
+    assert_eq!(
+        fresh.live_fact(w.brann, "mood").unwrap().canon,
+        Canon::Established
+    );
+    assert_eq!(
+        fresh.live_fact(w.gate, "seal").unwrap().canon,
+        Canon::Established
+    );
+}

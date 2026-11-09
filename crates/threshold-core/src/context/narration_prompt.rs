@@ -7,9 +7,11 @@
 //! never gets a fact by id, a hidden fact, a key list, a goal or a scheduled
 //! event. This is the real protection against leaks.
 
+use std::collections::HashSet;
+
 use super::{Retrieval, one_line, recent_block, render_voice, seen_present, with_fragments};
 use crate::{
-    domain::{EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction},
+    domain::{EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, is_state_key},
     model::Prompt,
     normalize,
     pack::ContentPack,
@@ -68,6 +70,63 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
         .collect()
 }
 
+/// The reactions as the narrator may see them. A plan is model text and can
+/// quote a GM-only fact, so a plan that names a secret is dropped; the NPC
+/// and the stance stay.
+///
+/// A secret is a live fact on a key that is not a state key, with no PC
+/// Belief on the same slot and value. A plan names it when the fact's key
+/// or value appears in the plan as whole words, after normalization
+/// (case, articles, `_` and punctuation count as word breaks). A key or
+/// value that is an entity name is not a secret word: names are public.
+pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
+    let known: HashSet<(EntityId, String, String)> = pc_knowledge(view)
+        .into_iter()
+        .map(|b| (b.subject, b.key, normalize::value(&b.value)))
+        .collect();
+    let names: HashSet<Vec<String>> = view.entities.iter().map(|e| words(&e.name)).collect();
+    let secrets: Vec<Vec<String>> = view
+        .live_facts
+        .iter()
+        .filter(|f| !is_state_key(&f.slot.key))
+        .filter(|f| {
+            !known.contains(&(
+                f.slot.subject,
+                f.slot.key.clone(),
+                normalize::value(&f.slot.value),
+            ))
+        })
+        .flat_map(|f| [words(&f.slot.key), words(&f.slot.value)])
+        .filter(|term| !term.is_empty() && !names.contains(term))
+        .collect();
+    reactions
+        .iter()
+        .map(|r| {
+            let plan = words(&r.plan);
+            let quotes = secrets.iter().any(|term| {
+                plan.windows(term.len())
+                    .any(|window| window == term.as_slice())
+            });
+            let mut r = r.clone();
+            if quotes {
+                r.plan.clear();
+            }
+            r
+        })
+        .collect()
+}
+
+/// The words of a text after normalization: lowercase, article dropped, and
+/// split on everything that is not a letter or a digit.
+fn words(text: &str) -> Vec<String> {
+    let text = text.replace('_', " ");
+    normalize::value(&text)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 pub fn narration_prompt(
     view_after: &WorldView,
     packs: &[ContentPack],
@@ -78,13 +137,15 @@ pub fn narration_prompt(
     let r = Retrieval::new(view_after, "");
     Prompt {
         system: with_fragments(NARRATION_RULES, packs),
-        stable: stable(view_after),
+        stable: adventure_block(view_after),
         scene: scene(&r),
         recent: recent(&r, perceived, reactions, intent),
     }
 }
 
-fn stable(view: &WorldView) -> String {
+/// The stable block: the Adventure Seed's premise, PC, story language and
+/// boundaries. The OOC prompt uses it too.
+pub(crate) fn adventure_block(view: &WorldView) -> String {
     let mut out = String::from("ADVENTURE\n");
     if let Some(seed) = &view.adventure_seed {
         out.push_str(&format!("Premise: {}\n", one_line(&seed.premise)));
@@ -210,10 +271,12 @@ fn recent(
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_owned))
                 .unwrap_or_default();
-            tail.push_str(&format!(
-                "- {name} ({stance}): {}\n",
-                one_line(&reaction.plan)
-            ));
+            let plan = one_line(&reaction.plan);
+            if plan.is_empty() {
+                tail.push_str(&format!("- {name} ({stance})\n"));
+            } else {
+                tail.push_str(&format!("- {name} ({stance}): {plan}\n"));
+            }
         }
     }
     recent_block(r.view, "", &tail)

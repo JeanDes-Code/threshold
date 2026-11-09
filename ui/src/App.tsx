@@ -89,6 +89,12 @@ export default function App() {
                 onBusy={setTurnBusy}
                 lines={lines}
                 onLine={(line) => setLines((all) => [...all, line])}
+                onRefresh={() => {
+                  api.summary().then(
+                    (summary) => setLines(summary.turns),
+                    (e: unknown) => setAppError(`Could not reload the Turns: ${errorText(e)}`),
+                  );
+                }}
                 onNarration={(turnId, narration) =>
                   setLines((all) =>
                     all.map((l) => (l.turn_id === turnId ? { ...l, narration } : l)),

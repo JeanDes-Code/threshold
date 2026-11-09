@@ -7,8 +7,8 @@ use threshold_core::{
     CallKind, Gm, GmError, Prompt, RecordedGm,
     checks::CheckKind,
     domain::{
-        ActionKind, DecisionProposal, EntityRef, Knowing, LedgerOp, Reaction, SeedEntity, SeedFact,
-        Seen, Stance, Verdict,
+        ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Reaction,
+        SeedEntity, SeedFact, Seen, Stance, Verdict,
     },
     rules::{D10, Ruleset, turn_seed},
     store::{Store, WorldView},
@@ -708,4 +708,89 @@ fn timings_record_prompt_tokens_of_both_calls() {
         .unwrap();
     assert_eq!(outcome.timings.proposal_prompt_tokens, Some(100));
     assert_eq!(outcome.timings.narration_prompt_tokens, Some(40));
+}
+
+/// Final fix 1: a narration that fails after the Commit reports the
+/// committed Turn. A retry under the same op_id narrates it again and adds
+/// no second Turn row.
+#[test]
+fn narration_failure_after_commit_reports_the_turn() {
+    let (mut engine, w, gm) = setup(vec![json(&proposal(Verdict::Allowed))], vec![]);
+    let before = snapshot(&engine, &w);
+    let result = engine.play_turn("turn-1".into(), "I look around.", &mut no_chunks());
+    let Err(TurnError::NarrationFailed { turn_id, .. }) = result else {
+        panic!("expected NarrationFailed, got {result:?}");
+    };
+    let stored = engine.store().turn(turn_id).unwrap().unwrap();
+    assert_eq!(stored.record.op_id, "turn-1");
+    assert_eq!(stored.narration, None);
+    assert_eq!(snapshot(&engine, &w).turn_seq, before.turn_seq + 1);
+
+    gm.push_narration("You look around.".into());
+    let outcome = engine
+        .play_turn("turn-1".into(), "I look around.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(outcome.turn_id, turn_id);
+    assert_eq!(outcome.narration, "You look around.");
+    let after = snapshot(&engine, &w);
+    assert_eq!(after.turn_seq, before.turn_seq + 1, "exactly one Turn row");
+    let stored = engine.store().turn(turn_id).unwrap().unwrap();
+    assert_eq!(stored.narration.as_deref(), Some("You look around."));
+    assert_eq!(
+        kinds(&gm),
+        [CallKind::Propose, CallKind::Narrate, CallKind::Narrate]
+    );
+}
+
+/// A retry whose narration fails again still reports the committed Turn.
+#[test]
+fn narration_failure_on_retry_reports_the_turn() {
+    let (mut engine, _w, _gm) = setup(vec![json(&proposal(Verdict::Allowed))], vec![]);
+    let first = engine.play_turn("turn-1".into(), "I wait.", &mut no_chunks());
+    let Err(TurnError::NarrationFailed { turn_id, .. }) = first else {
+        panic!("expected NarrationFailed, got {first:?}");
+    };
+    let second = engine.play_turn("turn-1".into(), "I wait.", &mut no_chunks());
+    assert!(
+        matches!(second, Err(TurnError::NarrationFailed { turn_id: t, .. }) if t == turn_id),
+        "{second:?}"
+    );
+}
+
+/// Final fix 4: a Correction commits its facts with `FactSource::Correction`,
+/// and the store reports the Turn it reverted.
+#[test]
+fn correction_facts_have_the_correction_source() {
+    let w0 = World::new();
+    let mut first = proposal(Verdict::Allowed);
+    first.facts = vec![fact(slot(e(w0.gate), "color", "red"), Seen::Pc, vec![])];
+    let mut clarified = proposal(Verdict::Allowed);
+    clarified.facts = vec![fact(slot(e(w0.gate), "color", "blue"), Seen::Pc, vec![])];
+    let (mut engine, w, _gm) = setup(vec![json(&first), json(&clarified)], vec!["a", "b"]);
+    let played = engine
+        .play_turn("turn-1".into(), "I paint the gate red.", &mut no_chunks())
+        .unwrap();
+    assert!(
+        engine
+            .store()
+            .reverted_turns(w.campaign)
+            .unwrap()
+            .is_empty()
+    );
+    let corrected = engine
+        .correct_last(
+            "turn-2".into(),
+            "I paint the gate blue.",
+            "blue, not red",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let after = snapshot(&engine, &w);
+    let color = after.live_fact(w.gate, "color").unwrap();
+    assert_eq!(color.slot.value, "blue");
+    assert_eq!(color.source, FactSource::Correction);
+    assert_eq!(color.canon, threshold_core::domain::Canon::Persistent);
+    assert_eq!(color.created_turn, corrected.turn_id);
+    let reverted = engine.store().reverted_turns(w.campaign).unwrap();
+    assert_eq!(reverted.into_iter().collect::<Vec<_>>(), [played.turn_id]);
 }

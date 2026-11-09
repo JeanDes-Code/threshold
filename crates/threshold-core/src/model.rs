@@ -18,6 +18,9 @@ pub enum GmError {
     Unreachable(String),
     Timeout,
     BadStatus(u16, String),
+    /// The server answered, then reported an error in the body (a
+    /// mid-stream `{"error": ...}` line, for example).
+    Aborted(String),
 }
 
 impl fmt::Display for GmError {
@@ -28,6 +31,7 @@ impl fmt::Display for GmError {
             Self::BadStatus(status, message) => {
                 write!(f, "game model returned HTTP {status}: {message}")
             }
+            Self::Aborted(message) => write!(f, "game model stopped: {message}"),
         }
     }
 }
@@ -81,6 +85,14 @@ impl RecordedGm {
     /// a proposal needs a handle that exists only after earlier Turns.
     pub fn push_proposal(&self, raw: String) {
         self.proposals
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_back(raw);
+    }
+
+    /// Queues one more narration, after the recorded ones.
+    pub fn push_narration(&self, raw: String) {
+        self.narrations
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push_back(raw);

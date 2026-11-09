@@ -165,8 +165,7 @@ impl Gm for OllamaGm {
         let response = self.post("/api/chat", &body)?;
         let status = response.status();
         let raw = response.into_string().map_err(map_io_error)?;
-        let parsed: ChatResponse = serde_json::from_str(&raw)
-            .map_err(|error| GmError::BadStatus(status, format!("invalid response: {error}")))?;
+        let parsed = parse_chat(&raw, status)?;
         self.record_metrics(&parsed);
         Ok(parsed.message.content)
     }
@@ -175,14 +174,14 @@ impl Gm for OllamaGm {
         self.clear_metrics();
         let body = self.chat_body(prompt, true, None);
         let response = self.post("/api/chat", &body)?;
+        let status = response.status();
         let mut narration = String::new();
         for line in BufReader::new(response.into_reader()).lines() {
             let line = line.map_err(map_io_error)?;
             if line.is_empty() {
                 continue;
             }
-            let chunk: ChatResponse = serde_json::from_str(&line)
-                .map_err(|error| GmError::BadStatus(200, format!("invalid response: {error}")))?;
+            let chunk = parse_chat(&line, status)?;
             self.record_metrics(&chunk);
             on_chunk(&chunk.message.content);
             narration.push_str(&chunk.message.content);
@@ -193,6 +192,22 @@ impl Gm for OllamaGm {
     fn last_prompt_tokens(&self) -> Option<u64> {
         self.last_metrics().map(|metrics| metrics.prompt_tokens)
     }
+}
+
+/// One response body or stream line. An `{"error": ...}` object is the
+/// server reporting a failure after it answered (Ollama does this mid-stream
+/// when the runner stops), so it maps to `GmError::Aborted`.
+fn parse_chat(raw: &str, status: u16) -> Result<ChatResponse, GmError> {
+    let value: Value = serde_json::from_str(raw)
+        .map_err(|error| GmError::BadStatus(status, format!("invalid response: {error}")))?;
+    if let Some(error) = value.get("error") {
+        let message = error
+            .as_str()
+            .map_or_else(|| error.to_string(), str::to_owned);
+        return Err(GmError::Aborted(message));
+    }
+    serde_json::from_value(value)
+        .map_err(|error| GmError::BadStatus(status, format!("invalid response: {error}")))
 }
 
 #[derive(Debug, Deserialize)]

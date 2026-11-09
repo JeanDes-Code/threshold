@@ -17,10 +17,13 @@ use serde_json::json;
 
 use crate::{
     checks::{self, CheckKind, Rejection, Validated},
-    context::{narration_prompt, perceived_by_pc, proposal_context, seen_present},
+    context::{
+        adventure_block, guard_plans, narration_prompt, one_line, perceived_by_pc,
+        proposal_context, seen_present,
+    },
     domain::{
-        AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, Handle, Knowing,
-        LedgerOp, Reaction,
+        AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource, Handle,
+        Knowing, LedgerOp, Reaction,
     },
     model::{Gm, GmError, Prompt},
     pack::ContentPack,
@@ -71,6 +74,13 @@ pub enum TurnError {
     Store(StoreError),
     /// Only the last play Turn can be corrected.
     NotCorrectable(String),
+    /// The Turn is committed, but its Narration failed. The Turn row has no
+    /// Narration: `renarrate`, or a retry under the same `op_id`, narrates it
+    /// again.
+    NarrationFailed {
+        turn_id: TurnId,
+        error: GmError,
+    },
 }
 
 impl fmt::Display for TurnError {
@@ -90,6 +100,12 @@ impl fmt::Display for TurnError {
             }
             Self::Store(e) => e.fmt(f),
             Self::NotCorrectable(why) => write!(f, "nothing to correct: {why}"),
+            Self::NarrationFailed { turn_id, error } => {
+                write!(
+                    f,
+                    "turn {turn_id} is committed, but its narration failed: {error}"
+                )
+            }
         }
     }
 }
@@ -236,7 +252,10 @@ impl Engine {
             |roll| Ok(roll.seed),
         )?;
         let mut timings = Timings::default();
-        let planned = self.plan(&op_id, &view, clarified_intent, seed, &mut timings)?;
+        let mut planned = self.plan(&op_id, &view, clarified_intent, seed, &mut timings)?;
+        for op in &mut planned.ops {
+            as_correction(op);
+        }
         let head = vec![
             LedgerOp::RevertTurn { turn_id: last.id },
             LedgerOp::RecordCorrection {
@@ -316,7 +335,9 @@ impl Engine {
     ) -> Result<TurnOutcome, TurnError> {
         let narration = match stored.narration {
             Some(narration) => narration,
-            None => self.renarrate(stored.id, on_chunk)?,
+            None => self
+                .renarrate(stored.id, on_chunk)
+                .map_err(|e| narration_failed(stored.id, e))?,
         };
         Ok(TurnOutcome {
             turn_id: stored.id,
@@ -362,14 +383,16 @@ impl Engine {
 
         let view_after = self.store.snapshot(self.campaign)?;
         let step = Instant::now();
-        let narration = self.narrate(
-            &op_id,
-            &view_after,
-            &ops,
-            &planned.reactions,
-            &intent,
-            on_chunk,
-        )?;
+        let narration = self
+            .narrate(
+                &op_id,
+                &view_after,
+                &ops,
+                &planned.reactions,
+                &intent,
+                on_chunk,
+            )
+            .map_err(|e| narration_failed(turn_id, e))?;
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
         self.store.set_narration(turn_id, &narration)?;
@@ -384,7 +407,7 @@ impl Engine {
 
     /// The narration call. Only what the PC perceives reaches it, and only
     /// the reactions of NPCs the PC knows are here: the others are offscreen
-    /// intents.
+    /// intents. A plan that names a secret is dropped (`guard_plans`).
     fn narrate(
         &mut self,
         op_id: &str,
@@ -409,6 +432,7 @@ impl Engine {
             })
             .cloned()
             .collect();
+        let reactions = guard_plans(view_after, &reactions);
         let prompt = narration_prompt(view_after, &self.packs, &perceived, &reactions, intent);
         let start = Instant::now();
         let narration = self.gm.narrate(&prompt, on_chunk);
@@ -493,7 +517,7 @@ impl Engine {
         self.log(op_id, "roll", &Prompt::default(), &raw, step)?;
 
         let step = Instant::now();
-        let resolved = checks::to_ops(valid, roll.as_ref(), view, view.turn_seq + 1);
+        let resolved = checks::to_ops(valid, roll.as_ref(), view);
         let mut ops = resolved.ops;
         // A due event that writes a slot the proposal writes waits a Turn.
         let written = world::written_slots(&ops);
@@ -544,6 +568,27 @@ impl Engine {
     }
 }
 
+/// A fact the proposal or its Check wrote is, in a Correction Turn, a
+/// Correction fact. World Event facts keep their source.
+fn as_correction(op: &mut LedgerOp) {
+    let source = match op {
+        LedgerOp::AddFact { source, .. } => source,
+        LedgerOp::SupersedeFact { new, .. } => &mut new.source,
+        _ => return,
+    };
+    if matches!(source, FactSource::Proposal | FactSource::Stake) {
+        *source = FactSource::Correction;
+    }
+}
+
+/// A model error after the Commit: the Turn stands, its Narration failed.
+fn narration_failed(turn_id: TurnId, e: TurnError) -> TurnError {
+    match e {
+        TurnError::Model(error) => TurnError::NarrationFailed { turn_id, error },
+        other => other,
+    }
+}
+
 fn ms(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
@@ -581,7 +626,8 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
     Ok(p)
 }
 
-fn stored_roll(proposal_json: &str) -> Option<RollResult> {
+/// The Roll stored in a Turn's `proposal_json`, if the Turn had a Check.
+pub fn stored_roll(proposal_json: &str) -> Option<RollResult> {
     let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
     serde_json::from_value(record.get("roll")?.clone()).ok()
 }
@@ -594,21 +640,10 @@ fn stored_reactions(proposal_json: &str) -> Vec<Reaction> {
 }
 
 /// The OOC prompt: rules, the Adventure Seed's premise, PC, language and
-/// boundaries, then PC Knowledge, then the question.
+/// boundaries (the narration prompt's stable block), then PC Knowledge, then
+/// the question.
 fn ooc_prompt(view: &WorldView, question: &str) -> Prompt {
-    let mut stable = String::from("ADVENTURE\n");
-    if let Some(seed) = &view.adventure_seed {
-        stable.push_str(&format!("Premise: {}\n", one_line(&seed.premise)));
-        stable.push_str(&format!(
-            "PC: {}, {}\n",
-            one_line(&seed.pc.name),
-            one_line(&seed.pc.concept)
-        ));
-        stable.push_str(&format!("Story language: {}\n", seed.story_language));
-        for b in &seed.boundaries {
-            stable.push_str(&format!("Boundary: {}\n", one_line(b)));
-        }
-    }
+    let stable = adventure_block(view);
     let mut scene = String::from("WHAT THE PC KNOWS\n");
     let name = |id: u64| {
         view.entities
@@ -632,8 +667,4 @@ fn ooc_prompt(view: &WorldView, question: &str) -> Prompt {
         scene,
         recent: format!("QUESTION\n{}\n", one_line(question)),
     }
-}
-
-fn one_line(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }

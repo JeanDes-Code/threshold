@@ -18,7 +18,7 @@ use threshold_core::{
     model::GmError,
     rules::{D10, RollResult},
     store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
-    turn::{Engine, TurnError, TurnOutcome, create_campaign},
+    turn::{Engine, TurnError, TurnOutcome, create_campaign, stored_roll},
     world::pc_knowledge,
 };
 use threshold_ollama::OllamaConfig;
@@ -73,13 +73,19 @@ pub struct TurnLine {
     pub intent: String,
     pub narration: Option<String>,
     pub roll: Option<RollResult>,
+    /// A later Correction reverted this Turn: its outcome no longer holds.
+    pub reverted: bool,
 }
 
+/// A committed Turn. `narration` is `None` when the Turn is committed but
+/// its Narration failed; `narration_error` then says why, and the Turn can
+/// be narrated again.
 #[derive(Clone, Debug, Serialize)]
 pub struct TurnSummary {
     pub turn_id: u64,
     pub roll: Option<RollResult>,
-    pub narration: String,
+    pub narration: Option<String>,
+    pub narration_error: Option<String>,
     pub total_ms: u64,
 }
 
@@ -255,14 +261,17 @@ impl Session {
         let open = self.open()?;
         let view = self.view()?;
         let seed = view.adventure_seed.as_ref();
-        let turns = open
-            .engine
-            .store()
+        let store = open.engine.store();
+        let reverted = store.reverted_turns(open.campaign).map_err(failed)?;
+        let turns = store
             .turns(open.campaign)
             .map_err(failed)?
             .into_iter()
             .filter(|t| matches!(t.record.kind, TurnKind::Play | TurnKind::Correction))
-            .map(turn_line)
+            .map(|t| {
+                let reverted = reverted.contains(&t.id);
+                turn_line(t, reverted)
+            })
             .collect();
         Ok(CampaignSummary {
             db_path: open.db_path.display().to_string(),
@@ -279,11 +288,8 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
-        let outcome = open
-            .engine
-            .play_turn(op_id, text, on_chunk)
-            .map_err(|e| player_error(&e))?;
-        Ok(turn_summary(outcome))
+        let played = open.engine.play_turn(op_id, text, on_chunk);
+        committed(&open.engine, played)
     }
 
     pub fn correct_last(
@@ -294,11 +300,8 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
-        let outcome = open
-            .engine
-            .correct_last(op_id, clarified, why, on_chunk)
-            .map_err(|e| player_error(&e))?;
-        Ok(turn_summary(outcome))
+        let played = open.engine.correct_last(op_id, clarified, why, on_chunk);
+        committed(&open.engine, played)
     }
 
     pub fn ask_ooc(&mut self, text: &str) -> Result<String, AppError> {
@@ -436,27 +439,62 @@ impl Session {
     }
 }
 
+/// A Turn result as the app reports it. A Turn whose Narration failed after
+/// the Commit is a committed Turn without Narration, not an error.
+fn committed(
+    engine: &Engine,
+    played: Result<TurnOutcome, TurnError>,
+) -> Result<TurnSummary, AppError> {
+    match played {
+        Ok(outcome) => Ok(turn_summary(outcome)),
+        Err(TurnError::NarrationFailed { turn_id, error }) => {
+            let stored = engine
+                .store()
+                .turn(turn_id)
+                .map_err(failed)?
+                .ok_or_else(|| failed(format!("no turn {turn_id}")))?;
+            Ok(TurnSummary {
+                turn_id,
+                roll: stored_roll(&stored.record.proposal_json),
+                narration: None,
+                narration_error: Some(model_error(&error)),
+                total_ms: 0,
+            })
+        }
+        Err(e) => Err(player_error(&e)),
+    }
+}
+
+/// The text of a model error that the Player may see: never the server's
+/// message, which can echo the prompt.
+fn model_error(e: &GmError) -> String {
+    match e {
+        GmError::Unreachable(_) => "the game model is unreachable".into(),
+        GmError::Timeout => "the game model request timed out".into(),
+        GmError::BadStatus(status, _) => format!("the game model returned HTTP {status}"),
+        GmError::Aborted(_) => "the game model stopped with an error".into(),
+    }
+}
+
 /// The text of a Turn error that the Player may see. Rejection reasons and
 /// model or store messages can quote GM-only facts (a Persistent key, a
-/// model's echo), so only the check kind and its handle get through. The
-/// full reasons stay in the debug log.
+/// model's echo), so only the check kind gets through. A handle would reveal
+/// that a hidden fact exists, and its id. The full reasons stay in the debug
+/// log.
 pub fn player_error(e: &TurnError) -> AppError {
     let text = match e {
         TurnError::EmptyIntent | TurnError::IntentTooLong | TurnError::NotCorrectable(_) => {
             e.to_string()
         }
-        TurnError::Model(GmError::Unreachable(_)) => "the game model is unreachable".into(),
-        TurnError::Model(GmError::Timeout) => "the game model request timed out".into(),
-        TurnError::Model(GmError::BadStatus(status, _)) => {
-            format!("the game model returned HTTP {status}")
-        }
+        TurnError::Model(error) => model_error(error),
+        TurnError::NarrationFailed { error, .. } => format!(
+            "the Turn is committed, but its narration failed: {}",
+            model_error(error)
+        ),
         TurnError::Rejected(errs) => {
             let mut text = String::from("the proposal was rejected twice:");
             for r in errs {
                 text.push_str(&format!("\n- {}", r.check));
-                if let Some(handle) = r.handle {
-                    text.push_str(&format!(" {handle}"));
-                }
             }
             text.push_str("\n(details in the debug view)");
             text
@@ -475,13 +513,9 @@ fn kind_name(kind: TurnKind) -> String {
         .unwrap_or_default()
 }
 
-fn stored_roll(proposal_json: &str) -> Option<RollResult> {
-    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
-    serde_json::from_value(record.get("roll")?.clone()).ok()
-}
-
-fn turn_line(t: StoredTurn) -> TurnLine {
+fn turn_line(t: StoredTurn, reverted: bool) -> TurnLine {
     TurnLine {
+        reverted,
         turn_id: t.id,
         kind: kind_name(t.record.kind),
         roll: stored_roll(&t.record.proposal_json),
@@ -494,7 +528,8 @@ fn turn_summary(outcome: TurnOutcome) -> TurnSummary {
     TurnSummary {
         turn_id: outcome.turn_id,
         roll: outcome.roll,
-        narration: outcome.narration,
+        narration: Some(outcome.narration),
+        narration_error: None,
         total_ms: outcome.timings.total_ms,
     }
 }

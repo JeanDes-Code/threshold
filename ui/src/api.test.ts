@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createTurnClient, type Invoke } from "./api";
+import { committedLine, createApi, createTurnClient, type Invoke, type TurnSummary } from "./api";
 
 interface Call {
   cmd: string;
@@ -13,7 +13,13 @@ function fakeInvoke(outcomes: ("ok" | "fail")[]) {
     calls.push({ cmd, args });
     const outcome = outcomes.shift() ?? "ok";
     if (outcome === "fail") return Promise.reject(new Error("the game model is unreachable"));
-    return Promise.resolve({ turn_id: calls.length, roll: null, narration: "ok", total_ms: 1 } as T);
+    return Promise.resolve({
+      turn_id: calls.length,
+      roll: null,
+      narration: "ok",
+      narration_error: null,
+      total_ms: 1,
+    } as T);
   };
   return { calls, invoke };
 }
@@ -97,5 +103,46 @@ describe("createTurnClient", () => {
     fail(new Error("timeout"));
     await expect(attempt.result).rejects.toThrow();
     expect(client.pending()).toBeNull();
+  });
+});
+
+describe("committedLine", () => {
+  const summary = (narration: string | null): TurnSummary => ({
+    turn_id: 7,
+    roll: null,
+    narration,
+    narration_error: narration === null ? "the game model request timed out" : null,
+    total_ms: 1,
+  });
+
+  it("keeps a Turn whose narration failed, without narration", () => {
+    const { line, notice } = committedLine(summary(null), "play", "I wait.");
+    expect(line).toEqual({
+      turn_id: 7,
+      kind: "play",
+      intent: "I wait.",
+      narration: null,
+      roll: null,
+      reverted: false,
+    });
+    expect(notice).toBe("Committed, narration interrupted: the game model request timed out");
+  });
+
+  it("has no notice for a narrated Turn", () => {
+    const { line, notice } = committedLine(summary("You wait."), "play", "I wait.");
+    expect(line.narration).toBe("You wait.");
+    expect(notice).toBeNull();
+  });
+});
+
+describe("createApi", () => {
+  it("reads the campaign summary", async () => {
+    const calls: string[] = [];
+    const invoke: Invoke = <T,>(cmd: string) => {
+      calls.push(cmd);
+      return Promise.resolve({ turns: [] } as T);
+    };
+    await createApi(invoke).summary();
+    expect(calls).toEqual(["campaign_summary"]);
   });
 });

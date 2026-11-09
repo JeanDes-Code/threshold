@@ -159,6 +159,11 @@ async fn open_campaign(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+async fn campaign_summary(state: State<'_, Shared>) -> Result<CampaignSummary, AppError> {
+    blocking(&state, |s| s.summary()).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 async fn submit_intent(
     app: AppHandle,
     state: State<'_, Shared>,
@@ -266,6 +271,7 @@ pub fn run() {
             list_campaigns,
             new_campaign,
             open_campaign,
+            campaign_summary,
             submit_intent,
             correct_last,
             ask_ooc,

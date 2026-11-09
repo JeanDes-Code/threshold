@@ -43,6 +43,10 @@ label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 13px;
 .roll.ok { color: var(--ok); }
 .roll.bad { color: var(--bad); }
 .error { color: var(--bad); white-space: pre-wrap; }
+.notice { white-space: pre-wrap; }
+.turn.reverted { opacity: 0.6; }
+.turn.reverted .narration { text-decoration: line-through; }
+.tag { color: var(--muted); font-size: 0.9em; }
 .ooc { border-left: 3px solid var(--line); padding-left: 10px; color: var(--muted); white-space: pre-wrap; }
 .muted { color: var(--muted); }
 pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: rgba(127,127,127,0.1); padding: 8px; max-height: 360px; overflow: auto; }

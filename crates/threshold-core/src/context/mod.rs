@@ -13,7 +13,8 @@
 mod narration_prompt;
 mod proposal_prompt;
 
-pub use narration_prompt::{narration_prompt, perceived_by_pc};
+pub(crate) use narration_prompt::adventure_block;
+pub use narration_prompt::{guard_plans, narration_prompt, perceived_by_pc};
 pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, proposal_prompt};
 
 use std::collections::BTreeSet;

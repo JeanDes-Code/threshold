@@ -145,7 +145,7 @@ fn turn_streams_and_reopens() {
         })
         .unwrap();
     assert_eq!(chunks.concat(), "The hall is quiet.");
-    assert_eq!(turn.narration, "The hall is quiet.");
+    assert_eq!(turn.narration.as_deref(), Some("The hall is quiet."));
     assert_eq!(turn.roll, None);
 
     // A retry with the same op_id returns the stored Turn: no second Commit.
@@ -256,6 +256,20 @@ fn rejected_turn_error_hides_gm_only_facts() {
     for secret in ["skims", "grain tithe"] {
         assert!(!err.contains(secret), "{err}");
     }
+    // No handle either: a fact handle reveals that a hidden fact exists, and
+    // its id.
+    let skims = {
+        let store = Store::open(Path::new(&db)).unwrap();
+        let campaign = *store.campaigns().unwrap().last().unwrap();
+        store
+            .snapshot(campaign)
+            .unwrap()
+            .live_fact(orsel, "skims")
+            .unwrap()
+            .id
+    };
+    assert!(!err.contains(&Handle::Fact(skims).to_string()), "{err}");
+    assert!(!err.contains(&Handle::Entity(orsel).to_string()), "{err}");
     // The raw reason did name the secret's key: the formatter removed it.
     s.set_debug(true);
     let raw = Store::open(Path::new(&db))
@@ -276,4 +290,60 @@ fn debug_flag_is_shared_outside_the_session() {
     let flag = s.debug_flag();
     flag.store(true, std::sync::atomic::Ordering::SeqCst);
     assert!(s.debug());
+}
+
+/// Final fix 1: a narration that fails after the Commit keeps the Turn. The
+/// result says so, the summary lists the Turn without Narration, and a retry
+/// under the same op_id narrates it without a second Turn row.
+#[test]
+fn narration_failure_keeps_the_committed_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![allowed()], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let turn = s
+        .submit_intent("op-1".into(), "I look around.", &mut |_| {})
+        .unwrap();
+    assert_eq!(turn.narration, None);
+    assert!(turn.narration_error.is_some());
+    let summary = s.summary().unwrap();
+    assert_eq!(summary.turns.len(), 1);
+    assert_eq!(summary.turns[0].turn_id, turn.turn_id);
+    assert_eq!(summary.turns[0].narration, None);
+
+    gm.push_narration("The hall is quiet.".into());
+    let again = s
+        .submit_intent("op-1".into(), "I look around.", &mut |_| {})
+        .unwrap();
+    assert_eq!(again.turn_id, turn.turn_id);
+    assert_eq!(again.narration.as_deref(), Some("The hall is quiet."));
+    assert_eq!(again.narration_error, None);
+    let summary = s.summary().unwrap();
+    assert_eq!(summary.turns.len(), 1, "exactly one Turn row");
+    assert_eq!(
+        summary.turns[0].narration.as_deref(),
+        Some("The hall is quiet.")
+    );
+}
+
+/// Final fix 4: the summary marks the Turn a Correction reverted.
+#[test]
+fn summary_marks_reverted_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(
+        vec![allowed(), allowed()],
+        vec!["You look.".into(), "You listen.".into()],
+    );
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let played = s
+        .submit_intent("op-1".into(), "I look around.", &mut |_| {})
+        .unwrap();
+    let corrected = s
+        .correct_last("op-2".into(), "I listen.", "I meant listening", &mut |_| {})
+        .unwrap();
+    let lines = s.summary().unwrap().turns;
+    let line = |id: u64| lines.iter().find(|l| l.turn_id == id).unwrap();
+    assert!(line(played.turn_id).reverted);
+    assert!(!line(corrected.turn_id).reverted);
 }

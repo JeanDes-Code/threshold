@@ -631,6 +631,25 @@ impl Store {
             .map(|id| project::read_turn(&self.db, id))
             .collect()
     }
+    /// The Turns of a campaign that a later Turn reverted (a Correction).
+    /// A revert inside a Turn that was itself reverted does not count.
+    pub fn reverted_turns(
+        &self,
+        c: CampaignId,
+    ) -> Result<std::collections::BTreeSet<TurnId>, StoreError> {
+        let mut reverted = std::collections::BTreeSet::new();
+        for turn in self.turns(c)?.iter().rev() {
+            if reverted.contains(&turn.id) {
+                continue;
+            }
+            for op in self.turn_ops(turn.id)? {
+                if let LedgerOp::RevertTurn { turn_id } = op {
+                    reverted.insert(turn_id);
+                }
+            }
+        }
+        Ok(reverted)
+    }
     /// One Turn row by id.
     pub fn turn(&self, t: TurnId) -> Result<Option<StoredTurn>, StoreError> {
         let exists: bool =

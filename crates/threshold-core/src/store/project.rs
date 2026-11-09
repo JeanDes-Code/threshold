@@ -160,7 +160,13 @@ fn apply(
             for cause in causes {
                 fact(db, *cause, c)?;
             }
-            let actual_canon = if *source == FactSource::Proposal {
+            // A fact a Turn writes (proposal, Check stake, Correction) is
+            // Persistent when the PC witnesses it, Established otherwise.
+            // Adventure Seed and World Event facts arrive with their canon.
+            let actual_canon = if matches!(
+                source,
+                FactSource::Proposal | FactSource::Stake | FactSource::Correction
+            ) {
                 let mut pc_seen = false;
                 for holder in seen_by {
                     pc_seen |= db.query_row(

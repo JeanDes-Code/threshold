@@ -35,7 +35,7 @@ fn apply(
     roll: Option<threshold_core::rules::RollResult>,
 ) -> Vec<threshold_core::domain::Reaction> {
     let valid = validate(p, &w.view).expect("apply takes a valid proposal");
-    let resolved = to_ops(valid, roll.as_ref(), &w.view, w.view.turn_seq + 1);
+    let resolved = to_ops(valid, roll.as_ref(), &w.view);
     w.commit(resolved.ops);
     resolved.reactions
 }
@@ -634,7 +634,7 @@ fn claims_blockers_rolls_schedule_and_clock_commit() {
     ok(validate(&p, &w.view));
 
     let valid = validate(&p, &w.view).unwrap();
-    let resolved = to_ops(valid, Some(&roll(false)), &w.view, w.view.turn_seq + 1);
+    let resolved = to_ops(valid, Some(&roll(false)), &w.view);
     assert!(resolved.ops.iter().any(|op| matches!(
         op,
         LedgerOp::RecordRoll { outcome, .. } if outcome == "lose"
@@ -926,4 +926,98 @@ fn schedule_seen_by_lists_npc_witnesses_only() {
     apply(&mut w, &p, None);
     let event = w.view.events_scheduled.iter().find(|ev| ev.id != w.bell);
     assert_eq!(event.unwrap().seen_by, [w.brann]);
+}
+
+// --- Canon per writer (final fix 2) ------------------------------------------
+//
+// One rule for every fact a Turn writes: Persistent when the PC witnesses
+// it, Established otherwise, and a state key is never Persistent.
+
+#[test]
+fn canon_of_a_proposal_fact() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![
+        fact(slot(e(w.brann), "scar", "left cheek"), Seen::Pc, vec![]),
+        fact(slot(e(w.brann), "oath", "silence"), Seen::Gm, vec![]),
+    ];
+    apply(&mut w, &p, None);
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(slot(e(w.brann), "mood", "calm"), Seen::Pc, vec![])];
+    apply(&mut w, &p, None);
+    let canon = |key: &str| w.view.live_fact(w.brann, key).unwrap().canon;
+    assert_eq!(canon("scar"), Canon::Persistent);
+    assert_eq!(canon("oath"), Canon::Established);
+    assert_eq!(canon("mood"), Canon::Established, "state key");
+}
+
+fn stake_check(w: &World) -> threshold_core::domain::DecisionProposal {
+    let mut p = proposal(Verdict::Check);
+    p.blockers = vec![f(w.gate_locked)];
+    p.check = Some(check(
+        None,
+        slot(e(w.gate), "locked", "no"),
+        slot(e(w.ada), "fatigue", "winded"),
+    ));
+    p
+}
+
+#[test]
+fn canon_of_a_stake_fact() {
+    // Won: `locked` is not a state key, and the present PC witnesses it.
+    let mut w = World::new();
+    let p = stake_check(&w);
+    apply(&mut w, &p, Some(roll(true)));
+    let won = w.view.live_fact(w.gate, "locked").unwrap();
+    assert_eq!(won.slot.value, "no");
+    assert_eq!(won.source, threshold_core::domain::FactSource::Stake);
+    assert_eq!(won.canon, Canon::Persistent);
+
+    // Lost: `fatigue` is a state key, so it stays Established.
+    let mut w = World::new();
+    let p = stake_check(&w);
+    apply(&mut w, &p, Some(roll(false)));
+    let lost = w.view.live_fact(w.ada, "fatigue").unwrap();
+    assert_eq!(lost.source, threshold_core::domain::FactSource::Stake);
+    assert_eq!(lost.canon, Canon::Established);
+}
+
+#[test]
+fn canon_of_an_adventure_seed_fact() {
+    let w = World::new();
+    let material = w.view.live_fact(w.gate, "material").unwrap();
+    assert_eq!(
+        material.source,
+        threshold_core::domain::FactSource::AdventureSeed
+    );
+    assert_eq!(material.canon, Canon::Persistent, "decided");
+    assert_eq!(
+        w.view.live_fact(w.ada, "location").unwrap().canon,
+        Canon::Established,
+        "decided state key"
+    );
+    assert_eq!(w.view.fact(f(w.rumor)).unwrap().canon, Canon::Possible);
+}
+
+/// Final fix 4: a new NPC on a move Turn stands where the PC arrives.
+#[test]
+fn new_npc_on_a_move_turn_stands_at_the_new_place() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.action = threshold_core::domain::ActionKind::Move;
+    p.facts = vec![fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![])];
+    p.new_npcs = vec![new_npc(1, "Kett", true)];
+    apply(&mut w, &p, None);
+    let kett = w
+        .view
+        .entities
+        .iter()
+        .find(|x| x.name == "Kett")
+        .unwrap()
+        .id;
+    assert_eq!(
+        w.view.live_fact(kett, "location").unwrap().slot.value,
+        "tavern"
+    );
+    assert!(w.view.present().contains(&kett));
 }

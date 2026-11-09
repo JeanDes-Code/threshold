@@ -554,7 +554,7 @@ fn new_npc_is_seen_by_those_present() {
     let mut p = proposal(Verdict::Allowed);
     p.new_npcs = vec![new_npc(1, "Kett", true)];
     let valid = validate(&p, &w.view).expect("valid proposal");
-    let resolved = to_ops(valid, None, &w.view, w.view.turn_seq + 1);
+    let resolved = to_ops(valid, None, &w.view);
     play_turn(&mut w, "turn-kett", "I wait.", "", resolved.ops.clone());
 
     let kett = w

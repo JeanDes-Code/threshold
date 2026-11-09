@@ -203,3 +203,63 @@ fn narrate_streams_ndjson_and_returns_full_text() {
     assert_eq!(metrics.eval_tokens, 8);
     assert_eq!(metrics.total_ms, 750);
 }
+
+#[test]
+fn narrate_maps_a_mid_stream_error_line() {
+    let response = [
+        json!({ "message": { "content": "The door " } }),
+        json!({ "error": "model runner has unexpectedly stopped" }),
+    ]
+    .into_iter()
+    .map(|line| line.to_string())
+    .collect::<Vec<_>>()
+    .join("\n");
+    let (base_url, _request, server) = serve_response(response);
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url,
+        ..OllamaConfig::default()
+    });
+    let result = gm.narrate(&prompt(), &mut |_| {});
+    server.join().unwrap();
+    assert_eq!(
+        result,
+        Err(GmError::Aborted(
+            "model runner has unexpectedly stopped".into()
+        ))
+    );
+}
+
+#[test]
+fn propose_maps_an_error_body() {
+    let (base_url, _request, server) =
+        serve_response(json!({ "error": "out of memory" }).to_string());
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url,
+        ..OllamaConfig::default()
+    });
+    let result = gm.propose(&prompt(), &proposal_schema());
+    server.join().unwrap();
+    assert_eq!(result, Err(GmError::Aborted("out of memory".into())));
+}
+
+#[test]
+fn silent_server_times_out() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        // Hold the connection open, never answer.
+        thread::sleep(Duration::from_secs(3));
+        drop(stream);
+    });
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url: format!("http://{address}"),
+        timeout_s: 1,
+        ..OllamaConfig::default()
+    });
+    let started = Instant::now();
+    let result = gm.narrate(&prompt(), &mut |_| {});
+    assert_eq!(result, Err(GmError::Timeout));
+    assert!(started.elapsed() < Duration::from_secs(3));
+    server.join().unwrap();
+}

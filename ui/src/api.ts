@@ -16,6 +16,8 @@ export interface TurnLine {
   intent: string;
   narration: string | null;
   roll: RollResult | null;
+  /** A later Correction reverted this Turn. */
+  reverted: boolean;
 }
 
 export interface CampaignSummary {
@@ -25,10 +27,12 @@ export interface CampaignSummary {
   turns: TurnLine[];
 }
 
+/** A committed Turn. `narration` is null when the narration failed after the Commit. */
 export interface TurnSummary {
   turn_id: number;
   roll: RollResult | null;
-  narration: string;
+  narration: string | null;
+  narration_error: string | null;
   total_ms: number;
 }
 
@@ -153,6 +157,7 @@ export function createTurnClient(
 export function createApi(invoke: Invoke) {
   return {
     defaults: () => invoke<Defaults>("defaults"),
+    summary: () => invoke<CampaignSummary>("campaign_summary"),
     modelStatus: () => invoke<string>("model_status"),
     listCampaigns: () => invoke<string[]>("list_campaigns"),
     newCampaign: (seedPath: string, worldPath: string) =>
@@ -168,6 +173,32 @@ export function createApi(invoke: Invoke) {
 }
 
 export type Api = ReturnType<typeof createApi>;
+
+/**
+ * The Turn line of a committed Turn, and the notice to show with it. A Turn
+ * whose narration failed is committed all the same: its line has no
+ * narration, so the view offers to narrate it again.
+ */
+export function committedLine(
+  turn: TurnSummary,
+  kind: string,
+  intent: string,
+): { line: TurnLine; notice: string | null } {
+  return {
+    line: {
+      turn_id: turn.turn_id,
+      kind,
+      intent,
+      narration: turn.narration,
+      roll: turn.roll,
+      reverted: false,
+    },
+    notice:
+      turn.narration === null
+        ? `Committed, narration interrupted: ${turn.narration_error ?? "unknown error"}`
+        : null,
+  };
+}
 
 /** The text of a command error: Tauri rejects with the serialized AppError. */
 export function errorText(e: unknown): string {

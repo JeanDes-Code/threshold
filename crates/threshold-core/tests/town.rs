@@ -270,3 +270,127 @@ fn town_demo_offscreen_consequence() {
         narrations[3]
     );
 }
+
+fn plan(npc: u64, stance: Stance, plan: &str) -> Reaction {
+    Reaction {
+        npc: e(npc),
+        stance,
+        plan: plan.into(),
+        cause: None,
+    }
+}
+
+/// Final fix 3: a reaction plan that names a live fact the PC holds no
+/// Belief about (its key or value, as a whole word) is dropped before the
+/// narrator sees it. The NPC and the stance stay.
+#[test]
+fn narrator_never_gets_a_plan_that_quotes_a_secret() {
+    let (store, campaign) = town();
+    let view = store.snapshot(campaign).unwrap();
+    let (orsel, doul, hessa) = (id(&view, "Orsel"), id(&view, "Doul"), id(&view, "Hessa"));
+    let mut talk = proposal(Verdict::Allowed);
+    talk.action = ActionKind::Talk;
+    talk.reactions = vec![
+        plan(orsel, Stance::Resist, "hides the Grain  Tithe ledger"),
+        plan(doul, Stance::Neutral, "knows_his_master_skims"),
+    ];
+    let mut later = proposal(Verdict::Allowed);
+    later.action = ActionKind::Talk;
+    later.reactions = vec![plan(
+        hessa,
+        Stance::Comply,
+        "glances at the door, then smiles",
+    )];
+    let gm = RecordedGm::new(
+        vec![json(&talk), json(&later)],
+        vec!["They watch you.".into(), "Hessa smiles.".into()],
+    );
+    let mut engine = Engine::new(store, Box::new(gm.clone()), Box::new(D10), vec![], campaign);
+    for (op, intent) in [("t1", "I greet the room."), ("t2", "I greet Hessa.")] {
+        engine
+            .play_turn(op.into(), intent, &mut |_: &str| {})
+            .unwrap_or_else(|err| panic!("{op}: {err}"));
+    }
+    let narrations: Vec<String> = gm
+        .calls()
+        .into_iter()
+        .filter(|c| c.kind == CallKind::Narrate)
+        .map(|c| {
+            let p = c.prompt;
+            format!("{}{}{}{}", p.system, p.stable, p.scene, p.recent)
+        })
+        .collect();
+    let all = &narrations[0];
+    for secret in ["skims", "grain tithe", "Grain  Tithe", "his_master"] {
+        assert!(!all.contains(secret), "{secret} leaked:\n{all}");
+    }
+    assert!(all.contains("- Orsel (resist)\n"), "{all}");
+    assert!(all.contains("- Doul (neutral)\n"), "{all}");
+    assert!(
+        narrations[1].contains("- Hessa (comply): glances at the door, then smiles\n"),
+        "{}",
+        narrations[1]
+    );
+    // The stored Turn keeps the model's reactions as they were.
+    let stored = engine
+        .store()
+        .turn_by_campaign_op(campaign, &"t1".to_owned())
+        .unwrap()
+        .unwrap();
+    assert!(stored.record.proposal_json.contains("Grain  Tithe"));
+}
+
+/// Words that only look like a secret do not count: a part of a word, a
+/// state key, an entity name. A secret the PC knows is no longer one.
+#[test]
+fn plan_guard_matches_whole_words_of_unknown_facts_only() {
+    let (mut store, campaign) = town();
+    let view = store.snapshot(campaign).unwrap();
+    let (pc, orsel) = (id(&view, "Wren"), id(&view, "Orsel"));
+    let keep = [
+        // "skimsy" and "tithes" are not the words "skims" and "tithe".
+        "skimsy grain tithes",
+        // `condition` is a state key.
+        "checks the condition of the archive",
+        // The Magistracy's `seat` value is the entity name "Varn town hall".
+        "walks back to the Varn town hall",
+    ];
+    let reactions: Vec<Reaction> = keep
+        .iter()
+        .map(|p| plan(orsel, Stance::Neutral, p))
+        .collect();
+    assert_eq!(
+        threshold_core::context::guard_plans(&view, &reactions),
+        reactions
+    );
+    let secret = vec![plan(orsel, Stance::Neutral, "pockets the grain tithe")];
+    assert_eq!(
+        threshold_core::context::guard_plans(&view, &secret)[0].plan,
+        ""
+    );
+
+    // Once the PC witnessed the secret, a plan may name it.
+    let skims = view.live_fact(orsel, "skims").unwrap().id;
+    store
+        .commit(
+            threshold_core::store::TurnRecord {
+                campaign_id: campaign,
+                op_id: "learn".into(),
+                kind: TurnKind::Play,
+                intent: "test".into(),
+                proposal_json: "{}".into(),
+                clock_before: view.clock_min,
+                clock_after: view.clock_min,
+            },
+            vec![LedgerOp::Know {
+                holder: threshold_core::domain::EntityRef::Id(pc),
+                fact_id: Some(skims),
+                claim_id: None,
+                how: Knowing::Witnessed,
+                arrives_at: view.clock_min,
+            }],
+        )
+        .unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    assert_eq!(threshold_core::context::guard_plans(&view, &secret), secret);
+}

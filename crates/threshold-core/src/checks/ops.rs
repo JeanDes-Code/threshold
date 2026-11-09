@@ -25,13 +25,11 @@ pub struct Resolved {
 ///
 /// `roll` is the Roll of the proposal's Check, if any. With a Check and no
 /// Roll, no stake applies and every `Cause::Check` reaction is clamped.
-/// `turn_seq` is the sequence number of this Turn; this slice does not need
-/// it, because every fact in `view` already predates the Turn.
+/// Every fact in `view` predates the Turn.
 pub fn to_ops(
     valid: super::Validated<'_>,
     roll: Option<&RollResult>,
     view: &WorldView,
-    _turn_seq: u64,
 ) -> Resolved {
     let p = valid.proposal();
     let mut b = Builder {
@@ -148,14 +146,44 @@ struct Builder<'a> {
 
 impl Builder<'_> {
     /// Each new NPC: the entity, its Voice Card from the one-line voice seed,
-    /// and a `location` fact equal to the PC's, so the NPC is present. The
-    /// NPC is introduced into the Scene, so everyone present witnesses that
-    /// location, the PC included (as `Seen::Present`).
+    /// and a `location` fact equal to the PC's location after this Turn, so
+    /// the NPC is present. The NPC is introduced into the Scene, so everyone
+    /// present witnesses that location, the PC included (as `Seen::Present`).
+    /// On a move, the others present stay behind: only the PC and the new
+    /// NPCs witness it.
     fn new_npcs(&mut self) {
-        let pc_location = pc(self.view)
-            .and_then(|pc| self.view.live_fact(pc, "location"))
-            .map(|f| f.slot.value.clone());
-        let witnesses = self.holders(Seen::Present);
+        let pc_id = pc(self.view);
+        let moved_to = pc_id.and_then(|pc| {
+            self.p
+                .facts
+                .iter()
+                .filter(|f| f.said_by.is_none())
+                .filter(|f| {
+                    f.slot.subject == Handle::Entity(pc)
+                        && normalize::key(&f.slot.key) == "location"
+                })
+                .map(|f| normalize::value(&f.slot.value))
+                .next_back()
+        });
+        let witnesses = if moved_to.is_some() {
+            pc_id
+                .map(EntityRef::Id)
+                .into_iter()
+                .chain(
+                    self.p
+                        .new_npcs
+                        .iter()
+                        .map(|n| EntityRef::New(new_local(n.id))),
+                )
+                .collect()
+        } else {
+            self.holders(Seen::Present)
+        };
+        let pc_location = moved_to.or_else(|| {
+            pc_id
+                .and_then(|pc| self.view.live_fact(pc, "location"))
+                .map(|f| f.slot.value.clone())
+        });
         for npc in &self.p.new_npcs {
             let local = new_local(npc.id);
             self.ops.push(LedgerOp::AddEntity {
