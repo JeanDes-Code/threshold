@@ -61,3 +61,7 @@ Content Packs are removable data folders (prompt fragments, extra Adventure Seed
 - `GLOSSARY.md`: the domain terms.
 - `docs/adr/`: architecture decisions.
 - `docs/superpowers/specs/`: the design and the data shape.
+
+## License
+
+MIT. See `LICENSE`.
