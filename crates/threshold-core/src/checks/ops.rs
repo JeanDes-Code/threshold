@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{ceiling, pc};
+use super::{handle_ceiling, pc};
 use crate::{
     domain::{
         Canon, Cause, ClaimDraft, DecisionProposal, Effect, EntityKind, EntityRef, FactDraft,
@@ -27,14 +27,13 @@ pub struct Resolved {
 /// Roll, no stake applies and every `Cause::Check` reaction is clamped.
 /// `turn_seq` is the sequence number of this Turn; this slice does not need
 /// it, because every fact in `view` already predates the Turn.
-///
-/// Panics on a handle that `validate` rejects (wrong prefix, `N` above 255).
 pub fn to_ops(
-    p: &DecisionProposal,
+    valid: super::Validated<'_>,
     roll: Option<&RollResult>,
     view: &WorldView,
     _turn_seq: u64,
 ) -> Resolved {
+    let p = valid.proposal();
     let mut b = Builder {
         p,
         view,
@@ -49,9 +48,10 @@ pub fn to_ops(
     if let (Some(check), Some(roll)) = (&p.check, roll) {
         b.ops.push(LedgerOp::RecordRoll {
             seed: roll.seed,
-            difficulty: i8::try_from(roll.difficulty).unwrap_or(i8::MAX),
+            difficulty: i8::try_from(roll.difficulty).expect("a Ruleset difficulty is at most 10"),
             stakes: serde_json::json!({ "win": check.win, "lose": check.lose }),
-            factors: serde_json::to_value(&check.factors).unwrap_or_default(),
+            factors: serde_json::to_value(&check.factors)
+                .expect("factors are plain data and always serialize"),
             value: i32::from(roll.value),
             outcome: if roll.success { "win" } else { "lose" }.into(),
         });
@@ -124,10 +124,7 @@ pub fn to_ops(
         .map(|r| {
             let mut r = r.clone();
             if r.cause == Some(Cause::Check) && !success {
-                let limit = match r.npc {
-                    Handle::Entity(id) => ceiling(view, id),
-                    _ => ceiling(view, u64::MAX),
-                };
+                let limit = handle_ceiling(view, r.npc);
                 r.stance = r.stance.min(limit);
             }
             r
@@ -352,6 +349,7 @@ impl Builder<'_> {
             Seen::Gm => Vec::new(),
             Seen::Pc => pc(self.view).map(EntityRef::Id).into_iter().collect(),
             Seen::Present => {
+                // Factions hear and remember (holders), but are not persons, so boundary.rs skips them.
                 let present = self.view.present();
                 self.view
                     .entities

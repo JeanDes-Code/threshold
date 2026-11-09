@@ -177,6 +177,14 @@ fn apply(
             } else {
                 *canon
             };
+            // State keys hold changing state and are never Persistent, whatever
+            // the source (Adventure Seed included) or the witnesses.
+            let actual_canon =
+                if actual_canon == Canon::Persistent && crate::domain::is_state_key(&slot.key) {
+                    Canon::Established
+                } else {
+                    actual_canon
+                };
             db.execute("INSERT INTO fact(id,subject_id,key,value,text,canon,source,created_turn) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,slot.subject,normalize::key(&slot.key),normalize::value(&slot.value),text,enum_text(&actual_canon)?,enum_text(source)?,turn])?;
             let fact_id = db.last_insert_rowid();
             for cause in causes {

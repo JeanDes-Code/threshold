@@ -11,5 +11,5 @@ pub use proposal::{
 };
 pub use types::{
     Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef, FactDraft, FactSource,
-    GoalStatus, Key, Knowing, LedgerOp, Slot, Stance, Trigger, Value,
+    GoalStatus, Key, Knowing, LedgerOp, STATE_KEYS, Slot, Stance, Trigger, Value, is_state_key,
 };

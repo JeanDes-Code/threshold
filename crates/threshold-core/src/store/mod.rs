@@ -350,7 +350,13 @@ impl Store {
                             value: crate::normalize::value(&f.value),
                         },
                         text: f.text.clone(),
-                        canon,
+                        // A decided state key (location, mood...) is Established.
+                        canon: if canon == Canon::Persistent && crate::domain::is_state_key(&f.key)
+                        {
+                            Canon::Established
+                        } else {
+                            canon
+                        },
                         source: FactSource::AdventureSeed,
                         seen_by: vec![],
                         causes: vec![],

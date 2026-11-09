@@ -10,7 +10,10 @@ use threshold_core::{
     proposal_schema_for,
 };
 
-fn rejected(result: Result<(), Vec<Rejection>>, kind: CheckKind) -> Vec<Rejection> {
+fn rejected<T: std::fmt::Debug>(
+    result: Result<T, Vec<Rejection>>,
+    kind: CheckKind,
+) -> Vec<Rejection> {
     let errs = result.expect_err("proposal should be rejected");
     assert!(
         errs.iter().any(|r| r.check == kind),
@@ -19,7 +22,7 @@ fn rejected(result: Result<(), Vec<Rejection>>, kind: CheckKind) -> Vec<Rejectio
     errs
 }
 
-fn ok(result: Result<(), Vec<Rejection>>) {
+fn ok<T>(result: Result<T, Vec<Rejection>>) {
     if let Err(errs) = result {
         panic!("expected Ok, got {errs:?}");
     }
@@ -31,7 +34,8 @@ fn apply(
     p: &threshold_core::domain::DecisionProposal,
     roll: Option<threshold_core::rules::RollResult>,
 ) -> Vec<threshold_core::domain::Reaction> {
-    let resolved = to_ops(p, roll.as_ref(), &w.view, w.view.turn_seq + 1);
+    let valid = validate(p, &w.view).expect("apply takes a valid proposal");
+    let resolved = to_ops(valid, roll.as_ref(), &w.view, w.view.turn_seq + 1);
     w.commit(resolved.ops);
     resolved.reactions
 }
@@ -105,7 +109,8 @@ fn cause_created_this_turn_rejected() {
     ];
     let errs = validate(&p, &w.view).expect_err("a cause from this Turn is never valid");
     assert!(
-        errs.iter().any(|r| r.handle == Some(f(w.next_fact_id()))),
+        errs.iter()
+            .any(|r| r.check == CheckKind::References && r.handle == Some(f(w.next_fact_id()))),
         "{errs:?}"
     );
 }
@@ -280,12 +285,18 @@ fn actor_death_counts_as_cancel() {
     p.facts = vec![fact(slot(e(w.orsel), "alive", "no"), Seen::Pc, vec![])];
     rejected(validate(&p, &w.view), CheckKind::TensionEvaporates);
 
+    // Orsel's location is a state key, so it is not Persistent: only the
+    // actor-cancel rule can reject this write.
     p.facts = vec![fact(
         slot(e(w.orsel), "location", "tavern"),
         Seen::Gm,
         vec![],
     )];
-    rejected(validate(&p, &w.view), CheckKind::TensionEvaporates);
+    let errs = rejected(validate(&p, &w.view), CheckKind::TensionEvaporates);
+    assert!(
+        errs.iter().all(|r| r.check != CheckKind::FactBends),
+        "{errs:?}"
+    );
 
     p.facts = vec![fact(
         slot(e(w.orsel), "alive", "no"),
@@ -494,7 +505,7 @@ fn new_npc_commits_with_voice_card_location_and_witnessed_fact() {
     assert!(w.view.present().contains(&kett));
     assert!(w.store.voice_card(kett).unwrap().is_some());
     let mood = w.view.live_fact(kett, "mood").unwrap();
-    assert_eq!(mood.canon, Canon::Persistent, "the PC saw it");
+    assert_eq!(mood.canon, Canon::Established, "mood is a state key");
     let holders: Vec<u64> = w
         .view
         .knowledge
@@ -514,7 +525,7 @@ fn seen_controls_canon_and_existing_slot_is_superseded() {
     let mut p = proposal(Verdict::Allowed);
     p.facts = vec![
         fact(slot(e(w.brann), "mood", "bored"), Seen::Gm, vec![]),
-        fact(slot(e(w.ada), "fatigue", "tired"), Seen::Pc, vec![]),
+        fact(slot(e(w.brann), "scar", "left cheek"), Seen::Pc, vec![]),
     ];
     ok(validate(&p, &w.view));
     apply(&mut w, &p, None);
@@ -523,7 +534,7 @@ fn seen_controls_canon_and_existing_slot_is_superseded() {
         Canon::Established
     );
     assert_eq!(
-        w.view.live_fact(w.ada, "fatigue").unwrap().canon,
+        w.view.live_fact(w.brann, "scar").unwrap().canon,
         Canon::Persistent
     );
 
@@ -588,7 +599,8 @@ fn claims_blockers_rolls_schedule_and_clock_commit() {
     p.minutes = 5;
     ok(validate(&p, &w.view));
 
-    let resolved = to_ops(&p, Some(&roll(false)), &w.view, w.view.turn_seq + 1);
+    let valid = validate(&p, &w.view).unwrap();
+    let resolved = to_ops(valid, Some(&roll(false)), &w.view, w.view.turn_seq + 1);
     assert!(resolved.ops.iter().any(|op| matches!(
         op,
         LedgerOp::RecordRoll { outcome, .. } if outcome == "lose"
@@ -653,4 +665,149 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let mut bad = good.clone();
     bad["reactions"][0]["npc"] = "E999".into();
     assert!(!validator.is_valid(&bad));
+}
+
+// --- Fix round 1 -----------------------------------------------------------
+
+#[test]
+fn agency_applies_to_stakes_and_effects() {
+    let w = World::new();
+    let mut p = proposal(Verdict::Check);
+    p.check = Some(check(
+        None,
+        slot(e(w.orsel), "convinced", "yes"),
+        slot(e(w.ada), "intends", "give up"),
+    ));
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+
+    let mut p = proposal(Verdict::Allowed);
+    p.schedule = Some(EventDraft {
+        in_minutes: 5,
+        actor: e(w.brann),
+        goal: None,
+        text: "Brann shouts".into(),
+        effects: vec![slot(e(w.ada), "intends", "flee")],
+    });
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+}
+
+#[test]
+fn lose_stake_is_not_exempt_from_coincidence_or_tension() {
+    let w = World::new();
+    let mut p = proposal(Verdict::Check);
+    p.check = Some(check(
+        None,
+        slot(e(w.ada), "fatigue", "winded"),
+        slot(e(w.gate), "locked", "no"),
+    ));
+    rejected(validate(&p, &w.view), CheckKind::Coincidence);
+
+    let mut p = proposal(Verdict::Check);
+    p.check = Some(check(
+        None,
+        slot(e(w.ada), "fatigue", "winded"),
+        slot(e(w.orsel), "alive", "no"),
+    ));
+    rejected(validate(&p, &w.view), CheckKind::TensionEvaporates);
+
+    let mut p = proposal(Verdict::Check);
+    p.check = Some(check(
+        None,
+        slot(e(w.orsel), "alive", "no"),
+        slot(e(w.ada), "fatigue", "winded"),
+    ));
+    rejected(validate(&p, &w.view), CheckKind::TensionEvaporates);
+}
+
+#[test]
+fn state_keys_never_persistent() {
+    use threshold_core::domain::STATE_KEYS;
+    assert!(STATE_KEYS.contains(&"location") && !STATE_KEYS.contains(&"alive"));
+    let mut w = World::new();
+    assert_eq!(
+        w.view.live_fact(w.ada, "location").unwrap().canon,
+        Canon::Established,
+        "seed-decided location"
+    );
+    assert_eq!(
+        w.view.live_fact(w.gate, "material").unwrap().canon,
+        Canon::Persistent
+    );
+
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(slot(e(w.ada), "fatigue", "tired"), Seen::Pc, vec![])];
+    apply(&mut w, &p, None);
+    assert_eq!(
+        w.view.live_fact(w.ada, "fatigue").unwrap().canon,
+        Canon::Established,
+        "PC-witnessed fatigue"
+    );
+
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![
+        fact(slot(e(w.ada), "fatigue", "rested"), Seen::Pc, vec![]),
+        fact(slot(e(w.brann), "location", "tavern"), Seen::Pc, vec![]),
+    ];
+    ok(validate(&p, &w.view));
+    apply(&mut w, &p, None);
+    assert_eq!(
+        w.view.live_fact(w.ada, "fatigue").unwrap().slot.value,
+        "rested"
+    );
+    assert_eq!(
+        w.view.live_fact(w.brann, "location").unwrap().slot.value,
+        "tavern"
+    );
+    w.store.rebuild_projections(w.campaign).unwrap();
+    assert_eq!(w.store.snapshot(w.campaign).unwrap(), w.view);
+}
+
+#[test]
+fn pc_move_sets_location_only_for_move_action() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![])];
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+
+    p.action = threshold_core::domain::ActionKind::Move;
+    ok(validate(&p, &w.view));
+    apply(&mut w, &p, None);
+    assert_eq!(
+        w.view.live_fact(w.ada, "location").unwrap().slot.value,
+        "tavern"
+    );
+    assert!(
+        !w.view.present().contains(&w.orsel),
+        "Orsel stayed at the gate"
+    );
+
+    // A stake still cannot move the PC.
+    let mut p = proposal(Verdict::Check);
+    p.action = threshold_core::domain::ActionKind::Move;
+    p.check = Some(check(
+        None,
+        slot(e(w.ada), "location", "roof"),
+        slot(e(w.ada), "injury", "sprain"),
+    ));
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+}
+
+#[test]
+fn alive_stays_protected() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(slot(e(w.brann), "alive", "no"), Seen::Pc, vec![])];
+    apply(&mut w, &p, None);
+    let dead = w.view.live_fact(w.brann, "alive").unwrap();
+    assert_eq!(dead.canon, Canon::Persistent);
+    let dead = dead.id;
+
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(
+        slot(e(w.brann), "alive", "yes"),
+        Seen::Pc,
+        vec![f(w.debt)],
+    )];
+    let errs = rejected(validate(&p, &w.view), CheckKind::FactBends);
+    assert_eq!(errs[0].handle, Some(f(dead)));
 }

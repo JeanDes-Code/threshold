@@ -94,40 +94,135 @@ pub const PC_INVOLUNTARY_KEYS: &[&str] = &["condition", "injury", "fatigue", "ca
 /// no attitude row (for example one created this Turn) has attitude 0.
 pub fn ceiling(view: &WorldView, npc: EntityId) -> Stance {
     let Some(pc) = pc(view) else {
-        return Stance::Comply;
+        return attitude_ceiling(0);
     };
     let attitude = view
         .attitudes
         .iter()
         .find(|a| a.from == npc && a.to == pc)
         .map_or(0, |a| a.attitude);
-    let by_attitude = STANCE_CEILINGS
-        .iter()
-        .rev()
-        .find(|(lowest, _)| attitude >= *lowest)
-        .map_or(Stance::Resist, |(_, stance)| *stance);
     let against_pc = view
         .goals_active
         .iter()
         .any(|g| g.npc_id == npc && g.against_id == Some(pc));
     if against_pc {
-        by_attitude.min(GOAL_AGAINST_PC_CEILING)
+        attitude_ceiling(attitude).min(GOAL_AGAINST_PC_CEILING)
     } else {
-        by_attitude
+        attitude_ceiling(attitude)
+    }
+}
+
+/// The ceiling for an attitude toward the PC, from `STANCE_CEILINGS`.
+fn attitude_ceiling(attitude: i8) -> Stance {
+    STANCE_CEILINGS
+        .iter()
+        .rev()
+        .find(|(lowest, _)| attitude >= *lowest)
+        .map_or(Stance::Resist, |(_, stance)| *stance)
+}
+
+/// The ceiling of a reaction's NPC. A new NPC (`N` handle) has no attitude
+/// row and no goal yet, so its ceiling is the one of attitude 0.
+fn handle_ceiling(view: &WorldView, npc: Handle) -> Stance {
+    match npc {
+        Handle::Entity(id) => ceiling(view, id),
+        _ => attitude_ceiling(0),
+    }
+}
+
+/// A proposal that passed `validate`. Only `validate` builds one, so
+/// unvalidated input cannot reach `to_ops`.
+#[derive(Clone, Copy, Debug)]
+pub struct Validated<'a>(&'a DecisionProposal);
+
+impl<'a> Validated<'a> {
+    pub fn proposal(&self) -> &'a DecisionProposal {
+        self.0
     }
 }
 
 /// Runs every Commit check that comes before the Roll. References and shape
 /// run first; when they fail, the other checks are skipped, so they never see
 /// an unknown handle.
-pub fn validate(p: &DecisionProposal, view: &WorldView) -> Result<(), Vec<Rejection>> {
+pub fn validate<'a>(
+    p: &'a DecisionProposal,
+    view: &WorldView,
+) -> Result<Validated<'a>, Vec<Rejection>> {
     let mut errs = references::check(p, view);
     if errs.is_empty() {
         agency::check(p, view, &mut errs);
         shortcuts::check(p, view, &mut errs);
         boundary::check(p, view, &mut errs);
     }
-    if errs.is_empty() { Ok(()) } else { Err(errs) }
+    if errs.is_empty() {
+        Ok(Validated(p))
+    } else {
+        Err(errs)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Origin {
+    Fact,
+    Effect,
+    WinStake,
+    LoseStake,
+}
+
+/// A slot write of the proposal on an entity that exists before this Turn:
+/// non-claim facts, schedule effects, and both stakes.
+pub(super) struct Write<'a> {
+    pub subject: EntityId,
+    pub key: &'a str,
+    pub value: &'a str,
+    pub because: &'a [Handle],
+    pub origin: Origin,
+}
+
+pub(super) fn writes(p: &DecisionProposal) -> Vec<Write<'_>> {
+    let mut out = Vec::new();
+    let mut push = |subject: Handle, key, value, because, origin| {
+        if let Handle::Entity(subject) = subject {
+            out.push(Write {
+                subject,
+                key,
+                value,
+                because,
+                origin,
+            });
+        }
+    };
+    for f in p.facts.iter().filter(|f| f.said_by.is_none()) {
+        push(
+            f.slot.subject,
+            &f.slot.key,
+            &f.slot.value,
+            &f.because,
+            Origin::Fact,
+        );
+    }
+    if let Some(s) = &p.schedule {
+        for e in &s.effects {
+            push(e.subject, &e.key, &e.value, &[], Origin::Effect);
+        }
+    }
+    if let Some(c) = &p.check {
+        push(
+            c.win.subject,
+            &c.win.key,
+            &c.win.value,
+            &[],
+            Origin::WinStake,
+        );
+        push(
+            c.lose.subject,
+            &c.lose.key,
+            &c.lose.value,
+            &[],
+            Origin::LoseStake,
+        );
+    }
+    out
 }
 
 fn pc(view: &WorldView) -> Option<EntityId> {

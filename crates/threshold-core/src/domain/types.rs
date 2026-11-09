@@ -10,6 +10,24 @@ pub type Key = String;
 pub type Value = String;
 pub type ClockMin = u64;
 
+/// Keys that hold changing state (normalized). A fact on one of these keys is
+/// never Persistent, so the state can change on a later Turn. `alive` is not a
+/// state key: a death stays protected.
+pub const STATE_KEYS: &[&str] = &[
+    "location",
+    "condition",
+    "injury",
+    "fatigue",
+    "carrying",
+    "mood",
+];
+
+/// True when `key`, once normalized, is in `STATE_KEYS`.
+pub fn is_state_key(key: &str) -> bool {
+    let key = crate::normalize::key(key);
+    STATE_KEYS.contains(&key.as_str())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityKind {

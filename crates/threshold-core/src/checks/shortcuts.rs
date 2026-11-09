@@ -1,62 +1,14 @@
 //! The four Shortcut checks of data-shape §4: coincidence, NPC folds, fact
 //! bends and tension evaporates.
 
-use super::{CheckKind, Rejection, ceiling, changes, same, same_key, valid_cause};
+use super::{
+    CheckKind, Origin, Rejection, Write, changes, handle_ceiling, same, same_key, valid_cause,
+    writes,
+};
 use crate::{
-    domain::{Canon, Cause, DecisionProposal, EntityId, Handle, Seen, Trigger, Verdict},
+    domain::{Canon, Cause, DecisionProposal, Handle, Seen, Trigger, Verdict, is_state_key},
     store::WorldView,
 };
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Origin {
-    Fact,
-    Effect,
-    Stake,
-}
-
-/// A slot write on an entity that exists before this Turn.
-struct Write<'a> {
-    subject: EntityId,
-    key: &'a str,
-    value: &'a str,
-    because: &'a [Handle],
-    origin: Origin,
-}
-
-fn writes(p: &DecisionProposal) -> Vec<Write<'_>> {
-    let mut out = Vec::new();
-    let mut push = |subject: Handle, key, value, because, origin| {
-        if let Handle::Entity(subject) = subject {
-            out.push(Write {
-                subject,
-                key,
-                value,
-                because,
-                origin,
-            });
-        }
-    };
-    for f in p.facts.iter().filter(|f| f.said_by.is_none()) {
-        push(
-            f.slot.subject,
-            &f.slot.key,
-            &f.slot.value,
-            &f.because,
-            Origin::Fact,
-        );
-    }
-    if let Some(s) = &p.schedule {
-        for e in &s.effects {
-            push(e.subject, &e.key, &e.value, &[], Origin::Effect);
-        }
-    }
-    if let Some(c) = &p.check {
-        for stake in [&c.win, &c.lose] {
-            push(stake.subject, &stake.key, &stake.value, &[], Origin::Stake);
-        }
-    }
-    out
-}
 
 fn has_valid_cause(view: &WorldView, because: &[Handle]) -> bool {
     because.iter().any(|h| valid_cause(view, *h).is_some())
@@ -98,7 +50,7 @@ fn coincidence(
             continue;
         };
         let hit = writes.iter().any(|w| {
-            w.origin != Origin::Stake
+            w.origin != Origin::WinStake
                 && w.subject == obstacle.slot.subject
                 && same_key(w.key, &obstacle.slot.key)
                 && !same(w.value, &obstacle.slot.value)
@@ -121,11 +73,7 @@ fn coincidence(
 /// against that NPC, or a valid cause fact the NPC holds after this Commit.
 fn npc_folds(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
     for r in &p.reactions {
-        let limit = match r.npc {
-            Handle::Entity(id) => ceiling(view, id),
-            // A new NPC has no attitude row and no goal: the ceiling of attitude 0.
-            _ => ceiling(view, EntityId::MAX),
-        };
+        let limit = handle_ceiling(view, r.npc);
         if r.stance <= limit {
             continue;
         }
@@ -191,6 +139,9 @@ fn holds(p: &DecisionProposal, view: &WorldView, npc: Handle, f: Handle) -> bool
 /// Persistent. Restating the same value is not a change.
 fn fact_bends(view: &WorldView, writes: &[Write], errs: &mut Vec<Rejection>) {
     for w in writes {
+        if is_state_key(w.key) {
+            continue;
+        }
         if let Some(live) = view.live_fact(w.subject, w.key)
             && live.canon == Canon::Persistent
             && !same(&live.slot.value, w.value)
@@ -225,7 +176,7 @@ fn tension(p: &DecisionProposal, view: &WorldView, writes: &[Write], errs: &mut 
     }
     for event in &view.events_scheduled {
         let hit = writes.iter().any(|w| {
-            if w.origin == Origin::Stake || has_valid_cause(view, w.because) {
+            if has_valid_cause(view, w.because) {
                 return false;
             }
             if !changes(view, w.subject, w.key, w.value) {

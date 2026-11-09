@@ -1,9 +1,9 @@
 //! Agency check: the proposal sets no voluntary action, speech, feeling or
 //! motive for the PC.
 
-use super::{CheckKind, PC_INVOLUNTARY_KEYS, Rejection, pc, same_key};
+use super::{CheckKind, Origin, PC_INVOLUNTARY_KEYS, Rejection, pc, same_key, writes};
 use crate::{
-    domain::{DecisionProposal, Handle},
+    domain::{ActionKind, DecisionProposal, Handle},
     store::WorldView,
 };
 
@@ -24,14 +24,19 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
     for f in &p.facts {
         if f.said_by == Some(pc) {
             err("a claim cannot put words in the PC's mouth");
-        } else if f.said_by.is_none()
-            && f.slot.subject == pc
-            && !PC_INVOLUNTARY_KEYS.iter().any(|k| same_key(k, &f.slot.key))
-        {
+        }
+    }
+    // Every slot write on the PC: facts, both stakes and schedule effects.
+    for w in writes(p).iter().filter(|w| Handle::Entity(w.subject) == pc) {
+        let involuntary = PC_INVOLUNTARY_KEYS.iter().any(|k| same_key(k, w.key));
+        // The Player's Intent chose the move, so a move Turn may set where the PC is.
+        let chosen_move =
+            w.origin == Origin::Fact && p.action == ActionKind::Move && same_key(w.key, "location");
+        if !involuntary && !chosen_move {
             err(&format!(
-                "a fact about the PC may only set {}; got {}",
+                "a write on the PC may only set {} (or location on a move Turn); got {}",
                 PC_INVOLUNTARY_KEYS.join(", "),
-                f.slot.key
+                w.key
             ));
         }
     }
