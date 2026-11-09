@@ -351,6 +351,7 @@ fn bad_handles_rejected() {
         Box::new(move |p| {
             p.schedule = Some(EventDraft {
                 in_minutes: 5,
+                seen_by: vec![],
                 actor: e(w.orsel),
                 goal: Some(Handle::Goal(999)),
                 text: "x".into(),
@@ -392,6 +393,7 @@ fn event_effects_writing_one_slot_twice_rejected() {
     let w = World::new();
     let draft = |second_key: &str| EventDraft {
         in_minutes: 5,
+        seen_by: vec![],
         actor: e(w.orsel),
         goal: None,
         text: "Orsel paces".into(),
@@ -448,6 +450,7 @@ fn pc_cannot_react_act_or_speak() {
     let mut p = proposal(Verdict::Allowed);
     p.schedule = Some(EventDraft {
         in_minutes: 5,
+        seen_by: vec![],
         actor: e(w.ada),
         goal: None,
         text: "Ada leaves".into(),
@@ -621,6 +624,7 @@ fn claims_blockers_rolls_schedule_and_clock_commit() {
     p.facts = vec![claim];
     p.schedule = Some(EventDraft {
         in_minutes: 10,
+        seen_by: vec![],
         actor: e(w.brann),
         goal: None,
         text: "Brann fetches the captain".into(),
@@ -713,6 +717,7 @@ fn agency_applies_to_stakes_and_effects() {
     let mut p = proposal(Verdict::Allowed);
     p.schedule = Some(EventDraft {
         in_minutes: 5,
+        seen_by: vec![],
         actor: e(w.brann),
         goal: None,
         text: "Brann shouts".into(),
@@ -852,6 +857,7 @@ fn schedule_effect_may_set_pc_reputation() {
     let mut p = proposal(Verdict::Allowed);
     p.schedule = Some(EventDraft {
         in_minutes: 1440,
+        seen_by: vec![],
         actor: e(w.orsel),
         goal: None,
         text: "Orsel files a complaint".into(),
@@ -887,4 +893,37 @@ fn witnessed_pc_reputation_changes_next_turn() {
         w.view.live_fact(w.ada, "reputation").unwrap().slot.value,
         "disgraced"
     );
+}
+
+/// A scheduled event names its NPC witnesses; they reach the stored event.
+/// The PC is never among them, and unknown handles are refused.
+#[test]
+fn schedule_seen_by_lists_npc_witnesses_only() {
+    let mut w = World::new();
+    let draft = |seen_by: Vec<Handle>| {
+        let mut p = proposal(Verdict::Allowed);
+        p.schedule = Some(EventDraft {
+            in_minutes: 60,
+            seen_by,
+            actor: e(w.orsel),
+            goal: None,
+            text: "Orsel files a complaint".into(),
+            effects: vec![slot(e(w.ada), "reputation", "under_suspicion")],
+        });
+        p
+    };
+    rejected(validate(&draft(vec![e(w.ada)]), &w.view), CheckKind::Agency);
+    rejected(
+        validate(&draft(vec![e(999)]), &w.view),
+        CheckKind::References,
+    );
+    rejected(
+        validate(&draft(vec![e(w.brann), e(w.pip), e(w.orsel)]), &w.view),
+        CheckKind::References,
+    );
+    let p = draft(vec![e(w.brann)]);
+    ok(validate(&p, &w.view));
+    apply(&mut w, &p, None);
+    let event = w.view.events_scheduled.iter().find(|ev| ev.id != w.bell);
+    assert_eq!(event.unwrap().seen_by, [w.brann]);
 }

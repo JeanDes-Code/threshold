@@ -39,6 +39,7 @@ fn schema_caps_lists() {
 
     let event = serde_json::to_value(schema_for!(EventDraft)).unwrap();
     assert_eq!(event.pointer("/properties/effects/maxItems").unwrap(), 2);
+    assert_eq!(event.pointer("/properties/seen_by/maxItems").unwrap(), 2);
 }
 
 #[test]
@@ -142,6 +143,11 @@ fn schema_for_limits_entity_handles() {
     );
     assert_eq!(
         s.pointer("/$defs/SlotDraft/properties/subject/enum")
+            .unwrap(),
+        &serde_json::json!(["E1", "E5", "N1"])
+    );
+    assert_eq!(
+        s.pointer("/$defs/EventDraft/properties/seen_by/items/enum")
             .unwrap(),
         &serde_json::json!(["E1", "E5", "N1"])
     );

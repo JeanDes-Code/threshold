@@ -128,4 +128,10 @@ pub struct EventDraft {
     pub text: String,
     #[schemars(length(max = 2))]
     pub effects: Vec<SlotDraft>,
+    /// The NPCs who witness the event when it fires, wherever the PC is.
+    /// Never the PC: the PC learns of an event only by being there or by
+    /// being told. Empty means only the GM knows (`seen = gm`).
+    #[serde(default)]
+    #[schemars(length(max = 2))]
+    pub seen_by: Vec<Handle>,
 }

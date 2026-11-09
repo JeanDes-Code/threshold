@@ -129,7 +129,7 @@ pub struct NewNpc     { id: Handle /* N* */, name: String, adult: bool, voice: S
 pub struct SlotDraft  { subject: Handle, key: String, value: String }
 pub struct NewFact    { slot: SlotDraft, seen: Seen /* pc | present | gm */, said_by: Option<Handle>, because: Vec<Handle> }
 pub struct Cancel     { event: Handle, because: Handle }
-pub struct EventDraft { in_minutes: u32, actor: Handle, goal: Option<Handle>, text: String, effects: Vec<SlotDraft> } // effects max 2
+pub struct EventDraft { in_minutes: u32, actor: Handle, goal: Option<Handle>, text: String, effects: Vec<SlotDraft>, seen_by: Vec<Handle> } // effects max 2; seen_by: NPC witnesses, max 2, never the PC (Task 9)
 ```
 
 `said_by` set means the fact is a Claim, not World Truth. A typical Turn (one reaction, one fact) is 90 to 140 tokens. A Turn with a Check and a scheduled event can pass 150. That is the risk to measure first (section 5).

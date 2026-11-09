@@ -111,7 +111,7 @@ pub fn to_ops(
             },
             cause_fact_id: None,
             effects,
-            seen_by: Vec::new(),
+            seen_by: s.seen_by.iter().map(|h| entity_ref(*h)).collect(),
         });
     }
     if p.minutes > 0 {

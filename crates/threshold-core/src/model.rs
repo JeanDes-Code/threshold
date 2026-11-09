@@ -77,6 +77,15 @@ impl RecordedGm {
         }
     }
 
+    /// Queues one more proposal, after the recorded ones. A test uses it when
+    /// a proposal needs a handle that exists only after earlier Turns.
+    pub fn push_proposal(&self, raw: String) {
+        self.proposals
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_back(raw);
+    }
+
     /// Every call received so far, in order.
     pub fn calls(&self) -> Vec<RecordedCall> {
         self.calls

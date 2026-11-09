@@ -21,6 +21,11 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
     if p.schedule.as_ref().is_some_and(|s| s.actor == pc) {
         err("a scheduled event cannot make the PC act");
     }
+    if p.schedule.as_ref().is_some_and(|s| s.seen_by.contains(&pc)) {
+        err(
+            "a scheduled event's seen_by lists NPCs only; the PC sees an event only by being there",
+        );
+    }
     for f in &p.facts {
         if f.said_by == Some(pc) {
             err("a claim cannot put words in the PC's mouth");

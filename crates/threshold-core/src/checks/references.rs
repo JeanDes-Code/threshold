@@ -11,7 +11,7 @@ use crate::{
     store::WorldView,
 };
 
-const CAPS: [(&str, usize); 7] = [
+const CAPS: [(&str, usize); 8] = [
     ("blockers", 2),
     ("reactions", 2),
     ("new_npcs", 1),
@@ -19,6 +19,7 @@ const CAPS: [(&str, usize); 7] = [
     ("cancel", 1),
     ("check.factors", 3),
     ("schedule.effects", 2),
+    ("schedule.seen_by", 2),
 ];
 
 pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
@@ -35,6 +36,7 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         p.cancel.len(),
         p.check.as_ref().map_or(0, |c| c.factors.len()),
         p.schedule.as_ref().map_or(0, |s| s.effects.len()),
+        p.schedule.as_ref().map_or(0, |s| s.seen_by.len()),
     ];
     for ((field, cap), len) in CAPS.iter().zip(lengths) {
         if len > *cap {
@@ -87,6 +89,9 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         entity(s.actor, "schedule.actor");
         for effect in &s.effects {
             entity(effect.subject, "schedule.effects.subject");
+        }
+        for witness in &s.seen_by {
+            entity(*witness, "schedule.seen_by");
         }
     }
 

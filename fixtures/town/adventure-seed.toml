@@ -1,0 +1,121 @@
+# The town demo (design section 9). A test fixture, not the default setting.
+premise = "Varn, a grain town on the river road, run by a proud magistrate. An outsider scribe arrives to copy the town's charters."
+boundaries = ["adult participants only"]
+story_language = "en"
+
+[pc]
+name = "Wren"
+adult = true
+concept = "An outsider scribe, hired to copy the town's charters"
+
+[[entities]]
+name = "Varn town hall"
+kind = "place"
+
+[[entities]]
+name = "Tithe archive"
+kind = "place"
+
+[[entities]]
+name = "Orsel"
+kind = "npc"
+adult = true
+
+[[entities]]
+name = "Doul"
+kind = "npc"
+adult = true
+
+[[entities]]
+name = "Hessa"
+kind = "npc"
+adult = true
+
+[[entities]]
+name = "Tobin"
+kind = "npc"
+adult = true
+
+[[entities]]
+name = "Magistracy"
+kind = "faction"
+
+[[decided]]
+subject = "Wren"
+key = "location"
+value = "Varn town hall"
+text = "Wren stands in the Varn town hall."
+
+[[decided]]
+subject = "Orsel"
+key = "location"
+value = "Varn town hall"
+text = "Magistrate Orsel holds court in the Varn town hall."
+
+[[decided]]
+subject = "Doul"
+key = "location"
+value = "Varn town hall"
+text = "Doul, the magistrate's investigator, waits by the door."
+
+[[decided]]
+subject = "Hessa"
+key = "location"
+value = "Varn town hall"
+text = "Hessa, the clerk, writes at her desk in the town hall."
+
+[[decided]]
+subject = "Tobin"
+key = "location"
+value = "Varn mill"
+text = "Tobin runs the mill by the river."
+
+[[decided]]
+subject = "Orsel"
+key = "role"
+value = "magistrate"
+text = "Orsel is the magistrate of Varn."
+
+[[decided]]
+subject = "Orsel"
+key = "temper"
+value = "proud and vindictive, polite on the surface"
+text = "Orsel is proud and vindictive, but always polite on the surface."
+
+[[decided]]
+subject = "Doul"
+key = "role"
+value = "investigator"
+text = "Doul is the magistrate's investigator, a man of few words."
+
+[[decided]]
+subject = "Hessa"
+key = "role"
+value = "clerk"
+text = "Hessa is the town hall clerk. She is nervous and loves to gossip."
+
+[[decided]]
+subject = "Magistracy"
+key = "seat"
+value = "Varn town hall"
+text = "The Magistracy of Varn sits in the town hall."
+
+# GM only: no one holds this fact at the start.
+[[decided]]
+subject = "Orsel"
+key = "skims"
+value = "the grain tithe"
+text = "Orsel skims the grain tithe."
+
+# `condition` is a state key, so this stays Established: a Check can open it.
+[[decided]]
+subject = "Tithe archive"
+key = "condition"
+value = "locked"
+text = "The tithe archive is locked, and only the magistrate holds the key."
+
+[[proposed]]
+subject = "Tobin"
+key = "cheats"
+value = "the scales"
+text = "Rumor has it the miller cheats the scales."

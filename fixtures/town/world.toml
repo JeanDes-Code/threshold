@@ -1,0 +1,54 @@
+# What the town's Adventure Seed cannot express. `load_world` commits it as
+# one Setup Turn. Attitudes run from -5 to 5.
+
+[[attitudes]]
+from = "Orsel"
+to = "Wren"
+attitude = -1
+
+[[attitudes]]
+from = "Hessa"
+to = "Wren"
+attitude = 1
+
+[[attitudes]]
+from = "Doul"
+to = "Orsel"
+attitude = 4
+
+[[goals]]
+npc = "Orsel"
+text = "Protect his reputation"
+
+[[goals]]
+npc = "Doul"
+text = "Serve Orsel"
+
+[[voice_cards]]
+npc = "Orsel"
+habits = "Formal speech in full sentences; never raises his voice; smiles when he is offended"
+vocabulary = "statute, writ, in accordance with, the court notes, petitioner, it is so recorded"
+samples = [
+    "In accordance with the statutes of Varn, the court notes your remark.",
+    "A scribe's hand is a fine thing. The court trusts it stays steady.",
+    "Your petition is received. It will be weighed, as all things are weighed.",
+]
+
+[[voice_cards]]
+npc = "Doul"
+habits = "Terse; answers with one or two words; watches hands, not faces"
+vocabulary = "name, business, noted, move along"
+samples = ["Name.", "Noted.", "Magistrate's business."]
+
+[[voice_cards]]
+npc = "Hessa"
+habits = "Nervous; talks fast and low; glances at the door before she shares gossip"
+vocabulary = "they say, between us, I shouldn't, the magistrate's people"
+samples = [
+    "Between us, I shouldn't say, but the miller's scales are a scandal.",
+    "Oh, the magistrate's people come and go. I only keep the ledgers.",
+]
+
+[[obstacles]]
+subject = "Tithe archive"
+key = "condition"

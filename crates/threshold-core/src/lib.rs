@@ -1,6 +1,7 @@
 pub mod checks;
 pub mod context;
 pub mod domain;
+pub mod fixture;
 pub mod model;
 pub mod normalize;
 pub mod pack;
@@ -85,6 +86,7 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
             "/$defs/CheckDraft/properties/against",
             "/$defs/NewFact/properties/said_by",
             "/$defs/EventDraft/properties/actor",
+            "/$defs/EventDraft/properties/seen_by/items",
         ] {
             set(&mut schema, path, &entities);
         }
