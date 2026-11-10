@@ -13,9 +13,9 @@ pub use proposal::{
     Reaction, Seen, SlotDraft, Verdict,
 };
 pub use types::{
-    Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef, FactDraft, FactSource,
-    GoalStatus, Key, Knowing, LedgerOp, OPEN_KEY_PREFIX, STATE_KEYS, Slot, Stance, Trigger, Value,
-    is_open_key, is_state_key,
+    ALIAS_KEY_PREFIX, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,
+    FactDraft, FactSource, GoalStatus, Key, Knowing, LedgerOp, OPEN_KEY_PREFIX, STATE_KEYS, Slot,
+    Stance, Trigger, Value, alias_key, is_alias_key, is_open_key, is_state_key, outcome_key,
 };
 pub use world_setup::{
     AttitudeEntry, EffectEntry, EventEntry, FactEntry, GoalEntry, ObstacleEntry, VoiceCardEntry,

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::BuildFailure;
 use crate::{
     context::{ADVENTURE_BLOCK_MAX_CHARS, adventure_block_chars},
-    domain::{AdventureSeed, EntityKind, OtherName, is_open_key},
+    domain::{AdventureSeed, EntityKind, OtherName, alias_key, is_open_key},
     normalize,
 };
 
@@ -401,7 +401,7 @@ fn seed_slots(seed: &AdventureSeed, roster: &Roster) -> Vec<(usize, String)> {
         .map(|(i, e)| (i + 1, &e.other_names));
     let aliases = pc.chain(entities).flat_map(|(owner, others)| {
         others.iter().map(move |o| {
-            let key = format!("alias_{}", normalize::name(&o.name).replace(' ', "_"));
+            let key = alias_key(&o.name);
             (owner, normalize::key(&key))
         })
     });

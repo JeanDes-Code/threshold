@@ -10,6 +10,7 @@ pub mod rules;
 pub mod setup;
 pub mod store;
 pub mod turn;
+pub mod view;
 pub mod world;
 
 pub use model::{CallKind, Gm, GmError, Prompt, RecordedCall, RecordedGm};

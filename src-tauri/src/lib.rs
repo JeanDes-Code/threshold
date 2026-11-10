@@ -5,6 +5,7 @@
 //! build progress as `build_progress` events. The app binds no network port;
 //! it only calls the local Ollama server.
 
+pub mod drafts;
 pub mod session;
 
 use std::{
@@ -15,10 +16,11 @@ use std::{
     },
 };
 
+use drafts::{DraftLine, DraftView, Drafts};
 use serde::Serialize;
 use session::{
-    AppError, CampaignSummary, CharacterView, DebugLine, DebugView, DraftLine, DraftView, Drafts,
-    JournalView, Session, TurnSummary, clock_nanos, load_config, lock,
+    AppError, CampaignSummary, DebugLine, DebugView, Session, TurnSummary, clock_nanos,
+    load_config, lock,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
@@ -26,6 +28,7 @@ use threshold_core::{
     domain::AdventureSeed,
     rules::RollResult,
     turn::BEGIN_OP_ID,
+    view::{CharacterView, JournalView},
 };
 use threshold_ollama::OllamaGm;
 

@@ -542,7 +542,7 @@ fn waiting_world() -> World {
 fn wait_without_minutes_takes_the_default() {
     let w = waiting_world();
     assert_eq!(wait_minutes(&w.view, 0), WAIT_DEFAULT_MIN);
-    assert!(WAIT_DEFAULT_MIN >= 1);
+    const { assert!(WAIT_DEFAULT_MIN >= 1) };
 }
 
 #[test]

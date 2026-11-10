@@ -277,3 +277,22 @@ fn entity_ref_serializes_ids_as_plain_numbers() {
         EntityRef::Id(3)
     );
 }
+
+#[test]
+fn outcome_key_strips_the_open_prefix_only() {
+    use threshold_core::domain::outcome_key;
+
+    assert_eq!(outcome_key("pending_trip"), Some("trip"));
+    assert_eq!(outcome_key("trip"), None);
+    assert_eq!(outcome_key("pending_"), None);
+}
+
+#[test]
+fn alias_key_is_the_one_writer() {
+    use threshold_core::domain::{alias_key, is_alias_key};
+
+    assert_eq!(alias_key("Jade Moss"), "alias_jade_moss");
+    assert_eq!(alias_key("Chloé"), "alias_chloe");
+    assert!(is_alias_key(&alias_key("Jade")));
+    assert!(!is_alias_key("location"));
+}

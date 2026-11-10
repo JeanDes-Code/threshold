@@ -431,10 +431,7 @@ impl Store {
                     &LedgerOp::AddFact {
                         slot: Slot {
                             subject: bearer,
-                            key: format!(
-                                "alias_{}",
-                                crate::normalize::name(&other.name).replace(' ', "_")
-                            ),
+                            key: crate::domain::alias_key(&other.name),
                             value: other.name.clone(),
                         },
                         text: format!("{name} is also called {}.", other.name),

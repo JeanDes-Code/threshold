@@ -43,6 +43,30 @@ pub fn is_open_key(key: &str) -> bool {
     crate::normalize::key(key).starts_with(OPEN_KEY_PREFIX)
 }
 
+/// The outcome slot of an open key: `key` without `OPEN_KEY_PREFIX`. `None`
+/// when `key` has no prefix or nothing after it.
+pub fn outcome_key(key: &str) -> Option<&str> {
+    key.strip_prefix(OPEN_KEY_PREFIX)
+        .filter(|rest| !rest.is_empty())
+}
+
+/// The prefix of the key of a fact that gives an entity one more name.
+pub const ALIAS_KEY_PREFIX: &str = "alias_";
+
+/// True when `key`, once normalized, starts with `ALIAS_KEY_PREFIX`.
+pub fn is_alias_key(key: &str) -> bool {
+    crate::normalize::key(key).starts_with(ALIAS_KEY_PREFIX)
+}
+
+/// The key of the fact that gives an entity the name `other_name`. The one
+/// writer of `ALIAS_KEY_PREFIX`.
+pub fn alias_key(other_name: &str) -> String {
+    format!(
+        "{ALIAS_KEY_PREFIX}{}",
+        crate::normalize::name(other_name).replace(' ', "_")
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityKind {

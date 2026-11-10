@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     checks::{PC_INVOLUNTARY_KEYS, is_involuntary_key},
-    domain::{AdventureSeed, EntityKind, FactEntry, OtherName, is_open_key},
+    domain::{AdventureSeed, EntityKind, FactEntry, OtherName, alias_key, is_open_key},
     normalize,
 };
 
@@ -270,7 +270,7 @@ impl FactBook {
         let members = roster.members().iter();
         for member in members {
             for other in &member.others {
-                let key = format!("alias_{}", normalize::name(other).replace(' ', "_"));
+                let key = alias_key(other);
                 fixed(fact(&member.main, &key, other, vec![]));
             }
         }
