@@ -35,9 +35,11 @@ fn report_has_every_metric() {
         model: "recorded".into(),
         judge: "first-choice".into(),
         memory_turns: None,
+        source: None,
+        expected: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
-    let report = run(&config, &make, &FirstChoice, &mut |_| {}).unwrap();
+    let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
 
     for name in SCENARIOS {
         assert_eq!(
@@ -81,6 +83,11 @@ fn report_has_every_metric() {
     );
     assert!(
         report.contains("| 1 | committed | never | no | no | correct |"),
+        "{report}"
+    );
+    // The recorded answers are no Adventure Seed, so each draft fails.
+    assert!(
+        report.contains("- Failures (BuildFailure, by stage and check): 2 x draft_seed / schema"),
         "{report}"
     );
 }
@@ -412,9 +419,11 @@ fn offscreen_measures_the_seeded_event() {
         model: "recorded".into(),
         judge: "first-choice".into(),
         memory_turns: None,
+        source: None,
+        expected: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
-    let report = run(&config, &make, &FirstChoice, &mut |_| {}).unwrap();
+    let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
     for line in [
         "- (a) Model scheduled an event on the provocation Turn: 0 of 1",
         "- (b) Seeded event fired while the PC was away: 1 of 1 (PC away after Turn 2: 1 of 1)",
@@ -422,5 +431,452 @@ fn offscreen_measures_the_seeded_event() {
         "- Offscreen consequence observed (b and c in the same run): 1 of 1",
     ] {
         assert!(report.contains(line), "missing {line}:\n{report}");
+    }
+}
+
+// ---- world_build ------------------------------------------------------------
+
+mod world_build {
+    use serde_json::json;
+    use threshold_core::{
+        build::{BuildCheck, BuildFailure, DebugEntry, Gap, GapKind, KnownFact, SeedDraft, Stage},
+        domain::{AdventureSeed, EffectEntry, EventEntry, FactEntry, GoalEntry, WorldSetup},
+    };
+    use threshold_eval::world_build::{
+        BuildRun, Calls, Expected, Shown, VoiceLine, fact_recall, false_past, open_recall,
+        pc_centred, roster_recall, secrets_of, section,
+    };
+
+    const EXPECTED: &str = r#"
+pc_name = "Teodor Brandt"
+pc_age = 34
+pc_other_names = ["Wick"]
+start_place = "The Copper Kettle"
+start_present = ["Agathe Morrow"]
+
+[[characters]]
+name = "Agathe Morrow"
+kind = "npc"
+age = 67
+
+[[characters]]
+name = "Gerrit Vane"
+kind = "npc"
+other_names = ["The Toll-Master"]
+
+[[characters]]
+name = "Pim Quast"
+kind = "npc"
+age = 11
+
+[[characters]]
+name = "Sefa Lind"
+kind = "npc"
+
+[[characters]]
+name = "Osric Fell"
+kind = "npc"
+age = 52
+
+[[groups]]
+name = "The Lamplighters"
+
+[[places]]
+name = "Harrowmere"
+
+[[places]]
+name = "The Copper Kettle"
+
+[[settled]]
+subject = "Teodor Brandt"
+about = "iron chain"
+
+[[settled]]
+subject = "Gerrit Vane"
+about = "guild"
+
+[[open]]
+subject = "Osric Fell"
+about = "wedding"
+
+[[open]]
+subject = "Gerrit Vane"
+about = "ferry"
+"#;
+
+    fn expected() -> Expected {
+        Expected::parse(EXPECTED).unwrap()
+    }
+
+    /// The draft roster: Gerrit Vane under his other name, the Lamplighters
+    /// as an npc, Sefa Lind missing, a heron that the list does not hold,
+    /// and Osric Fell five years too young.
+    fn seed() -> AdventureSeed {
+        serde_json::from_value(json!({
+            "premise": "A ferry on the Sallow.",
+            "pc": {
+                "name": "Teodor Brandt",
+                "age": 34,
+                "other_names": [{"name": "Wick", "known_to": ["Agathe Morrow"]}],
+                "concept": "a ferryman"
+            },
+            "entities": [
+                {"name": "Agathe Morrow", "kind": "npc", "age": 67},
+                {"name": "Toll-Master", "kind": "npc", "age": 50,
+                 "other_names": [{"name": "Gerrit", "known_to": []}]},
+                {"name": "Lamplighters", "kind": "npc", "age": 30},
+                {"name": "Pim Quast", "kind": "npc", "age": 11},
+                {"name": "Osric Fell", "kind": "npc", "age": 47},
+                {"name": "Harrowmere", "kind": "place", "age": null},
+                {"name": "Copper Kettle", "kind": "place", "age": null},
+                {"name": "Blue Heron", "kind": "item", "age": null}
+            ],
+            "boundaries": [],
+            "decided": [],
+            "proposed": [],
+            "story_language": "en",
+            "start": {"place": "Copper Kettle", "present": ["Agathe Morrow"]}
+        }))
+        .unwrap()
+    }
+
+    fn fact(subject: &str, key: &str, value: &str, text: &str, open: bool) -> FactEntry {
+        FactEntry {
+            subject: subject.into(),
+            key: key.into(),
+            value: value.into(),
+            text: text.into(),
+            known_by: vec![],
+            open,
+        }
+    }
+
+    fn goal(npc: &str, text: &str) -> GoalEntry {
+        GoalEntry {
+            npc: npc.into(),
+            text: text.into(),
+            against: None,
+        }
+    }
+
+    #[test]
+    fn roster_recall_matches_through_other_names() {
+        let recall = roster_recall(&expected(), &seed());
+        // PC, Agathe, Gerrit (draft main name = expected other name), the
+        // Lamplighters (wrong kind), Pim, Osric, Harrowmere, Copper Kettle.
+        assert_eq!((recall.found, recall.expected), (8, 9));
+        assert_eq!(recall.missing, vec!["Sefa Lind".to_owned()]);
+        assert_eq!(recall.extra, vec!["Blue Heron".to_owned()]);
+        assert_eq!(recall.wrong_kinds.len(), 1, "{:?}", recall.wrong_kinds);
+        assert!(recall.wrong_kinds[0].starts_with("The Lamplighters"));
+        // The other name the draft gives Gerrit matches too.
+        let mut seed = seed();
+        seed.entities[1].name = "Gerrit".into();
+        seed.entities[1].other_names.clear();
+        assert_eq!(roster_recall(&expected(), &seed).found, 7);
+    }
+
+    #[test]
+    fn false_past_counts_a_settled_fact_on_an_open_item() {
+        let (expected, seed) = (expected(), seed());
+        let planned = fact(
+            "Osric Fell",
+            "wedding",
+            "first day of spring",
+            "His daughter's wedding is planned for spring.",
+            true,
+        );
+        let mut facts = vec![planned];
+        assert_eq!(false_past(&expected, &seed, &facts), vec![false, false]);
+        assert_eq!(open_recall(&expected, &seed, &facts), vec![true, false]);
+
+        // The same item stated as done, on the same subject: a false past.
+        facts.push(fact(
+            "Osric Fell",
+            "daughter",
+            "married",
+            "Osric's daughter had her wedding at Harrowmere.",
+            false,
+        ));
+        assert_eq!(false_past(&expected, &seed, &facts), vec![true, false]);
+
+        // Another subject does not count; a subject named through the draft's
+        // other name does, with the word in the key.
+        facts.push(fact(
+            "Agathe Morrow",
+            "ferry",
+            "bought",
+            "Agathe bought it.",
+            false,
+        ));
+        assert_eq!(false_past(&expected, &seed, &facts), vec![true, false]);
+        facts.push(fact(
+            "Toll-Master",
+            "owns_ferry",
+            "yes",
+            "He owns it now.",
+            false,
+        ));
+        assert_eq!(false_past(&expected, &seed, &facts), vec![true, true]);
+        // Fact recall takes any fact on the subject that holds every word.
+        assert_eq!(fact_recall(&expected, &seed, &facts), vec![false, false]);
+        facts.push(fact(
+            "Teodor Brandt",
+            "ferry_chain",
+            "iron",
+            "Teodor replaced the rope with a chain.",
+            false,
+        ));
+        facts.push(fact(
+            "Gerrit",
+            "role",
+            "Guild master",
+            "He runs the hall.",
+            false,
+        ));
+        assert_eq!(fact_recall(&expected, &seed, &facts), vec![true, true]);
+    }
+
+    #[test]
+    fn pc_centred_share_counts_goals_and_secrets_that_name_the_pc() {
+        let names = vec!["Teodor Brandt".to_owned(), "Wick".to_owned()];
+        let goals = vec![
+            goal("Gerrit Vane", "Buy the ferry from Teodor Brandt."),
+            goal("Agathe Morrow", "Make Wick carry the winter post."),
+            goal("Osric Fell", "Win the boundary wall case."),
+            // A word that only starts like the PC's name is not the name.
+            goal("Pim Quast", "Save a penny for the Teodor-Brandtson fair."),
+        ];
+        let secret = fact(
+            "Henrike Sall",
+            "debt",
+            "clay",
+            "Henrike hides her debt from Teodor Brandt.",
+            false,
+        );
+        let hidden = fact(
+            "Henrike Sall",
+            "kiln",
+            "cracked",
+            "Teodor Brandt saw the crack.",
+            false,
+        );
+        let world = WorldSetup {
+            facts: vec![
+                FactEntry {
+                    known_by: vec!["Henrike Sall".into()],
+                    ..secret.clone()
+                },
+                FactEntry {
+                    known_by: vec!["Henrike Sall".into()],
+                    ..hidden
+                },
+            ],
+            goals: goals.clone(),
+            ..WorldSetup::default()
+        };
+        let log = vec![DebugEntry {
+            op_id: "draft-1".into(),
+            step: "npc_state 2/2".into(),
+            prompt: String::new(),
+            raw: json!({
+                "goals": [],
+                "secret": {"subject": "Henrike Sall", "key": "debt", "value": "clay",
+                           "text": "Henrike hides her debt from Teodor Brandt.", "open": false},
+                "attitudes": [],
+                "voice_card": {"habits": "", "vocabulary": "", "samples": []}
+            })
+            .to_string(),
+            ms: 1,
+        }];
+        let secrets = secrets_of(&world, &log);
+        assert_eq!(secrets.len(), 1, "{secrets:?}");
+        assert_eq!(secrets[0].text, secret.text);
+        // Goals 1 and 2 and the secret name the PC; goals 3 and 4 do not.
+        assert_eq!(pc_centred(&names, &world.goals, &secrets), (3, 5));
+    }
+
+    /// Three runs: one built, one not approvable, one failed in the build.
+    fn runs() -> Vec<BuildRun> {
+        let mut draft = SeedDraft::new("text".into(), seed());
+        draft.knowledge.push(KnownFact {
+            subject: "Teodor Brandt".into(),
+            key: "ferry".into(),
+            value: "iron chain".into(),
+            text: "Teodor put an iron chain on the ferry.".into(),
+            open: false,
+        });
+        let world = WorldSetup {
+            facts: vec![fact(
+                "Osric Fell",
+                "wedding",
+                "done",
+                "The wedding took place.",
+                false,
+            )],
+            goals: vec![
+                goal("Gerrit Vane", "Buy the ferry from Teodor Brandt."),
+                goal("Osric Fell", "Marry off his daughter."),
+            ],
+            events: vec![
+                EventEntry {
+                    at: 60,
+                    actor: "Gerrit Vane".into(),
+                    text: "Gerrit raises the toll".into(),
+                    effects: vec![EffectEntry {
+                        subject: "Gerrit Vane".into(),
+                        key: "toll".into(),
+                        value: "five pennies".into(),
+                    }],
+                    seen_by: vec![],
+                },
+                EventEntry {
+                    at: 600,
+                    actor: "Osric Fell".into(),
+                    text: "Osric argues with the cook".into(),
+                    effects: vec![],
+                    seen_by: vec![],
+                },
+            ],
+            ..WorldSetup::default()
+        };
+        let built = BuildRun {
+            draft: Some(draft.clone()),
+            draft_ms: Some(90_000),
+            world: Some(world),
+            build_ms: Some(150_000),
+            draft_calls: Calls {
+                calls: 5,
+                retries: 1,
+                repairs: 1,
+            },
+            build_calls: Calls {
+                calls: 14,
+                retries: 0,
+                repairs: 2,
+            },
+            voices: vec![
+                VoiceLine {
+                    npc: "Gerrit Vane".into(),
+                    line: "Four pennies, and not one less.".into(),
+                    choices: 4,
+                    hit: Some(true),
+                },
+                VoiceLine {
+                    npc: "Osric Fell".into(),
+                    line: "The pies cost what they cost.".into(),
+                    choices: 4,
+                    hit: Some(false),
+                },
+                VoiceLine {
+                    npc: "Agathe Morrow".into(),
+                    line: "Boots off my bar.".into(),
+                    choices: 4,
+                    hit: None,
+                },
+            ],
+            ..BuildRun::default()
+        };
+        let gapped = BuildRun {
+            draft: Some(draft.clone()),
+            draft_ms: Some(80_000),
+            gaps: vec![
+                Gap {
+                    kind: GapKind::AgeMissing,
+                    at: "entities[2].age".into(),
+                },
+                Gap {
+                    kind: GapKind::UnknownName,
+                    at: "start.place".into(),
+                },
+            ],
+            ..BuildRun::default()
+        };
+        let failed = BuildRun {
+            draft: Some(draft),
+            draft_ms: Some(70_000),
+            failure: Some(BuildFailure {
+                stage: Stage::HiddenFacts,
+                check: BuildCheck::Schema,
+            }),
+            ..BuildRun::default()
+        };
+        vec![built, gapped, failed]
+    }
+
+    fn fixture() -> Shown {
+        Shown::Fixture {
+            source: "fixtures/chronicle/source.md".into(),
+            expected: "fixtures/chronicle/expected.toml".into(),
+        }
+    }
+
+    #[test]
+    fn report_has_every_world_build_metric() {
+        let report = section(&expected(), &runs(), &fixture(), 7_874);
+        for line in [
+            "- Runs: 3; drafted 3, approvable 2, built 1, failed 1",
+            "- Roster recall: 24 of 27 expected entries over 3 drafts (89%)",
+            "- Wrong kinds: 3 (The Lamplighters: expected faction, drafted npc)",
+            "- Extra entities: 3 (Blue Heron)",
+            "- Missing entries: 3 (Sefa Lind)",
+            "- Ages that differ from a stated age: 3 of 12 (Osric Fell: stated 52, drafted 47)",
+            "- Child (stated age under 18) drafted under 18: 3 of 3 (Pim Quast)",
+            "- Start place right: 3 of 3 drafts; present characters found: 3 of 3",
+            "- Draft gaps before approval, by kind: age_missing 1, unknown_name 1",
+            "- Not approvable: 1 of 3 runs",
+            "- Fact recall (settled items found): 3 of 6 over 3 drafts (50%)",
+            "- False past (open items stated as settled facts): 1 of 6 over 3 drafts",
+            "- Open recall (open items kept open): 0 of 6 over 3 drafts",
+            "- PC-centred share (NPC goals and secrets that name the PC): 1 of 2 (50%) over 1 built worlds; highest world 50%; the build's limit is 50%",
+            "- World Events: 2 over 1 built worlds; with at least one effect: 1",
+            "- Voice distance: matched 1 / 2 judged sample lines (50%), chance 25%; judge errors 1",
+            "- Draft time p50 / max: 80.0 s / 90.0 s",
+            "- Build time p50 / max: 150.0 s / 150.0 s",
+            "- Model calls: draft 5, build 14; timeout retries 1; repair calls 3",
+            "- Failures (BuildFailure, by stage and check): 1 x hidden_facts / schema",
+            "Sample Voice Card lines:",
+            "- Gerrit Vane: \"Four pennies, and not one less.\"",
+        ] {
+            assert!(report.contains(line), "missing {line}:\n{report}");
+        }
+        assert!(report.contains("fixtures/chronicle/source.md"), "{report}");
+        // The fact rule is stated: it is a lower bound.
+        assert!(report.contains("lower bound"), "{report}");
+        // At most three sample lines.
+        assert!(report.matches("\n- Agathe Morrow: \"").count() <= 1);
+    }
+
+    #[test]
+    fn private_report_prints_counts_only() {
+        let report = section(&expected(), &runs(), &Shown::Private, 7_874);
+        for line in [
+            "- Runs: 3; drafted 3, approvable 2, built 1, failed 1",
+            "- Roster recall: 24 of 27 expected entries over 3 drafts (89%)",
+            "- Wrong kinds: 3\n",
+            "- Extra entities: 3\n",
+            "- Missing entries: 3\n",
+            "- Ages that differ from a stated age: 3 of 12\n",
+            "- Child (stated age under 18) drafted under 18: 3 of 3\n",
+            "- False past (open items stated as settled facts): 1 of 6 over 3 drafts",
+            "- Voice distance: matched 1 / 2 judged sample lines (50%), chance 25%; judge errors 1",
+        ] {
+            assert!(report.contains(line), "missing {line:?}:\n{report}");
+        }
+        for name in [
+            "Teodor",
+            "Wick",
+            "Sefa",
+            "Lamplighters",
+            "Heron",
+            "Osric",
+            "Pim",
+            "Gerrit",
+            "pennies",
+            "fixtures/",
+            "Sample Voice Card lines",
+        ] {
+            assert!(!report.contains(name), "{name} in:\n{report}");
+        }
     }
 }

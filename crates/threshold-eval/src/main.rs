@@ -3,12 +3,16 @@
 //!
 //! Options:
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
-//!   voices, shortcuts, agency_leaks, offscreen. Repeat or comma-separate.
+//!   voices, shortcuts, agency_leaks, offscreen, world_build. Repeat or
+//!   comma-separate.
 //! - `--runs <n>` (default 3)
 //! - `--judge local` (default): the same local model, with a short rubric.
 //!   A frontier judge is not built in this slice.
 //! - `--model <tag>`: the Ollama model (default from `OllamaConfig`).
 //! - `--memory-turns <n>`: overrides the memory scenario's Turn count.
+//! - `--source <path>`, `--expected <path>`: the world_build scenario's
+//!   Source Text and expected list, instead of the scenario file's. A file
+//!   outside the repository makes its report section print counts only.
 //! - `--out <path>` (default `evals/reports/<date>.md`).
 
 use std::{fs, path::PathBuf, process::ExitCode};
@@ -16,6 +20,9 @@ use std::{fs, path::PathBuf, process::ExitCode};
 use threshold_core::Gm;
 use threshold_eval::{Config, GmJudge, SCENARIOS, find_root, run, today};
 use threshold_ollama::{OllamaConfig, OllamaGm};
+
+/// The model timeout of drafts and World Builds, as the app sets it.
+const BUILD_TIMEOUT_S: u64 = 600;
 
 fn main() -> ExitCode {
     match real_main() {
@@ -34,6 +41,7 @@ fn real_main() -> Result<(), String> {
     let mut ollama = OllamaConfig::default();
     let mut memory_turns = None;
     let mut out: Option<PathBuf> = None;
+    let (mut source, mut expected): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value"));
@@ -50,9 +58,11 @@ fn real_main() -> Result<(), String> {
                 );
             }
             "--out" => out = Some(PathBuf::from(value()?)),
+            "--source" => source = Some(PathBuf::from(value()?)),
+            "--expected" => expected = Some(PathBuf::from(value()?)),
             "-h" | "--help" => {
                 println!(
-                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--out <path>]"
+                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>]"
                 );
                 return Ok(());
             }
@@ -84,10 +94,17 @@ fn real_main() -> Result<(), String> {
         model: format!("{} (num_ctx {})", ollama.model, ollama.num_ctx),
         judge: format!("local: {} with a short rubric prompt", ollama.model),
         memory_turns,
+        source: source.map(|p| cwd.join(p)),
+        expected: expected.map(|p| cwd.join(p)),
     };
     let make = || Box::new(OllamaGm::new(ollama.clone())) as Box<dyn Gm + Send>;
+    let mut slow = ollama.clone();
+    slow.timeout_s = BUILD_TIMEOUT_S;
+    let build = || Box::new(OllamaGm::new(slow.clone())) as Box<dyn Gm + Send>;
     let judge = GmJudge::new(OllamaGm::new(ollama.clone()));
-    let report = run(&config, &make, &judge, &mut |line| eprintln!("{line}"))?;
+    let report = run(&config, &make, &build, &judge, &mut |line| {
+        eprintln!("{line}")
+    })?;
 
     let path = out.unwrap_or_else(|| root.join("evals/reports").join(format!("{}.md", today())));
     if let Some(dir) = path.parent() {

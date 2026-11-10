@@ -1,0 +1,136 @@
+# What a correct Seed Draft and World Build of source.md hold, written by
+# hand. The world_build evaluation scores each run against it.
+#
+# A name matches through normalize::name on the main name and the other
+# names. A [[settled]] or [[open]] item is found when a fact on the same
+# subject holds every word of `about` in its key, value and text.
+
+pc_name = "Teodor Brandt"
+pc_age = 34
+# Known to Agathe Morrow and Sefa Lind; not to Odile Quast or Gerrit Vane.
+pc_other_names = ["Wick"]
+start_place = "The Copper Kettle"
+start_present = ["Agathe Morrow", "Sefa Lind", "Pim Quast"]
+
+[[characters]]
+name = "Agathe Morrow"
+kind = "npc"
+age = 67
+
+[[characters]]
+name = "Sefa Lind"
+kind = "npc"
+
+[[characters]]
+name = "Odile Quast"
+kind = "npc"
+age = 45
+
+# The child.
+[[characters]]
+name = "Pim Quast"
+kind = "npc"
+age = 11
+
+[[characters]]
+name = "Gerrit Vane"
+kind = "npc"
+other_names = ["Toll-Master"]
+
+[[characters]]
+name = "Ludo Brenn"
+kind = "npc"
+
+# Henrike Sall and Osric Fell have lives that do not turn around the PC.
+[[characters]]
+name = "Henrike Sall"
+kind = "npc"
+
+[[characters]]
+name = "Osric Fell"
+kind = "npc"
+age = 52
+
+[[groups]]
+name = "The Bargemen's Guild"
+other_names = ["The Guild"]
+
+[[groups]]
+name = "The Lamplighters"
+
+[[places]]
+name = "Ostley Crossing"
+
+[[places]]
+name = "The Copper Kettle"
+
+[[places]]
+name = "Harrowmere"
+
+[[settled]]
+subject = "Teodor Brandt"
+about = "uncle"
+
+[[settled]]
+subject = "Teodor Brandt"
+about = "chain"
+
+[[settled]]
+subject = "Teodor Brandt"
+about = "letter"
+
+[[settled]]
+subject = "The Bargemen's Guild"
+about = "toll"
+
+[[settled]]
+subject = "Agathe Morrow"
+about = "kettle"
+
+[[settled]]
+subject = "Odile Quast"
+about = "reeve"
+
+[[settled]]
+subject = "Pim Quast"
+about = "ferry"
+
+[[settled]]
+subject = "Henrike Sall"
+about = "kiln"
+
+[[settled]]
+subject = "Gerrit Vane"
+about = "guild"
+
+[[settled]]
+subject = "Ludo Brenn"
+about = "barge"
+
+[[settled]]
+subject = "Osric Fell"
+about = "ledger"
+
+[[open]]
+subject = "The Bargemen's Guild"
+about = "ferry"
+
+[[open]]
+subject = "Osric Fell"
+about = "wedding"
+
+[[open]]
+subject = "The Lamplighters"
+about = "meeting"
+
+[[open]]
+subject = "Odile Quast"
+about = "inquiry"
+
+[[open]]
+subject = "Henrike Sall"
+about = "wheel"
+
+[[open]]
+subject = "Teodor Brandt"
+about = "post"

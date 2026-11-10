@@ -110,6 +110,16 @@ pub struct Offscreen {
     pub ask: String,
 }
 
+/// A Seed Draft and a World Build from a Source Text, scored against a
+/// hand-made list. A relative path starts at the repository root; the
+/// command line can name files outside it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldBuild {
+    pub source: String,
+    pub expected: String,
+}
+
 pub fn load<T: DeserializeOwned>(root: &Path, name: &str) -> Result<T, String> {
     let path = root.join("evals/scenarios").join(format!("{name}.toml"));
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;

@@ -10,6 +10,7 @@
 mod judge;
 pub mod scan;
 mod scenario;
+pub mod world_build;
 
 use std::{
     collections::BTreeMap,
@@ -34,13 +35,14 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 6] = [
+pub const SCENARIOS: [&str; 7] = [
     "latency",
     "memory",
     "voices",
     "shortcuts",
     "agency_leaks",
     "offscreen",
+    "world_build",
 ];
 
 /// The latency pass line (design §10): p90 at or under 15 s, warm.
@@ -69,14 +71,20 @@ pub struct Config {
     pub judge: String,
     /// Overrides the memory scenario's `total_turns`.
     pub memory_turns: Option<usize>,
+    /// Override the world_build scenario's Source Text and expected list.
+    /// A file outside `root` makes the report print counts only.
+    pub source: Option<PathBuf>,
+    pub expected: Option<PathBuf>,
 }
 
 pub type GmFactory<'a> = &'a dyn Fn() -> Box<dyn Gm + Send>;
 
-/// Runs the scenarios and returns the Markdown report.
+/// Runs the scenarios and returns the Markdown report. `gm` plays Turns;
+/// `build` drafts and builds worlds, with a longer timeout.
 pub fn run(
     config: &Config,
     gm: GmFactory<'_>,
+    build: GmFactory<'_>,
     judge: &dyn Judge,
     log: &mut dyn FnMut(&str),
 ) -> Result<String, String> {
@@ -98,6 +106,7 @@ pub fn run(
     let mut ctx = Ctx {
         config,
         gm,
+        build,
         judge,
         log,
         declared,
@@ -120,6 +129,7 @@ pub fn run(
             "shortcuts" => shortcuts(&mut ctx)?,
             "agency_leaks" => agency_leaks(&mut ctx)?,
             "offscreen" => offscreen(&mut ctx)?,
+            "world_build" => world_build::scenario(&mut ctx)?,
             _ => unreachable!("checked above"),
         };
         sections.insert(name, section);
@@ -178,6 +188,8 @@ pub fn run(
 struct Ctx<'a> {
     config: &'a Config,
     gm: GmFactory<'a>,
+    /// Drafts and World Builds.
+    build: GmFactory<'a>,
     judge: &'a dyn Judge,
     log: &'a mut dyn FnMut(&str),
     /// The scenario-declared secret stems; every Narration is scanned for them.
