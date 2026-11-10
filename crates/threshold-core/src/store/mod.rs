@@ -212,18 +212,22 @@ impl WorldView {
 
     /// The entity that `name` names: its main name or one of its other
     /// names, compared through `normalize::name`. The lowest id wins a tie.
-    /// Every name match in the core goes through this function.
+    /// Every name match in the core goes through this function or through
+    /// `entities_by_name`.
     pub fn entity_by_name(&self, name: &str) -> Option<&Entity> {
+        self.entities_by_name(name).min_by_key(|e| e.id)
+    }
+
+    /// Every entity that answers to `name` (main name or other name), in
+    /// the order of `entities`. Two entities can share a name in play.
+    pub fn entities_by_name<'a>(&'a self, name: &str) -> impl Iterator<Item = &'a Entity> {
         let name = crate::normalize::name(name);
-        self.entities
-            .iter()
-            .filter(|e| {
-                e.norm_name == name
-                    || e.other_names
-                        .iter()
-                        .any(|other| crate::normalize::name(other) == name)
-            })
-            .min_by_key(|e| e.id)
+        self.entities.iter().filter(move |e| {
+            e.norm_name == name
+                || e.other_names
+                    .iter()
+                    .any(|other| crate::normalize::name(other) == name)
+        })
     }
 
     pub fn entity(&self, handle: Handle) -> Option<&Entity> {
@@ -352,10 +356,14 @@ impl Store {
             .chain(adventure_seed.entities.iter().map(|e| (e.kind, e.age)));
         let mut ids = Vec::new();
         for (&(name, other_names), (kind, age)) in declared.iter().zip(added) {
-            if crate::normalize::name(name) == "world" {
-                return Err(StoreError::Invalid(
-                    "world is a reserved adventure seed entity name".into(),
-                ));
+            let names = std::iter::once(name).chain(other_names.iter().map(|o| o.name.as_str()));
+            if names
+                .into_iter()
+                .any(|n| crate::normalize::name(n) == "world")
+            {
+                return Err(StoreError::Invalid(format!(
+                    "world is a reserved adventure seed name, main or other (entity {name})"
+                )));
             }
             let id = project::append(
                 &tx,
@@ -373,12 +381,25 @@ impl Store {
             ids.push(id);
         }
         let view = project::snapshot(&tx, campaign)?;
-        // A name that resolves to another entity than its own is a duplicate.
-        for (&(name, _), id) in declared.iter().zip(&ids) {
-            if view.entity_by_name(name).map(|e| e.id) != Some(*id) {
-                return Err(StoreError::Invalid(format!(
-                    "duplicate adventure seed entity name: {name}"
-                )));
+        // Each name, main or other, names one entity only. Two other names
+        // of one entity with the same normal form would share an alias slot.
+        for (&(name, other_names), id) in declared.iter().zip(&ids) {
+            let mut own = std::collections::HashSet::new();
+            for other in other_names {
+                if !own.insert(crate::normalize::name(&other.name)) {
+                    return Err(StoreError::Invalid(format!(
+                        "{name} has the same other name twice: {}",
+                        other.name
+                    )));
+                }
+            }
+            let names = std::iter::once(name).chain(other_names.iter().map(|o| o.name.as_str()));
+            for n in names {
+                if view.entities_by_name(n).any(|e| e.id != *id) {
+                    return Err(StoreError::Invalid(format!(
+                        "duplicate adventure seed name: {n}"
+                    )));
+                }
             }
         }
         // Who knows that two names are one entity: one Persistent fact per

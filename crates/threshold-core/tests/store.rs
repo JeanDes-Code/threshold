@@ -1657,3 +1657,59 @@ fn seed_other_names_resolve_and_are_known_facts() {
     seed.pc.other_names[0].known_to = vec!["Nobody".into()];
     assert!(db.create_campaign(&seed, 8).is_err());
 }
+
+fn named(name: &str, other_names: &[&str]) -> threshold_core::domain::SeedEntity {
+    threshold_core::domain::SeedEntity {
+        name: name.into(),
+        kind: EntityKind::Npc,
+        age: Some(40),
+        other_names: other_names
+            .iter()
+            .map(|n| threshold_core::domain::OtherName {
+                name: (*n).into(),
+                known_to: vec![],
+            })
+            .collect(),
+        hidden: false,
+    }
+}
+
+#[test]
+fn seed_names_are_unique_across_main_and_other_names() {
+    let mut db = Store::open_in_memory().unwrap();
+    // A later other name takes an earlier main name.
+    let mut seed = adventure_seed();
+    seed.entities = vec![named("Bela", &["ADA"])];
+    let err = db.create_campaign(&seed, 1).unwrap_err().to_string();
+    assert!(err.contains("duplicate"), "{err}");
+    // An earlier other name takes a later main name.
+    let mut seed = adventure_seed();
+    seed.entities = vec![named("Bela", &["Cato"]), named("Cato", &[])];
+    assert!(db.create_campaign(&seed, 2).is_err());
+    // Two entities share one other name.
+    let mut seed = adventure_seed();
+    seed.entities = vec![named("Bela", &["Red"]), named("Cato", &["red"])];
+    assert!(db.create_campaign(&seed, 3).is_err());
+    assert!(db.campaigns().unwrap().is_empty());
+}
+
+#[test]
+fn same_other_name_twice_is_refused_with_a_clear_error() {
+    let mut db = Store::open_in_memory().unwrap();
+    let mut seed = adventure_seed();
+    seed.entities = vec![named("Bela", &["Chloé", "Chloe"])];
+    let err = db.create_campaign(&seed, 1).unwrap_err().to_string();
+    assert!(!err.contains("UNIQUE"), "{err}");
+    assert!(err.contains("Bela") && err.contains("Chloe"), "{err}");
+    assert!(db.campaigns().unwrap().is_empty());
+}
+
+#[test]
+fn world_is_reserved_for_other_names_too() {
+    let mut db = Store::open_in_memory().unwrap();
+    let mut seed = adventure_seed();
+    seed.entities = vec![named("Bela", &["The World"])];
+    let err = db.create_campaign(&seed, 1).unwrap_err().to_string();
+    assert!(err.contains("world"), "{err}");
+    assert!(db.campaigns().unwrap().is_empty());
+}

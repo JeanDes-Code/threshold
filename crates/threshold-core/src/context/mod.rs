@@ -74,11 +74,12 @@ impl<'a> Retrieval<'a> {
         let location = pc
             .and_then(|pc| view.live_fact(pc, "location"))
             .map(|f| f.slot.value.clone());
-        let place = location
-            .as_ref()
-            .and_then(|location| view.entity_by_name(location))
-            .filter(|e| e.kind == EntityKind::Place)
-            .map(|e| e.id);
+        let place = location.as_ref().and_then(|location| {
+            view.entities_by_name(location)
+                .filter(|e| e.kind == EntityKind::Place)
+                .min_by_key(|e| e.id)
+                .map(|e| e.id)
+        });
         let exists = |id: &EntityId| view.entities.iter().any(|e| e.id == *id);
         let present: BTreeSet<EntityId> = view.present().into_iter().collect();
         let mut room: BTreeSet<EntityId> = present.clone();

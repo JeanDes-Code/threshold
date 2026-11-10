@@ -61,8 +61,8 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
             LedgerOp::AddEntity { kind, name, .. } => {
                 *kind != EntityKind::Pc
                     && view_after
-                        .entity_by_name(name)
-                        .is_some_and(|e| present.contains(&e.id))
+                        .entities_by_name(name)
+                        .any(|e| present.contains(&e.id))
             }
             LedgerOp::RecordRoll { .. } | LedgerOp::AdvanceClock { .. } => true,
             _ => false,

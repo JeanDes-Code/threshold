@@ -366,6 +366,56 @@ fn pack_fragment_path_stays_inside_pack() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// Adds an NPC (or a place) by name and returns its id.
+fn add_named(w: &mut World, kind: EntityKind, name: &str) -> u64 {
+    let age = (kind == EntityKind::Npc).then_some(40);
+    w.commit(vec![LedgerOp::AddEntity {
+        local: None,
+        kind,
+        name: name.into(),
+        age,
+        other_names: vec![],
+    }]);
+    w.view
+        .entities
+        .iter()
+        .filter(|e| e.name == name)
+        .map(|e| e.id)
+        .max()
+        .unwrap()
+}
+
+#[test]
+fn second_npc_with_a_shared_name_is_perceived_when_present() {
+    let mut w = World::new();
+    let first = add_named(&mut w, EntityKind::Npc, "Guard");
+    let second = add_named(&mut w, EntityKind::Npc, "Guard");
+    assert!(first < second);
+    w.commit(vec![
+        add_fact(first, "location", "market", "the first guard", vec![]),
+        add_fact(second, "location", "gate square", "a guard", vec![w.ada]),
+    ]);
+    let ops = vec![LedgerOp::AddEntity {
+        local: Some(1),
+        kind: EntityKind::Npc,
+        name: "Guard".into(),
+        age: Some(40),
+        other_names: vec![],
+    }];
+    assert_eq!(perceived_by_pc(&ops, &w.view), ops);
+}
+
+#[test]
+fn scene_place_is_the_place_when_a_lower_id_shares_its_name() {
+    let mut w = World::new();
+    let npc = add_named(&mut w, EntityKind::Npc, "Gate Square");
+    let place = add_named(&mut w, EntityKind::Place, "Gate Square");
+    assert!(npc < place);
+    let prompt = proposal_prompt(&w.view, &[], "I look around.");
+    let all = prefix(&prompt);
+    assert!(all.contains(&format!("(E{place})")), "{all}");
+}
+
 #[test]
 fn unwitnessed_presence_never_reaches_the_narrator() {
     let mut w = World::new();
