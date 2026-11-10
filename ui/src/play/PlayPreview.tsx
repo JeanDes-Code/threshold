@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PlayView } from "../api";
+import { fixtureCard } from "../fixtures/entityCards";
 import { playView, streamText } from "../fixtures/playView";
 import PlayScreen from "./PlayScreen";
 
@@ -82,6 +83,7 @@ export default function PlayPreview() {
         failure={null}
         notice={null}
         canRetry={false}
+        loadCard={fixtureCard}
         onAct={async () => {
           replay();
           return true;

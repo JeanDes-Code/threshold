@@ -9,10 +9,12 @@ use support::hidden::*;
 use threshold_core::{
     domain::{ActionKind, EntityKind, LedgerOp, Verdict},
     fixture::{load_adventure_seed, load_world},
-    player::Marks,
+    player::{Marks, Note, Target},
     store::{Store, TurnId, TurnKind, TurnRecord},
     turn::create_campaign,
-    view::{Block, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view, play_view},
+    view::{
+        Block, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view, entity_card, play_view,
+    },
 };
 
 /// The town fixture after one Turn that gave Wren a fact Wren saw and a
@@ -404,6 +406,108 @@ fn play_fact_text_reads_as_a_line() {
     assert_eq!(line.text, "Ada pending meal promise: tonight");
     assert!(line.open);
     assert_eq!(line.subject, named(ada, EntityKind::Pc, "Ada"));
+}
+
+/// Shape 3.6: a card holds what the PC knows about the entity, and no more.
+#[test]
+fn entity_card_shows_pc_knowledge_only() {
+    let mut w = HiddenWorld::new();
+    let (ada, orsel) = (w.ada, w.orsel);
+    let view = w.view();
+    w.play(
+        "I ask Orsel the price of passage.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            orsel,
+            "pending_toll",
+            "two coins at dusk",
+            "Orsel wants two coins at dusk.",
+            &[ada],
+        )],
+    );
+    let sight = w.sight();
+    let card = entity_card(&sight, &Marks::default(), orsel).expect("the PC knows Orsel");
+    let json = serde_json::to_string(&card).unwrap();
+    for hidden in HIDDEN {
+        assert!(!json.contains(hidden), "{hidden} leaks: {json}");
+    }
+    assert_eq!(card.who, named(orsel, EntityKind::Npc, "Orsel"));
+    assert!(card.here);
+    assert!(
+        card.other_names.is_empty(),
+        "the PC does not know the Toll-Wolf"
+    );
+    // Its facts are the PC Beliefs about Orsel, open items marked.
+    let mut want: Vec<&str> = sight
+        .beliefs
+        .iter()
+        .filter(|b| b.subject == orsel)
+        .map(|b| b.key.as_str())
+        .collect();
+    let mut got: Vec<&str> = card.facts.iter().map(|f| f.belief.key.as_str()).collect();
+    want.sort_unstable();
+    got.sort_unstable();
+    assert_eq!(got, want);
+    assert!(got.contains(&"pending_toll"), "{got:?}");
+    for fact in &card.facts {
+        assert_eq!(fact.subject, card.who);
+        assert_eq!(fact.open, fact.belief.key == "pending_toll", "{fact:?}");
+    }
+    assert!(card.notes.is_empty());
+    assert!(!card.pinned);
+}
+
+/// Shape 3.6: no card for an entity the PC does not know.
+#[test]
+fn entity_card_refuses_an_entity_the_pc_does_not_know() {
+    let w = HiddenWorld::new();
+    let sight = w.sight();
+    let marks = Marks::default();
+    let beyond = w.view().entities.iter().map(|e| e.id).max().unwrap() + 1;
+    for id in [w.vey, w.pip, beyond] {
+        assert_eq!(entity_card(&sight, &marks, id), None, "entity {id}");
+    }
+    assert!(entity_card(&sight, &marks, w.orsel).is_some());
+}
+
+/// A character the PC perceives and cannot name has a card with no text.
+#[test]
+fn stranger_card_holds_no_text() {
+    let w = HiddenWorld::new();
+    let card = entity_card(&w.sight(), &Marks::default(), w.kestrel).expect("the PC sees them");
+    assert_eq!(card.who.name, None);
+    assert!(card.facts.is_empty(), "{:?}", card.facts);
+    assert!(card.other_names.is_empty());
+    assert!(card.here);
+    let json = serde_json::to_string(&card).unwrap();
+    assert!(!json.contains("Kestrel"), "{json}");
+}
+
+/// The card joins the Player's Notes about the entity and its Pin.
+#[test]
+fn entity_card_joins_its_notes_and_pin() {
+    let w = HiddenWorld::new();
+    let note = |id: u64, about: Target| Note {
+        id,
+        body: format!("note {id}"),
+        about: Some(about),
+        created_ms: 1,
+        updated_ms: 1,
+    };
+    let marks = Marks {
+        notes: vec![
+            note(1, Target::Entity { entity_id: w.orsel }),
+            note(2, Target::Entity { entity_id: w.brann }),
+        ],
+        pins: vec![Target::Entity { entity_id: w.orsel }],
+    };
+    let card = entity_card(&w.sight(), &marks, w.orsel).unwrap();
+    assert_eq!(card.notes.iter().map(|n| n.id).collect::<Vec<_>>(), [1]);
+    assert!(card.pinned);
+    let card = entity_card(&w.sight(), &marks, w.brann).unwrap();
+    assert!(!card.pinned);
 }
 
 /// The UI reads what the core sends: the core's JSON is kept in

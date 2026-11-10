@@ -4,7 +4,7 @@ use std::{path::Path, time::Instant};
 
 mod support;
 
-use support::{allowed, entity, session, town, with_fact};
+use support::{allowed, entity, session, town, town_dir, with_fact};
 use threshold_core::{
     RecordedGm,
     store::TurnKind,
@@ -55,6 +55,37 @@ fn play_view_builds_within_budget_at_300_turns() {
     };
     eprintln!("get_play_view at {TURNS} Turns: {ms} ms (budget {budget} ms)");
     assert!(ms <= budget, "{ms} ms over the budget of {budget} ms");
+}
+
+/// Review Focus 3: probing `get_entity_card` with ids must not tell a hidden
+/// entity from an id that does not exist.
+#[test]
+fn card_refusal_does_not_tell_hidden_from_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let seed = dir.path().join("adventure-seed.toml");
+    let mut text = std::fs::read_to_string(town_dir().join("adventure-seed.toml")).unwrap();
+    text.push_str(
+        "\n[[entities]]\nname = \"Vey\"\nkind = \"npc\"\nage = 40\nhidden = true\n\n\
+         [[decided]]\nsubject = \"Vey\"\nkey = \"location\"\nvalue = \"Varn town hall\"\n\
+         text = \"Vey waits unseen behind the town hall's screen.\"\n",
+    );
+    std::fs::write(&seed, text).unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    s.new_campaign(&seed, &town_dir().join("world.toml"), 11)
+        .unwrap();
+    let db = s.summary().unwrap().db_path;
+
+    let vey = s
+        .get_entity_card(entity(&db, "Vey"))
+        .unwrap_err()
+        .to_string();
+    let missing = s.get_entity_card(99_999).unwrap_err().to_string();
+    assert_eq!(vey, missing);
+    assert_eq!(vey, "the PC does not know this one");
+
+    let orsel = s.get_entity_card(entity(&db, "Orsel")).unwrap();
+    assert_eq!(orsel.who.name.as_deref(), Some("Orsel"));
 }
 
 #[test]

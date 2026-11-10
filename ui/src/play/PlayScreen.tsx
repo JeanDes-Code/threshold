@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { PlayView } from "../api";
+import { useEffect, useState } from "react";
+import { errorText, type EntityCard, type PlayView } from "../api";
 import ActionBar from "./ActionBar";
 import { storyItems, turnPhase } from "./logic";
 import SidePanel from "./SidePanel";
@@ -23,6 +23,8 @@ export interface PlayScreenProps {
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
   canRetry: boolean;
+  /** `get_entity_card`: what the PC knows about one entity. */
+  loadCard: (entityId: number) => Promise<EntityCard>;
   onAct: (text: string) => Promise<boolean>;
   onAsk: (text: string) => Promise<boolean>;
   onCorrect: (clarified: string, why: string) => Promise<boolean>;
@@ -32,15 +34,47 @@ export interface PlayScreenProps {
   onDismissAnswer: () => void;
 }
 
+/** The last answer of the core for one entity: its card, or the refusal text. */
+interface CardAnswer {
+  entityId: number;
+  card: EntityCard | null;
+  refusal: string | null;
+}
+
 /** The Play screen. It reads one PlayView through props and holds only screen state. */
 export default function PlayScreen(props: PlayScreenProps) {
-  const { view, busy, stream, pendingIntent, answer } = props;
+  const { view, busy, stream, pendingIntent, answer, loadCard } = props;
   const [selected, setSelected] = useState<number | null>(null);
+  const [card, setCard] = useState<CardAnswer | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
 
-  const showName = (entityId: number) => {
+  // The card reads the core again after each Turn: what the PC knows changes.
+  // Until the answer comes, the panel keeps the last card of that entity.
+  useEffect(() => {
+    if (selected === null) return;
+    let current = true;
+    loadCard(selected).then(
+      (found) => {
+        if (current) setCard({ entityId: selected, card: found, refusal: null });
+      },
+      (e: unknown) => {
+        if (current) setCard({ entityId: selected, card: null, refusal: errorText(e) });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [selected, view, loadCard]);
+  const shown = card !== null && card.entityId === selected ? card : null;
+
+  const showCard = (entityId: number) => {
     setSelected(entityId);
     setPanelOpen(true);
+  };
+
+  const closeCard = () => {
+    setSelected(null);
+    setCard(null);
   };
 
   return (
@@ -60,7 +94,7 @@ export default function PlayScreen(props: PlayScreenProps) {
         <Story
           items={storyItems(view, busy ? stream : null)}
           pendingIntent={pendingIntent}
-          onName={showName}
+          onName={showCard}
           onRenarrate={props.onRenarrate}
           busy={busy}
         />
@@ -72,7 +106,10 @@ export default function PlayScreen(props: PlayScreenProps) {
             pinned={view.pinned}
             known={view.known}
             selected={selected}
-            onSelect={setSelected}
+            card={shown?.card ?? null}
+            cardRefusal={shown?.refusal ?? null}
+            onSelect={showCard}
+            onCloseCard={closeCard}
           />
         </aside>
       </div>

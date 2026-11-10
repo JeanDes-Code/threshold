@@ -145,6 +145,16 @@ describe("createApi", () => {
     await createApi(invoke).getPlayView();
     expect(calls).toEqual([{ cmd: "get_play_view", args: undefined }]);
   });
+
+  it("getEntityCard sends the entity id", async () => {
+    const calls: Call[] = [];
+    const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return Promise.resolve({} as T);
+    };
+    await createApi(invoke).getEntityCard(7);
+    expect(calls).toEqual([{ cmd: "get_entity_card", args: { entity_id: 7 } }]);
+  });
 });
 
 describe("approveDraft", () => {

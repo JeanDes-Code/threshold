@@ -35,17 +35,21 @@ export function isSendKey(e: { key: string; shiftKey: boolean }): boolean {
   return e.key === "Enter" && !e.shiftKey;
 }
 
-const fold = (s: string): string =>
-  s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
+/** Text for the people search: lower case, accents dropped. */
+export function searchFold(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
 
 /**
- * True when the search text is part of a name the PC knows for this entry.
- * It reads the panel's own list, never the story text.
+ * The lines of "People and places" whose main name or other name holds the
+ * search text. It reads the panel's own list, never the story text.
  */
-export function matchesSearch(line: KnownLine, query: string): boolean {
-  const q = fold(query);
-  if (q === "") return true;
-  return [line.who.name ?? "", ...line.other_names].some((n) => fold(n).includes(q));
+export function filterKnown(lines: KnownLine[], query: string): KnownLine[] {
+  const q = searchFold(query).trim();
+  if (q === "") return lines;
+  return lines.filter((line) =>
+    [line.who.name ?? "", ...line.other_names].some((n) => searchFold(n).includes(q)),
+  );
 }
 
 /** The committed Turns, then the raw stream text while a Narration streams. */

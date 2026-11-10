@@ -21,13 +21,17 @@ use threshold_core::{
     setup::{create_campaign_file, remove_part},
     store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
     turn::{Engine, TurnError, TurnOutcome, stored_roll},
-    view::{self, CharacterView, JournalView, PlayView},
+    view::{self, CharacterView, EntityCard, JournalView, PlayView},
     world::{PcSight, pc_sight},
 };
 use threshold_ollama::OllamaConfig;
 
 /// The config file the app reads from its data dir.
 pub const CONFIG_FILE: &str = "threshold.toml";
+
+/// The one refusal of `get_entity_card`, for a hidden entity and for an id
+/// that does not exist alike.
+pub const UNKNOWN_ENTITY: &str = "the PC does not know this one";
 
 /// Builds the model adapter for each Engine the session opens.
 pub type MakeGm = Box<dyn Fn() -> Box<dyn Gm + Send> + Send + Sync>;
@@ -349,6 +353,14 @@ impl Session {
     /// only. The UI calls it after a Turn ends, never during one.
     pub fn get_play_view(&self) -> Result<PlayView, AppError> {
         Ok(view::play_view(&self.sight()?, &Marks::default()))
+    }
+
+    /// The card of one person, place or Faction the PC knows. Any other id
+    /// gets the same refusal, so the Player cannot learn that a hidden
+    /// entity exists by probing ids.
+    pub fn get_entity_card(&self, entity_id: u64) -> Result<EntityCard, AppError> {
+        view::entity_card(&self.sight()?, &Marks::default(), entity_id)
+            .ok_or_else(|| failed(UNKNOWN_ENTITY))
     }
 
     /// PC Knowledge, split: what the PC witnessed, and what it was told.

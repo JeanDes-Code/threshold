@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::{
     domain::{ClockMin, EntityId, EntityKind, Knowing, STATE_KEYS, is_open_key},
     normalize,
-    player::{Marks, Target},
+    player::{Marks, Note, Target},
     rules::RollResult,
     store::{TurnId, TurnKind},
     world::{Belief, PcSight, SightLine, SightTurn},
@@ -313,6 +313,54 @@ pub fn play_view(sight: &PcSight, marks: &Marks) -> PlayView {
             })
             .collect(),
     }
+}
+
+/// One person, place or Faction as the PC knows it (data shape 3.6).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EntityCard {
+    pub who: NameRef,
+    /// The other names the PC holds an `alias_` Belief for.
+    pub other_names: Vec<String>,
+    /// Present now, as the PC perceives it.
+    pub here: bool,
+    /// The PC Beliefs about it, Open Items marked.
+    pub facts: Vec<FactLine>,
+    /// The Player's Notes about it.
+    pub notes: Vec<Note>,
+    pub pinned: bool,
+}
+
+/// The card of `entity`, or `None` when the PC does not know it: it is not
+/// in `PcSight.known`. A hidden entity and an id that does not exist look
+/// the same here. A character the PC cannot name gets a card with no text:
+/// its only Belief is a witnessed `location`, and that text holds its name.
+pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<EntityCard> {
+    let known = sight.known.iter().find(|k| k.id == entity)?;
+    let who = name_ref(sight, entity)?;
+    let named = known.name.is_some();
+    let target = Target::Entity { entity_id: entity };
+    Some(EntityCard {
+        other_names: if named {
+            known.other_names.clone()
+        } else {
+            Vec::new()
+        },
+        here: sight.present.contains(&entity),
+        facts: sight
+            .beliefs
+            .iter()
+            .filter(|b| named && b.subject == entity)
+            .filter_map(|b| fact_line(sight, b))
+            .collect(),
+        notes: marks
+            .notes
+            .iter()
+            .filter(|n| n.about.as_ref() == Some(&target))
+            .cloned()
+            .collect(),
+        pinned: marks.pins.contains(&target),
+        who,
+    })
 }
 
 /// The Pins whose target the PC can still see. No Pin resolves yet: the

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { KnownLine } from "../api";
 import { playView } from "../fixtures/playView";
 import {
+  filterKnown,
   isSendKey,
-  matchesSearch,
   nameText,
   npcColor,
+  searchFold,
   shouldFollow,
   storyItems,
   turnPhase,
@@ -45,16 +47,27 @@ describe("play logic", () => {
     expect(shouldFollow(500, 24, 1000)).toBe(false);
   });
 
-  it("the people search reads every name the PC knows, case and accents aside", () => {
-    const line = {
-      who: { entity_id: 4, kind: "npc" as const, name: "Chloé Varn" },
+  it("filterKnown matches main and other names, case and accents aside", () => {
+    const chloe: KnownLine = {
+      who: { entity_id: 4, kind: "npc", name: "Chloé Varn" },
       other_names: ["the Tallyman"],
       here: false,
     };
-    expect(matchesSearch(line, "")).toBe(true);
-    expect(matchesSearch(line, "chloe")).toBe(true);
-    expect(matchesSearch(line, "  TALLY ")).toBe(true);
-    expect(matchesSearch(line, "maren")).toBe(false);
+    const mill: KnownLine = {
+      who: { entity_id: 5, kind: "place", name: "Old Mill" },
+      other_names: [],
+      here: true,
+    };
+    const lines = [chloe, mill];
+    expect(searchFold("CHLOÉ")).toBe("chloe");
+    expect(filterKnown(lines, "  Chloé ")).toEqual([chloe]);
+    expect(filterKnown(lines, "")).toEqual(lines);
+    expect(filterKnown(lines, "   ")).toEqual(lines);
+    expect(filterKnown(lines, "CHLOE")).toEqual([chloe]);
+    expect(filterKnown(lines, "varn")).toEqual([chloe]);
+    expect(filterKnown(lines, "tally")).toEqual([chloe]);
+    expect(filterKnown(lines, "mill")).toEqual([mill]);
+    expect(filterKnown(lines, "maren")).toEqual([]);
   });
 
   it("Enter sends and Shift+Enter does not", () => {

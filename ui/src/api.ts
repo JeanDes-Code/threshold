@@ -154,6 +154,27 @@ export interface PinLine {
   text: string;
 }
 
+/** Text the Player writes in the Journal. Never part of the world. */
+export interface Note {
+  id: number;
+  body: string;
+  about: Target | null;
+  created_ms: number;
+  updated_ms: number;
+}
+
+/** One person, place or Faction as the PC knows it. */
+export interface EntityCard {
+  who: NameRef;
+  other_names: string[];
+  /** Present now, as the PC perceives it. */
+  here: boolean;
+  /** What the PC knows about it, Open Items marked. */
+  facts: FactLine[];
+  notes: Note[];
+  pinned: boolean;
+}
+
 /** The mature content module adds a variant; the UI reads the tag only. */
 export type SceneState = { kind: "plain" };
 
@@ -403,6 +424,9 @@ export function createApi(invoke: Invoke) {
     askOoc: (text: string) => invoke<string>("ask_ooc", { text }),
     renarrate: (turnId: number) => invoke<string>("renarrate", { turn_id: turnId }),
     getCharacter: () => invoke<CharacterView>("get_character"),
+    /** One card. Refused with one fixed text for an entity the PC does not know. */
+    getEntityCard: (entityId: number) =>
+      invoke<EntityCard>("get_entity_card", { entity_id: entityId }),
     getJournal: () => invoke<JournalView>("get_journal"),
     setDebug: (on: boolean) => invoke<boolean>("set_debug", { on }),
     getDebug: (turnId: number) => invoke<DebugView>("get_debug", { turn_id: turnId }),

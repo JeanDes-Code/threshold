@@ -28,7 +28,7 @@ use threshold_core::{
     domain::AdventureSeed,
     rules::RollResult,
     turn::BEGIN_OP_ID,
-    view::{CharacterView, JournalView, PlayView},
+    view::{CharacterView, EntityCard, JournalView, PlayView},
 };
 use threshold_ollama::OllamaGm;
 
@@ -247,6 +247,13 @@ async fn get_character(state: State<'_, Shared>) -> Result<CharacterView, AppErr
     blocking(&state, |s| s.get_character()).await
 }
 
+/// One person, place or Faction the PC knows; refused with one fixed text
+/// for any other id.
+#[tauri::command(rename_all = "snake_case")]
+async fn get_entity_card(state: State<'_, Shared>, entity_id: u64) -> Result<EntityCard, AppError> {
+    blocking(&state, move |s| s.get_entity_card(entity_id)).await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 async fn get_journal(state: State<'_, Shared>) -> Result<JournalView, AppError> {
     blocking(&state, |s| s.get_journal()).await
@@ -394,6 +401,7 @@ pub fn run() {
             ask_ooc,
             renarrate,
             get_character,
+            get_entity_card,
             get_journal,
             set_debug,
             get_debug,

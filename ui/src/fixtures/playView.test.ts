@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Block, Part, PlayView } from "../api";
+import { entityCards } from "./entityCards";
 import coreJson from "./playView.core.json?raw";
 import { playView, streamText } from "./playView";
 
@@ -33,6 +34,20 @@ describe("the Play fixture", () => {
     const names = parts.filter((p) => p.kind === "name");
     expect(names.length).toBeGreaterThan(0);
     for (const part of names) expect(ids.has(part.entity_id)).toBe(true);
+  });
+
+  it("every entity the screen links has a card, and the stranger's card has no text", () => {
+    const parts = blocksOf(playView).flatMap((b) => b.parts);
+    const linked = [
+      ...parts.flatMap((p) => (p.kind === "name" ? [p.entity_id] : [])),
+      ...playView.here.map((who) => who.entity_id),
+      ...playView.known.map((line) => line.who.entity_id),
+    ];
+    for (const id of linked) expect(entityCards[id]?.who.entity_id).toBe(id);
+    const stranger = playView.here.find((who) => who.name === null);
+    const card = stranger && entityCards[stranger.entity_id];
+    expect(card?.facts).toEqual([]);
+    expect(card?.other_names).toEqual([]);
   });
 });
 

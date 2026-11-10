@@ -128,6 +128,7 @@ export default function LivePlay({ view, onView, onBusy }: Props) {
       failure={failure}
       notice={notice}
       canRetry={turns.pending() !== null}
+      loadCard={api.getEntityCard}
       onAct={act}
       onAsk={ask}
       onCorrect={correct}
