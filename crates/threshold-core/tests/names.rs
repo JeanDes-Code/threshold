@@ -1,4 +1,5 @@
 use threshold_core::{
+    build::names_pc,
     domain::EntityKind,
     normalize,
     store::{Entity, WorldView},
@@ -59,4 +60,45 @@ fn tie_takes_the_lowest_id() {
         entity(5, "Mara", &[]),
     ]);
     assert_eq!(id_of(&view, "Mara"), Some(3));
+}
+
+#[test]
+fn normalize_name_ignores_edge_punctuation() {
+    assert_eq!(normalize::name("Ostley Crossing."), "ostley crossing");
+    assert_eq!(
+        normalize::name("Ostley Crossing."),
+        normalize::name("ostley crossing")
+    );
+    assert_eq!(
+        normalize::name("  \"The  Copper Kettle,\" "),
+        "copper kettle"
+    );
+    assert_eq!(normalize::name("(Wick)"), "wick");
+    // Inner apostrophes and hyphens stay.
+    assert_eq!(normalize::name("O'Brien"), "o'brien");
+    assert_eq!(normalize::name("O’Brien!"), "o'brien");
+    assert_eq!(normalize::name("Jean-Luc"), "jean-luc");
+    assert_ne!(normalize::name("Jean-Luc"), normalize::name("Jean Luc"));
+    // A name lookup ignores the edge punctuation too.
+    let view = world(vec![entity(1, "Ostley Crossing", &["the Ford"])]);
+    assert_eq!(id_of(&view, "Ostley Crossing."), Some(1));
+    assert_eq!(id_of(&view, "The Ford!"), Some(1));
+}
+
+#[test]
+fn first_name_alone_names_the_pc() {
+    let others = ["Wick".to_owned()];
+    let named = |text: &str| names_pc("Teodor Brandt", &others, text);
+    assert!(named("Teodor owes her money"));
+    assert!(named("She wants Teodor Brandt to sell."));
+    assert!(named("Make Wick carry the winter post."));
+    assert!(named("Teodor's ferry"));
+    assert!(named("(Teodor) pays."));
+    // A word is whole: a longer word or a hyphenated word is not the name.
+    assert!(!named("Theodora owes her money"));
+    assert!(!named("Teodora sells bread."));
+    assert!(!named("Save a penny for the Teodor-Brandtson fair."));
+    assert!(!named("A wicker basket."));
+    // Only the first word of the main name counts alone, not the last.
+    assert!(!named("Old Brandt left the village."));
 }

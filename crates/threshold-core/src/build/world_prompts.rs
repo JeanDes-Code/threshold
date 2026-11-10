@@ -1,10 +1,12 @@
-//! The prompts of the World Build stages (design 6.3). A prompt never shows
-//! an open item without its marker, nor its `pending_` key.
+//! The prompts and schemas of the World Build stages (design 6.3). A prompt
+//! never shows an open item without its marker, nor its `pending_` key.
+//! Each schema field that names a roster entry is an `enum` of main names
+//! from the approved roster.
 
 use super::{
     SeedDraft, Stage,
     checks::{FactBook, Member, Roster},
-    stages::{Need, StageCall, schema_of},
+    stages::{Need, StageCall, name_field, name_list, schema_of},
     world_stages::{EventsOut, HiddenOut, NpcCall, NpcOut, NpcState, StartOut},
 };
 use crate::{
@@ -31,7 +33,7 @@ Rules:
 - Give this NPC their own life, one that does not turn around the PC: their work, their family, their money, their fears, their other relations. Many NPCs care little about the PC. Name the PC in at most one goal or in the secret, and only when the WORLD FACTS give a reason.
 - goals: one to three things this NPC wants now, each in one sentence. against: the ROSTER name of the character the goal works against, or null.
 - secret: one thing this NPC hides, plausible and not melodramatic, as a fact. subject: a name from the ROSTER, often the NPC. key: a short English word in snake_case. value: a few words. text: one sentence. open: true when it is planned or pending, not done. It must be new: never restate a WORLD FACT. null when the NPC hides nothing.
-- attitudes: how this NPC feels toward other names from the ROSTER, from -5 (hostile) to 5 (devoted).
+- attitudes: how this NPC feels toward other characters from the ROSTER, the PC included, from -5 (hostile) to 5 (devoted).
 - voice_card: speech habits, typical words, and two to four short sample lines. Make this voice clearly different from every voice under VOICES ALREADY WRITTEN.
 - Write every text in the story language.";
 
@@ -134,6 +136,16 @@ fn open_details(draft: &SeedDraft) -> String {
     }
 }
 
+/// The main names of the roster members that `keep` accepts, the PC first.
+fn names(roster: &Roster, keep: impl Fn(&Member) -> bool) -> Vec<&str> {
+    roster
+        .members()
+        .iter()
+        .filter(|m| keep(m))
+        .map(|m| m.main.as_str())
+        .collect()
+}
+
 fn prompt(system: String, recent: String) -> Prompt {
     Prompt {
         system,
@@ -152,6 +164,17 @@ pub(super) fn hidden_call(
     let pc = &roster.pc().main;
     let (known, hidden): (Vec<&FactEntry>, Vec<&FactEntry>) =
         book.facts().partition(|f| f.known_by.contains(pc));
+    // Only an NPC holds a hidden fact, so the PC is no holder by schema.
+    let mut schema = schema_of::<HiddenOut>();
+    let fact = "/$defs/FactOut/properties";
+    name_field(
+        &mut schema,
+        &format!("{fact}/subject"),
+        &names(roster, |_| true),
+        false,
+    );
+    let npcs = names(roster, |m| m.kind == EntityKind::Npc);
+    name_list(&mut schema, &format!("{fact}/known_by"), &npcs);
     StageCall {
         stage: Stage::HiddenFacts,
         step: format!("hidden_facts {n}/{of}"),
@@ -164,7 +187,7 @@ pub(super) fn hidden_call(
                 fact_lines(hidden.into_iter(), true),
             ),
         ),
-        schema: schema_of::<HiddenOut>(),
+        schema,
         need: Need::Optional,
     }
 }
@@ -200,6 +223,30 @@ pub(super) fn npc_call(
             voices.join("\n")
         },
     );
+    // Attitudes and goals point at another character or at the PC.
+    let toward = names(roster, |m| {
+        matches!(m.kind, EntityKind::Pc | EntityKind::Npc) && m.main != npc.main
+    });
+    let mut schema = schema_of::<NpcOut>();
+    name_field(
+        &mut schema,
+        "/$defs/GoalOut/properties/against",
+        &toward,
+        true,
+    );
+    name_field(
+        &mut schema,
+        "/$defs/AttitudeOut/properties/to",
+        &toward,
+        false,
+    );
+    let all = names(roster, |_| true);
+    name_field(
+        &mut schema,
+        "/$defs/SecretOut/properties/subject",
+        &all,
+        false,
+    );
     let mut step = format!("npc_state {n}/{of}");
     let mut need = Need::Essential;
     if let Some(items) = call.autonomy {
@@ -216,7 +263,7 @@ pub(super) fn npc_call(
         stage: Stage::NpcState,
         step,
         prompt: prompt(with_pc_keys(NPC_SYSTEM), recent),
-        schema: schema_of::<NpcOut>(),
+        schema,
         need,
     }
 }
@@ -232,6 +279,22 @@ pub(super) fn events_call(
         .flat_map(|s| &s.goals)
         .map(|g| format!("- {}: {}", g.npc, g.text))
         .collect();
+    let npcs = names(roster, |m| m.kind == EntityKind::Npc);
+    let mut schema = schema_of::<EventsOut>();
+    name_field(
+        &mut schema,
+        "/$defs/EventOut/properties/actor",
+        &npcs,
+        false,
+    );
+    name_list(&mut schema, "/$defs/EventOut/properties/seen_by", &npcs);
+    let all = names(roster, |_| true);
+    name_field(
+        &mut schema,
+        "/$defs/EffectOut/properties/subject",
+        &all,
+        false,
+    );
     StageCall {
         stage: Stage::WorldEvents,
         step: "world_events".into(),
@@ -245,7 +308,7 @@ pub(super) fn events_call(
                 goals.join("\n"),
             ),
         ),
-        schema: schema_of::<EventsOut>(),
+        schema,
         need: Need::Optional,
     }
 }
@@ -268,12 +331,21 @@ pub(super) fn start_call(
                 .join("\n")
         }
     };
-    let places = roster
-        .members()
-        .iter()
-        .filter(|m| m.kind == EntityKind::Place)
-        .map(|m| m.main.as_str())
-        .collect();
+    let places = names(roster, |m| m.kind == EntityKind::Place);
+    let absent: Vec<&str> = absent.iter().map(|m| m.main.as_str()).collect();
+    let mut schema = schema_of::<StartOut>();
+    name_field(
+        &mut schema,
+        "/$defs/PlacementOut/properties/npc",
+        &absent,
+        false,
+    );
+    name_field(
+        &mut schema,
+        "/$defs/PlacementOut/properties/place",
+        &places,
+        false,
+    );
     StageCall {
         stage: Stage::StartState,
         step: "start_state".into(),
@@ -288,12 +360,12 @@ pub(super) fn start_call(
                 } else {
                     present.join(", ")
                 },
-                list(absent.iter().map(|m| m.main.as_str()).collect()),
+                list(absent),
                 list(places),
                 fact_lines(book.facts(), true),
             ),
         ),
-        schema: schema_of::<StartOut>(),
+        schema,
         need: Need::Essential,
     }
 }

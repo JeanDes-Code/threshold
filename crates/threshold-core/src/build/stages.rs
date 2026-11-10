@@ -156,6 +156,53 @@ pub(crate) fn schema_of<T: JsonSchema>() -> Value {
     schema
 }
 
+/// Constrains the string at `pointer` of a stage schema to one of `names`,
+/// built per call from the roster, as the Turn pipeline does for handles
+/// (`proposal_schema_for`). `nullable` adds `null`. With no name, only the
+/// empty string fits, or only `null`.
+pub(crate) fn name_field(schema: &mut Value, pointer: &str, names: &[&str], nullable: bool) {
+    let mut values = name_values(names);
+    *node(schema, pointer) = if nullable {
+        values.push(Value::Null);
+        json!({ "enum": values })
+    } else {
+        if values.is_empty() {
+            values.push(json!(""));
+        }
+        json!({ "type": "string", "enum": values })
+    };
+}
+
+/// Constrains each item of the list at `pointer` of a stage schema to one
+/// of `names`. With no name, the list stays empty.
+pub(crate) fn name_list(schema: &mut Value, pointer: &str, names: &[&str]) {
+    let list = node(schema, pointer);
+    let values = name_values(names);
+    if values.is_empty() {
+        list["maxItems"] = json!(0);
+        list["items"] = json!({ "type": "string", "enum": [""] });
+    } else {
+        list["items"] = json!({ "type": "string", "enum": values });
+    }
+}
+
+/// Each non-empty name once, in order.
+fn name_values(names: &[&str]) -> Vec<Value> {
+    let mut seen = Vec::new();
+    for name in names {
+        if !name.trim().is_empty() && !seen.contains(name) {
+            seen.push(*name);
+        }
+    }
+    seen.into_iter().map(|n| json!(n)).collect()
+}
+
+fn node<'a>(schema: &'a mut Value, pointer: &str) -> &'a mut Value {
+    schema
+        .pointer_mut(pointer)
+        .unwrap_or_else(|| panic!("a stage schema has {pointer}"))
+}
+
 fn close(schema: &mut Value) {
     if schema.get("type") != Some(&json!("object")) {
         return;

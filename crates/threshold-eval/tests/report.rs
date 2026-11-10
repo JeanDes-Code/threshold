@@ -85,9 +85,10 @@ fn report_has_every_metric() {
         report.contains("| 1 | committed | never | no | no | correct |"),
         "{report}"
     );
-    // The recorded answers are no Adventure Seed, so each draft fails.
+    // The recorded answers are no roster, so each draft fails at its
+    // first stage, the roster.
     assert!(
-        report.contains("- Failures (BuildFailure, by stage and check): 2 x draft_seed / schema"),
+        report.contains("- Failures (BuildFailure, by stage and check): 2 x draft_roster / schema"),
         "{report}"
     );
 }
@@ -639,13 +640,15 @@ about = "ferry"
 
     #[test]
     fn pc_centred_share_counts_goals_and_secrets_that_name_the_pc() {
-        let names = vec!["Teodor Brandt".to_owned(), "Wick".to_owned()];
+        let names = vec![("Teodor Brandt".to_owned(), vec!["Wick".to_owned()])];
         let goals = vec![
             goal("Gerrit Vane", "Buy the ferry from Teodor Brandt."),
             goal("Agathe Morrow", "Make Wick carry the winter post."),
             goal("Osric Fell", "Win the boundary wall case."),
             // A word that only starts like the PC's name is not the name.
             goal("Pim Quast", "Save a penny for the Teodor-Brandtson fair."),
+            // The first word of the main name alone names the PC.
+            goal("Odile Quast", "Make Teodor pay the toll."),
         ];
         let secret = fact(
             "Henrike Sall",
@@ -692,8 +695,8 @@ about = "ferry"
         let secrets = secrets_of(&world, &log);
         assert_eq!(secrets.len(), 1, "{secrets:?}");
         assert_eq!(secrets[0].text, secret.text);
-        // Goals 1 and 2 and the secret name the PC; goals 3 and 4 do not.
-        assert_eq!(pc_centred(&names, &world.goals, &secrets), (3, 5));
+        // Goals 1, 2 and 5 and the secret name the PC; goals 3 and 4 do not.
+        assert_eq!(pc_centred(&names, &world.goals, &secrets), (4, 6));
     }
 
     /// Three runs: one built, one not approvable, one failed in the build.

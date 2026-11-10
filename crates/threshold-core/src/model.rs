@@ -60,6 +60,8 @@ pub enum CallKind {
 pub struct RecordedCall {
     pub kind: CallKind,
     pub prompt: Prompt,
+    /// The JSON schema of a `propose` call; `Null` for `narrate`.
+    pub schema: serde_json::Value,
 }
 
 /// A `Gm` that replays recorded responses in order and records every call.
@@ -106,20 +108,21 @@ impl RecordedGm {
             .clone()
     }
 
-    fn record(&self, kind: CallKind, prompt: &Prompt) {
+    fn record(&self, kind: CallKind, prompt: &Prompt, schema: &serde_json::Value) {
         self.calls
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(RecordedCall {
                 kind,
                 prompt: prompt.clone(),
+                schema: schema.clone(),
             });
     }
 }
 
 impl Gm for RecordedGm {
-    fn propose(&self, prompt: &Prompt, _schema: &serde_json::Value) -> Result<String, GmError> {
-        self.record(CallKind::Propose, prompt);
+    fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
+        self.record(CallKind::Propose, prompt, schema);
         self.proposals
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -128,7 +131,7 @@ impl Gm for RecordedGm {
     }
 
     fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
-        self.record(CallKind::Narrate, prompt);
+        self.record(CallKind::Narrate, prompt, &serde_json::Value::Null);
         let narration = self
             .narrations
             .lock()

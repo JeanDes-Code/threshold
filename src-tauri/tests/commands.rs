@@ -559,11 +559,11 @@ fn doc_source() -> String {
 }
 
 fn doc_npc(name: &str, age: u16, stated: bool) -> Value {
-    json!({"name": name, "kind": "npc", "age": age, "age_stated": stated, "other_names": []})
+    json!({"name": name, "age": age, "age_stated": stated, "other_names": []})
 }
 
 fn doc_thing(name: &str, kind: &str) -> Value {
-    json!({"name": name, "kind": kind, "age": null, "age_stated": false, "other_names": []})
+    json!({"name": name, "kind": kind, "other_names": []})
 }
 
 fn doc_fact(subject: &str, key: &str, value: &str, open: bool) -> Value {
@@ -577,13 +577,11 @@ fn doc_fact(subject: &str, key: &str, value: &str, open: bool) -> Value {
     })
 }
 
-/// The seed, the roster (one proposed age) and the PC Knowledge of each
-/// section of `doc_source()`.
+/// The roster with the PC (one proposed age), the seed and the PC Knowledge
+/// of each section of `doc_source()`.
 fn draft_outputs() -> Vec<Value> {
     vec![
         json!({
-            "premise": "A lighthouse keeper faces the storm season.",
-            "story_language": "en",
             "pc": {
                 "name": "Mira Holt",
                 "age": 31,
@@ -591,6 +589,16 @@ fn draft_outputs() -> Vec<Value> {
                 "other_names": [{"name": "the Keeper", "known_to": ["Mira Holt", "Tobin Reed"]}],
                 "concept": "A careful lighthouse keeper."
             },
+            "characters": [doc_npc("Tobin Reed", 58, true), doc_npc("Ada Venn", 40, false)],
+            "others": [
+                doc_thing("Gull Point", "place"),
+                doc_thing("Tide Hall", "place"),
+                doc_thing("Harbour Council", "faction"),
+            ]
+        }),
+        json!({
+            "premise": "A lighthouse keeper faces the storm season.",
+            "story_language": "en",
             "themes": ["duty", "weather"],
             "gm_agreement": "Keep the pace slow.",
             "resolution": "Roll when the outcome is uncertain.",
@@ -603,13 +611,6 @@ fn draft_outputs() -> Vec<Value> {
             },
             "open_details": []
         }),
-        json!({"entities": [
-            doc_npc("Tobin Reed", 58, true),
-            doc_npc("Ada Venn", 40, false),
-            doc_thing("Gull Point", "place"),
-            doc_thing("Tide Hall", "place"),
-            doc_thing("Harbour Council", "faction"),
-        ]}),
         json!({"facts": [doc_fact("Mira Holt", "occupation", "lighthouse keeper", false)]}),
         json!({"facts": [doc_fact("Harbour Council", "vote", "new pier", true)]}),
     ]
@@ -943,10 +944,7 @@ fn cancel_build_stops_draft_and_build() {
         .draft_from_text(&doc_source(), &mut |_| {})
         .unwrap_err()
         .to_string();
-    assert_eq!(
-        err,
-        "The draft stopped at the roster step: it was cancelled."
-    );
+    assert_eq!(err, "The draft stopped at the seed step: it was cancelled.");
     assert_eq!(rig.build.calls().len(), 1);
     assert!(rig.drafts.list_drafts().unwrap().is_empty());
     let left: Vec<_> = std::fs::read_dir(rig.dir.path().join("drafts"))

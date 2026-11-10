@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use threshold_core::{
     build::{
         BuildFailure, Control, DebugEntry, Gap, PC_CENTRED_MAX_SHARE, Progress, SeedDraft, approve,
-        build_world, draft_from_text,
+        build_world, draft_from_text, names_pc,
     },
     domain::{AdventureSeed, EntityKind, FactEntry, GoalEntry, OtherName, WorldSetup, is_adult},
     normalize,
@@ -365,42 +365,38 @@ fn words(text: &str) -> Vec<String> {
 }
 
 /// How many of `goals` and `secrets` name the PC, and how many there are.
-/// The build's own rule (`build::checks`, not public): a text names the PC
-/// when it holds all the words of one of `pc_names`, in order, as whole
-/// words after `normalize::name`.
+/// The build's own rule, `build::names_pc`: a text names the PC when it
+/// holds, as whole words, a full name of the PC or the first word of its
+/// main name. `pcs` gives the PC's names as (main name, other names); a
+/// text that names one of them names the PC.
 pub fn pc_centred(
-    pc_names: &[String],
+    pcs: &[(String, Vec<String>)],
     goals: &[GoalEntry],
     secrets: &[FactEntry],
 ) -> (usize, usize) {
-    let names: Vec<Vec<String>> = pc_names
-        .iter()
-        .map(|n| words(n))
-        .filter(|w| !w.is_empty())
-        .collect();
-    let names_pc = |text: &str| {
-        let said = words(text);
-        names
-            .iter()
-            .any(|name| said.windows(name.len()).any(|w| w == name.as_slice()))
+    let named = |text: &str| {
+        pcs.iter()
+            .any(|(main, others)| names_pc(main, others, text))
     };
     goals
         .iter()
         .map(|g| g.text.as_str())
         .chain(secrets.iter().map(|s| s.text.as_str()))
         .fold((0, 0), |(naming, total), text| {
-            (naming + usize::from(names_pc(text)), total + 1)
+            (naming + usize::from(named(text)), total + 1)
         })
 }
 
-/// The PC's names: the expected ones and the drafted ones.
-fn pc_names(expected: &Expected, seed: &AdventureSeed) -> Vec<String> {
-    std::iter::once(&expected.pc_name)
-        .chain(&expected.pc_other_names)
-        .chain(std::iter::once(&seed.pc.name))
-        .chain(seed.pc.other_names.iter().map(|o| &o.name))
-        .cloned()
-        .collect()
+/// The PC's names, as (main name, other names): the expected ones and the
+/// drafted ones.
+fn pc_names(expected: &Expected, seed: &AdventureSeed) -> Vec<(String, Vec<String>)> {
+    vec![
+        (expected.pc_name.clone(), expected.pc_other_names.clone()),
+        (
+            seed.pc.name.clone(),
+            seed.pc.other_names.iter().map(|o| o.name.clone()).collect(),
+        ),
+    ]
 }
 
 /// The snake_case name serde gives a value (`hidden_facts`, `faction`).
@@ -647,7 +643,7 @@ pub fn section(
     }
     let _ = writeln!(
         out,
-        " Each run drafts a Seed Draft, confirms every proposed age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a known fact of the draft or a fact of the built world has the same subject (through the main and other names) and holds every word of the item's `about` phrase in its key, value and text. A paraphrase does not match, so fact recall and open recall are a lower bound. False past counts the open items found in a settled fact (`open = false`); a settled fact that states the plan as a plan counts too. PC-centred share: the NPC goals and secrets whose text names the PC by one of its full names, as whole words (the build's own rule); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
+        " Each run drafts a Seed Draft, confirms every proposed age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a known fact of the draft or a fact of the built world has the same subject (through the main and other names) and holds every word of the item's `about` phrase in its key, value and text. A paraphrase does not match, so fact recall and open recall are a lower bound. False past counts the open items found in a settled fact (`open = false`); a settled fact that states the plan as a plan counts too. PC-centred share: the NPC goals and secrets whose text names the PC by one of its full names or by the first word of its main name, as whole words (the build's own rule); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
     );
 
     let n = runs.len();

@@ -35,8 +35,6 @@ pub(super) struct Member {
 pub(super) struct Roster {
     members: Vec<Member>,
     names: Vec<(String, usize)>,
-    /// The words of each name of the PC.
-    pc_words: Vec<Vec<String>>,
 }
 
 impl Roster {
@@ -68,16 +66,7 @@ impl Roster {
             })
             .filter(|(n, _)| !n.is_empty())
             .collect();
-        let pc_words = std::iter::once(&members[0].main)
-            .chain(&members[0].others)
-            .map(|n| words(n))
-            .filter(|w| !w.is_empty())
-            .collect();
-        Self {
-            members,
-            names,
-            pc_words,
-        }
+        Self { members, names }
     }
 
     pub fn find(&self, name: &str) -> Option<&Member> {
@@ -106,19 +95,38 @@ impl Roster {
             .map_or_else(|| name.to_owned(), |m| m.main.clone())
     }
 
-    /// True when `text` names the PC by any of its names, as whole words
-    /// after `normalize::name`.
+    /// True when `text` names the PC: see `names_pc`.
     pub fn names_pc(&self, text: &str) -> bool {
-        let words = words(text);
-        self.pc_words
-            .iter()
-            .any(|name| words.windows(name.len()).any(|w| w == name.as_slice()))
+        let pc = self.pc();
+        names_pc(&pc.main, &pc.others, text)
     }
 }
 
+/// True when `text` names the PC whose main name is `main`: it holds, as
+/// whole words after `normalize::name`, the full main name, a full name of
+/// `others`, or the first word of the main name ("Teodor" names "Teodor
+/// Brandt"). A possessive "'s" still names the PC; a longer or hyphenated
+/// word does not ("Theodora", "Teodor-Brandtson"). The WorldAutonomy check
+/// and the evaluation count PC-centred goals and secrets with it.
+pub fn names_pc(main: &str, others: &[String], text: &str) -> bool {
+    let said = words(text);
+    let main = words(main);
+    let first = main.first().map(|w| vec![w.clone()]);
+    std::iter::once(main.clone())
+        .chain(others.iter().map(|n| words(n)))
+        .chain(first)
+        .filter(|name| !name.is_empty())
+        .any(|name| said.windows(name.len()).any(|w| w == name.as_slice()))
+}
+
+/// The whole words of `text` after `normalize::name`. A word holds letters,
+/// digits, and inner apostrophes and hyphens; a final "'s" is dropped.
 fn words(text: &str) -> Vec<String> {
+    let inner = |c: char| c == '\'' || c == '-';
     normalize::name(text)
-        .split(|c: char| !c.is_alphanumeric())
+        .split(|c: char| !c.is_alphanumeric() && !inner(c))
+        .map(|w| w.trim_matches(inner))
+        .map(|w| w.strip_suffix("'s").unwrap_or(w))
         .filter(|w| !w.is_empty())
         .map(str::to_owned)
         .collect()

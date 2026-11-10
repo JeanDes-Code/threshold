@@ -1200,3 +1200,130 @@ fn an_absent_npc_is_never_placed_at_the_start_place() {
     assert!(repair_notes(&run.gm)[0].contains("SettledFacts"));
     assert!(facts_on(&world, "Ada Venn", "location").is_empty());
 }
+
+// ---- Names by schema -----------------------------------------------------------
+
+/// The schema node at `path` of `schema`: each step is a property name, or
+/// `[]` for the items of a list. A `$ref` is followed, and a nullable
+/// `anyOf` gives its other branch.
+fn node<'a>(schema: &'a Value, path: &[&str]) -> &'a Value {
+    let mut at = resolve(schema, schema);
+    for step in path {
+        at = match *step {
+            "[]" => &at["items"],
+            name => &at["properties"][name],
+        };
+        at = resolve(schema, at);
+    }
+    at
+}
+
+fn resolve<'a>(schema: &'a Value, mut at: &'a Value) -> &'a Value {
+    loop {
+        if let Some(path) = at.get("$ref").and_then(Value::as_str) {
+            at = schema.pointer(&path[1..]).expect("a $ref resolves");
+        } else if let Some(branch) = at
+            .get("anyOf")
+            .and_then(Value::as_array)
+            .and_then(|b| b.iter().find(|b| b["type"] != json!("null")))
+        {
+            at = branch;
+        } else {
+            return at;
+        }
+    }
+}
+
+/// The values of the `enum` at `path`; `null` as "null".
+fn names_at<'a>(schema: &'a Value, path: &[&str]) -> Vec<&'a str> {
+    node(schema, path)["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no enum at {path:?}: {}", node(schema, path)))
+        .iter()
+        .map(|v| v.as_str().unwrap_or("null"))
+        .collect()
+}
+
+const ALL: [&str; 6] = [
+    "Mira Holt",
+    "Tobin Reed",
+    "Ada Venn",
+    "Gull Point",
+    "Tide Hall",
+    "Harbour Council",
+];
+const NPCS: [&str; 2] = ["Tobin Reed", "Ada Venn"];
+
+#[test]
+fn every_name_field_of_each_world_stage_is_an_enum() {
+    let run = run(&draft(), &plain());
+    run.world();
+    let calls = run.gm.calls();
+    let steps: Vec<&str> = run.log.iter().map(|e| e.step.as_str()).collect();
+    assert_eq!(
+        steps,
+        vec![
+            "hidden_facts 1/2",
+            "hidden_facts 2/2",
+            "npc_state 1/2",
+            "npc_state 2/2",
+            "world_events",
+            "start_state",
+        ]
+    );
+
+    for hidden in &calls[0..2] {
+        assert_eq!(names_at(&hidden.schema, &["facts", "[]", "subject"]), ALL);
+        assert_eq!(
+            names_at(&hidden.schema, &["facts", "[]", "known_by", "[]"]),
+            NPCS
+        );
+    }
+
+    // Tobin Reed's state: never toward Tobin Reed himself.
+    let npc = &calls[2].schema;
+    assert_eq!(
+        names_at(npc, &["attitudes", "[]", "to"]),
+        vec!["Mira Holt", "Ada Venn"]
+    );
+    assert_eq!(
+        names_at(npc, &["goals", "[]", "against"]),
+        vec!["Mira Holt", "Ada Venn", "null"]
+    );
+    assert_eq!(names_at(npc, &["secret", "subject"]), ALL);
+    assert_eq!(
+        names_at(&calls[3].schema, &["attitudes", "[]", "to"]),
+        vec!["Mira Holt", "Tobin Reed"]
+    );
+
+    let events = &calls[4].schema;
+    assert_eq!(names_at(events, &["events", "[]", "actor"]), NPCS);
+    assert_eq!(names_at(events, &["events", "[]", "seen_by", "[]"]), NPCS);
+    assert_eq!(
+        names_at(events, &["events", "[]", "effects", "[]", "subject"]),
+        ALL
+    );
+
+    // Tobin Reed is present at the start, so only Ada Venn is placed.
+    let start = &calls[5].schema;
+    assert_eq!(
+        names_at(start, &["placements", "[]", "npc"]),
+        vec!["Ada Venn"]
+    );
+    assert_eq!(
+        names_at(start, &["placements", "[]", "place"]),
+        vec!["Gull Point", "Tide Hall"]
+    );
+}
+
+#[test]
+fn hidden_fact_holders_cannot_be_the_pc_by_schema() {
+    let run = run(&draft(), &plain());
+    run.world();
+    for call in &run.gm.calls()[0..2] {
+        let holders = names_at(&call.schema, &["facts", "[]", "known_by", "[]"]);
+        for pc in ["Mira Holt", "the Keeper"] {
+            assert!(!holders.contains(&pc), "{holders:?}");
+        }
+    }
+}
