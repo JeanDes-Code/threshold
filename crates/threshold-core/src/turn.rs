@@ -3,7 +3,8 @@
 //! `turn` is the only module that follows time order. A play Turn runs:
 //! duplicate `op_id` check, Intent check, proposal prompt, `Gm::propose`,
 //! parse, engine-owned wait, the core's repairs (`checks::settle`, and
-//! `checks::default_check` on the retry), shape and Commit checks (one shared retry
+//! `checks::default_check` on the retry or for a contested `check` verdict),
+//! shape and Commit checks (one shared retry
 //! with the errors in `recent`), Roll, `to_ops`, World Clock, perception on arrival, one Commit,
 //! then the streamed Narration and `set_narration`. Validation, `to_ops` and
 //! the World Clock all read the snapshot taken before the Turn, so a fact a
@@ -633,7 +634,8 @@ impl Engine {
                     let (mut p, mut notes) = checks::settle(engine_time(p, view), view);
                     // A contested act with no Check: one repair note on the
                     // first attempt, a default Check on the retry (ADR 0007).
-                    if retry {
+                    // A contested `check` verdict gets it at once.
+                    if retry || checks::checks_now(&p) {
                         notes.extend(checks::default_check(&mut p, view));
                     }
                     if !notes.is_empty() {

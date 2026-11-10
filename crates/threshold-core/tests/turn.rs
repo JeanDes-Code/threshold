@@ -1314,6 +1314,50 @@ fn contested_act_without_a_check_rolls_on_the_retry() {
     assert!(stored.unwrap().is_some());
 }
 
+/// The recorded shape from the live run (cdefde8): the first attempt is
+/// contested with verdict `check` but no Check. The verdict already says
+/// "roll", so the core builds the default Check on that first attempt and
+/// spends no retry. The facts apply on a win only.
+#[test]
+fn contested_check_verdict_without_a_check_rolls_on_the_first_attempt() {
+    let w0 = World::new();
+    let mut p = proposal(Verdict::Check);
+    p.action = ActionKind::Wait;
+    p.contested = true;
+    p.reactions = vec![Reaction {
+        npc: e(w0.brann),
+        stance: Stance::Neutral,
+        plan: "stares at the hands".into(),
+        cause: None,
+    }];
+    let (mut engine, _w, gm) = setup(vec![json(&p)], vec!["You strain."]);
+    let outcome = engine
+        .play_turn("t1".into(), "I arm-wrestle Brann.", &mut no_chunks())
+        .unwrap();
+    let roll = outcome.roll.expect("the default Check rolls");
+    assert_eq!(roll.difficulty, 6, "the Ruleset's normal difficulty");
+    assert_eq!(
+        kinds(&gm),
+        [CallKind::Propose, CallKind::Narrate],
+        "no retry"
+    );
+    let log = steps(&engine, "t1");
+    assert!(
+        log.iter().any(|(step, raw)| step == "settle"
+            && raw.contains(&format!("default Check against E{}", w0.brann))),
+        "{log:?}"
+    );
+    // A Check verdict without `contested` keeps the repair round: the core
+    // builds a Check on the first attempt only for a contest.
+    let mut plain = proposal(Verdict::Check);
+    plain.action = ActionKind::Act;
+    let (mut engine, _w, gm) = setup(vec![json(&plain), json(&plain)], vec!["You try."]);
+    engine
+        .play_turn("t1".into(), "I climb the wall.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(kinds(&gm).len(), 3, "propose, retry, narrate");
+}
+
 /// The recorded shape from the live run (ADR 0007): the impossible act
 /// cites the PC's own location as its blocker. The core drops it, opens no
 /// obstacle, and a legal move in the next Turn commits.

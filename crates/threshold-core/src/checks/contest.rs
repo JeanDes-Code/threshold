@@ -1,7 +1,8 @@
 //! Contests (ADR 0007). The proposal says in `contested` whether an NPC
 //! actively opposes the act and the result is uncertain. A contested act
 //! needs a Check: the first attempt without one gets one repair note; on
-//! the retry the core builds a default Check instead of rejecting.
+//! the retry the core builds a default Check instead of rejecting. When the
+//! verdict is already `check`, the core builds it on the first attempt.
 
 use super::{CheckKind, Rejection, pc};
 use crate::{
@@ -32,8 +33,18 @@ pub fn contest_note(p: &DecisionProposal) -> Option<Rejection> {
     })
 }
 
-/// On the retry: when the proposal still lacks the Check it needs, the
-/// core builds one and returns the note for the debug log. The default
+/// True when the core builds the default Check on the first attempt: the
+/// act is contested and the verdict is already `check`, but the Check is
+/// missing. The model has said "roll" twice; a repair round would only add
+/// stakes, so the core spends no retry on it (changed after the live run
+/// of cdefde8). Every other missing Check keeps its repair note.
+pub fn checks_now(p: &DecisionProposal) -> bool {
+    p.contested && p.verdict == Verdict::Check && p.check.is_none()
+}
+
+/// On the retry, or on the first attempt when `checks_now`: when the
+/// proposal still lacks the Check it needs, the core builds one and
+/// returns the note for the debug log. The default
 /// Check opposes the NPC whose reaction has the lowest stance (none when
 /// no NPC reacts). It has no stakes and no factors, so the Ruleset gives
 /// its normal difficulty, and the narrator gets only the result. The
