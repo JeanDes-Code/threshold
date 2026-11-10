@@ -1147,3 +1147,69 @@ fn pin_follows_the_correction_and_lost_target_hides() {
         [Target::Act { turn_id: undone }]
     );
 }
+
+/// B7 (QA, 2026-11-10): a place card was empty because the facts sit on
+/// people. It now lists who the PC believes is located there, from the
+/// PC's location Beliefs only; one the PC cannot name has no name.
+#[test]
+fn place_card_lists_who_the_pc_knows_is_there() {
+    let (mut store, campaign) = town();
+    let view = store.snapshot(campaign).unwrap();
+    let id = |name: &str| view.entities.iter().find(|e| e.name == name).unwrap().id;
+    let (wren, orsel, doul, hessa, tobin) = (
+        id("Wren"),
+        id("Orsel"),
+        id("Doul"),
+        id("Hessa"),
+        id("Tobin"),
+    );
+    let (hall, archive) = (id("Varn town hall"), id("Tithe archive"));
+    // A stranger the PC sees in the hall but cannot name.
+    store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: "stranger".into(),
+                kind: TurnKind::Play,
+                intent: "I look around.".into(),
+                proposal_json: record(ActionKind::Observe, Verdict::Allowed, None),
+                clock_before: view.clock_min,
+                clock_after: view.clock_min,
+            },
+            newcomer("Quillon", "Varn town hall", &[wren]),
+        )
+        .unwrap();
+    let sight = sight_of(&store, campaign);
+    let quillon = store
+        .snapshot(campaign)
+        .unwrap()
+        .entities
+        .iter()
+        .find(|e| e.name == "Quillon")
+        .unwrap()
+        .id;
+
+    let card = entity_card(&sight, &Marks::default(), hall).expect("the PC knows the hall");
+    let people: Vec<(u64, Option<String>)> = card
+        .people_here
+        .iter()
+        .map(|p| (p.entity_id, p.name.clone()))
+        .collect();
+    assert_eq!(
+        people,
+        [
+            (orsel, Some("Orsel".into())),
+            (doul, Some("Doul".into())),
+            (hessa, Some("Hessa".into())),
+            (quillon, None),
+        ]
+    );
+    let json = serde_json::to_string(&card).unwrap();
+    assert!(!json.contains("Quillon"), "{json}");
+    assert!(!people.iter().any(|(p, _)| *p == tobin || *p == wren));
+
+    // The PC does not know the archive: no card. A person lists nobody.
+    assert_eq!(entity_card(&sight, &Marks::default(), archive), None);
+    let person = entity_card(&sight, &Marks::default(), orsel).unwrap();
+    assert!(person.people_here.is_empty());
+}

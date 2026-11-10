@@ -229,8 +229,10 @@ pub struct Act         { turn_id: TurnId, intent: String, decision: bool }
 pub struct ClosedItem  { item: FactLine, closed_in: TurnId }
 
 pub struct EntityCard  { who: NameRef, other_names: Vec<String>, here: bool, facts: Vec<FactLine>,
-                         notes: Vec<Note>, pinned: bool }
+                         people_here: Vec<NameRef>, notes: Vec<Note>, pinned: bool }
 ```
+
+*Changed after QA (2026-11-10):* a place card was empty ("Nothing more yet"), because facts sit on people. `people_here` lists, for a place card only, the characters the PC believes are located there. It comes from the PC's `location` Beliefs only (`PcSight.whereabouts`), matched to the place's names through `normalize::name`. A character the PC cannot name has a `NameRef` with no name. The card shows them under "Who you know is here".
 
 Rules:
 

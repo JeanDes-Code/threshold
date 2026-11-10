@@ -210,6 +210,8 @@ export interface EntityCard {
   here: boolean;
   /** What the PC knows about it, Open Items marked. */
   facts: FactLine[];
+  /** A place only: who the PC believes is located there. A name is null when the PC cannot name them. */
+  people_here: NameRef[];
   notes: Note[];
   pinned: boolean;
 }

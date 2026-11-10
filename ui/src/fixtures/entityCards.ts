@@ -20,7 +20,7 @@ const fact = (subject: NameRef, key: string, text: string, told_by: NameRef | nu
   told_by,
 });
 
-const card = (entityId: number, facts: (subject: NameRef) => FactLine[]): EntityCard => {
+const card = (entityId: number, facts: (subject: NameRef) => FactLine[], people_here: NameRef[] = []): EntityCard => {
   const ref = who(entityId);
   const line = playView.known.find((l) => l.who.entity_id === entityId);
   return {
@@ -28,6 +28,7 @@ const card = (entityId: number, facts: (subject: NameRef) => FactLine[]): Entity
     other_names: line?.other_names ?? [],
     here: playView.here.some((h) => h.entity_id === entityId) || (line?.here ?? false),
     facts: facts(ref),
+    people_here,
     notes: [],
     pinned: false,
   };
@@ -46,10 +47,14 @@ export const entityCards: Record<number, EntityCard> = {
     fact(s, "role", "Orsel is the foreman of the night porters."),
     fact(s, "pending_roster", "Orsel must bring the night roster to the Salt Guild.", s),
   ]),
-  4: card(4, (s) => [
-    fact(s, "condition", "The Harbour Office keeps a lamp lit all night."),
-    fact(s, "rule", "No ledger leaves the counter of the Harbour Office.", maren),
-  ]),
+  4: card(
+    4,
+    (s) => [
+      fact(s, "condition", "The Harbour Office keeps a lamp lit all night."),
+      fact(s, "rule", "No ledger leaves the counter of the Harbour Office.", maren),
+    ],
+    [maren, who(3)],
+  ),
   5: card(5, (s) => [
     fact(s, "holds", "The Salt Guild holds the debts of half the harbour."),
     fact(s, "wants", "The Salt Guild wants the sealed manifest before the bell."),

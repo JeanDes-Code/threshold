@@ -247,6 +247,21 @@ function CardView({ who: listed, card, refusal, onClose, pins, onPin, onNote }: 
               Also known as <span>{card.other_names.join(", ")}</span>
             </p>
           )}
+          {card.people_here.length > 0 && (
+            <>
+              <h4 className="play-label play-entity__part">Who you know is here</h4>
+              <ul className="play-list play-entity__people">
+                {card.people_here.map((person) => (
+                  <li
+                    key={person.entity_id}
+                    className={person.name === null ? "play-entity__name--unknown" : undefined}
+                  >
+                    {nameText(person)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <h4 className="play-label play-entity__part">What you know</h4>
           {card.facts.length === 0 ? (
             <p className="play-empty">Nothing more yet.</p>

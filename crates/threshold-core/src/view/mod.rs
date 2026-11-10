@@ -424,6 +424,10 @@ pub struct EntityCard {
     pub here: bool,
     /// The PC Beliefs about it, Open Items marked.
     pub facts: Vec<FactLine>,
+    /// A place only: the characters the PC believes are located there, from
+    /// the PC's `location` Beliefs (QA, 2026-11-10). One the PC cannot
+    /// name has no name. Empty for any other entity.
+    pub people_here: Vec<NameRef>,
     /// The Player's Notes about it.
     pub notes: Vec<Note>,
     pub pinned: bool,
@@ -451,6 +455,11 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
             .filter(|b| named && b.subject == entity)
             .filter_map(|b| fact_line(sight, b))
             .collect(),
+        people_here: if named && known.kind == EntityKind::Place {
+            people_at(sight, known)
+        } else {
+            Vec::new()
+        },
         notes: notes_seen(sight, marks)
             .into_iter()
             .filter(|n| n.about.as_ref() == Some(&target))
@@ -458,6 +467,29 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
         pinned: pins_seen(sight, marks).contains(&target),
         who,
     })
+}
+
+/// The characters the PC believes are at `place`: a location Belief whose
+/// text is a name the PC knows for the place, through `normalize::name`,
+/// the rule the PC's own place follows. In id order.
+fn people_at(sight: &PcSight, place: &crate::world::Known) -> Vec<NameRef> {
+    let names: Vec<String> = place
+        .name
+        .iter()
+        .chain(&place.other_names)
+        .map(|n| normalize::name(n))
+        .collect();
+    let mut ids: Vec<EntityId> = sight
+        .whereabouts
+        .iter()
+        .filter(|(_, at)| names.contains(&normalize::name(at)))
+        .map(|(id, _)| *id)
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|id| name_ref(sight, id))
+        .collect()
 }
 
 /// Where `target` points now, or `None` when it no longer resolves (data

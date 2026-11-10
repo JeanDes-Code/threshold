@@ -110,6 +110,9 @@ pub struct PcSight {
     pub known: Vec<Known>,
     /// PC Beliefs now, Setup rows included, none about an unnamed entity.
     pub beliefs: Vec<Belief>,
+    /// The `location` the PC believes now for each other character in
+    /// `known`, named or not: `(entity, location text)` (QA, 2026-11-10).
+    pub whereabouts: Vec<(EntityId, String)>,
     /// "Known before the Campaign": the PC rows of Setup Turns.
     pub before: Vec<Belief>,
     /// One per standing Opening, Play and Correction Turn, in `seq` order.
@@ -331,6 +334,18 @@ pub fn pc_sight(
         })
         .collect();
 
+    let whereabouts: Vec<(EntityId, String)> = now
+        .iter()
+        .map(|(b, _)| b)
+        .filter(|b| b.key == "location" && b.subject != pc.id)
+        .filter(|b| {
+            known
+                .iter()
+                .any(|k| k.id == b.subject && k.kind == EntityKind::Npc)
+        })
+        .map(|b| (b.subject, b.value.clone()))
+        .collect();
+
     let story: Vec<SightTurn> = ordered
         .iter()
         .filter(|t| is_story(t.record.kind))
@@ -398,6 +413,7 @@ pub fn pc_sight(
         present,
         known,
         beliefs,
+        whereabouts,
         before,
         moments,
         open_items,
