@@ -1,3 +1,4 @@
+pub mod build;
 pub mod checks;
 pub mod context;
 pub mod domain;
