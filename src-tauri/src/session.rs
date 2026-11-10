@@ -104,6 +104,17 @@ pub struct CampaignCard {
     pub problem: Option<String>,
 }
 
+/// The start of the op_id that a Narration told again streams under. The UI
+/// holds the same text in `ui/src/api.ts`.
+pub const RENARRATE_OP_PREFIX: &str = "__renarrate__";
+
+/// The op_id of the `narration_chunk` events of `renarrate(turn_id)`. It is
+/// not the Turn's own op_id, so the Play screen can tell these chunks from
+/// those of any Turn.
+pub fn renarrate_op_id(turn_id: u64) -> String {
+    format!("{RENARRATE_OP_PREFIX}{turn_id}")
+}
+
 /// A committed Turn. `narration` is `None` when the Turn is committed but
 /// its Narration failed; `narration_error` then says why, and the Turn can
 /// be narrated again.
@@ -347,11 +358,6 @@ impl Session {
         open.engine
             .ooc(format!("ooc-{}", clock_nanos()), text)
             .map_err(|e| player_error(&e))
-    }
-
-    /// The `op_id` a Turn was played under.
-    pub fn turn_op_id(&self, turn_id: u64) -> Result<String, AppError> {
-        Ok(self.turn(turn_id)?.record.op_id)
     }
 
     pub fn renarrate(

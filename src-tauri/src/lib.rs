@@ -20,7 +20,7 @@ use drafts::{DraftLine, DraftView, Drafts};
 use serde::Serialize;
 use session::{
     AppError, CampaignCard, CampaignSummary, DebugLine, DebugView, Session, TurnSummary,
-    clock_nanos, load_config, lock,
+    clock_nanos, load_config, lock, renarrate_op_id,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
@@ -236,11 +236,8 @@ async fn renarrate(
     state: State<'_, Shared>,
     turn_id: u64,
 ) -> Result<String, AppError> {
-    blocking(&state, move |s| {
-        let mut sink = chunk_sink(&app, &s.turn_op_id(turn_id)?);
-        s.renarrate(turn_id, &mut sink)
-    })
-    .await
+    let mut sink = chunk_sink(&app, &renarrate_op_id(turn_id));
+    blocking(&state, move |s| s.renarrate(turn_id, &mut sink)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]

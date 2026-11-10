@@ -5,11 +5,27 @@ use std::{path::Path, time::Instant};
 mod support;
 
 use support::{allowed, entity, session, town, town_dir, with_fact};
+use threshold_app::session::{RENARRATE_OP_PREFIX, renarrate_op_id};
 use threshold_core::{
     RecordedGm,
     store::TurnKind,
+    turn::BEGIN_OP_ID,
     view::{Block, PLAY_VIEW_MAX_MS, TurnBody},
 };
+
+/// A Narration told again streams under an op_id of its own, so the Play
+/// screen takes only its chunks. The UI builds the same op_id.
+#[test]
+fn renarrate_chunks_have_their_own_op_id() {
+    assert_eq!(renarrate_op_id(7), "__renarrate__7");
+    assert_ne!(renarrate_op_id(7), renarrate_op_id(17));
+    assert_ne!(renarrate_op_id(0), BEGIN_OP_ID);
+    let api =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui/src/api.ts"))
+            .unwrap();
+    let ui = format!("export const RENARRATE_OP_PREFIX = \"{RENARRATE_OP_PREFIX}\";");
+    assert!(api.contains(&ui), "ui/src/api.ts must hold: {ui}");
+}
 
 /// Data shape 3.6: one call returns the whole story, so it must stay fast as
 /// the Campaign grows. A debug build gets ten times the budget.

@@ -32,11 +32,14 @@ pub enum Line<'a> {
     /// A line with no mark, as the Narration wrote it.
     Prose(&'a str),
     /// A speech mark. `line` is the whole line as written, for the case
-    /// where the mark does not resolve and the line shows as prose.
+    /// where the mark does not resolve and the line shows as prose. `said`
+    /// is the spoken words with their quote marks, for the case where the
+    /// tag is a name the PC cannot name and must not show (ADR 0006).
     Tagged {
         line: &'a str,
         name: &'a str,
         words: &'a str,
+        said: &'a str,
     },
 }
 
@@ -74,5 +77,6 @@ fn mark(line: &str) -> Option<Line<'_>> {
         line,
         name,
         words: inner_words,
+        said,
     })
 }

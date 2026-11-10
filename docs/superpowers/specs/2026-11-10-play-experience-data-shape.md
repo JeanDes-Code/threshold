@@ -69,7 +69,16 @@ Each call gives the chosen option, the reason, and the cost if it is wrong.
 2. That NPC is in the `present` list of the Turn (3.3).
 3. The PC can name that NPC (3.5).
 
-Any other line is a `Prose` block, with its text unchanged. A line that the PC speaks is prose: the Intent line already shows it.
+Any other line is a `Prose` block. A line that the PC speaks is prose: the Intent line already shows it.
+
+**Changed after review (2026-11-10).** The first rule kept every such line with its text unchanged. A review found that this prints a name the PC does not know: `Kestrel: "Nobody knows my name."` showed "Kestrel" in the story while the panel said "unknown", and `The Toll-Wolf: "…"` showed a hidden other name. The rule is now:
+
+- The tag is a name of an entity (main name or any other name, through `normalize::name`) and the PC cannot call that entity by that name (3.5: the PC cannot name the entity, or the tag is an other name without the PC's `alias_` Belief). The block is prose made of the quoted words only, with their quote marks. The tag and the colon are removed.
+- The tag names more than one entity, and at least one of them is not nameable by the PC by that name. The tag is removed, as above.
+- The tag names no entity at all. The text stays unchanged.
+- Any other line that is not a bubble (an absent NPC the PC can name, the PC, a tag shared by entities the PC can all name) stays unchanged.
+
+This covers the tag only. A name the narrator writes inside prose is not covered (ADR 0006).
 
 **Why.** It adds no model call and no proposal field. The cost is about three output tokens for each spoken line, which is an estimate and not a measurement. The speaker is the narrator's own statement, so it is as certain as the prose. Recent Turns in the prompt show the mark, and that helps the model keep the format. When the Gemma model drifts, the parser finds no mark and the line stays plain text.
 

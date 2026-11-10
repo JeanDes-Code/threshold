@@ -186,33 +186,55 @@ fn unnamed_character_is_shown_unknown() {
     assert!(view.here.iter().all(|who| who.entity_id != w.ada));
 }
 
-/// Shape test 5 of design 11: a bubble only for a tag that resolves to one
-/// NPC who is present and whom the PC can name.
+/// Shape test 5 of design 11, with the rule that changed after review
+/// (data shape 3.1, ADR 0006): a bubble only for a tag that resolves to one
+/// NPC who is present and whom the PC can name. A tag that names an entity
+/// the PC cannot name by that name is removed, so the line keeps only its
+/// quoted words. Any other tag stays as the narrator wrote it.
 #[test]
 fn speech_line_without_a_certain_speaker_stays_prose() {
     let mut w = HiddenWorld::new();
     w.play("I wait.", &observe(), 0, newcomer("Brann", "market", &[]));
     let said = w.play("I listen.", &observe(), 0, vec![]);
-    // Two entities share "Brann"; Pip is at the market; the PC cannot name
-    // Kestrel; Ada is the PC; the PC does not know Orsel's other name, so a
-    // bubble under "Orsel" would tell the Player who the Toll-Wolf is.
+    // (line, the prose the Player reads). Two named entities share "Brann";
+    // Pip is a seed entry the Player read, but at the market; Kestrel and
+    // the hidden Vey have no name the PC knows; Ada is the PC; the PC does
+    // not know Orsel's other name; "Thunder" names no entity.
     let lines = [
-        r#"Brann: "There are two of us.""#,
-        r#"Pip: "I am at the market.""#,
-        r#"Kestrel: "Nobody knows my name.""#,
-        r#"Ada: "I speak for myself.""#,
-        r#"The Toll-Wolf: "Pay the toll.""#,
-        r#"Orsel: "You are late.""#,
+        (
+            r#"Brann: "There are two of us.""#,
+            r#"Brann: "There are two of us.""#,
+        ),
+        (
+            r#"Pip: "I am at the market.""#,
+            r#"Pip: "I am at the market.""#,
+        ),
+        (
+            r#"Kestrel: "Nobody knows my name.""#,
+            r#""Nobody knows my name.""#,
+        ),
+        (
+            r#"Ada: "I speak for myself.""#,
+            r#"Ada: "I speak for myself.""#,
+        ),
+        (r#"The Toll-Wolf: "Pay the toll.""#, r#""Pay the toll.""#),
+        (
+            "Vey: \u{ab}Stay in the light.\u{bb}",
+            "\u{ab}Stay in the light.\u{bb}",
+        ),
+        (r#"Thunder: "Boom.""#, r#"Thunder: "Boom.""#),
+        (r#"Orsel: "You are late.""#, ""),
     ];
-    w.narrate(said, &lines.join("\n\n"));
+    let written: Vec<&str> = lines.iter().map(|(line, _)| *line).collect();
+    w.narrate(said, &written.join("\n\n"));
     let view = view_of(&w);
     let got = blocks(&view, said);
     assert_eq!(got.len(), lines.len(), "{got:?}");
-    for (block, line) in got.iter().zip(&lines[..5]) {
-        assert_eq!(prose(block), *line);
+    for (block, (line, shown)) in got.iter().zip(&lines[..lines.len() - 1]) {
+        assert_eq!(prose(block), *shown, "{line}");
     }
-    let Block::Speech { speaker, parts } = &got[5] else {
-        panic!("Orsel speaks: {:?}", got[5]);
+    let Block::Speech { speaker, parts } = &got[lines.len() - 1] else {
+        panic!("Orsel speaks: {:?}", got[lines.len() - 1]);
     };
     assert_eq!(*speaker, named(w.orsel, EntityKind::Npc, "Orsel"));
     assert_eq!(text(parts), "You are late.");
@@ -224,6 +246,70 @@ fn speech_line_without_a_certain_speaker_stays_prose() {
             .name,
         None
     );
+
+    // No screen shows a name that the marks wrote and the PC cannot name.
+    // Pip is in `HIDDEN` as an absent NPC; the Player read that name in
+    // the review, so a tag may print it.
+    let sight = w.sight();
+    let marks = Marks::default();
+    let mut screens = vec![
+        serde_json::to_string(&play_view(&sight, &marks)).unwrap(),
+        serde_json::to_string(&journal_view(&sight, &marks)).unwrap(),
+    ];
+    screens.extend(
+        sight
+            .known
+            .iter()
+            .filter_map(|k| entity_card(&sight, &marks, k.id))
+            .map(|card| serde_json::to_string(&card).unwrap()),
+    );
+    for json in &screens {
+        for hidden in HIDDEN.iter().filter(|h| **h != "Pip") {
+            assert!(!json.contains(hidden), "{hidden} leaks: {json}");
+        }
+    }
+}
+
+/// A tag shared by a name the PC knows and a name it does not know is
+/// removed too: a bubble or a tag could tell the Player that both exist.
+#[test]
+fn tag_shared_with_a_name_the_pc_cannot_name_is_removed() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    w.play(
+        "I wait.",
+        &observe(),
+        0,
+        newcomer("Vey", "gate square", &[ada]),
+    );
+    let view = w.view();
+    let other = view
+        .entities
+        .iter()
+        .filter(|e| e.name == "Vey")
+        .map(|e| e.id)
+        .max()
+        .unwrap();
+    assert_ne!(other, w.vey);
+    w.play(
+        "I ask the newcomer what she sells.",
+        &observe(),
+        0,
+        vec![set(
+            &view,
+            other,
+            "sells",
+            "salt",
+            "She sells salt.",
+            &[ada],
+        )],
+    );
+    let said = w.play("I listen.", &observe(), 0, vec![]);
+    w.narrate(said, r#"Vey: "Salt, fresh salt.""#);
+    let view = view_of(&w);
+    let got = blocks(&view, said);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(prose(&got[0]), r#""Salt, fresh salt.""#);
 }
 
 /// Review Focus 1: accents and case in a speech tag and in a name link.
@@ -484,6 +570,48 @@ fn stranger_card_holds_no_text() {
     assert!(card.here);
     let json = serde_json::to_string(&card).unwrap();
     assert!(!json.contains("Kestrel"), "{json}");
+}
+
+/// Every entity the Play view links (a name part, a speaker, a `here` line,
+/// a `known` line) opens a card: the core gives one for each id it shows.
+#[test]
+fn every_entity_the_view_links_has_a_card() {
+    let mut w = HiddenWorld::new();
+    let said = w.play("I listen.", &observe(), 0, vec![]);
+    w.narrate(said, "Orsel: \"Brann, the gate.\"\n\nBrann nods.");
+    let sight = w.sight();
+    let marks = Marks::default();
+    let view = play_view(&sight, &marks);
+    let mut linked: Vec<u64> = view
+        .here
+        .iter()
+        .map(|who| who.entity_id)
+        .chain(view.known.iter().map(|line| line.who.entity_id))
+        .collect();
+    for turn in &view.story {
+        if let TurnBody::Narration { blocks } = &turn.body {
+            for block in blocks {
+                let parts = match block {
+                    Block::Prose { parts } => parts,
+                    Block::Speech { speaker, parts } => {
+                        linked.push(speaker.entity_id);
+                        parts
+                    }
+                };
+                linked.extend(parts.iter().filter_map(|p| match p {
+                    Part::Name { entity_id, .. } => Some(*entity_id),
+                    Part::Text { .. } => None,
+                }));
+            }
+        }
+    }
+    for id in [w.orsel, w.brann, w.kestrel] {
+        assert!(linked.contains(&id), "{id} is linked: {linked:?}");
+    }
+    for id in linked {
+        let card = entity_card(&sight, &marks, id).unwrap_or_else(|| panic!("no card for {id}"));
+        assert_eq!(card.who.entity_id, id);
+    }
 }
 
 /// The card joins the Player's Notes about the entity and its Pin.

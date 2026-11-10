@@ -4,6 +4,7 @@ import {
   createTurnClient,
   gapsFromError,
   parseBuildProgress,
+  renarrateOpId,
   turnNotice,
   type AdventureSeed,
   type Invoke,
@@ -154,6 +155,14 @@ describe("createApi", () => {
     };
     await createApi(invoke).getEntityCard(7);
     expect(calls).toEqual([{ cmd: "get_entity_card", args: { entity_id: 7 } }]);
+  });
+});
+
+describe("renarrateOpId", () => {
+  // The shell's `renarrate_op_id` builds the same text; `src-tauri/tests/play.rs` checks the prefix.
+  it("names the Turn told again, apart from every Turn's own op_id", () => {
+    expect(renarrateOpId(7)).toBe("__renarrate__7");
+    expect(renarrateOpId(7)).not.toBe(renarrateOpId(17));
   });
 });
 

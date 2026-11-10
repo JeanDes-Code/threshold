@@ -28,6 +28,8 @@ interface Props {
   /** Resolves true when the Correction was committed: the fields then clear. */
   onCorrect: (clarified: string, why: string) => Promise<boolean>;
   onRetry: () => void;
+  /** Closes the failure, and forgets the Turn that could be sent again. */
+  onDismissFailure: () => void;
   onBegin: () => void;
   onDismissAnswer: () => void;
   /** A Scene is shown: a quick Note can be about it. */
@@ -40,6 +42,7 @@ interface Props {
 export default function ActionBar(props: Props) {
   const { scene, phase, pcName, needsBegin, answer, failure, notice, onAct, onAsk } = props;
   const { canRetry, canCorrect, fixing, onFixing, onCorrect, onRetry, onBegin, onDismissAnswer } = props;
+  const { onDismissFailure } = props;
   const [intent, setIntent] = useState("");
   const [ooc, setOoc] = useState("");
   const [asking, setAsking] = useState(false);
@@ -85,6 +88,9 @@ export default function ActionBar(props: Props) {
               Retry
             </button>
           )}
+          <button type="button" className="play-btn play-btn--text" disabled={busy} onClick={onDismissFailure}>
+            Dismiss
+          </button>
         </section>
       )}
       {notice !== null && (

@@ -30,6 +30,8 @@ export interface PlayScreenProps {
   onAsk: (text: string) => Promise<boolean>;
   onCorrect: (clarified: string, why: string) => Promise<boolean>;
   onRetry: () => void;
+  /** Closes the failure, and forgets the Turn that could be sent again. */
+  onDismissFailure: () => void;
   onBegin: () => void;
   onRenarrate: (turnId: number) => void;
   onDismissAnswer: () => void;
@@ -143,6 +145,7 @@ export default function PlayScreen(props: PlayScreenProps) {
         onAsk={props.onAsk}
         onCorrect={props.onCorrect}
         onRetry={props.onRetry}
+        onDismissFailure={props.onDismissFailure}
         onBegin={props.onBegin}
         onDismissAnswer={props.onDismissAnswer}
         hasScene={scene !== null}

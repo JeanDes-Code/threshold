@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   errorText,
   type CampaignCard,
   type CampaignSummary,
   type DraftLine,
+  type NarrationChunk,
   type PlayView,
 } from "./api";
 import Home from "./home/Home";
@@ -12,6 +13,7 @@ import Menu from "./home/Menu";
 import LiveJournal from "./journal/LiveJournal";
 import LivePlay from "./play/LivePlay";
 import { canOpenCorrection } from "./play/logic";
+import { createTurnStore } from "./play/session";
 import { api, play, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
 import Debug from "./views/Debug";
@@ -34,7 +36,6 @@ export default function App() {
   const [view, setView] = useState<PlayView | null>(null);
   const [debug, setDebug] = useState(false);
   const [model, setModel] = useState("warming");
-  const [turnBusy, setTurnBusy] = useState(false);
   const [fixing, setFixing] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
   // Home.
@@ -50,6 +51,19 @@ export default function App() {
     api.modelStatus().then(setModel, (e: unknown) => setModel(`unknown (${errorText(e)})`));
   }, []);
   useEvent<string>("model_status", setModel);
+
+  // The running Turn lives here, above the tabs: a tab switch keeps its
+  // chunks, its result and its failure. Only another Campaign resets it.
+  const [turnStore] = useState(() =>
+    createTurnStore({
+      reload: async () => setView(await play.turnEnded()),
+      canRetry: () => turns.pending() !== null,
+      forget: () => turns.reset(),
+    }),
+  );
+  const turn = useSyncExternalStore(turnStore.subscribe, turnStore.get);
+  const turnBusy = turn.busy;
+  useEvent<NarrationChunk>("narration_chunk", turnStore.chunk);
 
   const go = (to: Go) => setScreen((s) => navigate(s, to, { debug, open: campaign !== null }));
 
@@ -72,6 +86,7 @@ export default function App() {
   const opened = (summary: CampaignSummary) => {
     // A Turn that failed in the previous Campaign must not be retried here.
     turns.reset();
+    turnStore.reset();
     setCampaign(summary);
     setView(null);
     setFixing(false);
@@ -216,7 +231,8 @@ export default function App() {
             key={campaign.db_path}
             view={view}
             onView={setView}
-            onBusy={setTurnBusy}
+            turn={turn}
+            store={turnStore}
             fixing={fixing}
             onFixing={setFixing}
             tools={tools}

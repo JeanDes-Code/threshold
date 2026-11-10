@@ -19,7 +19,7 @@ use crate::{
     normalize,
     rules::RollResult,
     speech::{self, Line},
-    store::{Fact, Knowledge, StoredTurn, TurnId, TurnKind, WorldView},
+    store::{Entity, Fact, Knowledge, StoredTurn, TurnId, TurnKind, WorldView},
     turn::{stored_action, stored_roll},
 };
 
@@ -84,7 +84,8 @@ pub struct SightTurn {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SightLine {
     /// The line as the Narration wrote it, a mark that did not resolve
-    /// included.
+    /// included. When that mark's tag is a name the PC cannot use, the line
+    /// holds the quoted words only (ADR 0006).
     Prose(String),
     /// A line spoken by an NPC who is present in the Turn and whom the PC
     /// can name: the words without the quote marks.
@@ -344,15 +345,21 @@ pub fn pc_sight(
                     .into_iter()
                     .map(|line| match line {
                         Line::Prose(text) => SightLine::Prose(text.to_owned()),
-                        Line::Tagged { line, name, words } => {
-                            match speaker(view, name, present, &named, &known) {
-                                Some(speaker) => SightLine::Speech {
-                                    speaker,
-                                    words: words.to_owned(),
-                                },
-                                None => SightLine::Prose(line.to_owned()),
+                        Line::Tagged {
+                            line,
+                            name,
+                            words,
+                            said,
+                        } => match speaker(view, name, present, &named, &known) {
+                            Some(speaker) => SightLine::Speech {
+                                speaker,
+                                words: words.to_owned(),
+                            },
+                            None if hides_a_name(view, name, &named, &known) => {
+                                SightLine::Prose(said.to_owned())
                             }
-                        }
+                            None => SightLine::Prose(line.to_owned()),
+                        },
                     })
                     .collect()
             });
@@ -479,14 +486,36 @@ fn speaker(
     {
         return None;
     }
+    pc_knows_the_name(entity, name, named, known).then_some(entity.id)
+}
+
+/// True when the PC can call `entity` by `name`: the PC can name the entity
+/// (data shape 3.5), and `name` is its main name or an other name the PC
+/// holds the Belief for.
+fn pc_knows_the_name(
+    entity: &Entity,
+    name: &str,
+    named: &HashSet<EntityId>,
+    known: &[Known],
+) -> bool {
     let tag = normalize::name(name);
-    let knows_the_name = entity.norm_name == tag
-        || known
-            .iter()
-            .filter(|k| k.id == entity.id)
-            .flat_map(|k| &k.other_names)
-            .any(|other| normalize::name(other) == tag);
-    knows_the_name.then_some(entity.id)
+    named.contains(&entity.id)
+        && (entity.norm_name == tag
+            || known
+                .iter()
+                .filter(|k| k.id == entity.id)
+                .flat_map(|k| &k.other_names)
+                .any(|other| normalize::name(other) == tag))
+}
+
+/// True when the tag of a mark that did not resolve is a name of an entity
+/// (main name or other name) that the PC cannot call by that name. The line
+/// then loses its tag, so the story never prints a name the PC does not
+/// know (data shape 3.1, as changed after review). A tag that names no
+/// entity stays: it tells the Player nothing about the world.
+fn hides_a_name(view: &WorldView, name: &str, named: &HashSet<EntityId>, known: &[Known]) -> bool {
+    view.entities_by_name(name)
+        .any(|entity| !pc_knows_the_name(entity, name, named, known))
 }
 
 /// The PC's `location` after the Turn of `seq` `at`: the fact that was live

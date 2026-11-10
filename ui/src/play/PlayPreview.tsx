@@ -106,6 +106,7 @@ export default function PlayPreview() {
           return true;
         }}
         onRetry={replay}
+        onDismissFailure={() => undefined}
         onAsk={async () => {
           setAnswer("The GM answers here, out of character. This box is not part of the story.");
           return true;

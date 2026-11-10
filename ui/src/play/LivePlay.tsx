@@ -1,22 +1,16 @@
-import { useRef, useState, type ReactNode } from "react";
-import {
-  BEGIN_OP_ID,
-  errorText,
-  turnNotice,
-  type Attempt,
-  type NarrationChunk,
-  type PlayView,
-  type Target,
-} from "../api";
-import { api, play, turns, useEvent } from "../tauri";
+import type { ReactNode } from "react";
+import { BEGIN_OP_ID, errorText, renarrateOpId, type PlayView, type Target } from "../api";
+import { api, play, turns } from "../tauri";
 import PlayScreen from "./PlayScreen";
+import type { TurnState, TurnStore } from "./session";
 
 interface Props {
   view: PlayView;
-  /** Takes the view the core gives after each Turn. */
+  /** Takes the view the core gives after each note command. */
   onView: (view: PlayView) => void;
-  /** Told whenever a Turn starts or ends. */
-  onBusy: (busy: boolean) => void;
+  /** The running Turn. App holds it, so a tab switch does not lose it. */
+  turn: TurnState;
+  store: TurnStore;
   /** The Correction fields are open: the Campaign menu opens them. */
   fixing: boolean;
   onFixing: (open: boolean) => void;
@@ -24,119 +18,35 @@ interface Props {
   tools: ReactNode;
 }
 
-/** Narration again: its chunks come under the Turn's old op_id, so any chunk counts. */
-const ANY_OP = "*";
-
 /**
  * The Play screen on a real Campaign. While a Turn runs, the story shows the
  * raw stream; when it ends, the core's new PlayView replaces it.
  */
-export default function LivePlay({ view, onView, onBusy, fixing, onFixing, tools }: Props) {
-  const [busy, setBusyHere] = useState(false);
-  const [stream, setStream] = useState<string | null>(null);
-  const [pendingIntent, setPendingIntent] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [answer, setAnswer] = useState<string | null>(null);
-  // The op_id whose narration chunks the story shows.
-  const streaming = useRef<string | null>(null);
+export default function LivePlay({ view, onView, turn, store, fixing, onFixing, tools }: Props) {
+  const act = (text: string) => store.run(() => turns.submit(text), text);
 
-  // App hears it directly, so it stays right even if this screen unmounts
-  // (a tab switch) while a Turn runs.
-  const setBusy = (on: boolean) => {
-    setBusyHere(on);
-    onBusy(on);
-  };
-
-  useEvent<NarrationChunk>("narration_chunk", (chunk) => {
-    const op = streaming.current;
-    if (op !== null && (op === ANY_OP || chunk.op_id === op)) setStream((s) => (s ?? "") + chunk.text);
-  });
-
-  /** One view call after the Turn ends, committed or failed. */
-  const reload = async () => {
-    try {
-      onView(await play.turnEnded());
-    } catch (e) {
-      setNotice(`Could not reload the story: ${errorText(e)}`);
-    }
-  };
-
-  /** Runs one Turn. Resolves true when it committed. */
-  const run = async (attempt: Attempt, intent: string | null): Promise<boolean> => {
-    streaming.current = attempt.opId;
-    setStream("");
-    setPendingIntent(intent);
-    setFailure(null);
-    setNotice(null);
-    setBusy(true);
-    let committed = false;
-    try {
-      setNotice(turnNotice(await attempt.result));
-      committed = true;
-    } catch (e) {
-      setFailure(errorText(e));
-    }
-    streaming.current = null;
-    // The new view lands before the stream goes, so the story does not jump back.
-    await reload();
-    setStream(null);
-    setPendingIntent(null);
-    setBusy(false);
-    return committed;
-  };
-
-  const act = (text: string) => run(turns.submit(text), text);
-
-  const correct = (clarified: string, why: string) => run(turns.correct(clarified, why), clarified);
+  const correct = (clarified: string, why: string) => store.run(() => turns.correct(clarified, why), clarified);
 
   const retry = () => {
     const pending = turns.pending();
-    const attempt = turns.retry();
-    if (!pending || !attempt) return;
-    void run(attempt, String(pending.args.text ?? pending.args.clarified ?? ""));
+    if (!pending) return;
+    void store.run(() => turns.retry(), String(pending.args.text ?? pending.args.clarified ?? ""));
   };
 
   // "Begin": the GM narrates the opening scene, as the Opening Turn.
-  const begin = () => void run({ opId: BEGIN_OP_ID, result: api.begin() }, null);
+  const begin = () => void store.run(() => ({ opId: BEGIN_OP_ID, result: api.begin() }), null);
 
-  const renarrate = async (turnId: number) => {
-    streaming.current = ANY_OP;
-    setStream("");
-    setFailure(null);
-    setNotice(null);
-    setBusy(true);
-    try {
-      await api.renarrate(turnId);
-    } catch (e) {
-      // The Turn stays committed; only its narration failed again.
-      setNotice(`Committed, narration interrupted: ${errorText(e)}`);
-    }
-    streaming.current = null;
-    await reload();
-    setStream(null);
-    setBusy(false);
-  };
+  const renarrate = (turnId: number) =>
+    void store.renarrate(renarrateOpId(turnId), () => api.renarrate(turnId));
 
-  const ask = async (text: string): Promise<boolean> => {
-    setBusy(true);
-    try {
-      setAnswer(await api.askOoc(text));
-      return true;
-    } catch (e) {
-      setAnswer(`OOC failed: ${errorText(e)}`);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
+  const ask = (text: string) => store.ask(() => api.askOoc(text));
 
   /** One view call after each note command: the Pinned card and the cards change. */
   const marksChanged = async () => {
     try {
       onView(await play.noteChanged());
     } catch (e) {
-      setNotice(`Could not reload the story: ${errorText(e)}`);
+      store.notify(`Could not reload the story: ${errorText(e)}`);
     }
   };
 
@@ -144,7 +54,7 @@ export default function LivePlay({ view, onView, onBusy, fixing, onFixing, tools
     try {
       await api.setPin(target, on);
     } catch (e) {
-      setNotice(`Could not change the pin: ${errorText(e)}`);
+      store.notify(`Could not change the pin: ${errorText(e)}`);
     }
     await marksChanged();
   };
@@ -162,21 +72,22 @@ export default function LivePlay({ view, onView, onBusy, fixing, onFixing, tools
   return (
     <PlayScreen
       view={view}
-      busy={busy}
-      stream={stream}
-      pendingIntent={pendingIntent}
-      answer={answer}
-      failure={failure}
-      notice={notice}
-      canRetry={turns.pending() !== null}
+      busy={turn.busy}
+      stream={turn.stream}
+      pendingIntent={turn.pendingIntent}
+      answer={turn.answer}
+      failure={turn.failure}
+      notice={turn.notice}
+      canRetry={turn.canRetry}
       loadCard={api.getEntityCard}
       onAct={act}
       onAsk={ask}
       onCorrect={correct}
       onRetry={retry}
+      onDismissFailure={store.dismissFailure}
       onBegin={begin}
-      onRenarrate={(turnId) => void renarrate(turnId)}
-      onDismissAnswer={() => setAnswer(null)}
+      onRenarrate={renarrate}
+      onDismissAnswer={store.dismissAnswer}
       onPin={(target, on) => void pin(target, on)}
       onNote={note}
       fixing={fixing}

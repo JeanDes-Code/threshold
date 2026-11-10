@@ -392,6 +392,14 @@ export type Approval = { ok: true; draft: DraftView } | { ok: false; gaps: Gap[]
 /** The op_id of the Opening Turn's narration chunks. */
 export const BEGIN_OP_ID = "__begin__";
 
+/** The start of the op_id of a renarration's chunks; the shell's `RENARRATE_OP_PREFIX`. */
+export const RENARRATE_OP_PREFIX = "__renarrate__";
+
+/** The op_id of the chunks of `renarrate(turnId)`: not the Turn's own op_id. */
+export function renarrateOpId(turnId: number): string {
+  return `${RENARRATE_OP_PREFIX}${turnId}`;
+}
+
 export interface NarrationChunk {
   op_id: string;
   text: string;

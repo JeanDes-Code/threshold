@@ -3,7 +3,13 @@
 use threshold_core::speech::{Line, RULE, parse};
 
 fn tagged<'a>(name: &'a str, words: &'a str, line: &'a str) -> Line<'a> {
-    Line::Tagged { line, name, words }
+    let said = line.split_once(':').unwrap().1.trim();
+    Line::Tagged {
+        line,
+        name,
+        words,
+        said,
+    }
 }
 
 #[test]
@@ -42,6 +48,26 @@ fn parse_accepts_three_quote_styles() {
         };
         assert!(name == "Orsel" || name == "Old Brann Hale", "{name}");
         assert_eq!(got, words, "{line}");
+    }
+}
+
+/// A mark keeps the spoken words with their quote marks, for a line that
+/// must lose its tag (ADR 0006).
+#[test]
+fn parse_keeps_the_quoted_speech_with_its_marks() {
+    for (line, said) in [
+        (r#"Orsel: "Late.""#, r#""Late.""#),
+        ("Orsel: \u{201c}Late.\u{201d}", "\u{201c}Late.\u{201d}"),
+        (
+            "Orsel : \u{ab}\u{a0}En retard.\u{a0}\u{bb}  ",
+            "\u{ab}\u{a0}En retard.\u{a0}\u{bb}",
+        ),
+    ] {
+        let parsed = parse(line);
+        let [Line::Tagged { said: got, .. }] = parsed[..] else {
+            panic!("{line} is not a mark: {parsed:?}");
+        };
+        assert_eq!(got, said, "{line}");
     }
 }
 
