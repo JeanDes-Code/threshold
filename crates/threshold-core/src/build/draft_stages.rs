@@ -10,7 +10,7 @@ use serde::Deserialize;
 use super::{
     BuildCheck, BuildFailure, Control, DraftState, KnownFact, SeedDraft, Stage,
     draft::new_draft_id,
-    stages::{Need, Problem, StageCall, Staged, report, run_stage, schema_of, sections},
+    stages::{Need, Problem, StageCall, essential, report, run_stage, schema_of, sections},
 };
 use crate::{
     domain::{
@@ -44,13 +44,13 @@ pub fn draft_from_text(
 
     report(ctl, Stage::DraftSeed, 0, 1);
     let seed = run_stage(gm, ctl, &id, &seed_call(text), check_seed)?;
-    let seed = essential(Stage::DraftSeed, seed)?;
+    let seed = essential(Stage::DraftSeed, seed)?.output;
     report(ctl, Stage::DraftSeed, 1, 1);
 
     report(ctl, Stage::DraftRoster, 0, 1);
     let call = roster_call(text, &seed);
     let roster = run_stage(gm, ctl, &id, &call, |out| check_roster(&seed, out))?;
-    let roster = essential(Stage::DraftRoster, roster)?;
+    let roster = essential(Stage::DraftRoster, roster)?.output;
     report(ctl, Stage::DraftRoster, 1, 1);
 
     let mut draft = assemble(id, text, seed, roster);
@@ -82,15 +82,6 @@ pub fn draft_from_text(
         report(ctl, Stage::DraftKnowledge, i + 1, parts.len());
     }
     Ok(draft)
-}
-
-/// The output of an essential call. `run_stage` returns `None` only for an
-/// optional call, so the fallback never fires.
-fn essential<T, I>(stage: Stage, staged: Option<Staged<T, I>>) -> Result<T, BuildFailure> {
-    staged.map(|s| s.output).ok_or(BuildFailure {
-        stage,
-        check: BuildCheck::Schema,
-    })
 }
 
 // ---- Stage outputs -------------------------------------------------------
@@ -632,7 +623,7 @@ fn known_fact(names: &Names, fact: FactOut) -> KnownFact {
 
 /// The normalized key without any `pending_` prefix, and whether the item is
 /// open. A prefix that the model wrote means open: code alone adds it.
-fn open_key(key: &str, open: bool) -> (String, bool) {
+pub(super) fn open_key(key: &str, open: bool) -> (String, bool) {
     let mut key = normalize::key(key);
     let mut open = open;
     while let Some(rest) = key.strip_prefix(OPEN_KEY_PREFIX) {

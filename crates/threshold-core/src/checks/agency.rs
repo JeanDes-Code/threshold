@@ -7,6 +7,14 @@ use crate::{
     store::WorldView,
 };
 
+/// True when a write on the PC may set `key` without a choice of the
+/// Player: a key of `PC_INVOLUNTARY_KEYS`, never a voluntary act, word,
+/// feeling or motive. The World Build applies the same rule to its facts
+/// and event effects.
+pub(crate) fn is_involuntary_key(key: &str) -> bool {
+    PC_INVOLUNTARY_KEYS.iter().any(|k| same_key(k, key))
+}
+
 pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
     let Some(pc) = pc(view) else {
         return;
@@ -33,11 +41,10 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
     }
     // Every slot write on the PC: facts, both stakes and schedule effects.
     for w in writes(p).iter().filter(|w| Handle::Entity(w.subject) == pc) {
-        let involuntary = PC_INVOLUNTARY_KEYS.iter().any(|k| same_key(k, w.key));
         // The Player's Intent chose the move, so a move Turn may set where the PC is.
         let chosen_move =
             w.origin == Origin::Fact && p.action == ActionKind::Move && same_key(w.key, "location");
-        if !involuntary && !chosen_move {
+        if !is_involuntary_key(w.key) && !chosen_move {
             err(&format!(
                 "a write on the PC may only set {} (or location on a move Turn); got {}",
                 PC_INVOLUNTARY_KEYS.join(", "),

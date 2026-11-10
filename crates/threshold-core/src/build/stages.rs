@@ -13,7 +13,12 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use super::{BuildCheck, BuildFailure, Control, DebugEntry, Progress, Stage};
-use crate::model::{Gm, Prompt};
+use crate::model::{Gm, GmError, Prompt};
+
+/// How many times a call that timed out is sent again, with the same
+/// prompt, before the stage fails as `Model`. About one live call in ten
+/// times out. Any other model error fails the stage at once.
+pub(crate) const TIMEOUT_RETRIES: usize = 2;
 
 /// A section shorter than this, in characters, merges into the next one.
 pub(crate) const SECTION_MIN_CHARS: usize = 400;
@@ -78,7 +83,8 @@ pub(crate) struct Staged<T, I> {
 
 /// Sends `call`, checks its output with `check`, and sends one repair call
 /// when a check finds a problem. Returns `None` only for an `Optional` call
-/// whose output stays unusable. Every call is logged under `op_id`.
+/// whose output stays unusable. A call that times out is sent again, up to
+/// `TIMEOUT_RETRIES` times. Every call is logged under `op_id`.
 pub(crate) fn run_stage<T, I>(
     gm: &dyn Gm,
     ctl: &mut Control,
@@ -113,6 +119,18 @@ where
             check: failed.unwrap_or(BuildCheck::Schema),
         }),
     }
+}
+
+/// The output of an essential call. `run_stage` returns `None` only for an
+/// optional call, so the fallback never fires.
+pub(crate) fn essential<T, I>(
+    stage: Stage,
+    staged: Option<Staged<T, I>>,
+) -> Result<Staged<T, I>, BuildFailure> {
+    staged.ok_or(BuildFailure {
+        stage,
+        check: BuildCheck::Schema,
+    })
 }
 
 /// Reports how far `stage` is.
@@ -186,21 +204,32 @@ where
         stage: call.stage,
         check,
     };
-    if (ctl.cancelled)() {
-        return Err(fail(BuildCheck::Cancelled));
-    }
-    let started = Instant::now();
-    let answer = gm.propose(prompt, &call.schema);
-    (ctl.log)(DebugEntry {
-        op_id: op_id.to_owned(),
-        step: step.to_owned(),
-        prompt: render(prompt),
-        raw: match &answer {
-            Ok(raw) => raw.clone(),
-            Err(error) => format!("model error: {error}"),
-        },
-        ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-    });
+    let mut retries = 0;
+    let answer = loop {
+        if (ctl.cancelled)() {
+            return Err(fail(BuildCheck::Cancelled));
+        }
+        let started = Instant::now();
+        let answer = gm.propose(prompt, &call.schema);
+        (ctl.log)(DebugEntry {
+            op_id: op_id.to_owned(),
+            step: if retries == 0 {
+                step.to_owned()
+            } else {
+                format!("{step} retry {retries}")
+            },
+            prompt: render(prompt),
+            raw: match &answer {
+                Ok(raw) => raw.clone(),
+                Err(error) => format!("model error: {error}"),
+            },
+            ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        });
+        match answer {
+            Err(GmError::Timeout) if retries < TIMEOUT_RETRIES => retries += 1,
+            answer => break answer,
+        }
+    };
     let raw = answer.map_err(|_| fail(BuildCheck::Model))?;
     Ok(match serde_json::from_str::<T>(&raw) {
         Ok(output) => Attempt {
@@ -402,6 +431,174 @@ mod tests {
         let inner = &schema["$defs"]["Inner"];
         assert_eq!(inner["additionalProperties"], json!(false));
         assert_eq!(inner["required"], json!(["note"]));
+    }
+
+    /// A `Gm` that answers from a script of results, in order.
+    struct ScriptedGm(std::sync::Mutex<std::collections::VecDeque<Result<String, GmError>>>);
+
+    impl ScriptedGm {
+        fn new(answers: Vec<Result<String, GmError>>) -> Self {
+            Self(std::sync::Mutex::new(answers.into()))
+        }
+
+        fn left(&self) -> usize {
+            self.0.lock().unwrap().len()
+        }
+    }
+
+    impl Gm for ScriptedGm {
+        fn propose(&self, _: &Prompt, _: &Value) -> Result<String, GmError> {
+            self.0
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Err(GmError::Unreachable("script is empty".into())))
+        }
+
+        fn narrate(&self, _: &Prompt, _: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+            unreachable!("a stage never narrates")
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Items {
+        items: Vec<u8>,
+    }
+
+    /// Item 0 must be 1. Any other item above 1 is an optional problem.
+    fn check_items(out: &Items) -> Vec<Problem<usize>> {
+        let mut problems = vec![];
+        if out.items.first() != Some(&1) {
+            problems.push(Problem::essential(BuildCheck::Completeness, "items[0]"));
+        }
+        for (i, item) in out.items.iter().enumerate().skip(1) {
+            if *item > 1 {
+                problems.push(Problem::optional(BuildCheck::References, i, "item"));
+            }
+        }
+        problems
+    }
+
+    fn call(need: Need) -> StageCall {
+        StageCall {
+            stage: Stage::HiddenFacts,
+            step: "hidden_facts 1/1".into(),
+            prompt: Prompt::default(),
+            schema: json!({}),
+            need,
+        }
+    }
+
+    type Outcome = Result<Option<Staged<Items, usize>>, BuildFailure>;
+
+    /// Runs `call(need)` against `gm` and returns the result and the
+    /// logged steps.
+    fn run(gm: &ScriptedGm, need: Need) -> (Outcome, Vec<String>) {
+        let mut steps = vec![];
+        let result = {
+            let mut progress = |_| {};
+            let mut log = |e: DebugEntry| steps.push(e.step);
+            let mut ctl = Control {
+                progress: &mut progress,
+                cancelled: &|| false,
+                log: &mut log,
+            };
+            run_stage(gm, &mut ctl, "draft-1", &call(need), check_items)
+        };
+        (result, steps)
+    }
+
+    fn ok(items: &str) -> Result<String, GmError> {
+        Ok(format!("{{\"items\": {items}}}"))
+    }
+
+    #[test]
+    fn a_timeout_is_retried_twice_with_the_same_prompt() {
+        let gm = ScriptedGm::new(vec![
+            Err(GmError::Timeout),
+            Err(GmError::Timeout),
+            ok("[1]"),
+        ]);
+        let (result, steps) = run(&gm, Need::Essential);
+        assert_eq!(result.unwrap().unwrap().output.items, vec![1]);
+        assert_eq!(
+            steps,
+            vec![
+                "hidden_facts 1/1",
+                "hidden_facts 1/1 retry 1",
+                "hidden_facts 1/1 retry 2",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_third_timeout_fails_the_stage_as_model() {
+        let gm = ScriptedGm::new(vec![
+            Err(GmError::Timeout),
+            Err(GmError::Timeout),
+            Err(GmError::Timeout),
+            ok("[1]"),
+        ]);
+        let (result, steps) = run(&gm, Need::Optional);
+        assert_eq!(
+            result.err(),
+            Some(BuildFailure {
+                stage: Stage::HiddenFacts,
+                check: BuildCheck::Model
+            })
+        );
+        assert_eq!(steps.len(), 3);
+        assert_eq!(gm.left(), 1);
+    }
+
+    #[test]
+    fn another_model_error_fails_at_once() {
+        let gm = ScriptedGm::new(vec![Err(GmError::BadStatus(500, "x".into())), ok("[1]")]);
+        let (result, steps) = run(&gm, Need::Essential);
+        assert_eq!(result.err().map(|f| f.check), Some(BuildCheck::Model));
+        assert_eq!(steps.len(), 1);
+        assert_eq!(gm.left(), 1);
+    }
+
+    #[test]
+    fn a_repair_call_is_retried_on_timeout_too() {
+        let gm = ScriptedGm::new(vec![ok("[0]"), Err(GmError::Timeout), ok("[1]")]);
+        let (result, steps) = run(&gm, Need::Essential);
+        assert_eq!(result.unwrap().unwrap().output.items, vec![1]);
+        assert_eq!(
+            steps,
+            vec![
+                "hidden_facts 1/1",
+                "hidden_facts 1/1 repair",
+                "hidden_facts 1/1 repair retry 1",
+            ]
+        );
+    }
+
+    #[test]
+    fn cancel_stops_a_retry() {
+        let gm = ScriptedGm::new(vec![Err(GmError::Timeout), ok("[1]")]);
+        let calls = std::cell::Cell::new(0);
+        let mut progress = |_| {};
+        let mut log = |_| calls.set(calls.get() + 1);
+        let mut ctl = Control {
+            progress: &mut progress,
+            cancelled: &|| calls.get() > 0,
+            log: &mut log,
+        };
+        let result = run_stage(&gm, &mut ctl, "d", &call(Need::Essential), check_items);
+        assert_eq!(result.err().map(|f| f.check), Some(BuildCheck::Cancelled));
+        assert_eq!(gm.left(), 1);
+    }
+
+    #[test]
+    fn the_first_answer_wins_when_the_repair_breaks_an_essential_part() {
+        let gm = ScriptedGm::new(vec![ok("[1, 1, 7]"), Ok("not JSON".into())]);
+        let (result, steps) = run(&gm, Need::Essential);
+        let staged = result.unwrap().unwrap();
+        assert_eq!(staged.output.items, vec![1, 1, 7]);
+        assert_eq!(staged.drop, vec![2]);
+        assert_eq!(steps.len(), 2);
     }
 
     #[test]

@@ -15,6 +15,7 @@ use crate::{
     store::{Fact, WorldView},
 };
 
+pub(crate) use agency::is_involuntary_key;
 pub use ops::{Resolved, to_ops};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
