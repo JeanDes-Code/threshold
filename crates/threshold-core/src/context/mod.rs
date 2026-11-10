@@ -208,7 +208,7 @@ impl<'a> Retrieval<'a> {
 /// location. A location fact the PC never witnessed or heard of does not
 /// count, so a hidden watcher stays hidden. `WorldView::present` is world
 /// truth and stays the rule for the Commit checks.
-pub(crate) fn seen_present(view: &WorldView) -> Vec<EntityId> {
+pub fn seen_present(view: &WorldView) -> Vec<EntityId> {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return Vec::new();
     };

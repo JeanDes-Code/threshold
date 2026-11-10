@@ -2,10 +2,12 @@
 //!
 //! `advance` turns the passing of time into ledger ops; it never commits.
 //! Beliefs are derived from `knowledge` rows and never stored (ADR 0003).
+//! `pc_sight` gives the world as the PC knows it, for the Player screens.
 
 mod arrival;
 mod beliefs;
 mod clock;
+mod sight;
 mod wait;
 
 pub use arrival::{
@@ -13,4 +15,5 @@ pub use arrival::{
 };
 pub use beliefs::{Belief, beliefs, pc_knowledge};
 pub use clock::{MAX_EVENTS_PER_TURN, advance, written_slots};
+pub use sight::{Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightTurn, pc_sight};
 pub use wait::{WAIT_DEFAULT_MIN, WAIT_MAX_MIN, wait_minutes};

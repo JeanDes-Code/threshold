@@ -1,14 +1,13 @@
 //! The screen types and the functions that make them.
 //!
-//! The functions here still read `WorldView`. `PcSight` replaces that input
-//! later, so a view cannot see a hidden fact.
+//! Every function here reads `PcSight` only, never the world, so a view
+//! cannot show a hidden fact: its input does not hold one.
 
 use serde::Serialize;
 
 use crate::{
-    domain::{EntityKind, Knowing, is_open_key},
-    store::WorldView,
-    world::pc_knowledge,
+    domain::{EntityId, Knowing, is_open_key},
+    world::PcSight,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -42,49 +41,44 @@ pub struct JournalView {
     pub claims: Vec<JournalEntry>,
 }
 
-/// The PC as the PC knows itself: only its own Beliefs about itself. `None`
-/// when the campaign has no PC.
-pub fn character_view(view: &WorldView) -> Option<CharacterView> {
-    let pc = view.entities.iter().find(|e| e.kind == EntityKind::Pc)?;
-    let concept = view
-        .adventure_seed
-        .as_ref()
-        .map(|s| s.pc.concept.clone())
-        .unwrap_or_default();
-    let facts = pc_knowledge(view)
-        .into_iter()
-        .filter(|b| b.subject == pc.id)
+/// The PC as the PC knows itself: only its own Beliefs about itself.
+pub fn character_view(sight: &PcSight) -> CharacterView {
+    let facts = sight
+        .beliefs
+        .iter()
+        .filter(|b| b.subject == sight.pc)
         .map(|b| CharacterFact {
             open: is_open_key(&b.key),
-            text: b.text,
+            text: b.text.clone(),
         })
         .collect();
-    Some(CharacterView {
-        name: pc.name.clone(),
-        concept,
-        clock_min: view.clock_min,
+    CharacterView {
+        name: sight.pc_name.clone(),
+        concept: sight.concept.clone(),
+        clock_min: sight.clock_min,
         facts,
-    })
+    }
 }
 
-/// PC Knowledge, split: what the PC witnessed, and what it was told. Built
-/// from the PC's Beliefs only, so a fact no one told the PC (a GM-only fact)
-/// cannot appear.
-pub fn legacy_journal(view: &WorldView) -> JournalView {
-    let name = |id: u64| {
-        view.entities
+/// PC Knowledge, split: what the PC witnessed, and what it was told. A
+/// subject or a speaker the PC cannot name reads "someone".
+pub fn legacy_journal(sight: &PcSight) -> JournalView {
+    let name = |id: EntityId| {
+        sight
+            .known
             .iter()
-            .find(|e| e.id == id)
-            .map_or_else(|| "someone".to_owned(), |e| e.name.clone())
+            .find(|k| k.id == id)
+            .and_then(|k| k.name.clone())
+            .unwrap_or_else(|| "someone".to_owned())
     };
     let mut journal = JournalView {
         observations: Vec::new(),
         claims: Vec::new(),
     };
-    for belief in pc_knowledge(view) {
+    for belief in &sight.beliefs {
         let entry = JournalEntry {
             subject: name(belief.subject),
-            text: belief.text,
+            text: belief.text.clone(),
             source: belief.source.map(name),
             open: is_open_key(&belief.key),
         };

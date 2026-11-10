@@ -23,7 +23,7 @@ use crate::{
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource,
-        Handle, Knowing, LedgerOp, Reaction,
+        Handle, Knowing, LedgerOp, Reaction, Verdict,
     },
     model::{Gm, GmError, Prompt},
     pack::ContentPack,
@@ -763,6 +763,17 @@ fn engine_wait(mut p: DecisionProposal, view: &WorldView) -> DecisionProposal {
 pub fn stored_roll(proposal_json: &str) -> Option<RollResult> {
     let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
     serde_json::from_value(record.get("roll")?.clone()).ok()
+}
+
+/// The action and the verdict stored in a Turn's `proposal_json`: the
+/// `proposal.action` and `proposal.verdict` of the record. `None` for a
+/// Turn with no proposal, such as the Opening Turn.
+pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)> {
+    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
+    let proposal = record.get("proposal")?;
+    let action = serde_json::from_value(proposal.get("action")?.clone()).ok()?;
+    let verdict = serde_json::from_value(proposal.get("verdict")?.clone()).ok()?;
+    Some((action, verdict))
 }
 
 fn stored_reactions(proposal_json: &str) -> Vec<Reaction> {

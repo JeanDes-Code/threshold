@@ -12,7 +12,7 @@ use threshold_core::{
     },
     rules::{D10, Ruleset, turn_seed},
     store::{Store, WorldView},
-    turn::{Engine, MAX_INTENT_CHARS, TurnError, create_campaign},
+    turn::{Engine, MAX_INTENT_CHARS, TurnError, create_campaign, stored_action},
 };
 
 fn json(p: &DecisionProposal) -> String {
@@ -1017,4 +1017,22 @@ fn witnessed_event_text_that_quotes_a_secret_is_dropped() {
     assert!(!recent.contains("gate key"), "{recent}");
     assert!(!recent.contains("Orsel eyes"), "{recent}");
     assert!(knows);
+}
+
+/// Shape 3.2: the decision rule reads the stored action and verdict.
+#[test]
+fn stored_action_reads_the_proposal_record() {
+    let mut talk = proposal(Verdict::Allowed);
+    talk.action = ActionKind::Talk;
+    let (mut engine, _w, _gm) = setup(vec![json(&talk)], vec!["Brann nods."]);
+    let turn = engine
+        .play_turn("turn-1".into(), "I greet Brann.", &mut no_chunks())
+        .unwrap()
+        .turn_id;
+    let stored = engine.store().turn(turn).unwrap().unwrap();
+    assert_eq!(
+        stored_action(&stored.record.proposal_json),
+        Some((ActionKind::Talk, Verdict::Allowed))
+    );
+    assert_eq!(stored_action("{}"), None);
 }

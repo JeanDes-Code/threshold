@@ -17,6 +17,21 @@ pub fn name(input: &str) -> String {
         .collect()
 }
 
+/// The words of `text` for a whole-word name match: lower case, the
+/// accents dropped as `name` drops them, split on every character that is
+/// not a letter or a digit. "Chloé's" gives `["chloe", "s"]`.
+pub fn name_words(text: &str) -> Vec<String> {
+    lowered(text)
+        .nfd()
+        .filter(|c| !('\u{300}'..='\u{36f}').contains(c))
+        .nfc()
+        .collect::<String>()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 pub fn key(input: &str) -> String {
     normalized(input).replace(' ', "_")
 }

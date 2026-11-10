@@ -2,6 +2,8 @@
 //! builders for Decision Proposals. Later tasks reuse them.
 #![allow(dead_code)]
 
+pub mod hidden;
+
 use threshold_core::{
     domain::{
         ActionKind, AdventureSeed, Canon, CheckDraft, DecisionProposal, EntityKind, EntityRef,

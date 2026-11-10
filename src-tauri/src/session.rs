@@ -21,6 +21,7 @@ use threshold_core::{
     store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
     turn::{Engine, TurnError, TurnOutcome, stored_roll},
     view::{self, CharacterView, JournalView},
+    world::{PcSight, pc_sight},
 };
 use threshold_ollama::OllamaConfig;
 
@@ -351,14 +352,28 @@ impl Session {
             .map_err(|e| player_error(&e))
     }
 
+    /// The open campaign as the PC knows it: the only input of a view.
+    fn sight(&self) -> Result<PcSight, AppError> {
+        let open = self.open()?;
+        let store = open.engine.store();
+        let view = store.snapshot(open.campaign).map_err(failed)?;
+        let turns = store.turns(open.campaign).map_err(failed)?;
+        let reverted = store
+            .reverted_turns(open.campaign)
+            .map_err(failed)?
+            .into_iter()
+            .collect();
+        pc_sight(&view, &turns, &reverted).ok_or_else(|| failed("the campaign has no PC"))
+    }
+
     /// The PC as the PC knows itself: only its own Beliefs about itself.
     pub fn get_character(&self) -> Result<CharacterView, AppError> {
-        view::character_view(&self.view()?).ok_or_else(|| failed("the campaign has no PC"))
+        Ok(view::character_view(&self.sight()?))
     }
 
     /// PC Knowledge, split: what the PC witnessed, and what it was told.
     pub fn get_journal(&self) -> Result<JournalView, AppError> {
-        Ok(view::legacy_journal(&self.view()?))
+        Ok(view::legacy_journal(&self.sight()?))
     }
 
     pub fn set_debug(&mut self, on: bool) {
