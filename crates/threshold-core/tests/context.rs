@@ -4,15 +4,21 @@ use std::path::{Path, PathBuf};
 
 use support::*;
 use threshold_core::{
-    Prompt,
+    Prompt, RecordedGm,
     checks::{CheckKind, to_ops, validate},
-    context::{guard_plans, handle_context, narration_prompt, perceived_by_pc, proposal_prompt},
+    context::{
+        NARRATION_RULES, guard_plans, handle_context, narration_prompt, opening_prompt,
+        perceived_by_pc, proposal_prompt,
+    },
     domain::{
         Canon, EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, Reaction, Slot,
         Stance, Trigger, Verdict,
     },
     pack::{ContentPack, InsertPoint, PackError},
-    store::{Entity, Goal, TurnKind, TurnRecord, WorldView},
+    rules::D10,
+    speech::RULE,
+    store::{Entity, Goal, Store, TurnKind, TurnRecord, WorldView},
+    turn::Engine,
 };
 
 fn fields(p: &Prompt) -> [&str; 4] {
@@ -791,4 +797,32 @@ fn plan_naming_an_open_key_without_its_prefix_is_dropped() {
     }];
     let guarded = guard_plans(&w.view, &reactions);
     assert!(guarded[0].plan.is_empty(), "{guarded:?}");
+}
+
+/// The narrator gets exactly one new rule line, the speech mark. No other
+/// prompt gets it.
+#[test]
+fn narration_rules_add_one_line_only() {
+    let lines: Vec<&str> = NARRATION_RULES.lines().collect();
+    assert_eq!(lines.len(), 8, "{NARRATION_RULES}");
+    assert_eq!(lines.last(), Some(&RULE));
+
+    let mut w = World::new();
+    assert!(opening_prompt(&w.view, &[]).system.contains(RULE));
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.");
+    assert!(narration.system.contains(RULE));
+    let proposal = proposal_prompt(&w.view, &[], "I greet Orsel.");
+    assert!(!fields(&proposal).concat().contains(RULE));
+
+    let gm = RecordedGm::new(vec![], vec!["You are Ada.".into()]);
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    engine.ooc("ooc-1".into(), "Who am I?").unwrap();
+    assert!(!fields(&gm.calls()[0].prompt).concat().contains(RULE));
 }

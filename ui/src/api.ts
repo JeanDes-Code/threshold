@@ -10,21 +10,11 @@ export interface RollResult {
   success: boolean;
 }
 
-export interface TurnLine {
-  turn_id: number;
-  kind: string;
-  intent: string;
-  narration: string | null;
-  roll: RollResult | null;
-  /** A later Correction reverted this Turn. */
-  reverted: boolean;
-}
-
+/** The Campaign just opened. Its story comes from `get_play_view`. */
 export interface CampaignSummary {
   db_path: string;
   pc_name: string;
   premise: string;
-  turns: TurnLine[];
   /** No Opening Turn and no play Turn yet: "Begin" is still due. */
   needs_begin: boolean;
 }
@@ -405,7 +395,8 @@ export function createTurnClient(
 export function createApi(invoke: Invoke) {
   return {
     defaults: () => invoke<Defaults>("defaults"),
-    summary: () => invoke<CampaignSummary>("campaign_summary"),
+    /** The Play screen, from PC Knowledge only. Call it after a Turn ends, never during one. */
+    getPlayView: () => invoke<PlayView>("get_play_view"),
     modelStatus: () => invoke<string>("model_status"),
     listCampaigns: () => invoke<string[]>("list_campaigns"),
     openCampaign: (dbPath: string) => invoke<CampaignSummary>("open_campaign", { db_path: dbPath }),
@@ -483,29 +474,14 @@ export function parseBuildProgress(payload: unknown): BuildProgress | null {
 export type Api = ReturnType<typeof createApi>;
 
 /**
- * The Turn line of a committed Turn, and the notice to show with it. A Turn
- * whose narration failed is committed all the same: its line has no
- * narration, so the view offers to narrate it again.
+ * The notice to show with a committed Turn. A Turn whose narration failed is
+ * committed all the same: the view shows its Narration as missing and offers
+ * to narrate it again.
  */
-export function committedLine(
-  turn: TurnSummary,
-  kind: string,
-  intent: string,
-): { line: TurnLine; notice: string | null } {
-  return {
-    line: {
-      turn_id: turn.turn_id,
-      kind,
-      intent,
-      narration: turn.narration,
-      roll: turn.roll,
-      reverted: false,
-    },
-    notice:
-      turn.narration === null
-        ? `Committed, narration interrupted: ${turn.narration_error ?? "unknown error"}`
-        : null,
-  };
+export function turnNotice(turn: TurnSummary): string | null {
+  return turn.narration === null
+    ? `Committed, narration interrupted: ${turn.narration_error ?? "unknown error"}`
+    : null;
 }
 
 /** The text of a command error: Tauri rejects with the serialized AppError. */

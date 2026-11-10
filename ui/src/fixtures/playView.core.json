@@ -1,0 +1,237 @@
+{
+  "can_correct": true,
+  "clock_min": 5,
+  "here": [
+    {
+      "entity_id": 2,
+      "kind": "npc",
+      "name": "Orsel"
+    },
+    {
+      "entity_id": 3,
+      "kind": "npc",
+      "name": "Brann"
+    },
+    {
+      "entity_id": 7,
+      "kind": "npc",
+      "name": null
+    }
+  ],
+  "known": [
+    {
+      "here": true,
+      "other_names": [],
+      "who": {
+        "entity_id": 2,
+        "kind": "npc",
+        "name": "Orsel"
+      }
+    },
+    {
+      "here": true,
+      "other_names": [],
+      "who": {
+        "entity_id": 3,
+        "kind": "npc",
+        "name": "Brann"
+      }
+    }
+  ],
+  "needs_begin": false,
+  "open": [
+    {
+      "belief": {
+        "key": "pending_meet",
+        "subject_id": 1
+      },
+      "open": true,
+      "subject": {
+        "entity_id": 1,
+        "kind": "pc",
+        "name": "Ada"
+      },
+      "text": "Ada plans to meet Brann at the mill.",
+      "told_by": null
+    }
+  ],
+  "pc_name": "Ada",
+  "pinned": [],
+  "place": {
+    "entity_id": null,
+    "name": "gate square"
+  },
+  "scene": {
+    "kind": "plain"
+  },
+  "story": [
+    {
+      "body": {
+        "blocks": [
+          {
+            "kind": "prose",
+            "parts": [
+              {
+                "kind": "text",
+                "text": "Dusk falls on the gate square. "
+              },
+              {
+                "entity_id": 2,
+                "kind": "name",
+                "text": "Orsel"
+              },
+              {
+                "kind": "text",
+                "text": " watches the road. "
+              },
+              {
+                "entity_id": 3,
+                "kind": "name",
+                "text": "Brann"
+              },
+              {
+                "kind": "text",
+                "text": " leans on the wall."
+              }
+            ]
+          }
+        ],
+        "kind": "narration"
+      },
+      "intent": "",
+      "kind": "opening",
+      "reverted": false,
+      "roll": null,
+      "turn_id": 3
+    },
+    {
+      "body": {
+        "blocks": [
+          {
+            "kind": "prose",
+            "parts": [
+              {
+                "kind": "text",
+                "text": "A stranger in a grey hood stops near "
+              },
+              {
+                "entity_id": 2,
+                "kind": "name",
+                "text": "Orsel"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ]
+          }
+        ],
+        "kind": "narration"
+      },
+      "intent": "I wait by the gate.",
+      "kind": "play",
+      "reverted": false,
+      "roll": null,
+      "turn_id": 4
+    },
+    {
+      "body": {
+        "blocks": [
+          {
+            "kind": "prose",
+            "parts": [
+              {
+                "entity_id": 3,
+                "kind": "name",
+                "text": "Brann"
+              },
+              {
+                "kind": "text",
+                "text": " shrugs. "
+              },
+              {
+                "entity_id": 2,
+                "kind": "name",
+                "text": "Orsel"
+              },
+              {
+                "kind": "text",
+                "text": " says nothing."
+              }
+            ]
+          }
+        ],
+        "kind": "narration"
+      },
+      "intent": "I ask Brann about the road.",
+      "kind": "play",
+      "reverted": false,
+      "roll": null,
+      "turn_id": 5
+    },
+    {
+      "body": {
+        "blocks": [
+          {
+            "kind": "speech",
+            "parts": [
+              {
+                "kind": "text",
+                "text": "You are late."
+              }
+            ],
+            "speaker": {
+              "entity_id": 2,
+              "kind": "npc",
+              "name": "Orsel"
+            }
+          },
+          {
+            "kind": "prose",
+            "parts": [
+              {
+                "entity_id": 3,
+                "kind": "name",
+                "text": "Brann"
+              },
+              {
+                "kind": "text",
+                "text": " laughs at "
+              },
+              {
+                "entity_id": 2,
+                "kind": "name",
+                "text": "Orsel"
+              },
+              {
+                "kind": "text",
+                "text": "."
+              }
+            ]
+          }
+        ],
+        "kind": "narration"
+      },
+      "intent": "I greet Orsel.",
+      "kind": "play",
+      "reverted": false,
+      "roll": null,
+      "turn_id": 6
+    },
+    {
+      "body": {
+        "kind": "missing"
+      },
+      "intent": "I wait.",
+      "kind": "play",
+      "reverted": false,
+      "roll": null,
+      "turn_id": 7
+    }
+  ],
+  "you": {
+    "concept": "Courier",
+    "name": "Ada",
+    "state": []
+  }
+}

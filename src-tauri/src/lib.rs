@@ -28,7 +28,7 @@ use threshold_core::{
     domain::AdventureSeed,
     rules::RollResult,
     turn::BEGIN_OP_ID,
-    view::{CharacterView, JournalView},
+    view::{CharacterView, JournalView, PlayView},
 };
 use threshold_ollama::OllamaGm;
 
@@ -184,9 +184,12 @@ async fn open_campaign(
     blocking(&state, move |s| s.open_campaign(&PathBuf::from(db_path))).await
 }
 
+/// The Play screen. The UI calls it after `open_campaign` and after each
+/// Turn ends: a running Turn holds the session lock, so it never runs
+/// inside one.
 #[tauri::command(rename_all = "snake_case")]
-async fn campaign_summary(state: State<'_, Shared>) -> Result<CampaignSummary, AppError> {
-    blocking(&state, |s| s.summary()).await
+async fn get_play_view(state: State<'_, Shared>) -> Result<PlayView, AppError> {
+    blocking(&state, |s| s.get_play_view()).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -385,7 +388,7 @@ pub fn run() {
             list_campaigns,
             new_campaign,
             open_campaign,
-            campaign_summary,
+            get_play_view,
             submit_intent,
             correct_last,
             ask_ooc,

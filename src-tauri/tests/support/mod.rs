@@ -1,4 +1,5 @@
 //! Helpers that the shell tests share.
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
@@ -7,6 +8,7 @@ use threshold_core::{
     Gm, RecordedGm,
     domain::{ActionKind, DecisionProposal, Handle, NewFact, Seen, SlotDraft, Verdict},
     store::Store,
+    view::{Block, Part, StoryTurn, TurnBody},
 };
 
 pub fn town_dir() -> PathBuf {
@@ -75,4 +77,29 @@ pub fn town(session: &mut Session) {
             11,
         )
         .unwrap();
+}
+
+/// The Narration of a story Turn as the Player reads it: its blocks joined
+/// by a blank line. `None` when the Narration is missing.
+pub fn narration(turn: &StoryTurn) -> Option<String> {
+    let TurnBody::Narration { blocks } = &turn.body else {
+        return None;
+    };
+    let text = |parts: &[Part]| -> String {
+        parts
+            .iter()
+            .map(|p| match p {
+                Part::Text { text } | Part::Name { text, .. } => text.as_str(),
+            })
+            .collect()
+    };
+    Some(
+        blocks
+            .iter()
+            .map(|b| match b {
+                Block::Prose { parts } | Block::Speech { parts, .. } => text(parts),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    )
 }

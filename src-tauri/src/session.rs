@@ -16,11 +16,12 @@ use threshold_core::{
     build::Gap,
     fixture::{load_adventure_seed, load_world_setup},
     model::GmError,
+    player::Marks,
     rules::{D10, RollResult},
     setup::{create_campaign_file, remove_part},
     store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
     turn::{Engine, TurnError, TurnOutcome, stored_roll},
-    view::{self, CharacterView, JournalView},
+    view::{self, CharacterView, JournalView, PlayView},
     world::{PcSight, pc_sight},
 };
 use threshold_ollama::OllamaConfig;
@@ -71,25 +72,14 @@ impl Serialize for AppError {
     }
 }
 
+/// The Campaign just opened. Its story comes from `get_play_view`.
 #[derive(Clone, Debug, Serialize)]
 pub struct CampaignSummary {
     pub db_path: String,
     pub pc_name: String,
     pub premise: String,
-    pub turns: Vec<TurnLine>,
     /// No Opening Turn and no play Turn yet: the Player still has to Begin.
     pub needs_begin: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct TurnLine {
-    pub turn_id: u64,
-    pub kind: String,
-    pub intent: String,
-    pub narration: Option<String>,
-    pub roll: Option<RollResult>,
-    /// A later Correction reverted this Turn: its outcome no longer holds.
-    pub reverted: bool,
 }
 
 /// A committed Turn. `narration` is `None` when the Turn is committed but
@@ -264,36 +254,20 @@ impl Session {
         open.engine.store().snapshot(open.campaign).map_err(failed)
     }
 
-    /// The open campaign, with its Opening Turn and every play and
-    /// Correction Turn.
+    /// The open campaign: its file, its PC and premise, and whether Begin
+    /// is still due.
     pub fn summary(&self) -> Result<CampaignSummary, AppError> {
         let open = self.open()?;
         let view = self.view()?;
         let seed = view.adventure_seed.as_ref();
-        let store = open.engine.store();
-        let reverted = store.reverted_turns(open.campaign).map_err(failed)?;
-        let stored = store.turns(open.campaign).map_err(failed)?;
+        let stored = open.engine.store().turns(open.campaign).map_err(failed)?;
         let needs_begin = !stored
             .iter()
             .any(|t| matches!(t.record.kind, TurnKind::Opening | TurnKind::Play));
-        let turns = stored
-            .into_iter()
-            .filter(|t| {
-                matches!(
-                    t.record.kind,
-                    TurnKind::Play | TurnKind::Correction | TurnKind::Opening
-                )
-            })
-            .map(|t| {
-                let reverted = reverted.contains(&t.id);
-                turn_line(t, reverted)
-            })
-            .collect();
         Ok(CampaignSummary {
             db_path: open.db_path.display().to_string(),
             pc_name: seed.map(|s| s.pc.name.clone()).unwrap_or_default(),
             premise: seed.map(|s| s.premise.clone()).unwrap_or_default(),
-            turns,
             needs_begin,
         })
     }
@@ -369,6 +343,12 @@ impl Session {
     /// The PC as the PC knows itself: only its own Beliefs about itself.
     pub fn get_character(&self) -> Result<CharacterView, AppError> {
         Ok(view::character_view(&self.sight()?))
+    }
+
+    /// The Play screen: the story and the side panel, from PC Knowledge
+    /// only. The UI calls it after a Turn ends, never during one.
+    pub fn get_play_view(&self) -> Result<PlayView, AppError> {
+        Ok(view::play_view(&self.sight()?, &Marks::default()))
     }
 
     /// PC Knowledge, split: what the PC witnessed, and what it was told.
@@ -506,17 +486,6 @@ fn kind_name(kind: TurnKind) -> String {
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_default()
-}
-
-fn turn_line(t: StoredTurn, reverted: bool) -> TurnLine {
-    TurnLine {
-        reverted,
-        turn_id: t.id,
-        kind: kind_name(t.record.kind),
-        roll: stored_roll(&t.record.proposal_json),
-        intent: t.record.intent,
-        narration: t.narration,
-    }
 }
 
 fn turn_summary(outcome: TurnOutcome) -> TurnSummary {

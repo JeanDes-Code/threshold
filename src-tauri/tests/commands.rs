@@ -14,7 +14,7 @@ use std::{
 mod support;
 
 use serde_json::{Value, json};
-use support::{allowed, entity, session, town, town_dir, with_fact};
+use support::{allowed, entity, narration, session, town, town_dir, with_fact};
 use threshold_app::{
     drafts::{DraftView, Drafts},
     session::{AppError, Session},
@@ -24,7 +24,7 @@ use threshold_core::{
     build::{BuildCheck, BuildFailure, DraftState, GapKind, Progress, Stage},
     domain::Handle,
     rules::D10,
-    store::Store,
+    store::{Store, TurnKind},
     turn::Engine,
 };
 
@@ -170,12 +170,10 @@ fn turn_streams_and_reopens() {
     let mut reopened = session(dir.path(), &gm);
     let summary = reopened.open_campaign(Path::new(&db)).unwrap();
     assert_eq!(summary.pc_name, "Wren");
-    assert_eq!(summary.turns.len(), 1);
-    assert_eq!(summary.turns[0].intent, "I look around.");
-    assert_eq!(
-        summary.turns[0].narration.as_deref(),
-        Some("The hall is quiet.")
-    );
+    let story = reopened.get_play_view().unwrap().story;
+    assert_eq!(story.len(), 1);
+    assert_eq!(story[0].intent, "I look around.");
+    assert_eq!(narration(&story[0]).as_deref(), Some("The hall is quiet."));
 }
 
 #[test]
@@ -305,7 +303,7 @@ fn debug_flag_is_shared_outside_the_session() {
 }
 
 /// Final fix 1: a narration that fails after the Commit keeps the Turn. The
-/// result says so, the summary lists the Turn without Narration, and a retry
+/// result says so, the Play view lists the Turn without Narration, and a retry
 /// under the same op_id narrates it without a second Turn row.
 #[test]
 fn narration_failure_keeps_the_committed_turn() {
@@ -318,10 +316,10 @@ fn narration_failure_keeps_the_committed_turn() {
         .unwrap();
     assert_eq!(turn.narration, None);
     assert!(turn.narration_error.is_some());
-    let summary = s.summary().unwrap();
-    assert_eq!(summary.turns.len(), 1);
-    assert_eq!(summary.turns[0].turn_id, turn.turn_id);
-    assert_eq!(summary.turns[0].narration, None);
+    let story = s.get_play_view().unwrap().story;
+    assert_eq!(story.len(), 1);
+    assert_eq!(story[0].turn_id, turn.turn_id);
+    assert_eq!(narration(&story[0]), None);
 
     gm.push_narration("The hall is quiet.".into());
     let again = s
@@ -330,15 +328,12 @@ fn narration_failure_keeps_the_committed_turn() {
     assert_eq!(again.turn_id, turn.turn_id);
     assert_eq!(again.narration.as_deref(), Some("The hall is quiet."));
     assert_eq!(again.narration_error, None);
-    let summary = s.summary().unwrap();
-    assert_eq!(summary.turns.len(), 1, "exactly one Turn row");
-    assert_eq!(
-        summary.turns[0].narration.as_deref(),
-        Some("The hall is quiet.")
-    );
+    let story = s.get_play_view().unwrap().story;
+    assert_eq!(story.len(), 1, "exactly one Turn row");
+    assert_eq!(narration(&story[0]).as_deref(), Some("The hall is quiet."));
 }
 
-/// Final fix 4: the summary marks the Turn a Correction reverted.
+/// Final fix 4: the Play view marks the Turn a Correction reverted.
 #[test]
 fn summary_marks_reverted_turns() {
     let dir = tempfile::tempdir().unwrap();
@@ -354,13 +349,13 @@ fn summary_marks_reverted_turns() {
     let corrected = s
         .correct_last("op-2".into(), "I listen.", "I meant listening", &mut |_| {})
         .unwrap();
-    let lines = s.summary().unwrap().turns;
+    let lines = s.get_play_view().unwrap().story;
     let line = |id: u64| lines.iter().find(|l| l.turn_id == id).unwrap();
     assert!(line(played.turn_id).reverted);
     assert!(!line(corrected.turn_id).reverted);
 }
 
-/// The opening Narration lives on its Opening Turn, so the summary of a
+/// The opening Narration lives on its Opening Turn, so the Play view of a
 /// reopened file shows it again.
 #[test]
 fn opening_survives_a_restart() {
@@ -379,15 +374,16 @@ fn opening_survives_a_restart() {
     drop(s);
 
     let mut reopened = session(dir.path(), &gm);
-    let summary = reopened.open_campaign(Path::new(&db)).unwrap();
-    assert_eq!(summary.turns.len(), 1, "{:?}", summary.turns);
-    assert_eq!(summary.turns[0].kind, "opening");
-    assert_eq!(summary.turns[0].intent, "");
+    reopened.open_campaign(Path::new(&db)).unwrap();
+    let story = reopened.get_play_view().unwrap().story;
+    assert_eq!(story.len(), 1, "{story:?}");
+    assert_eq!(story[0].kind, TurnKind::Opening);
+    assert_eq!(story[0].intent, "");
     assert_eq!(
-        summary.turns[0].narration.as_deref(),
+        narration(&story[0]).as_deref(),
         Some("The hall is quiet at dawn.")
     );
-    assert!(!summary.turns[0].reverted);
+    assert!(!story[0].reverted);
 }
 
 // ---- Campaign from a document ------------------------------------------------
@@ -730,7 +726,7 @@ fn draft_flow_end_to_end() {
         .unwrap();
     assert!(summary.needs_begin);
     assert_eq!(summary.pc_name, "Mira Holt");
-    assert!(summary.turns.is_empty());
+    assert!(rig.session().get_play_view().unwrap().story.is_empty());
     let seen = stages(&progress);
     assert_eq!(seen.first(), Some(&(Stage::HiddenFacts, 0, 2)));
     assert_eq!(
@@ -759,8 +755,9 @@ fn draft_flow_end_to_end() {
     assert_eq!(chunks.concat(), "The lamp burns over Gull Point.");
     let summary = rig.session().summary().unwrap();
     assert!(!summary.needs_begin);
-    assert_eq!(summary.turns.len(), 1);
-    assert_eq!(summary.turns[0].kind, "opening");
+    let story = rig.session().get_play_view().unwrap().story;
+    assert_eq!(story.len(), 1);
+    assert_eq!(story[0].kind, TurnKind::Opening);
 }
 
 #[test]

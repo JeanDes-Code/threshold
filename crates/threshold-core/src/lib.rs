@@ -9,6 +9,7 @@ pub mod pack;
 pub mod player;
 pub mod rules;
 pub mod setup;
+pub mod speech;
 pub mod store;
 pub mod turn;
 pub mod view;

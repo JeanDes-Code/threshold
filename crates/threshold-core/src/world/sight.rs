@@ -4,7 +4,8 @@
 //!
 //! Five rules live here: who the PC can name (3.5), who is here and the
 //! Moment of each Turn (3.3), the state of each Open Item (3.4), and which
-//! Turn is a decision of the PC (3.2).
+//! Turn is a decision of the PC (3.2). It also resolves each speech mark
+//! (3.1), because that needs `WorldView::entities_by_name`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -17,6 +18,7 @@ use crate::{
     },
     normalize,
     rules::RollResult,
+    speech::{self, Line},
     store::{Fact, Knowledge, StoredTurn, TurnId, TurnKind, WorldView},
     turn::{stored_action, stored_roll},
 };
@@ -72,6 +74,20 @@ pub struct SightTurn {
     pub roll: Option<RollResult>,
     pub reverted: bool,
     pub narration: Option<String>,
+    /// The Narration's lines, each speech mark resolved. Empty when the
+    /// Narration is missing. A reverted Turn holds prose lines only.
+    pub lines: Vec<SightLine>,
+}
+
+/// One line of a Narration, as the PC can read it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SightLine {
+    /// The line as the Narration wrote it, a mark that did not resolve
+    /// included.
+    Prose(String),
+    /// A line spoken by an NPC who is present in the Turn and whom the PC
+    /// can name: the words without the quote marks.
+    Speech { speaker: EntityId, words: String },
 }
 
 /// The world as the PC knows it. Each field comes from PC Knowledge, from
@@ -281,7 +297,7 @@ pub fn pc_sight(
         ids.insert(b.subject);
         ids.extend(b.source);
     }
-    let known = ids
+    let known: Vec<Known> = ids
         .into_iter()
         .filter_map(|id| view.entities.iter().find(|e| e.id == id))
         .map(|e| {
@@ -307,13 +323,38 @@ pub fn pc_sight(
     let story: Vec<SightTurn> = ordered
         .iter()
         .filter(|t| is_story(t.record.kind))
-        .map(|t| SightTurn {
-            turn: t.id,
-            kind: t.record.kind,
-            intent: t.record.intent.clone(),
-            roll: stored_roll(&t.record.proposal_json),
-            reverted: reverted.contains(&t.id),
-            narration: t.narration.clone(),
+        .map(|t| {
+            // A reverted Turn has no Moment, so no line of it can resolve.
+            let present: &[EntityId] = moments
+                .iter()
+                .find(|m| m.turn == t.id)
+                .map_or(&[], |m| &m.present);
+            let lines = t.narration.as_deref().map_or_else(Vec::new, |text| {
+                speech::parse(text)
+                    .into_iter()
+                    .map(|line| match line {
+                        Line::Prose(text) => SightLine::Prose(text.to_owned()),
+                        Line::Tagged { line, name, words } => {
+                            match speaker(view, name, present, &named, &known) {
+                                Some(speaker) => SightLine::Speech {
+                                    speaker,
+                                    words: words.to_owned(),
+                                },
+                                None => SightLine::Prose(line.to_owned()),
+                            }
+                        }
+                    })
+                    .collect()
+            });
+            SightTurn {
+                turn: t.id,
+                kind: t.record.kind,
+                intent: t.record.intent.clone(),
+                roll: stored_roll(&t.record.proposal_json),
+                reverted: reverted.contains(&t.id),
+                narration: t.narration.clone(),
+                lines,
+            }
         })
         .collect();
     let replaced_by = story
@@ -357,7 +398,9 @@ pub fn pc_sight(
 /// The entities the PC can name (data shape 3.5): the PC; an Adventure Seed
 /// entry that is not hidden; an entity the PC holds a Belief about that is
 /// not a witnessed `location`; an entity whose main name is in the Narration
-/// of a standing Turn, as whole words.
+/// of a standing Turn, as whole words. The name of a speech mark does not
+/// count: the mark names the speaker for the app, and a line whose mark
+/// cannot resolve must not make its own speaker resolve.
 fn named(
     view: &WorldView,
     pc: EntityId,
@@ -386,7 +429,11 @@ fn named(
     let narrations: Vec<Vec<String>> = standing
         .iter()
         .filter_map(|t| t.narration.as_deref())
-        .map(normalize::name_words)
+        .flat_map(speech::parse)
+        .map(|line| match line {
+            Line::Prose(text) => normalize::name_words(text),
+            Line::Tagged { words, .. } => normalize::name_words(words),
+        })
         .collect();
     for entity in &view.entities {
         let words = normalize::name_words(&normalize::name(&entity.name));
@@ -399,6 +446,37 @@ fn named(
         }
     }
     named
+}
+
+/// The speaker of a speech mark (data shape 3.1), or `None`: the line then
+/// stays prose. `name` must give exactly one entity, of kind NPC, present
+/// in the Turn, whom the PC can name; and it must be a name the PC knows
+/// for it: the main name, or an other name the PC holds the Belief for.
+/// A hidden other name never resolves, so a bubble cannot reveal it.
+fn speaker(
+    view: &WorldView,
+    name: &str,
+    present: &[EntityId],
+    named: &HashSet<EntityId>,
+    known: &[Known],
+) -> Option<EntityId> {
+    let mut found = view.entities_by_name(name);
+    let entity = found.next()?;
+    if found.next().is_some()
+        || entity.kind != EntityKind::Npc
+        || !present.contains(&entity.id)
+        || !named.contains(&entity.id)
+    {
+        return None;
+    }
+    let tag = normalize::name(name);
+    let knows_the_name = entity.norm_name == tag
+        || known
+            .iter()
+            .filter(|k| k.id == entity.id)
+            .flat_map(|k| &k.other_names)
+            .any(|other| normalize::name(other) == tag);
+    knows_the_name.then_some(entity.id)
 }
 
 /// The PC's `location` after the Turn of `seq` `at`: the fact that was live

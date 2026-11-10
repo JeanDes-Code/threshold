@@ -57,7 +57,7 @@ export default function PlayPreview() {
   };
 
   const busy = replaying || step !== "idle";
-  const shownStream = replaying ? stream : step === "narrating" ? halfStream : null;
+  const shownStream = replaying ? stream : step === "narrating" ? halfStream : step === "deciding" ? "" : null;
   // While a Turn runs, the story stops before the last Turn, as it would live.
   const view = busy ? beforeLast : playView;
   const pendingIntent = busy ? (lastTurn?.intent ?? null) : null;
@@ -79,10 +79,18 @@ export default function PlayPreview() {
         stream={shownStream}
         pendingIntent={pendingIntent}
         answer={answer}
+        failure={null}
+        notice={null}
+        canRetry={false}
         onAct={async () => {
           replay();
           return true;
         }}
+        onCorrect={async () => {
+          replay();
+          return true;
+        }}
+        onRetry={replay}
         onAsk={async () => {
           setAnswer("The GM answers here, out of character. This box is not part of the story.");
           return true;

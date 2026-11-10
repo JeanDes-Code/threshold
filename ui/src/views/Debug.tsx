@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { errorText, type DebugLine, type DebugView, type DraftLine, type TurnLine } from "../api";
+import { errorText, type DebugLine, type DebugView, type DraftLine, type StoryTurn } from "../api";
 import { api } from "../tauri";
 
 type Part = "turns" | "build";
 
-/** Prompts, raw model output and timings. Debug mode only. */
-export default function Debug({ lines }: { lines: TurnLine[] }) {
+/** Prompts, raw model output and timings. Debug mode only. Turn ids come from `PlayView.story`. */
+export default function Debug({ turns }: { turns: StoryTurn[] }) {
   const [part, setPart] = useState<Part>("turns");
   return (
     <section>
@@ -17,13 +17,13 @@ export default function Debug({ lines }: { lines: TurnLine[] }) {
           World Build
         </button>
       </div>
-      {part === "turns" ? <TurnDebug lines={lines} /> : <BuildDebug />}
+      {part === "turns" ? <TurnDebug turns={turns} /> : <BuildDebug />}
     </section>
   );
 }
 
-function TurnDebug({ lines }: { lines: TurnLine[] }) {
-  const [turnId, setTurnId] = useState<number | null>(lines.at(-1)?.turn_id ?? null);
+function TurnDebug({ turns }: { turns: StoryTurn[] }) {
+  const [turnId, setTurnId] = useState<number | null>(turns.at(-1)?.turn_id ?? null);
   const [view, setView] = useState<DebugView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +38,7 @@ function TurnDebug({ lines }: { lines: TurnLine[] }) {
     );
   }, [turnId]);
 
-  if (lines.length === 0) return <p className="muted">No Turn yet.</p>;
+  if (turns.length === 0) return <p className="muted">No Turn yet.</p>;
   return (
     <>
       <label htmlFor="turn">Turn</label>
@@ -47,7 +47,7 @@ function TurnDebug({ lines }: { lines: TurnLine[] }) {
         value={turnId ?? ""}
         onChange={(e) => setTurnId(Number(e.target.value))}
       >
-        {lines.map((l) => (
+        {turns.map((l) => (
           <option key={l.turn_id} value={l.turn_id}>
             {l.turn_id}: {l.kind === "opening" ? "(opening)" : l.intent.slice(0, 60)}
           </option>

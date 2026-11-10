@@ -30,7 +30,9 @@ use crate::{
     world::{hidden, openly_here, pc_knowledge},
 };
 
-pub const NARRATION_RULES: &str = "\
+/// The narrator's rules. The last line is `speech::RULE`, the speech mark.
+pub const NARRATION_RULES: &str = concat!(
+    "\
 You are the narrator of a single-player tabletop role-playing game. Write what the player character (PC) perceives, in the second person, in the story language.
 Narrate only the outcome given under THIS TURN. Never add a fact that changes the world, and never reveal what the PC cannot perceive.
 Never decide the PC's actions, words, or feelings beyond the player's intent.
@@ -38,7 +40,10 @@ NPC intentions tell you how to portray an NPC. Show them through words and manne
 Give each NPC the voice of their Voice Card.
 Never say that more time passed than THIS TURN states. If no minutes pass, time does not pass.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
-";
+",
+    crate::speech::rule_text!(),
+    "\n"
+);
 
 /// The lines that follow `NARRATION_RULES` in the opening prompt.
 pub const OPENING_RULES: &str = "\

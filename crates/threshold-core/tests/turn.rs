@@ -1036,3 +1036,28 @@ fn stored_action_reads_the_proposal_record() {
     );
     assert_eq!(stored_action("{}"), None);
 }
+
+/// Design 11, "Turn time does not grow": the speech mark adds no model call.
+/// A Turn asks for one proposal and one Narration; Begin for one Narration.
+#[test]
+fn turn_makes_the_same_model_calls() {
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &adventure_seed(), 7).unwrap();
+    let gm = RecordedGm::new(
+        vec![json(&proposal(Verdict::Allowed))],
+        vec![
+            "Dusk falls on the gate square.".into(),
+            "Orsel: \"You are late.\"".into(),
+        ],
+    );
+    let mut engine = make_engine(store, campaign, &gm);
+    engine.begin(&mut |_| {}).unwrap();
+    assert_eq!(kinds(&gm), [CallKind::Narrate]);
+    engine
+        .play_turn("t1".into(), "I greet Orsel.", &mut |_| {})
+        .unwrap();
+    assert_eq!(
+        kinds(&gm),
+        [CallKind::Narrate, CallKind::Propose, CallKind::Narrate]
+    );
+}

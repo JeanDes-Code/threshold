@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  committedLine,
   createApi,
   createTurnClient,
   gapsFromError,
   parseBuildProgress,
+  turnNotice,
   type AdventureSeed,
   type Invoke,
   type TurnSummary,
@@ -115,7 +115,7 @@ describe("createTurnClient", () => {
   });
 });
 
-describe("committedLine", () => {
+describe("turnNotice", () => {
   const summary = (narration: string | null): TurnSummary => ({
     turn_id: 7,
     roll: null,
@@ -124,35 +124,26 @@ describe("committedLine", () => {
     total_ms: 1,
   });
 
-  it("keeps a Turn whose narration failed, without narration", () => {
-    const { line, notice } = committedLine(summary(null), "play", "I wait.");
-    expect(line).toEqual({
-      turn_id: 7,
-      kind: "play",
-      intent: "I wait.",
-      narration: null,
-      roll: null,
-      reverted: false,
-    });
-    expect(notice).toBe("Committed, narration interrupted: the game model request timed out");
+  it("tells that a Turn is committed when its narration failed", () => {
+    expect(turnNotice(summary(null))).toBe(
+      "Committed, narration interrupted: the game model request timed out",
+    );
   });
 
   it("has no notice for a narrated Turn", () => {
-    const { line, notice } = committedLine(summary("You wait."), "play", "I wait.");
-    expect(line.narration).toBe("You wait.");
-    expect(notice).toBeNull();
+    expect(turnNotice(summary("You wait."))).toBeNull();
   });
 });
 
 describe("createApi", () => {
-  it("reads the campaign summary", async () => {
-    const calls: string[] = [];
-    const invoke: Invoke = <T,>(cmd: string) => {
-      calls.push(cmd);
-      return Promise.resolve({ turns: [] } as T);
+  it("getPlayView calls get_play_view", async () => {
+    const calls: Call[] = [];
+    const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return Promise.resolve({ story: [] } as T);
     };
-    await createApi(invoke).summary();
-    expect(calls).toEqual(["campaign_summary"]);
+    await createApi(invoke).getPlayView();
+    expect(calls).toEqual([{ cmd: "get_play_view", args: undefined }]);
   });
 });
 

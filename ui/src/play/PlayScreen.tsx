@@ -10,13 +10,23 @@ export interface PlayScreenProps {
   view: PlayView;
   /** True while a Turn runs. */
   busy: boolean;
-  /** The raw Narration text while it streams; null when no Narration streams. */
+  /**
+   * The raw Narration text of the running Turn, "" before its first chunk;
+   * null when no Turn runs (an OOC question keeps the story as it is).
+   */
   stream: string | null;
   /** The Intent of the running Turn. */
   pendingIntent: string | null;
   answer: string | null;
+  /** Why the last Turn failed; nothing was committed. */
+  failure: string | null;
+  /** A Turn that committed with a problem, such as an interrupted narration. */
+  notice: string | null;
+  canRetry: boolean;
   onAct: (text: string) => Promise<boolean>;
   onAsk: (text: string) => Promise<boolean>;
+  onCorrect: (clarified: string, why: string) => Promise<boolean>;
+  onRetry: () => void;
   onBegin: () => void;
   onRenarrate: (turnId: number) => void;
   onDismissAnswer: () => void;
@@ -48,7 +58,7 @@ export default function PlayScreen(props: PlayScreenProps) {
       />
       <div className="play__body">
         <Story
-          items={storyItems(view, busy ? (stream ?? "") : null)}
+          items={storyItems(view, busy ? stream : null)}
           pendingIntent={pendingIntent}
           onName={showName}
           onRenarrate={props.onRenarrate}
@@ -72,8 +82,14 @@ export default function PlayScreen(props: PlayScreenProps) {
         pcName={view.pc_name}
         needsBegin={view.needs_begin}
         answer={answer}
+        failure={props.failure}
+        notice={props.notice}
+        canRetry={props.canRetry}
+        canCorrect={view.can_correct}
         onAct={props.onAct}
         onAsk={props.onAsk}
+        onCorrect={props.onCorrect}
+        onRetry={props.onRetry}
         onBegin={props.onBegin}
         onDismissAnswer={props.onDismissAnswer}
       />

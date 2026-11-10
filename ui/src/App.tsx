@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
-import { errorText, type CampaignSummary, type TurnLine } from "./api";
-import { api, turns, useEvent } from "./tauri";
+import { errorText, type CampaignSummary, type PlayView } from "./api";
+import LivePlay from "./play/LivePlay";
+import { api, play, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
 import Debug from "./views/Debug";
 import Journal from "./views/Journal";
 import NewCampaign from "./views/NewCampaign";
-import Play from "./views/Play";
 
 type Tab = "play" | "character" | "journal" | "debug";
 
 export default function App() {
   const [campaign, setCampaign] = useState<CampaignSummary | null>(null);
-  const [lines, setLines] = useState<TurnLine[]>([]);
+  const [view, setView] = useState<PlayView | null>(null);
   const [tab, setTab] = useState<Tab>("play");
   const [debug, setDebug] = useState(false);
   const [model, setModel] = useState("warming");
@@ -28,9 +28,12 @@ export default function App() {
     // A Turn that failed in the previous campaign must not be retried here.
     turns.reset();
     setCampaign(summary);
-    setLines(summary.turns);
+    setView(null);
     setShowSetup(false);
     setTab("play");
+    play.opened().then(setView, (e: unknown) =>
+      setAppError(`Could not read the Campaign: ${errorText(e)}`),
+    );
   };
 
   const toggleDebug = async (on: boolean) => {
@@ -45,8 +48,10 @@ export default function App() {
     }
   };
 
+  const story = view?.story ?? [];
+
   return (
-    <>
+    <div className="app">
       {debug && (
         <div className="banner" role="alert">
           DEBUG MODE: this shows GM-only facts, prompts and raw model output.
@@ -67,10 +72,6 @@ export default function App() {
         <span className="status">Model: {model}</span>
       </nav>
       {appError && <p className="error page">{appError}</p>}
-      {/* Hidden, not unmounted: a running draft or build keeps its screen. */}
-      <div hidden={!showSetup}>
-        <Setup onOpened={opened} locked={turnBusy} shown={showSetup} />
-      </div>
       {(campaign || debug) && (
         <div className="tabs">
           {campaign &&
@@ -86,39 +87,28 @@ export default function App() {
           )}
         </div>
       )}
-      {/* The debug view works without a Campaign: a failed World Build has none. */}
-      {tab === "debug" && debug && (
-        <main>
-          <Debug lines={lines} />
-        </main>
-      )}
-      {campaign && tab !== "debug" && (
-        <main>
-          {tab === "play" && (
-            <Play
-              key={campaign.db_path}
-              campaign={campaign}
-              onBusy={setTurnBusy}
-              lines={lines}
-              onLine={(line) => setLines((all) => [...all, line])}
-              onRefresh={() => {
-                api.summary().then(
-                  (summary) => setLines(summary.turns),
-                  (e: unknown) => setAppError(`Could not reload the Turns: ${errorText(e)}`),
-                );
-              }}
-              onNarration={(turnId, narration) =>
-                setLines((all) =>
-                  all.map((l) => (l.turn_id === turnId ? { ...l, narration } : l)),
-                )
-              }
-            />
-          )}
-          {tab === "character" && <Character revision={lines.length} />}
-          {tab === "journal" && <Journal revision={lines.length} />}
-        </main>
-      )}
-    </>
+      <div className="app__body">
+        {/* Hidden, not unmounted: a running draft or build keeps its screen. */}
+        <div hidden={!showSetup}>
+          <Setup onOpened={opened} locked={turnBusy} shown={showSetup} />
+        </div>
+        {/* The debug view works without a Campaign: a failed World Build has none. */}
+        {tab === "debug" && debug && (
+          <main>
+            <Debug turns={story} />
+          </main>
+        )}
+        {campaign && tab === "play" && view && (
+          <LivePlay key={campaign.db_path} view={view} onView={setView} onBusy={setTurnBusy} />
+        )}
+        {campaign && (tab === "character" || tab === "journal") && (
+          <main>
+            {tab === "character" && <Character revision={story.length} />}
+            {tab === "journal" && <Journal revision={story.length} />}
+          </main>
+        )}
+      </div>
+    </div>
   );
 }
 

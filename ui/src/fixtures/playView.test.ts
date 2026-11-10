@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Block, Part, PlayView } from "../api";
+import coreJson from "./playView.core.json?raw";
 import { playView, streamText } from "./playView";
 
 const blocksOf = (view: PlayView): Block[] =>
@@ -32,5 +33,37 @@ describe("the Play fixture", () => {
     const names = parts.filter((p) => p.kind === "name");
     expect(names.length).toBeGreaterThan(0);
     for (const part of names) expect(ids.has(part.entity_id)).toBe(true);
+  });
+});
+
+/**
+ * The shape of a JSON value: each object's path and key set, and the type of
+ * each value that is not null. Array items share their array's path.
+ */
+function shapes(value: unknown, path = "", out = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) shapes(item, `${path}[]`, out);
+  } else if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+    out.add(`${path} {${entries.map(([key]) => key).join(",")}}`);
+    for (const [key, item] of entries) {
+      if (item !== null && typeof item !== "object") out.add(`${path}.${key}: ${typeof item}`);
+      shapes(item, `${path}.${key}`, out);
+    }
+  }
+  return out;
+}
+
+describe("the core's PlayView", () => {
+  // `playView.core.json` is what the Rust `play_view` gives for the hidden
+  // world; `view.rs` keeps it up to date.
+  it("has the shape of the UI fixture, field by field", () => {
+    const core = shapes(JSON.parse(coreJson) as unknown);
+    const ui = shapes(playView);
+    const missing = [...core].filter((shape) => !ui.has(shape));
+    expect(missing).toEqual([]);
+    expect(core.has(".story[].body.blocks[] {kind,parts,speaker}")).toBe(true);
+    expect(core.has(".story[].body.blocks[].parts[] {entity_id,kind,text}")).toBe(true);
+    expect(core.has(".story[].body {kind}")).toBe(true);
   });
 });

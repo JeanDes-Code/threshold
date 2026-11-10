@@ -10,9 +10,20 @@ interface Props {
   needsBegin: boolean;
   /** The OOC answer, shown apart from the story. */
   answer: string | null;
+  /** Why the last Turn failed; nothing was committed. */
+  failure: string | null;
+  /** A Turn that committed with a problem, such as an interrupted narration. */
+  notice: string | null;
+  /** The failed Turn can be sent again under its op_id. */
+  canRetry: boolean;
+  /** The latest Turn is a standing Play Turn. */
+  canCorrect: boolean;
   /** Resolves true when the Intent was taken: the field then clears. */
   onAct: (text: string) => Promise<boolean>;
   onAsk: (text: string) => Promise<boolean>;
+  /** Resolves true when the Correction was committed: the fields then clear. */
+  onCorrect: (clarified: string, why: string) => Promise<boolean>;
+  onRetry: () => void;
   onBegin: () => void;
   onDismissAnswer: () => void;
 }
@@ -25,11 +36,16 @@ const PHASE_TEXT: Record<TurnPhase, string> = {
 
 /** The Intent field, "Act", quiet buttons, and an empty slot on the right for later modules. */
 export default function ActionBar(props: Props) {
-  const { scene, phase, pcName, needsBegin, answer, onAct, onAsk, onBegin, onDismissAnswer } = props;
+  const { scene, phase, pcName, needsBegin, answer, failure, notice, onAct, onAsk } = props;
+  const { canRetry, canCorrect, onCorrect, onRetry, onBegin, onDismissAnswer } = props;
   const [intent, setIntent] = useState("");
   const [ooc, setOoc] = useState("");
   const [asking, setAsking] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const [clarified, setClarified] = useState("");
+  const [why, setWhy] = useState("");
   const oocId = useId();
+  const fixId = useId();
   const busy = phase !== "idle";
 
   const act = async () => {
@@ -44,8 +60,35 @@ export default function ActionBar(props: Props) {
     if (await onAsk(text)) setOoc("");
   };
 
+  const correct = async () => {
+    const text = clarified.trim();
+    if (!text || !why.trim() || busy) return;
+    if (await onCorrect(text, why.trim())) {
+      setFixing(false);
+      setClarified("");
+      setWhy("");
+    }
+  };
+
   return (
     <footer className="play-bar" data-scene={scene.kind}>
+      {failure !== null && (
+        <section className="play-alert play-alert--error" role="alert">
+          <p>The Turn failed. Nothing was committed.</p>
+          <p className="play-alert__detail">{failure}</p>
+          {canRetry && (
+            <button type="button" className="play-btn play-btn--outline" disabled={busy} onClick={onRetry}>
+              Retry
+            </button>
+          )}
+        </section>
+      )}
+      {notice !== null && (
+        <section className="play-alert" role="status">
+          <p>{notice}</p>
+        </section>
+      )}
+
       {answer !== null && (
         <section className="play-ooc-answer" aria-label="Answer from the GM, out of character">
           <div className="play-ooc-answer__head">
@@ -104,7 +147,50 @@ export default function ActionBar(props: Props) {
           >
             Ask the GM
           </button>
+          <button
+            type="button"
+            className="play-btn play-btn--quiet play-bar__fix"
+            aria-expanded={fixing}
+            aria-controls={fixId}
+            disabled={!canCorrect && !fixing}
+            onClick={() => setFixing((f) => !f)}
+          >
+            Correct last Turn
+          </button>
           <div className="action-bar__later" />
+        </div>
+      )}
+
+      {fixing && !needsBegin && (
+        <div className="play-bar__row play-bar__row--ooc" id={fixId}>
+          <input
+            className="play-ooc-field"
+            aria-label="What you meant"
+            placeholder="What you meant"
+            value={clarified}
+            onChange={(e) => setClarified(e.target.value)}
+          />
+          <input
+            className="play-ooc-field"
+            aria-label="Why the last Turn was wrong"
+            placeholder="Why the last Turn was wrong"
+            value={why}
+            onChange={(e) => setWhy(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void correct();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="play-btn play-btn--outline"
+            disabled={busy || !canCorrect || !clarified.trim() || !why.trim()}
+            onClick={() => void correct()}
+          >
+            Apply Correction
+          </button>
         </div>
       )}
 
