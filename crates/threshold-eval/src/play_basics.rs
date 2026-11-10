@@ -1,8 +1,11 @@
 //! The play-basics scenario (QA, 2026-11-10): a move, an impossible act,
 //! a contest with an NPC, the acceptance of a pending item and a move to a
-//! place that is not an entity, on the live model. It counts what the
-//! ledger and the PC's sight show after each Turn; the judge reads only the
-//! Narrations of the impossible act and of the unknown-place move.
+//! place that is not an entity, on the live model. Two negative steps
+//! (review, 2026-11-10) talk about the open item and about another place
+//! without settling or going. It counts what the ledger and the PC's sight
+//! show after each Turn, and the Turns that move the World Clock; the judge
+//! reads only the Narrations of the impossible act and of the unknown-place
+//! move.
 
 use std::{collections::HashSet, fmt::Write as _};
 
@@ -35,6 +38,12 @@ struct Stats {
     unknown: usize,
     stayed: usize,
     told_stayed: usize,
+    no_close: usize,
+    false_closes: usize,
+    no_move: usize,
+    false_moves: usize,
+    committed: usize,
+    advanced: usize,
 }
 
 /// Commits the pending item as a Setup Turn, witnessed by the PC.
@@ -86,6 +95,15 @@ fn place(s: &Session) -> Result<Option<String>, String> {
     Ok(pc_location(&view).map(|p| normalize::name(&p)))
 }
 
+/// The World Clock now.
+fn clock(s: &Session) -> Result<u64, String> {
+    Ok(s.engine
+        .store()
+        .snapshot(s.campaign)
+        .map_err(|e| e.to_string())?
+        .clock_min)
+}
+
 /// True when the PC's sight shows the pending item closed in `turn`.
 fn closed_in(s: &Session, pending: &scenario::Pending, turn: TurnId) -> Result<bool, String> {
     let store = s.engine.store();
@@ -117,11 +135,16 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         )?;
         for step in &sc.steps {
             let before = place(&s)?;
+            let clock_before = clock(&s)?;
             let played = ctx.play(&mut s, &step.intent);
             st.turns += 1;
             let outcome = match &played.outcome {
                 Ok(o) => {
                     st.total_ms.push(o.timings.total_ms);
+                    st.committed += 1;
+                    if clock(&s)? > clock_before {
+                        st.advanced += 1;
+                    }
                     Some(o)
                 }
                 Err(_) => {
@@ -132,8 +155,28 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
             match step.kind {
                 BasicKind::Move => {
                     st.moves += 1;
-                    if outcome.is_some() && place(&s)? != before {
+                    let after = place(&s)?;
+                    // Right only at the asked place, when the step names it.
+                    let right = match &step.to {
+                        Some(to) => after.as_deref() == Some(normalize::name(to).as_str()),
+                        None => after != before,
+                    };
+                    if outcome.is_some() && right {
                         st.moved += 1;
+                    }
+                }
+                BasicKind::NoClose => {
+                    st.no_close += 1;
+                    if let Some(o) = outcome
+                        && closed_in(&s, &sc.pending, o.turn_id)?
+                    {
+                        st.false_closes += 1;
+                    }
+                }
+                BasicKind::NoMove => {
+                    st.no_move += 1;
+                    if outcome.is_some() && place(&s)? != before {
+                        st.false_moves += 1;
                     }
                 }
                 BasicKind::Impossible => {
@@ -187,14 +230,29 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "One campaign per run on the {} fixture; each run plays the steps in order. A failed Turn counts in its step's total and not in its success count. The scene place is the PC's `location` after the Turn. The judge reads only the Narrations of the impossible act and of the unknown-place move.\n",
+        "One campaign per run on the {} fixture; each run plays the steps in order. A failed Turn counts in its step's total and not in its success count. The scene place is the PC's `location` after the Turn; a move is right only when it is the place the step names. A negative step talks about the open item or another place without settling it or going there: a close or a move there is false. The judge reads only the Narrations of the impossible act and of the unknown-place move.\n",
         sc.fixture
     );
     let ratio = |n: usize, d: usize| format!("{n} / {d} ({})", pct(n, d));
     let _ = writeln!(
         out,
-        "- Moves that changed the scene place: {}",
+        "- Moves that reached the asked place: {}",
         ratio(st.moved, st.moves)
+    );
+    let _ = writeln!(
+        out,
+        "- False closes / negative steps: {}",
+        ratio(st.false_closes, st.no_close)
+    );
+    let _ = writeln!(
+        out,
+        "- False moves / negative steps: {}",
+        ratio(st.false_moves, st.no_move)
+    );
+    let _ = writeln!(
+        out,
+        "- Turns with a clock advance > 0 (committed Turns): {}",
+        ratio(st.advanced, st.committed)
     );
     let _ = writeln!(
         out,

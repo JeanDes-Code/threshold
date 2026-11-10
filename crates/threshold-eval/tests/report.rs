@@ -70,7 +70,10 @@ fn report_has_every_metric() {
         "Secret leaks per 100 Turns",
         "Offscreen consequence observed",
         "Mark rate",
-        "Moves that changed the scene place",
+        "Moves that reached the asked place",
+        "False closes / negative steps",
+        "False moves / negative steps",
+        "Turns with a clock advance > 0",
         "Impossible acts narrated as failure (judge)",
         "Contests with a Roll",
         "Pending items closed",
@@ -80,8 +83,8 @@ fn report_has_every_metric() {
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4, speech 10, play_basics 6 = 99 Turns.
-    assert!(report.contains("- Turns played: 198 (0 failed"), "{report}");
+    // agency_leaks 12, offscreen 4, speech 10, play_basics 8 = 101 Turns.
+    assert!(report.contains("- Turns played: 202 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1344,7 +1347,8 @@ mod speech {
 }
 
 /// B12 (QA, 2026-11-10): the play-basics counts, on recorded answers that
-/// do each step right.
+/// do each step right, then (review, 2026-11-10) on answers that close on
+/// the negative step, move on the other one, and move to the wrong place.
 #[test]
 fn play_basics_counts_each_step() {
     use threshold_core::{
@@ -1361,50 +1365,88 @@ fn play_basics_counts_each_step() {
     let view = store.snapshot(campaign).unwrap();
     let id = |name: &str| view.entity_by_name(name).unwrap().id;
     let (wren, doul, hall) = (id("Wren"), id("Doul"), id("Varn town hall"));
+    let mill = id("Varn mill");
     let contest = format!(
         r#"{{"action":"act","verdict":"check","check":{{"against":"E{doul}","win":{{"subject":"E{doul}","key":"mood","value":"beaten"}},"lose":{{"subject":"E{wren}","key":"fatigue","value":"sore_arm"}},"factors":[]}},"schedule":null,"minutes":5}}"#
     );
     let impossible =
         r#"{"action":"act","verdict":"impossible","check":null,"schedule":null,"minutes":1}"#
             .to_owned();
-    let accept = format!(
-        r#"{{"action":"talk","verdict":"allowed","closes":[{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}}],"check":null,"schedule":null,"minutes":2}}"#
-    );
-    let mill = id("Varn mill");
-    let away = format!(
-        r#"{{"action":"move","verdict":"allowed","move_to":"E{mill}","check":null,"schedule":null,"minutes":15}}"#
-    );
-    let back = format!(
-        r#"{{"action":"move","verdict":"allowed","move_to":"E{hall}","check":null,"schedule":null,"minutes":15}}"#
-    );
+    let close = |minutes: u32| {
+        format!(
+            r#"{{"action":"talk","verdict":"allowed","closes":[{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}}],"check":null,"schedule":null,"minutes":{minutes}}}"#
+        )
+    };
+    // No `minutes`: the core's default for a talk.
+    let talk = r#"{"action":"talk","verdict":"allowed","check":null,"schedule":null}"#.to_owned();
+    let go = |place: u64| {
+        format!(
+            r#"{{"action":"move","verdict":"allowed","move_to":"E{place}","check":null,"schedule":null,"minutes":15}}"#
+        )
+    };
     let nowhere = r#"{"action":"move","verdict":"allowed","move_to":null,"check":null,"schedule":null,"minutes":10}"#
         .to_owned();
-    let gm = RecordedGm::new(
-        vec![contest, impossible, accept, away, back, nowhere],
-        vec!["It happens.".to_owned(); 6],
-    );
-    let config = Config {
-        root: root(),
-        scenarios: vec!["play_basics".into()],
-        runs: 1,
-        model: "recorded".into(),
-        judge: "first-choice".into(),
-        memory_turns: None,
-        source: None,
-        expected: None,
-        raw_log: None,
+    let report_of = |proposals: Vec<String>| {
+        let gm = RecordedGm::new(proposals, vec!["It happens.".to_owned(); 8]);
+        let config = Config {
+            root: root(),
+            scenarios: vec!["play_basics".into()],
+            runs: 1,
+            model: "recorded".into(),
+            judge: "first-choice".into(),
+            memory_turns: None,
+            source: None,
+            expected: None,
+            raw_log: None,
+        };
+        let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+        run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap()
     };
-    let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
-    let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
+
+    let right = report_of(vec![
+        contest.clone(),
+        impossible.clone(),
+        talk.clone(),
+        close(2),
+        talk.clone(),
+        go(mill),
+        go(hall),
+        nowhere.clone(),
+    ]);
     for line in [
-        "- Moves that changed the scene place: 2 / 2 (100%)",
+        "- Moves that reached the asked place: 2 / 2 (100%)",
+        "- False closes / negative steps: 0 / 1 (0%)",
+        "- False moves / negative steps: 0 / 1 (0%)",
+        "- Turns with a clock advance > 0 (committed Turns): 8 / 8 (100%)",
         "- Impossible acts narrated as failure (judge): 1 / 1 (100%) (0 judge errors)",
         "- Contests with a Roll: 1 / 1 (100%)",
         "- Pending items closed: 1 / 1 (100%)",
         "- Moves to an unknown place that left the PC in place: 1 / 1 (100%); told as not arriving (judge): 1 / 1 (100%)",
-        "- Turns failed: 0 / 6 (0%)",
+        "- Turns failed: 0 / 8 (0%)",
     ] {
-        assert!(report.contains(line), "missing {line}:\n{report}");
+        assert!(right.contains(line), "missing {line}:\n{right}");
+    }
+
+    // The model closes on "more time", moves on the question about the
+    // mill, then "goes back" to the mill instead of the town hall.
+    let wrong = report_of(vec![
+        contest,
+        impossible,
+        close(2),
+        talk,
+        go(mill),
+        go(mill),
+        go(mill),
+        nowhere,
+    ]);
+    for line in [
+        // The PC already stands at the mill for the first move.
+        "- Moves that reached the asked place: 1 / 2 (50%)",
+        "- False closes / negative steps: 1 / 1 (100%)",
+        "- False moves / negative steps: 1 / 1 (100%)",
+        "- Pending items closed: 0 / 1 (0%)",
+    ] {
+        assert!(wrong.contains(line), "missing {line}:\n{wrong}");
     }
 }
 

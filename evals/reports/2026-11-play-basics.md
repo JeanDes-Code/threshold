@@ -97,3 +97,9 @@ The two "truncated" proposals of attempt 2 were not cut. The model writes newlin
 - The unknown-place move: the model chose `impossible` three times out of four. The PC does not arrive, as wanted, but the narrator gets "the world prevents it" instead of "you do not find the way".
 - One fixture, one phrasing per step and 4 runs: the counts are small. A move or a contest that commits counts as a success even when its Narration disagrees; only the impossible act and the unknown-place move have a judge.
 
+
+## Attempt 4: not run (2026-11-10)
+
+The scenario now has two negative steps per run (an Intent that asks for more time on the open item, and one that asks about the Varn mill without going there), a move counts only at the asked place, and the report gives the share of committed Turns that move the World Clock. The code is the commit that adds this section.
+
+No live numbers yet. Before the run, the machine was busy: ComfyUI held about 3.9 GB of the 12 GB GPU, 4 GB of RAM was free, and the zram swap was 25.4 of 30.5 GB full. A run then measures the machine, not the model. Run `threshold-eval --scenario play_basics --runs 4` on a free machine, with `gemma4:26b-a4b-it-qat` preloaded.

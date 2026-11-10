@@ -2,8 +2,11 @@
 # the steps in order: a contest with an NPC, an impossible act, the
 # acceptance of a pending item, a move to a second known place (the Varn
 # mill, a place entity since ADR 0007), a move back, and a move to a place
-# that is not an entity. The report counts the moves that changed the
-# scene place, the impossible acts the judge reads as a failure, the
+# that is not an entity. Two negative steps (review, 2026-11-10) talk about
+# the open item and about another place without settling it or going there.
+# The report counts the moves that reached the asked place, the false
+# closes and false moves of the negative steps, the Turns that move the
+# World Clock, the impossible acts the judge reads as a failure, the
 # contests with a Roll, the pending items that closed, the unknown-place
 # moves that left the PC in place and that the judge reads as "does not
 # arrive", the failed Turns and the Turn time.
@@ -25,16 +28,26 @@ kind = "impossible"
 intent = "I spread my arms and fly up through the roof of the town hall."
 
 [[steps]]
+kind = "no_close"
+intent = "I ask Orsel for more time to think about the tithe roll."
+
+[[steps]]
 kind = "accept"
 intent = "I tell Orsel yes: I will copy the tithe roll before dusk."
 
 [[steps]]
+kind = "no_move"
+intent = "I ask Hessa how long the walk down to the Varn mill takes."
+
+[[steps]]
 kind = "move"
 intent = "I leave the town hall and walk down the river road to the Varn mill."
+to = "Varn mill"
 
 [[steps]]
 kind = "move"
 intent = "I walk back up the road to the Varn town hall."
+to = "Varn town hall"
 
 [[steps]]
 kind = "unknown_move"

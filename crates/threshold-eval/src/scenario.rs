@@ -146,6 +146,10 @@ pub struct Pending {
 pub struct BasicStep {
     pub kind: BasicKind,
     pub intent: String,
+    /// For a move: the place the Intent names. The move counts as right
+    /// only when the scene place after the Turn is this place.
+    #[serde(default)]
+    pub to: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -159,6 +163,12 @@ pub enum BasicKind {
     Contest,
     /// The PC accepts the pending item: it must close.
     Accept,
+    /// The PC talks about the Open Item without settling it: the item must
+    /// stay open (a negative step, review 2026-11-10).
+    NoClose,
+    /// The PC talks about another place without going there: the scene
+    /// place must stay (a negative step, review 2026-11-10).
+    NoMove,
     /// The PC heads for a place that is not an entity (ADR 0007): the
     /// Turn commits, the scene place stays, and the Narration must tell
     /// that the PC does not arrive.
