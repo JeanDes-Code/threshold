@@ -49,6 +49,28 @@ const STAGES: Record<BuildStage, string> = {
   commit: "Saving the campaign",
 };
 
+/** The largest document file the screen reads, in bytes: 1 MB. The core takes 40,000 characters. */
+export const DOCUMENT_MAX_BYTES = 1024 * 1024;
+
+/** Shown next to "Cancel": a cancel waits for the model call that runs. */
+export const CANCEL_NOTE = "Cancel takes effect after the current step.";
+
+export type DocumentRead = { ok: true; text: string } | { ok: false; message: string };
+
+/** Reads a chosen document, unless it is above `DOCUMENT_MAX_BYTES`: then it reads nothing. */
+export async function readDocument(file: {
+  size: number;
+  text: () => Promise<string>;
+}): Promise<DocumentRead> {
+  if (file.size > DOCUMENT_MAX_BYTES) {
+    return {
+      ok: false,
+      message: "This file is larger than 1 MB. Use a smaller file, or paste the part you need.",
+    };
+  }
+  return { ok: true, text: await file.text() };
+}
+
 /** The Player's label of a stage; "Working" for a stage this UI does not know. */
 export function stageLabel(stage: string): string {
   return Object.hasOwn(STAGES, stage) ? STAGES[stage as BuildStage] : "Working";

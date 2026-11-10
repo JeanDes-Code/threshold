@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdventureSeed, DraftView } from "./api";
 import {
+  CANCEL_NOTE,
+  DOCUMENT_MAX_BYTES,
+  readDocument,
   ageSource,
   agesStated,
   agesToConfirm,
@@ -486,5 +489,34 @@ describe("createSaver", () => {
     finish[0]?.();
     await vi.runAllTimersAsync();
     expect(results).toEqual([]);
+  });
+});
+
+describe("readDocument", () => {
+  const file = (size: number) => {
+    const text = vi.fn(() => Promise.resolve("the text"));
+    return { file: { size, text }, text };
+  };
+
+  it("refuses a file above 1 MB before reading it", async () => {
+    expect(DOCUMENT_MAX_BYTES).toBe(1024 * 1024);
+    const big = file(DOCUMENT_MAX_BYTES + 1);
+    expect(await readDocument(big.file)).toEqual({
+      ok: false,
+      message: "This file is larger than 1 MB. Use a smaller file, or paste the part you need.",
+    });
+    expect(big.text).not.toHaveBeenCalled();
+  });
+
+  it("reads a file at the limit", async () => {
+    const ok = file(DOCUMENT_MAX_BYTES);
+    expect(await readDocument(ok.file)).toEqual({ ok: true, text: "the text" });
+    expect(ok.text).toHaveBeenCalledOnce();
+  });
+});
+
+describe("CANCEL_NOTE", () => {
+  it("says when a cancel takes effect", () => {
+    expect(CANCEL_NOTE).toBe("Cancel takes effect after the current step.");
   });
 });

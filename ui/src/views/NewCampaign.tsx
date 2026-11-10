@@ -8,7 +8,7 @@ import {
   type DraftState,
   type DraftView,
 } from "../api";
-import { failureText, progressText } from "../newCampaign";
+import { CANCEL_NOTE, failureText, progressText, readDocument } from "../newCampaign";
 import { api, useEvent } from "../tauri";
 import SeedReview from "./SeedReview";
 
@@ -122,9 +122,16 @@ export default function NewCampaign({ onOpened, locked }: Props) {
     refresh();
   };
 
+  /** The size is checked before the file is read: a huge file never loads. */
   const loadFile = async (file: File) => {
     try {
-      setText(await file.text());
+      const read = await readDocument(file);
+      if (read.ok) {
+        setText(read.text);
+        setError(null);
+      } else {
+        setError(read.message);
+      }
     } catch (e) {
       setError(`Could not read the file: ${errorText(e)}`);
     }
@@ -136,6 +143,7 @@ export default function NewCampaign({ onOpened, locked }: Props) {
       <button disabled={cancelling} onClick={() => void cancel()}>
         {cancelling ? "Cancelling…" : "Cancel"}
       </button>
+      <span className="muted">{CANCEL_NOTE}</span>
     </div>
   );
 
