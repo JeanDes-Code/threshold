@@ -10,8 +10,8 @@ pub use adventure_seed::{
 };
 pub use handle::{Handle, HandleError};
 pub use proposal::{
-    ActionKind, Cancel, Cause, CheckDraft, Close, CloseOutcome, DecisionProposal, EventDraft,
-    Factor, MAX_CLOSES, NewFact, NewNpc, Reaction, Seen, SlotDraft, Verdict,
+    ActionKind, Cancel, Cause, CheckDraft, CloseOutcome, DecisionProposal, EventDraft, Factor,
+    ItemStatus, MAX_CLOSES, NewFact, NewNpc, Reaction, Seen, SlotDraft, Verdict,
 };
 pub use types::{
     ALIAS_KEY_PREFIX, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,

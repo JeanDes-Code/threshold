@@ -79,11 +79,11 @@ pub fn to_ops(
             b.write(stake, FactSource::Stake, holders, Vec::new());
         }
     }
-    // ADR 0007: each Open Item the Intent settles gets its outcome fact,
+    // ADR 0007: each Open Item with a closing status gets its outcome fact,
     // witnessed by everyone present, the PC included, when the verdict lets
     // the action happen (changed after review). The core builds the value
     // and the text from the item's own text and the outcome word.
-    for (subject, key, close) in super::closed(p, view).into_iter().filter(|_| lets_happen) {
+    for (subject, key, outcome_of) in super::closed(p, view).into_iter().filter(|_| lets_happen) {
         let holders = b.holders(Seen::Present);
         let open = format!("{}{key}", crate::domain::OPEN_KEY_PREFIX);
         let item_text = view
@@ -92,9 +92,9 @@ pub fn to_ops(
         let outcome = SlotDraft {
             subject: Handle::Entity(subject),
             key: key.to_owned(),
-            value: close.outcome.word().to_owned(),
+            value: outcome_of.word().to_owned(),
         };
-        let text = close.outcome.text(&item_text);
+        let text = outcome_of.text(&item_text);
         b.write_text(&outcome, text, FactSource::Proposal, holders, Vec::new());
     }
     if let (Some(place), Some(pc)) = (&moved_to, pc(view)) {

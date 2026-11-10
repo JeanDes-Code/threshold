@@ -7,7 +7,10 @@ use threshold_core::{
         CheckKind, PC_INVOLUNTARY_KEYS, Rejection, STANCE_CEILINGS, ceiling, settle, to_ops,
         validate,
     },
-    domain::{Cancel, Canon, Cause, EventDraft, Handle, Knowing, LedgerOp, Seen, Stance, Verdict},
+    domain::{
+        Cancel, Canon, Cause, EventDraft, Handle, ItemStatus, Knowing, LedgerOp, Seen, Stance,
+        Verdict,
+    },
     proposal_schema_for,
 };
 
@@ -712,7 +715,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "verdict": "allowed",
         "contested": false,
         "move_to": null,
-        "closes": [],
+        "open_items": {"E1 pending_trip": "open"},
         "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}}],
         "facts": [{"slot": {"subject": "N1", "key": "mood", "value": "calm"}, "seen": "pc", "because": ["F40"]}],
         "new_npcs": [{"id": "N1", "name": "Kett", "age": 34, "voice": "terse"}]
@@ -746,28 +749,37 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let mut unsaid = good.clone();
     unsaid.as_object_mut().unwrap().remove("contested");
     assert!(!validator.is_valid(&unsaid));
-    // `closes` is required; its items name an open item the PC holds.
+    // `open_items` is required: one status for each open item the PC
+    // holds, `open` included, and no other key.
     let mut closing = good.clone();
-    closing["closes"] = serde_json::json!([{"item": "E1 pending_trip", "outcome": "accepted"}]);
+    closing["open_items"]["E1 pending_trip"] = "accepted".into();
     assert!(
         validator.is_valid(&closing),
         "{:?}",
         validator.validate(&closing)
     );
-    closing["closes"][0]["item"] = "E1 pending_feast".into();
-    assert!(!validator.is_valid(&closing));
-    let mut open = good.clone();
-    open.as_object_mut().unwrap().remove("closes");
-    assert!(!validator.is_valid(&open));
-    // With no open item held, `closes` takes nothing.
+    let mut unknown = good.clone();
+    unknown["open_items"] = serde_json::json!({"E1 pending_feast": "open"});
+    assert!(!validator.is_valid(&unknown));
+    unknown["open_items"]["E1 pending_trip"] = "open".into();
+    assert!(!validator.is_valid(&unknown), "an extra key");
+    let mut unstated = good.clone();
+    unstated["open_items"] = serde_json::json!({});
+    assert!(
+        !validator.is_valid(&unstated),
+        "a held item without a status"
+    );
+    let mut missing = good.clone();
+    missing.as_object_mut().unwrap().remove("open_items");
+    assert!(!validator.is_valid(&missing));
+    // With no open item held, the schema has no `open_items`.
     let none = proposal_schema_for(&HandleContext {
         open_items: vec![],
         ..ctx.clone()
     });
     let none = jsonschema::validator_for(&none).unwrap();
-    assert!(none.is_valid(&good));
-    closing["closes"][0]["item"] = "E1 pending_trip".into();
-    assert!(!none.is_valid(&closing));
+    assert!(none.is_valid(&missing), "{:?}", none.validate(&missing));
+    assert!(!none.is_valid(&good));
 }
 
 // --- Fix round 1 -----------------------------------------------------------
@@ -1314,24 +1326,21 @@ fn pending(w: &mut World, subject: u64, key: &str, seen_by: Vec<u64>) {
 }
 
 /// ADR 0007: the PC's own outcome fact is refused even when the PC holds
-/// the item; `closes` names the item and the core writes the outcome.
+/// the item; `open_items` gives the item a closing status and the core
+/// writes the outcome.
 #[test]
-fn closes_writes_the_outcome_of_an_open_item_the_pc_holds() {
+fn a_closing_status_writes_the_outcome_of_an_open_item_the_pc_holds() {
     let mut w = World::new();
     let ada = w.ada;
     let item = format!("E{ada} pending_winter_post");
-    let close = |item: &str| threshold_core::domain::Close {
-        item: item.into(),
-        outcome: threshold_core::domain::CloseOutcome::Accepted,
-    };
     pending(&mut w, ada, "pending_winter_post", vec![]);
     // An open item the PC does not hold cannot be closed.
     let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Talk;
-    p.closes = vec![close(&item)];
+    p.open_items = [(item.clone(), ItemStatus::Accepted)].into();
     rejected(validate(&p, &w.view), CheckKind::References);
     let (settled, notes) = settle(p.clone(), &w.view);
-    assert!(settled.closes.is_empty());
+    assert!(settled.open_items.is_empty());
     assert_eq!(notes.len(), 1, "{notes:?}");
 
     // The PC learns of it.
@@ -1356,7 +1365,8 @@ fn closes_writes_the_outcome_of_an_open_item_the_pc_holds() {
         vec![],
     )];
     rejected(validate(&own, &w.view), CheckKind::Agency);
-    // With `closes`, a fact on the same slot goes: closes writes it.
+    // With a closing status, a fact on the same slot goes: the core
+    // writes it.
     p.facts = own.facts.clone();
     let (settled, notes) = settle(p, &w.view);
     assert!(settled.facts.is_empty());
@@ -1528,7 +1538,7 @@ fn a_fact_about_the_pc_itself_is_never_a_blocker() {
     assert!(notes[0].contains(&format!("F{location}")), "{notes:?}");
 }
 
-// --- closes after review (ADR 0007) ------------------------------------------
+// --- open_items after review (ADR 0007) --------------------------------------
 
 /// Gives the PC an Open Item on `key` that it holds: the pending fact, then
 /// the PC's knowledge of it.
@@ -1550,34 +1560,40 @@ fn held_item(w: &mut World, key: &str) -> String {
 fn closing(item: &str, verdict: Verdict) -> threshold_core::domain::DecisionProposal {
     let mut p = proposal(verdict);
     p.action = threshold_core::domain::ActionKind::Talk;
-    p.closes = vec![threshold_core::domain::Close {
-        item: item.into(),
-        outcome: threshold_core::domain::CloseOutcome::Accepted,
-    }];
+    p.open_items = [(item.to_owned(), ItemStatus::Accepted)].into();
     p
 }
 
-/// C1: `outcome` is a closed list. No free text parses, and the per-Turn
-/// schema refuses any other word.
+/// C1: a status is a closed list. No free text parses, and the per-Turn
+/// schema refuses any other word. `open` closes nothing; every other
+/// status is the outcome word of the fact the core writes.
 #[test]
-fn close_outcome_is_a_closed_list() {
-    use threshold_core::domain::{Close, CloseOutcome};
-    for (word, outcome) in [
-        ("accepted", CloseOutcome::Accepted),
-        ("refused", CloseOutcome::Refused),
-        ("done", CloseOutcome::Done),
-        ("failed", CloseOutcome::Failed),
-        ("dropped", CloseOutcome::Dropped),
+fn item_status_is_a_closed_list() {
+    use threshold_core::domain::CloseOutcome;
+    type Items = std::collections::BTreeMap<String, ItemStatus>;
+    for (word, status, outcome) in [
+        ("open", ItemStatus::Open, None),
+        (
+            "accepted",
+            ItemStatus::Accepted,
+            Some(CloseOutcome::Accepted),
+        ),
+        ("refused", ItemStatus::Refused, Some(CloseOutcome::Refused)),
+        ("done", ItemStatus::Done, Some(CloseOutcome::Done)),
+        ("failed", ItemStatus::Failed, Some(CloseOutcome::Failed)),
+        ("dropped", ItemStatus::Dropped, Some(CloseOutcome::Dropped)),
     ] {
-        let close: Close =
-            serde_json::from_value(serde_json::json!({"item": "E1 pending_x", "outcome": word}))
-                .unwrap();
-        assert_eq!(close.outcome, outcome);
-        assert_eq!(outcome.word(), word);
+        let items: Items =
+            serde_json::from_value(serde_json::json!({"E1 pending_x": word})).unwrap();
+        assert_eq!(items["E1 pending_x"], status);
+        assert_eq!(status.outcome(), outcome);
+        if let Some(outcome) = outcome {
+            assert_eq!(outcome.word(), word);
+        }
     }
-    for free in ["agreed", "I swear it gladly", "Accepted", ""] {
-        let parsed: Result<Close, _> =
-            serde_json::from_value(serde_json::json!({"item": "E1 pending_x", "outcome": free}));
+    for free in ["agreed", "I swear it gladly", "Accepted", "postponed", ""] {
+        let parsed: Result<Items, _> =
+            serde_json::from_value(serde_json::json!({"E1 pending_x": free}));
         assert!(parsed.is_err(), "{free:?} parsed");
     }
     let schema = proposal_schema_for(&HandleContext {
@@ -1587,11 +1603,52 @@ fn close_outcome_is_a_closed_list() {
     let validator = jsonschema::validator_for(&schema).unwrap();
     let mut p = serde_json::json!({
         "action": "talk", "verdict": "allowed", "contested": false, "move_to": null,
-        "closes": [{"item": "E1 pending_trip", "outcome": "refused"}]
+        "open_items": {"E1 pending_trip": "refused"}
     });
     assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));
-    p["closes"][0]["outcome"] = "gladly agreed".into();
+    p["open_items"]["E1 pending_trip"] = "open".into();
+    assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));
+    p["open_items"]["E1 pending_trip"] = "gladly agreed".into();
     assert!(!validator.is_valid(&p));
+}
+
+/// The live bug (play_basics, cdefde8): "I ask Orsel for more time" came
+/// back as a close with `refused`, because the model had no way to say that
+/// the Intent touched the item and left it open. Status `open` is that
+/// way: it writes no outcome, and the PC still holds the item.
+#[test]
+fn an_open_status_keeps_the_item_open() {
+    let mut w = World::new();
+    let item = held_item(&mut w, "pending_winter_post");
+    let mut p = proposal(Verdict::Allowed);
+    p.action = threshold_core::domain::ActionKind::Talk;
+    p.open_items = [(item.clone(), ItemStatus::Open)].into();
+    let (settled, notes) = settle(p, &w.view);
+    assert!(notes.is_empty(), "{notes:?}");
+    apply(&mut w, &settled, None);
+    assert!(w.view.live_fact(w.ada, "winter_post").is_none());
+    assert_eq!(
+        threshold_core::world::pc_open_items(&w.view),
+        [(w.ada, "pending_winter_post".to_owned())]
+    );
+    // A held item the proposal leaves out stays open too: the schema
+    // demands its status, but the core creates no close.
+    let mut silent = proposal(Verdict::Allowed);
+    silent.action = threshold_core::domain::ActionKind::Talk;
+    apply(&mut w, &silent, None);
+    assert_eq!(threshold_core::world::pc_open_items(&w.view).len(), 1);
+    // With `open`, the outcome slot is not the core's: the model's own
+    // outcome fact on the PC is still an agency error.
+    let mut own = proposal(Verdict::Allowed);
+    own.open_items = [(item, ItemStatus::Open)].into();
+    own.facts = vec![fact(
+        slot(e(w.ada), "winter_post", "accepted"),
+        Seen::Pc,
+        vec![],
+    )];
+    let (own, _) = settle(own, &w.view);
+    assert_eq!(own.facts.len(), 1);
+    rejected(validate(&own, &w.view), CheckKind::Agency);
 }
 
 /// C1: the core builds the outcome fact from the item's own text and the
@@ -1610,10 +1667,10 @@ fn the_outcome_fact_is_built_from_the_item_text() {
     );
 }
 
-/// C2: `closes` obeys the verdict, like `move_to`: an impossible verdict
+/// C2: a closing status obeys the verdict, like `move_to`: an impossible verdict
 /// and a lost Check close nothing; a won Check closes.
 #[test]
-fn closes_applies_only_when_the_action_happens() {
+fn a_close_applies_only_when_the_action_happens() {
     for (verdict, roll_result, closed) in [
         (Verdict::Impossible, None, false),
         (Verdict::Check, Some(false), false),
@@ -1669,8 +1726,10 @@ fn the_outcome_fact_is_established_and_play_can_change_it() {
     );
 }
 
-/// C4: at most `MAX_CLOSES` items per proposal. The schema refuses a third;
-/// `validate` rejects it; `settle` keeps the first two and logs the rest.
+/// C4: at most `MAX_CLOSES` items close per proposal. `validate` rejects a
+/// third closing status; `settle` keeps the first two closes and sets the
+/// rest back to `open`, with a note. The schema cannot count the closing
+/// statuses, so the core alone holds this rule.
 #[test]
 fn a_proposal_closes_at_most_two_items() {
     use threshold_core::domain::MAX_CLOSES;
@@ -1681,41 +1740,31 @@ fn a_proposal_closes_at_most_two_items() {
         .map(|key| held_item(&mut w, key))
         .collect();
     let mut p = proposal(Verdict::Allowed);
-    p.closes = items
+    p.open_items = items
         .iter()
-        .map(|item| threshold_core::domain::Close {
-            item: item.clone(),
-            outcome: threshold_core::domain::CloseOutcome::Done,
-        })
+        .map(|item| (item.clone(), ItemStatus::Done))
         .collect();
     rejected(validate(&p, &w.view), CheckKind::References);
     let (settled, notes) = settle(p.clone(), &w.view);
-    assert_eq!(settled.closes.len(), MAX_CLOSES);
+    let closing = |p: &threshold_core::domain::DecisionProposal| {
+        p.open_items
+            .values()
+            .filter(|s| s.outcome().is_some())
+            .count()
+    };
+    assert_eq!(closing(&settled), MAX_CLOSES);
+    assert_eq!(settled.open_items.len(), 3, "the third stays, as open");
     assert_eq!(notes.len(), 1, "{notes:?}");
     ok(validate(&settled, &w.view));
-    // The same item twice is dropped.
-    let mut twice = p.clone();
-    twice.closes = vec![p.closes[0].clone(), p.closes[0].clone()];
-    let (settled, notes) = settle(twice, &w.view);
-    assert_eq!(settled.closes.len(), 1);
-    assert_eq!(notes.len(), 1, "{notes:?}");
-    // The schema: three items fail.
-    let schema = proposal_schema_for(&HandleContext {
-        open_items: items.clone(),
-        ..HandleContext::default()
-    });
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    let closes: Vec<serde_json::Value> = items
-        .iter()
-        .map(|item| serde_json::json!({"item": item, "outcome": "done"}))
-        .collect();
-    let mut json = serde_json::json!({
-        "action": "talk", "verdict": "allowed", "contested": false, "move_to": null,
-        "closes": closes
-    });
-    assert!(!validator.is_valid(&json));
-    json["closes"].as_array_mut().unwrap().pop();
-    assert!(validator.is_valid(&json), "{:?}", validator.validate(&json));
+    // Three statuses of which only two close are fine.
+    let mut two = p.clone();
+    two.open_items.insert(items[2].clone(), ItemStatus::Open);
+    ok(validate(&two, &w.view));
+    let (two, notes) = settle(two, &w.view);
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(closing(&two), MAX_CLOSES);
+    apply(&mut w, &settled, None);
+    assert_eq!(threshold_core::world::pc_open_items(&w.view).len(), 1);
 }
 
 // --- move_to and the default Check after review (ADR 0007) -------------------

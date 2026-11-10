@@ -186,13 +186,14 @@ pub(super) enum Origin {
     LoseStake,
     /// The PC's `location` that the core writes from `move_to` (ADR 0007).
     Move,
-    /// An outcome fact that the core writes from `closes` (ADR 0007).
+    /// An outcome fact that the core writes from a closing status in
+    /// `open_items` (ADR 0007).
     Close,
 }
 
 /// A slot write of the proposal on an entity that exists before this Turn:
 /// non-claim facts, schedule effects, both stakes, the PC's `location`
-/// from `move_to`, and the outcomes of `closes`.
+/// from `move_to`, and the outcomes of the closing statuses in `open_items`.
 pub(super) struct Write<'a> {
     pub subject: EntityId,
     pub key: &'a str,
@@ -235,7 +236,7 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             }
         }
     }
-    // `move_to` and `closes` apply only when the action can happen: an
+    // `move_to` and a close apply only when the action can happen: an
     // impossible verdict writes neither. On a Check they apply on a success
     // only, like the win stake (`to_ops`).
     let happens = p.verdict != crate::domain::Verdict::Impossible;
@@ -250,11 +251,11 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             Origin::Move,
         );
     }
-    for (subject, key, close) in closed(p, view).into_iter().filter(|_| happens) {
+    for (subject, key, outcome) in closed(p, view).into_iter().filter(|_| happens) {
         push(
             Handle::Entity(subject),
             key,
-            close.outcome.word(),
+            outcome.word(),
             &[],
             Origin::Close,
         );
@@ -262,28 +263,29 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
     out
 }
 
-/// The `closes` items that name an Open Item the PC holds, with the item's
-/// subject and outcome key (the open key without its prefix, ADR 0005).
-/// Items that name nothing are left out, and so is every item after the
-/// first `MAX_CLOSES`.
+/// The entries of `open_items` that close an Open Item the PC holds (any
+/// status but `open`), with the item's subject, outcome key (the open key
+/// without its prefix, ADR 0005) and outcome. Entries that name nothing are
+/// left out, and so is every close after the first `MAX_CLOSES`.
 pub(super) fn closed<'a>(
     p: &'a DecisionProposal,
     view: &WorldView,
-) -> Vec<(EntityId, &'a str, &'a crate::domain::Close)> {
+) -> Vec<(EntityId, &'a str, crate::domain::CloseOutcome)> {
     let held = crate::world::pc_open_items(view);
-    p.closes
+    p.open_items
         .iter()
-        .take(crate::domain::MAX_CLOSES)
-        .filter_map(|close| {
+        .filter_map(|(item, status)| {
+            let outcome = status.outcome()?;
             let (subject, key) = held
                 .iter()
-                .find(|(subject, key)| crate::world::open_item_ref(*subject, key) == close.item)?;
-            let outcome = crate::domain::outcome_key(key)?;
+                .find(|(subject, key)| crate::world::open_item_ref(*subject, key) == *item)?;
+            let outcome_key = crate::domain::outcome_key(key)?;
             // The item text ends with the open key, so it ends with the
             // outcome key too: borrow it from there.
-            let at = close.item.len() - outcome.len();
-            Some((*subject, &close.item[at..], close))
+            let at = item.len() - outcome_key.len();
+            Some((*subject, &item[at..], outcome))
         })
+        .take(crate::domain::MAX_CLOSES)
         .collect()
 }
 

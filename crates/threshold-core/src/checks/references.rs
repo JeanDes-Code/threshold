@@ -192,35 +192,36 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         err(Some(place), "move_to: not a place the PC knows".into());
     }
     let held = crate::world::pc_open_items(view);
-    if p.closes.len() > crate::domain::MAX_CLOSES {
+    let closing = p
+        .open_items
+        .values()
+        .filter(|s| s.outcome().is_some())
+        .count();
+    if closing > crate::domain::MAX_CLOSES {
         err(
             None,
             format!(
-                "closes names {} items; at most {} per Turn",
-                p.closes.len(),
+                "open_items closes {closing} items; at most {} per Turn",
                 crate::domain::MAX_CLOSES
             ),
         );
     }
-    let mut named = HashSet::new();
-    for close in &p.closes {
+    for item in p.open_items.keys() {
         if !held
             .iter()
-            .any(|(subject, key)| crate::world::open_item_ref(*subject, key) == close.item)
+            .any(|(subject, key)| crate::world::open_item_ref(*subject, key) == *item)
         {
             err(
                 None,
-                format!("closes: {} is not an open item the PC holds", close.item),
+                format!("open_items: {item} is not an open item the PC holds"),
             );
-        } else if !named.insert(close.item.as_str()) {
-            err(None, format!("closes names {} twice", close.item));
         }
     }
     for (subject, key, _) in super::closed(p, view) {
         if written.contains(&(Handle::Entity(subject), normalize::key(key))) {
             err(
                 Some(Handle::Entity(subject)),
-                format!("a fact and closes both write the slot {key}"),
+                format!("a fact and the close in open_items both write the slot {key}"),
             );
         }
     }

@@ -34,8 +34,8 @@ pub struct HandleContext {
     /// The places the PC knows (`world::known_places`): the values of
     /// `move_to` besides `null`.
     pub places: Vec<domain::Handle>,
-    /// The Open Items the PC holds (`world::open_item_ref`): the values of
-    /// a `closes` item.
+    /// The Open Items the PC holds (`world::open_item_ref`): the required
+    /// keys of `open_items`.
     pub open_items: Vec<String>,
 }
 
@@ -151,12 +151,27 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         .collect();
     schema["properties"]["move_to"] = json!({"type": ["string", "null"], "enum": places});
     require(&mut schema, "", "move_to");
+    // One required status per Open Item the PC holds, `open` included: the
+    // model always has a value that says "this item stays open" (changed
+    // after the live run of cdefde8). With none held, the field is absent.
     if ctx.open_items.is_empty() {
-        schema["properties"]["closes"]["maxItems"] = json!(0);
+        omit(&mut schema, "/properties", "open_items");
     } else {
-        set(&mut schema, "/$defs/Close/properties/item", &ctx.open_items);
+        let statuses: Vec<&str> = domain::ItemStatus::ALL.iter().map(|s| s.word()).collect();
+        let status = json!({"type": "string", "enum": statuses});
+        let properties: serde_json::Map<String, serde_json::Value> = ctx
+            .open_items
+            .iter()
+            .map(|item| (item.clone(), status.clone()))
+            .collect();
+        schema["properties"]["open_items"] = json!({
+            "type": "object",
+            "properties": properties,
+            "required": ctx.open_items,
+            "additionalProperties": false,
+        });
+        require(&mut schema, "", "open_items");
     }
-    require(&mut schema, "", "closes");
     schema["properties"]["contested"] = json!({"type": "boolean"});
     require(&mut schema, "", "contested");
     for stake in ["win", "lose"] {

@@ -888,8 +888,9 @@ fn a_streamed_narration_never_shows_an_unknown_tag() {
 }
 
 /// The PC accepts a pending proposal (B3, then ADR 0007). The proposal
-/// names the Open Item in `closes`, the core writes its outcome on the PC,
-/// and the item closes in a Turn that is a decision.
+/// gives the Open Item the status `accepted` in `open_items`, the core
+/// writes its outcome on the PC, and the item closes in a Turn that is a
+/// decision.
 #[test]
 fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     let w = HiddenWorld::new();
@@ -897,10 +898,11 @@ fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     let mut accept = proposal(Verdict::Allowed);
     accept.action = ActionKind::Talk;
     accept.minutes = 2;
-    accept.closes = vec![threshold_core::domain::Close {
-        item: format!("E{ada} pending_meet"),
-        outcome: threshold_core::domain::CloseOutcome::Accepted,
-    }];
+    accept.open_items = [(
+        format!("E{ada} pending_meet"),
+        threshold_core::domain::ItemStatus::Accepted,
+    )]
+    .into();
     let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
     let (mut engine, campaign) = w.engine(&gm);
     let handles = {
@@ -918,4 +920,29 @@ fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     let sight = sight_of(engine.store(), campaign);
     assert_eq!(meet(&sight, ada).closed_in, Some(outcome.turn_id));
     assert!(moment(&sight, outcome.turn_id).unwrap().decision);
+}
+
+/// The live bug (play_basics, cdefde8), in the new shape: the Intent asks
+/// for more time, and the proposal states the item `open`. The Turn
+/// commits on the first attempt and the item stays open.
+#[test]
+fn an_intent_that_asks_for_time_leaves_the_open_item_open() {
+    let w = HiddenWorld::new();
+    let ada = w.ada;
+    let raw = format!(
+        r#"{{"action":"talk","contested":false,"move_to":null,"open_items":{{"E{ada} pending_meet":"open"}},"verdict":"allowed","minutes":3}}"#
+    );
+    let gm = RecordedGm::new(vec![raw], vec!["Brann nods and waits.".into()]);
+    let (mut engine, campaign) = w.engine(&gm);
+    let outcome = engine
+        .play_turn(
+            "t-later".into(),
+            "I ask Brann for more time to think about the meeting.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let sight = sight_of(engine.store(), campaign);
+    assert_eq!(meet(&sight, ada).closed_in, None);
+    assert!(moment(&sight, outcome.turn_id).is_none_or(|m| !m.decision));
+    assert_eq!(gm.calls().len(), 2, "one proposal, one Narration");
 }

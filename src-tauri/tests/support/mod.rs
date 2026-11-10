@@ -25,7 +25,7 @@ pub fn base() -> DecisionProposal {
         verdict: Verdict::Allowed,
         contested: false,
         move_to: None,
-        closes: vec![],
+        open_items: Default::default(),
         blockers: vec![],
         check: None,
         reactions: vec![],

@@ -1374,7 +1374,7 @@ fn play_basics_counts_each_step() {
             .to_owned();
     let close = |minutes: u32| {
         format!(
-            r#"{{"action":"talk","verdict":"allowed","closes":[{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}}],"check":null,"schedule":null,"minutes":{minutes}}}"#
+            r#"{{"action":"talk","verdict":"allowed","open_items":{{"E{wren} pending_copy_tithe_roll":"accepted"}},"check":null,"schedule":null,"minutes":{minutes}}}"#
         )
     };
     // No `minutes`: the core's default for a talk.

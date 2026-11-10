@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -18,12 +20,13 @@ pub struct DecisionProposal {
     /// schema makes it required, with the known places' handles and `null`.
     #[serde(default)]
     pub move_to: Option<Handle>,
-    /// The Open Items the Player's Intent settles. The core writes each
-    /// outcome fact (ADR 0005, ADR 0007). The per-Turn schema makes it
-    /// required and limits `item` to the open items the PC holds.
+    /// One status for each Open Item the PC holds, keyed by the item as the
+    /// prompt shows it (`world::open_item_ref`). `open` leaves the item
+    /// open; any other status closes it, and the core writes the outcome
+    /// fact (ADR 0005, ADR 0007). The per-Turn schema makes it required,
+    /// with exactly the held items as keys; with none held it is absent.
     #[serde(default)]
-    #[schemars(length(max = 2))]
-    pub closes: Vec<Close>,
+    pub open_items: BTreeMap<String, ItemStatus>,
     #[serde(default)]
     #[schemars(length(max = 2))]
     pub blockers: Vec<Handle>,
@@ -53,23 +56,58 @@ pub struct DecisionProposal {
     pub facts_on_win: bool,
 }
 
-/// The most `closes` items one proposal may hold (ADR 0007, changed after
-/// review). The per-Turn schema and the core both enforce it.
+/// The most Open Items one proposal may close (ADR 0007, changed after
+/// review). `validate` rejects more; `settle` keeps the first ones.
 pub const MAX_CLOSES: usize = 2;
 
-/// One Open Item that the Intent settles: `item` names it as the prompt
-/// shows it (`world::open_item_ref`), and `outcome` says how it ended. The
-/// core builds the value and the text of the outcome fact from the item's
-/// own text and the outcome word; no model text reaches that fact (ADR
-/// 0007, changed after review).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct Close {
-    pub item: String,
-    pub outcome: CloseOutcome,
+/// What the Player's Intent does to one Open Item the PC holds. A closed
+/// list: serde parses no other value. `open` means the item stays open:
+/// the Intent does not settle it, or only asks, talks about it or puts it
+/// off. Every other status closes it with that outcome (ADR 0007, changed
+/// after the live run of cdefde8).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemStatus {
+    Open,
+    Accepted,
+    Refused,
+    Done,
+    Failed,
+    Dropped,
 }
 
-/// How an Open Item ended. A closed list: serde parses no other value, so
-/// free model text can never state a PC act or feeling here.
+impl ItemStatus {
+    /// Every status, `open` first: the order of the per-Turn schema's enum.
+    pub const ALL: [Self; 6] = [
+        Self::Open,
+        Self::Accepted,
+        Self::Refused,
+        Self::Done,
+        Self::Failed,
+        Self::Dropped,
+    ];
+
+    /// The outcome this status closes the item with; `None` for `open`.
+    pub fn outcome(self) -> Option<CloseOutcome> {
+        match self {
+            Self::Open => None,
+            Self::Accepted => Some(CloseOutcome::Accepted),
+            Self::Refused => Some(CloseOutcome::Refused),
+            Self::Done => Some(CloseOutcome::Done),
+            Self::Failed => Some(CloseOutcome::Failed),
+            Self::Dropped => Some(CloseOutcome::Dropped),
+        }
+    }
+
+    /// The status word, as the schema and the prompt spell it.
+    pub fn word(self) -> &'static str {
+        self.outcome().map_or("open", CloseOutcome::word)
+    }
+}
+
+/// How an Open Item ended: a closing `ItemStatus`. The core builds the value
+/// and the text of the outcome fact from it and the item's own text; no
+/// model text reaches that fact (ADR 0007, changed after review).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CloseOutcome {

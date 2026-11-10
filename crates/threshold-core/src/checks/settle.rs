@@ -4,11 +4,9 @@
 //! voluntary act of the PC: the Agency rule holds. Every repair returns one
 //! note for the debug log.
 
-use std::collections::HashSet;
-
 use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
-    domain::{ActionKind, DecisionProposal, EntityKind, Handle, SlotDraft},
+    domain::{ActionKind, DecisionProposal, EntityKind, Handle, ItemStatus, SlotDraft},
     normalize,
     store::WorldView,
     world,
@@ -64,37 +62,38 @@ fn drop_pc_acts(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
     }
 }
 
-/// A `closes` item that names no Open Item the PC holds, or names one a
-/// second time, goes, and so does every item after the first `MAX_CLOSES`.
-/// So does a fact on the outcome slot of an item that
-/// `closes` names: the core writes that slot itself (ADR 0007).
+/// An `open_items` entry that names no Open Item the PC holds goes. A
+/// closing status after the first `MAX_CLOSES` becomes `open`: the item
+/// stays open, so no PC act is added. A fact on the outcome slot of an item
+/// that closes goes too: the core writes that slot itself (ADR 0007).
 fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
     let held = world::pc_open_items(view);
-    let mut seen = HashSet::new();
-    p.closes.retain(|close| {
+    p.open_items.retain(|item, _| {
         let known = held
             .iter()
-            .any(|(subject, key)| world::open_item_ref(*subject, key) == close.item);
-        let keep = known && seen.insert(close.item.clone());
-        if !keep {
+            .any(|(subject, key)| world::open_item_ref(*subject, key) == *item);
+        if !known {
             notes.push(format!(
-                "removed closes {}: not an open item the PC holds, or named twice",
-                close.item
+                "removed open_items {item}: not an open item the PC holds"
             ));
         }
-        keep
+        known
     });
-    if p.closes.len() > crate::domain::MAX_CLOSES {
-        let dropped: Vec<String> = p
-            .closes
-            .drain(crate::domain::MAX_CLOSES..)
-            .map(|c| c.item)
-            .collect();
-        notes.push(format!(
-            "removed closes {}: at most {} items per Turn",
-            dropped.join(", "),
-            crate::domain::MAX_CLOSES
-        ));
+    let mut closes = 0;
+    for (item, status) in p.open_items.iter_mut() {
+        if status.outcome().is_none() {
+            continue;
+        }
+        if closes < crate::domain::MAX_CLOSES {
+            closes += 1;
+        } else {
+            notes.push(format!(
+                "kept {item} open instead of {}: at most {} items close per Turn",
+                status.word(),
+                crate::domain::MAX_CLOSES
+            ));
+            *status = ItemStatus::Open;
+        }
     }
     let slots: Vec<(Handle, String)> = closed(p, view)
         .into_iter()
@@ -108,7 +107,10 @@ fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Str
                 .any(|(subject, key)| f.slot.subject == *subject && same_key(&f.slot.key, key))
     });
     if p.facts.len() < before {
-        notes.push("removed a fact on the outcome of an item in closes: closes writes it".into());
+        notes.push(
+            "removed a fact on the outcome of an item that open_items closes: the core writes it"
+                .into(),
+        );
     }
 }
 

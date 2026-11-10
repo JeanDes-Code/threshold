@@ -97,8 +97,8 @@ pub fn pc_knowledge(view: &WorldView) -> Vec<Belief> {
 /// The Open Items the PC holds that are still open, as `(subject, open
 /// key)`: each live fact on a `pending_x` key that the PC believes, whose
 /// outcome slot `x` has no live fact yet. A Turn whose Intent settles one
-/// names it in `closes`, and the core writes its outcome (ADR 0005, ADR
-/// 0007). Sorted, no duplicates.
+/// gets a closing status in `open_items`, and the core writes its outcome
+/// (ADR 0005, ADR 0007). Sorted, no duplicates.
 pub fn pc_open_items(view: &WorldView) -> Vec<(EntityId, Key)> {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return Vec::new();
@@ -116,7 +116,7 @@ pub fn pc_open_items(view: &WorldView) -> Vec<(EntityId, Key)> {
     items
 }
 
-/// How the proposal prompt and the `closes` enum name an Open Item: the
+/// How the proposal prompt and the keys of `open_items` name an Open Item: the
 /// subject's handle, a space, and the open key, as a fact line shows them.
 pub fn open_item_ref(subject: EntityId, key: &str) -> String {
     format!("E{subject} {key}")

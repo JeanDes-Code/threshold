@@ -974,19 +974,23 @@ fn proposal_prompt_lists_the_places_for_move_to() {
     assert!(!system.contains("A move always has this fact"), "{system}");
 }
 
-/// ADR 0007: one rule line describes `closes`; the B3 lines (the outcome
-/// fact rule and the `settles:` list on the PC's line) are gone.
+/// ADR 0007: one rule line describes `open_items`, `open` included; the B3
+/// lines (the outcome fact rule and the `settles:` list on the PC's line)
+/// are gone.
 #[test]
-fn proposal_prompt_describes_closes_in_one_line() {
+fn proposal_prompt_describes_open_items_in_one_line() {
     let w = World::new();
     let prompt = proposal_prompt(&w.view, &[], "I say yes.");
-    let closes: Vec<&str> = prompt
+    let lines: Vec<&str> = prompt
         .system
         .lines()
-        .filter(|l| l.contains("closes"))
+        .filter(|l| l.contains("open_items") || l.contains("closes"))
         .collect();
-    assert_eq!(closes.len(), 1, "{}", prompt.system);
-    assert!(closes[0].starts_with("- closes:"), "{}", closes[0]);
+    assert_eq!(lines.len(), 1, "{}", prompt.system);
+    assert!(lines[0].starts_with("- open_items:"), "{}", lines[0]);
+    for status in ["open", "accepted", "refused", "done", "failed", "dropped"] {
+        assert!(lines[0].contains(status), "{status}: {}", lines[0]);
+    }
     let all = fields(&prompt).concat();
     assert!(!all.contains("settles:"), "{all}");
     assert!(!all.contains("write x only"), "{all}");
