@@ -29,6 +29,7 @@ import {
   cutSections,
   cutSentence,
   dropTyped,
+  factEditFields,
   fieldId,
   focusTarget,
   formOfView,
@@ -359,7 +360,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
     </div>
   );
 
-  /** One fact: its sentence and "edit"; edit mode or debug mode shows its three fields. */
+  /** One fact: its sentence and "edit". Editing edits the sentence; debug mode also shows the three internal fields. */
   const fact = (k: KnownFact, i: number) => {
     const open = editing.has(i);
     const toggle = () =>
@@ -402,19 +403,21 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
               value={k.text}
               onChange={(text) => setFact(i, { text })}
             />
-            <div className="review-fact__fields">
-              {FACT_FIELDS.map(([field, label, hint]) => (
-                <div key={field}>
-                  <TextInput
-                    path={`knowledge[${i}].${field}`}
-                    label={label}
-                    value={k[field]}
-                    onChange={(text) => setFact(i, { [field]: text })}
-                  />
-                  <p className="review-hint">{hint}</p>
-                </div>
-              ))}
-            </div>
+            {factEditFields(debug).length > 0 && (
+              <div className="review-fact__fields">
+                {FACT_FIELDS.filter(([field]) => factEditFields(debug).includes(field)).map(([field, label, hint]) => (
+                  <div key={field}>
+                    <TextInput
+                      path={`knowledge[${i}].${field}`}
+                      label={label}
+                      value={k[field]}
+                      onChange={(text) => setFact(i, { [field]: text })}
+                    />
+                    <p className="review-hint">{hint}</p>
+                  </div>
+                ))}
+              </div>
+            )}
             <label className="review-check">
               <input type="checkbox" checked={k.open} onChange={(ev) => setFact(i, { open: ev.target.checked }, true)} />
               Not done yet: it is planned or pending (an open matter)

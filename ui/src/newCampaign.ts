@@ -434,6 +434,14 @@ export function parseAge(text: string): number | null | undefined {
   return n <= 65535 ? n : undefined;
 }
 
+/**
+ * The internal fields a fact's edit panel shows: none outside debug mode,
+ * where editing a fact edits its sentence only (QA, 2026-11-10).
+ */
+export function factEditFields(debug: boolean): ("subject" | "key" | "value")[] {
+  return debug ? ["subject", "key", "value"] : [];
+}
+
 /** The start hour typed in the review: null when empty (the core then starts at 8), undefined when it is not a whole hour 0 to 23. */
 export function parseHour(text: string): number | null | undefined {
   const t = text.trim();

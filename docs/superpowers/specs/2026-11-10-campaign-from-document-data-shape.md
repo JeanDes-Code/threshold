@@ -152,6 +152,11 @@ draft_from_text ─► Draft ── approve, no Gap ─► Approved ── build
 
 Only three states are stored. A stored "building" state would be false after a crash. "Failed" is `Approved` with `last_failure`. "Begun" is a fact of the Campaign: its Opening Turn exists.
 
+*Changed after QA (2026-11-10):*
+
+- **One truth for an age.** QA found Pim with age 12 on the entry, "11" on the known `age` fact, and "twelve" in its text. Now `confirm_age` and `rename` rewrite each known fact with key `age` about that entry (main or other name, through `normalize::name`): the value becomes the age, the text the plain sentence "<name> is <age> years old." `apply_edit` (save_draft) does the same for each fact whose value is not the entry's age. The entry's age is the truth.
+- **The review edits a fact's sentence only.** Outside debug mode, the edit panel of a fact shows its sentence and the open box. The internal fields About, Detail and Value show in debug mode only.
+
 ### 3.6 World Build stages (F)
 
 ```rust

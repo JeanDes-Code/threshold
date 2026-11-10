@@ -1063,3 +1063,83 @@ fn rename_moves_only_the_mark_of_its_own_row() {
     assert!(confirmed(&draft, "Ash Reed"));
     assert_eq!(draft.seed.entities[2].name, "Ash Hill");
 }
+
+/// B8 (QA, 2026-11-10): Pim had age 12 on the entry, "11" on the known age
+/// fact, and "twelve" in its text. Every operation that sets an age now
+/// rewrites the known `age` facts of that entry in the same step.
+fn age_fact<'a>(draft: &'a SeedDraft, subject: &str) -> &'a KnownFact {
+    draft
+        .knowledge
+        .iter()
+        .find(|f| f.subject == subject && f.key.eq_ignore_ascii_case("age"))
+        .unwrap_or_else(|| panic!("no age fact of {subject}: {:?}", draft.knowledge))
+}
+
+fn with_stale_age_facts() -> SeedDraft {
+    let mut draft = unconfirmed_draft();
+    draft.knowledge.push(KnownFact {
+        subject: "Jean".into(),
+        key: "age".into(),
+        value: "39".into(),
+        text: "Jean is forty.".into(),
+        open: false,
+    });
+    draft.knowledge.push(KnownFact {
+        subject: "Jay".into(),
+        key: "Age".into(),
+        value: "28".into(),
+        text: "Jay is twenty-eight.".into(),
+        open: false,
+    });
+    draft
+}
+
+#[test]
+fn confirming_an_age_rewrites_the_known_age_fact() {
+    let mut draft = with_stale_age_facts();
+    confirm(&mut draft, "Jean").unwrap();
+    let fact = age_fact(&draft, "Jean");
+    assert_eq!(
+        (fact.value.as_str(), fact.text.as_str()),
+        ("40", "Jean is 40 years old.")
+    );
+    // The PC's fact under an other name follows the PC's age.
+    confirm(&mut draft, "Wren").unwrap();
+    let fact = age_fact(&draft, "Jay");
+    assert_eq!(
+        (fact.value.as_str(), fact.text.as_str()),
+        ("29", "Wren is 29 years old.")
+    );
+    // Other facts do not change.
+    assert!(
+        draft
+            .knowledge
+            .iter()
+            .any(|f| f.key == "job" && f.text == "Jean job ferryman.")
+    );
+}
+
+#[test]
+fn editing_an_age_rewrites_the_known_age_fact() {
+    let mut draft = with_stale_age_facts();
+    let mut seed = draft.seed.clone();
+    seed.entities[0].age = Some(41);
+    let knowledge = draft.knowledge.clone();
+    apply_edit(&mut draft, seed, knowledge);
+    let fact = age_fact(&draft, "Jean");
+    assert_eq!(
+        (fact.value.as_str(), fact.text.as_str()),
+        ("41", "Jean is 41 years old.")
+    );
+}
+
+#[test]
+fn renaming_an_entry_rewrites_its_known_age_fact() {
+    let mut draft = with_stale_age_facts();
+    rename_named(&mut draft, "Jean", "Joan").unwrap();
+    let fact = age_fact(&draft, "Joan");
+    assert_eq!(
+        (fact.value.as_str(), fact.text.as_str()),
+        ("40", "Joan is 40 years old.")
+    );
+}

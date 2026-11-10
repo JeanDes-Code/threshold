@@ -508,7 +508,49 @@ pub fn apply_edit(draft: &mut SeedDraft, seed: AdventureSeed, knowledge: Vec<Kno
             })
             .collect(),
     };
+    let rows: Vec<Option<usize>> = characters(&draft.seed).map(|(row, ..)| row).collect();
+    for row in rows {
+        set_age_facts(draft, row, false);
+    }
     edited(draft);
+}
+
+/// The draft keeps one truth for an age (QA, 2026-11-10): each known fact
+/// with key `age` about the entry of `row` gets the entry's age as its
+/// value, and a plain sentence as its text. `always` rewrites them all;
+/// else only a fact whose value is not the age. An entry with no age, or
+/// with no name, changes nothing.
+fn set_age_facts(draft: &mut SeedDraft, row: Option<usize>, always: bool) {
+    let (name, others, age) = match row {
+        None => (
+            &draft.seed.pc.name,
+            &draft.seed.pc.other_names,
+            Some(draft.seed.pc.age),
+        ),
+        Some(i) => match draft.seed.entities.get(i) {
+            Some(e) if is_character(e.kind) => (&e.name, &e.other_names, e.age),
+            _ => return,
+        },
+    };
+    let Some(age) = age else {
+        return;
+    };
+    let names: Vec<String> = std::iter::once(name.as_str())
+        .chain(others.iter().map(|o| o.name.as_str()))
+        .map(normalize::name)
+        .filter(|n| !n.is_empty())
+        .collect();
+    if names.is_empty() {
+        return;
+    }
+    let (value, text) = (age.to_string(), format!("{name} is {age} years old."));
+    for fact in &mut draft.knowledge {
+        let about = names.contains(&normalize::name(&fact.subject));
+        if about && normalize::key(&fact.key) == "age" && (always || fact.value.trim() != value) {
+            fact.value.clone_from(&value);
+            fact.text.clone_from(&text);
+        }
+    }
 }
 
 /// For each new row, the old row whose mark it may keep. A pure removal of
@@ -552,6 +594,7 @@ pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), Review
             });
         }
     }
+    set_age_facts(draft, row, true);
     Ok(())
 }
 
@@ -623,6 +666,7 @@ pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), R
     {
         mark.name = to.to_owned();
     }
+    set_age_facts(draft, owner, true);
     edited(draft);
     Ok(())
 }

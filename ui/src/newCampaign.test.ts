@@ -18,6 +18,7 @@ import {
   entryOf,
   parseAge,
   parseHour,
+  factEditFields,
   cutSections,
   cutSentence,
   failureText,
@@ -329,6 +330,11 @@ describe("ages", () => {
       expect(parseAge(text), text).toBeUndefined();
     }
     expect(parseAge("65535")).toBe(65535);
+  });
+
+  it("edits a fact's sentence only, outside debug mode", () => {
+    expect(factEditFields(false)).toEqual([]);
+    expect(factEditFields(true)).toEqual(["subject", "key", "value"]);
   });
 
   it("reads a start hour 0 to 23, empty as the default", () => {
