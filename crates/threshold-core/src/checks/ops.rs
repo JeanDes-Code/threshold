@@ -77,15 +77,22 @@ pub fn to_ops(
         }
     }
     // ADR 0007: each Open Item the Intent settles gets its outcome fact,
-    // witnessed by everyone present, the PC included.
-    for (subject, key, close) in super::closed(p, view) {
+    // witnessed by everyone present, the PC included, when the verdict lets
+    // the action happen (changed after review). The core builds the value
+    // and the text from the item's own text and the outcome word.
+    for (subject, key, close) in super::closed(p, view).into_iter().filter(|_| lets_happen) {
         let holders = b.holders(Seen::Present);
+        let open = format!("{}{key}", crate::domain::OPEN_KEY_PREFIX);
+        let item_text = view
+            .live_fact(subject, &open)
+            .map_or_else(String::new, |f| f.text.clone());
         let outcome = SlotDraft {
             subject: Handle::Entity(subject),
             key: key.to_owned(),
-            value: close.outcome.clone(),
+            value: close.outcome.word().to_owned(),
         };
-        b.write(&outcome, FactSource::Proposal, holders, Vec::new());
+        let text = close.outcome.text(&item_text);
+        b.write_text(&outcome, text, FactSource::Proposal, holders, Vec::new());
     }
     if let (Some(place), Some(pc)) = (&moved_to, pc(view)) {
         let holders = b.holders(Seen::Pc);
@@ -336,6 +343,18 @@ impl Builder<'_> {
         causes: Vec<u64>,
     ) {
         let text = self.text(draft);
+        self.write_text(draft, text, source, seen_by, causes);
+    }
+
+    /// `write` with a text the core built itself.
+    fn write_text(
+        &mut self,
+        draft: &SlotDraft,
+        text: String,
+        source: FactSource,
+        seen_by: Vec<EntityRef>,
+        causes: Vec<u64>,
+    ) {
         let new = FactDraft {
             slot: slot(draft),
             text,

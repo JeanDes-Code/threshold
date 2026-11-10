@@ -43,3 +43,12 @@ What the code needs becomes a small field of the Decision Proposal that the per-
 - **Whether an act is a contest.** The model still decides `contested`; the code only makes sure a contested act rolls.
 - **Whether the Intent really settles the item.** The model still judges that; the schema only keeps the item among those the PC holds.
 - **A wrong destination.** The schema keeps the value inside the enum; it cannot check that the place is the one the Player named.
+
+## Changed after review (2026-11-10): `closes` is a fixed outcome, obeys the verdict and is Established
+
+A review of the first version found three ways in which `closes` could commit what the Player's Intent did not state.
+
+- **`outcome` is a closed enum.** It was free text of at most 40 characters, and the core did not enforce the limit. Even 40 characters can state a PC act or feeling. `outcome` is now one of `accepted`, `refused`, `done`, `failed`, `dropped`; serde parses no other value, and the per-Turn schema has the same enum. The core builds the outcome fact itself: its value is the enum word, and its text is a fixed English template, `<Word>: <the Open Item's own stored text>` (`CloseOutcome::text`). No model text reaches that fact.
+- **`closes` obeys the verdict, exactly like `move_to`.** It applies only when the verdict lets the action happen: allowed, or a Check that succeeds. An impossible verdict and a lost Check close nothing. For the Shortcut checks an outcome write of a Check counts like the win stake.
+- **The outcome fact is Established, not Persistent.** The store made it Persistent because the PC witnesses it. The model judges that the Intent settled the item, and the model can be wrong; a wrong close must stay repairable in play, without a Correction. The store keeps a fact on the outcome slot of an Open Item (a slot whose subject has a fact on the `pending_` key) Established, whatever its source and witnesses, as it does for state keys.
+- **At most 2 items per Turn** (`domain::MAX_CLOSES`). The schema has `maxItems: 2`; `validate` rejects more; `settle` keeps the first two and logs the rest. The same item named twice is dropped.

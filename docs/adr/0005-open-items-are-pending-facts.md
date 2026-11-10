@@ -38,3 +38,7 @@ The rule above did not work on the live model: in `play_basics`, 0 of 4 acceptan
 - The permission to write the outcome key on the PC in a proposal fact is gone. Such a fact is an agency error again, unless `closes` names the item: then the core drops the fact, because it writes that slot itself.
 - The prompt has one line for `closes`. The rule line about `pending_x` and the `settles:` list on the PC's line are gone.
 
+
+## Changed after review (2026-11-10)
+
+`outcome` is no longer free text: it is one of `accepted`, `refused`, `done`, `failed`, `dropped`, and the core builds the outcome fact's text from the Open Item's own text (ADR 0007). The outcome fact is Established, so play can change it; `closes` applies only when the verdict lets the action happen.

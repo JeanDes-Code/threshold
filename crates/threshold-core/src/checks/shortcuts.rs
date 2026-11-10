@@ -25,8 +25,8 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
 /// A proposal fact or a scheduled effect that writes the slot of an open
 /// obstacle needs a valid cause. The obstacles are the open rows plus the
 /// blockers this proposal declares. The win stake is the legal path and is
-/// not checked here; so is the move of a Check, which happens only on a
-/// success.
+/// not checked here; so are the move and the closes of a Check, which
+/// happen only on a success.
 fn coincidence(
     p: &DecisionProposal,
     view: &WorldView,
@@ -52,7 +52,8 @@ fn coincidence(
         };
         let hit = writes.iter().any(|w| {
             let on_success = w.origin == Origin::WinStake
-                || (w.origin == Origin::Move && p.verdict == Verdict::Check);
+                || (matches!(w.origin, Origin::Move | Origin::Close)
+                    && p.verdict == Verdict::Check);
             !on_success
                 && w.subject == obstacle.slot.subject
                 && same_key(w.key, &obstacle.slot.key)

@@ -47,14 +47,58 @@ pub struct DecisionProposal {
     pub intimate: bool,
 }
 
+/// The most `closes` items one proposal may hold (ADR 0007, changed after
+/// review). The per-Turn schema and the core both enforce it.
+pub const MAX_CLOSES: usize = 2;
+
 /// One Open Item that the Intent settles: `item` names it as the prompt
-/// shows it (`world::open_item_ref`), and `outcome` is the value of the
-/// outcome fact the core writes.
+/// shows it (`world::open_item_ref`), and `outcome` says how it ended. The
+/// core builds the value and the text of the outcome fact from the item's
+/// own text and the outcome word; no model text reaches that fact (ADR
+/// 0007, changed after review).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Close {
     pub item: String,
-    #[schemars(length(max = 40))]
-    pub outcome: String,
+    pub outcome: CloseOutcome,
+}
+
+/// How an Open Item ended. A closed list: serde parses no other value, so
+/// free model text can never state a PC act or feeling here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CloseOutcome {
+    Accepted,
+    Refused,
+    Done,
+    Failed,
+    Dropped,
+}
+
+impl CloseOutcome {
+    /// The value of the outcome fact: the enum word.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Refused => "refused",
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Dropped => "dropped",
+        }
+    }
+
+    /// The text of the outcome fact, from a fixed English template and the
+    /// Open Item's own stored text.
+    pub fn text(self, item_text: &str) -> String {
+        let item = item_text.trim();
+        let head = match self {
+            Self::Accepted => "Accepted",
+            Self::Refused => "Refused",
+            Self::Done => "Done",
+            Self::Failed => "Failed",
+            Self::Dropped => "Dropped",
+        };
+        format!("{head}: {item}")
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

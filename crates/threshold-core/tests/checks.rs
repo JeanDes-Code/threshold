@@ -1322,7 +1322,7 @@ fn closes_writes_the_outcome_of_an_open_item_the_pc_holds() {
     let item = format!("E{ada} pending_winter_post");
     let close = |item: &str| threshold_core::domain::Close {
         item: item.into(),
-        outcome: "accepted".into(),
+        outcome: threshold_core::domain::CloseOutcome::Accepted,
     };
     pending(&mut w, ada, "pending_winter_post", vec![]);
     // An open item the PC does not hold cannot be closed.
@@ -1508,4 +1508,194 @@ fn a_fact_about_the_pc_itself_is_never_a_blocker() {
     assert_eq!(settled.blockers, [f(injury)], "an injury may block");
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].contains(&format!("F{location}")), "{notes:?}");
+}
+
+// --- closes after review (ADR 0007) ------------------------------------------
+
+/// Gives the PC an Open Item on `key` that it holds: the pending fact, then
+/// the PC's knowledge of it.
+fn held_item(w: &mut World, key: &str) -> String {
+    let ada = w.ada;
+    pending(w, ada, key, vec![]);
+    let fact_id = w.view.live_fact(ada, key).unwrap().id;
+    let now = w.view.clock_min;
+    w.commit(vec![LedgerOp::Know {
+        holder: threshold_core::domain::EntityRef::Id(ada),
+        fact_id: Some(fact_id),
+        claim_id: None,
+        how: Knowing::Witnessed,
+        arrives_at: now,
+    }]);
+    format!("E{ada} {key}")
+}
+
+fn closing(item: &str, verdict: Verdict) -> threshold_core::domain::DecisionProposal {
+    let mut p = proposal(verdict);
+    p.action = threshold_core::domain::ActionKind::Talk;
+    p.closes = vec![threshold_core::domain::Close {
+        item: item.into(),
+        outcome: threshold_core::domain::CloseOutcome::Accepted,
+    }];
+    p
+}
+
+/// C1: `outcome` is a closed list. No free text parses, and the per-Turn
+/// schema refuses any other word.
+#[test]
+fn close_outcome_is_a_closed_list() {
+    use threshold_core::domain::{Close, CloseOutcome};
+    for (word, outcome) in [
+        ("accepted", CloseOutcome::Accepted),
+        ("refused", CloseOutcome::Refused),
+        ("done", CloseOutcome::Done),
+        ("failed", CloseOutcome::Failed),
+        ("dropped", CloseOutcome::Dropped),
+    ] {
+        let close: Close =
+            serde_json::from_value(serde_json::json!({"item": "E1 pending_x", "outcome": word}))
+                .unwrap();
+        assert_eq!(close.outcome, outcome);
+        assert_eq!(outcome.word(), word);
+    }
+    for free in ["agreed", "I swear it gladly", "Accepted", ""] {
+        let parsed: Result<Close, _> =
+            serde_json::from_value(serde_json::json!({"item": "E1 pending_x", "outcome": free}));
+        assert!(parsed.is_err(), "{free:?} parsed");
+    }
+    let schema = proposal_schema_for(&HandleContext {
+        open_items: vec!["E1 pending_trip".into()],
+        ..HandleContext::default()
+    });
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let mut p = serde_json::json!({
+        "action": "talk", "verdict": "allowed", "contested": false, "move_to": null,
+        "closes": [{"item": "E1 pending_trip", "outcome": "refused"}]
+    });
+    assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));
+    p["closes"][0]["outcome"] = "gladly agreed".into();
+    assert!(!validator.is_valid(&p));
+}
+
+/// C1: the core builds the outcome fact from the item's own text and the
+/// outcome word; the value is the word.
+#[test]
+fn the_outcome_fact_is_built_from_the_item_text() {
+    let mut w = World::new();
+    let item = held_item(&mut w, "pending_winter_post");
+    let p = closing(&item, Verdict::Allowed);
+    apply(&mut w, &p, None);
+    let outcome = w.view.live_fact(w.ada, "winter_post").unwrap();
+    assert_eq!(outcome.slot.value, "accepted");
+    assert_eq!(
+        outcome.text,
+        "Accepted: Agathe asked for help with the winter post."
+    );
+}
+
+/// C2: `closes` obeys the verdict, like `move_to`: an impossible verdict
+/// and a lost Check close nothing; a won Check closes.
+#[test]
+fn closes_applies_only_when_the_action_happens() {
+    for (verdict, roll_result, closed) in [
+        (Verdict::Impossible, None, false),
+        (Verdict::Check, Some(false), false),
+        (Verdict::Check, Some(true), true),
+        (Verdict::Allowed, None, true),
+    ] {
+        let mut w = World::new();
+        let item = held_item(&mut w, "pending_winter_post");
+        let mut p = closing(&item, verdict);
+        if verdict == Verdict::Check {
+            p.check = Some(check(
+                Some(e(w.brann)),
+                slot(e(w.brann), "mood", "impressed"),
+                slot(e(w.brann), "mood", "smug"),
+            ));
+        }
+        apply(&mut w, &p, roll_result.map(roll));
+        assert_eq!(
+            w.view.live_fact(w.ada, "winter_post").is_some(),
+            closed,
+            "{verdict:?} {roll_result:?}"
+        );
+        assert_eq!(
+            threshold_core::world::pc_open_items(&w.view).is_empty(),
+            closed,
+            "{verdict:?} {roll_result:?}"
+        );
+    }
+}
+
+/// C3: the outcome fact is Established, though the PC witnesses it, so play
+/// can change it later without a Correction.
+#[test]
+fn the_outcome_fact_is_established_and_play_can_change_it() {
+    let mut w = World::new();
+    let item = held_item(&mut w, "pending_winter_post");
+    apply(&mut w, &closing(&item, Verdict::Allowed), None);
+    let outcome = w.view.live_fact(w.ada, "winter_post").unwrap();
+    assert!(outcome.seen_by.contains(&w.ada));
+    assert_eq!(outcome.canon, Canon::Established);
+    // A later write on the slot is not a Persistent fact bending: only the
+    // agency rule, which is about the PC, speaks.
+    let mut later = proposal(Verdict::Allowed);
+    later.facts = vec![fact(
+        slot(e(w.ada), "winter_post", "refused"),
+        Seen::Present,
+        vec![],
+    )];
+    let errs = validate(&later, &w.view).unwrap_err();
+    assert!(
+        errs.iter().all(|r| r.check != CheckKind::FactBends),
+        "{errs:?}"
+    );
+}
+
+/// C4: at most `MAX_CLOSES` items per proposal. The schema refuses a third;
+/// `validate` rejects it; `settle` keeps the first two and logs the rest.
+#[test]
+fn a_proposal_closes_at_most_two_items() {
+    use threshold_core::domain::MAX_CLOSES;
+    assert_eq!(MAX_CLOSES, 2);
+    let mut w = World::new();
+    let items: Vec<String> = ["pending_a", "pending_b", "pending_c"]
+        .into_iter()
+        .map(|key| held_item(&mut w, key))
+        .collect();
+    let mut p = proposal(Verdict::Allowed);
+    p.closes = items
+        .iter()
+        .map(|item| threshold_core::domain::Close {
+            item: item.clone(),
+            outcome: threshold_core::domain::CloseOutcome::Done,
+        })
+        .collect();
+    rejected(validate(&p, &w.view), CheckKind::References);
+    let (settled, notes) = settle(p.clone(), &w.view);
+    assert_eq!(settled.closes.len(), MAX_CLOSES);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    ok(validate(&settled, &w.view));
+    // The same item twice is dropped.
+    let mut twice = p.clone();
+    twice.closes = vec![p.closes[0].clone(), p.closes[0].clone()];
+    let (settled, notes) = settle(twice, &w.view);
+    assert_eq!(settled.closes.len(), 1);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    // The schema: three items fail.
+    let schema = proposal_schema_for(&HandleContext {
+        open_items: items.clone(),
+        ..HandleContext::default()
+    });
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let closes: Vec<serde_json::Value> = items
+        .iter()
+        .map(|item| serde_json::json!({"item": item, "outcome": "done"}))
+        .collect();
+    let mut json = serde_json::json!({
+        "action": "talk", "verdict": "allowed", "contested": false, "move_to": null,
+        "closes": closes
+    });
+    assert!(!validator.is_valid(&json));
+    json["closes"].as_array_mut().unwrap().pop();
+    assert!(validator.is_valid(&json), "{:?}", validator.validate(&json));
 }

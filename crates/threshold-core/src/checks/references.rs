@@ -192,6 +192,16 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         err(Some(place), "move_to: not a place the PC knows".into());
     }
     let held = crate::world::pc_open_items(view);
+    if p.closes.len() > crate::domain::MAX_CLOSES {
+        err(
+            None,
+            format!(
+                "closes names {} items; at most {} per Turn",
+                p.closes.len(),
+                crate::domain::MAX_CLOSES
+            ),
+        );
+    }
     let mut named = HashSet::new();
     for close in &p.closes {
         if !held

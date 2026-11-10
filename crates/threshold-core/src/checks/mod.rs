@@ -235,8 +235,12 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             }
         }
     }
-    let moves = p.verdict != crate::domain::Verdict::Impossible;
-    if let (true, Some(pc), Some(place)) = (moves, pc(view), p.move_to.and_then(|h| view.entity(h)))
+    // `move_to` and `closes` apply only when the action can happen: an
+    // impossible verdict writes neither. On a Check they apply on a success
+    // only, like the win stake (`to_ops`).
+    let happens = p.verdict != crate::domain::Verdict::Impossible;
+    if let (true, Some(pc), Some(place)) =
+        (happens, pc(view), p.move_to.and_then(|h| view.entity(h)))
     {
         push(
             Handle::Entity(pc),
@@ -246,11 +250,11 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             Origin::Move,
         );
     }
-    for (subject, key, close) in closed(p, view) {
+    for (subject, key, close) in closed(p, view).into_iter().filter(|_| happens) {
         push(
             Handle::Entity(subject),
             key,
-            &close.outcome,
+            close.outcome.word(),
             &[],
             Origin::Close,
         );
@@ -260,7 +264,8 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
 
 /// The `closes` items that name an Open Item the PC holds, with the item's
 /// subject and outcome key (the open key without its prefix, ADR 0005).
-/// Items that name nothing are left out.
+/// Items that name nothing are left out, and so is every item after the
+/// first `MAX_CLOSES`.
 pub(super) fn closed<'a>(
     p: &'a DecisionProposal,
     view: &WorldView,
@@ -268,6 +273,7 @@ pub(super) fn closed<'a>(
     let held = crate::world::pc_open_items(view);
     p.closes
         .iter()
+        .take(crate::domain::MAX_CLOSES)
         .filter_map(|close| {
             let (subject, key) = held
                 .iter()

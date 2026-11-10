@@ -58,7 +58,8 @@ fn drop_pc_acts(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
 }
 
 /// A `closes` item that names no Open Item the PC holds, or names one a
-/// second time, goes. So does a fact on the outcome slot of an item that
+/// second time, goes, and so does every item after the first `MAX_CLOSES`.
+/// So does a fact on the outcome slot of an item that
 /// `closes` names: the core writes that slot itself (ADR 0007).
 fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
     let held = world::pc_open_items(view);
@@ -76,6 +77,18 @@ fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Str
         }
         keep
     });
+    if p.closes.len() > crate::domain::MAX_CLOSES {
+        let dropped: Vec<String> = p
+            .closes
+            .drain(crate::domain::MAX_CLOSES..)
+            .map(|c| c.item)
+            .collect();
+        notes.push(format!(
+            "removed closes {}: at most {} items per Turn",
+            dropped.join(", "),
+            crate::domain::MAX_CLOSES
+        ));
+    }
     let slots: Vec<(Handle, String)> = closed(p, view)
         .into_iter()
         .map(|(subject, key, _)| (Handle::Entity(subject), key.to_owned()))

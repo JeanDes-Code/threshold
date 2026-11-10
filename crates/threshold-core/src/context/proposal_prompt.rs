@@ -41,7 +41,7 @@ LATER ACTIONS
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
 - move_to: when the player moves the PC to a place listed under PLACES, that place's handle; else null, and the PC stays. Never write the PC's location in facts or stakes.
-- closes: for each open item (a fact on a pending_ key) that the player's intent settles (accepts, refuses or does it), {\"item\":\"<subject handle> <pending_ key>\",\"outcome\":\"<short result, such as accepted>\"}; else [].
+- closes: for each open item (a fact on a pending_ key) that the player's intent settles (accepts, refuses, does, fails or gives up), {\"item\":\"<subject handle> <pending_ key>\",\"outcome\":\"accepted|refused|done|failed|dropped\"}; at most 2; else []. Asking about an item or talking about it does not settle it.
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.
 - For wait: use the duration the player names. If the player names none, use the minutes until something happens.

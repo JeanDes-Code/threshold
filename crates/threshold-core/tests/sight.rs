@@ -878,7 +878,7 @@ fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     accept.minutes = 2;
     accept.closes = vec![threshold_core::domain::Close {
         item: format!("E{ada} pending_meet"),
-        outcome: "agreed".into(),
+        outcome: threshold_core::domain::CloseOutcome::Accepted,
     }];
     let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
     let (mut engine, campaign) = w.engine(&gm);

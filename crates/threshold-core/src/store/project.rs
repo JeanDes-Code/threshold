@@ -189,12 +189,28 @@ fn apply(
             };
             // State keys hold changing state and are never Persistent, whatever
             // the source (Adventure Seed included) or the witnesses.
-            let actual_canon =
-                if actual_canon == Canon::Persistent && crate::domain::is_state_key(&slot.key) {
-                    Canon::Established
-                } else {
-                    actual_canon
-                };
+            // The outcome slot of an Open Item stays Established too (ADR
+            // 0007, changed after review): the model judges that the Intent
+            // settled the item, so a wrong close must stay repairable in play.
+            let outcome_slot = || -> Result<bool, StoreError> {
+                let open = format!(
+                    "{}{}",
+                    crate::domain::OPEN_KEY_PREFIX,
+                    normalize::key(&slot.key)
+                );
+                Ok(db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM fact WHERE subject_id=?1 AND key=?2)",
+                    params![slot.subject, open],
+                    |r| r.get::<_, bool>(0),
+                )?)
+            };
+            let actual_canon = if actual_canon == Canon::Persistent
+                && (crate::domain::is_state_key(&slot.key) || outcome_slot()?)
+            {
+                Canon::Established
+            } else {
+                actual_canon
+            };
             db.execute("INSERT INTO fact(id,subject_id,key,value,text,canon,source,created_turn) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,slot.subject,normalize::key(&slot.key),normalize::value(&slot.value),text,enum_text(&actual_canon)?,enum_text(source)?,turn])?;
             let fact_id = db.last_insert_rowid();
             for cause in causes {
