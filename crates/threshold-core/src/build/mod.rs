@@ -1,13 +1,16 @@
-//! The Seed Draft, its rules and its store, and the types every build stage
-//! shares (data shape 2 and 3.5). `build` calls the model through
-//! `Gm::propose` only, and knows no SQL.
+//! The Seed Draft, its rules and its store, the stage runner, the draft
+//! stages, and the types every build stage shares (data shape 2 and 3.5).
+//! `build` calls the model through `Gm::propose` only, and knows no SQL.
 
 mod draft;
+mod draft_stages;
+mod stages;
 mod store;
 
 use serde::{Deserialize, Serialize};
 
 pub use draft::{DraftState, Gap, GapKind, KnownFact, SeedDraft, apply_edit, approve, gaps};
+pub use draft_stages::{SOURCE_TEXT_MAX_CHARS, draft_from_text};
 pub use store::{DraftLine, DraftStore, DraftStoreError};
 
 /// A step of the draft or of the World Build. The first three draft the

@@ -46,11 +46,8 @@ pub struct SeedDraft {
 impl SeedDraft {
     /// A new draft in state `Draft`, with a fresh id and no knowledge.
     pub fn new(source_text: String, seed: AdventureSeed) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
         Self {
-            id: format!("draft-{nanos}"),
+            id: new_draft_id(),
             state: DraftState::Draft,
             source_text,
             seed,
@@ -60,6 +57,14 @@ impl SeedDraft {
             campaign_file: None,
         }
     }
+}
+
+/// A fresh draft id, `draft-<nanos>`, from the system clock.
+pub(crate) fn new_draft_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!("draft-{nanos}")
 }
 
 /// A fact the PC knows. `open` marks an open item (ADR 0005): `setup` adds
