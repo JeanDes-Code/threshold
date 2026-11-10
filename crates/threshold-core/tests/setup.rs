@@ -103,8 +103,9 @@ open = true
     );
     assert!(pc_knowledge(&view).iter().all(|b| b.key != "ledger_place"));
 
-    // No `known_by`: GM only. An open entry commits like any other fact.
-    let plan = view.live_fact(doul, "plan").unwrap();
+    // No `known_by`: GM only. An open entry commits on its `pending_` key.
+    assert!(view.live_fact(doul, "plan").is_none());
+    let plan = view.live_fact(doul, "pending_plan").unwrap();
     assert!(plan.seen_by.is_empty());
     assert!(view.knowledge.iter().all(|k| k.fact_id != Some(plan.id)));
 }

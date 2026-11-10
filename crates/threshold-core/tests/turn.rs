@@ -415,6 +415,33 @@ fn ooc_never_sees_secrets() {
     assert_eq!(steps("ooc-2"), ["ooc"]);
 }
 
+/// ADR 0005: the OOC prompt lists PC Knowledge, so an open item there
+/// carries the marker too.
+#[test]
+fn ooc_prompt_marks_open_items() {
+    let mut w = World::new();
+    w.commit(vec![LedgerOp::AddFact {
+        slot: threshold_core::domain::Slot {
+            subject: EntityRef::Id(w.gate),
+            key: "pending_repair".into(),
+            value: "next week".into(),
+        },
+        text: "The gate is to be repaired next week.".into(),
+        canon: threshold_core::domain::Canon::Established,
+        source: threshold_core::domain::FactSource::Proposal,
+        seen_by: vec![EntityRef::Id(w.ada)],
+        causes: vec![],
+    }]);
+    let gm = RecordedGm::new(vec![], vec!["Not yet.".into()]);
+    let mut engine = make_engine(w.store, w.campaign, &gm);
+    engine.ooc("ooc-1".into(), "Is the gate repaired?").unwrap();
+    let all = fields(&gm.calls()[0].prompt).concat();
+    assert!(
+        all.contains("(open, not done) The gate is to be repaired next week."),
+        "{all}"
+    );
+}
+
 // --- Controller rulings -----------------------------------------------------
 
 /// Ruling 2 and 3: final reactions are stored with the Turn, and only the

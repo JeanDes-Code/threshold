@@ -6,7 +6,7 @@ use support::*;
 use threshold_core::{
     Prompt,
     checks::{CheckKind, to_ops, validate},
-    context::{handle_context, narration_prompt, perceived_by_pc, proposal_prompt},
+    context::{guard_plans, handle_context, narration_prompt, perceived_by_pc, proposal_prompt},
     domain::{
         Canon, EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, Reaction, Slot,
         Stance, Trigger, Verdict,
@@ -682,4 +682,77 @@ fn rules_speak_about_time() {
         narration.contains("Never say that more time passed than THIS TURN states"),
         "{narration}"
     );
+}
+
+/// ADR 0005: no prompt shows an open item without the marker.
+#[test]
+fn open_fact_carries_the_marker_in_both_prompts() {
+    let mut w = World::new();
+    witness_presence(&mut w);
+    let (ada, orsel) = (w.ada, w.orsel);
+    let text = "Orsel plans to inspect the gate tonight.";
+    let marked = format!("(open, not done) {text}");
+    let ops = vec![add_fact(
+        orsel,
+        "pending_inspection",
+        "tonight",
+        text,
+        vec![ada],
+    )];
+    play_turn(&mut w, "turn-open", "I wait.", "", ops.clone());
+
+    let gm = proposal_prompt(&w.view, &[], "I wait.");
+    let gm = prefix(&gm) + &gm.recent;
+    assert!(gm.contains(&marked), "{gm}");
+    assert!(gm.contains("pending_inspection"), "{gm}");
+    assert_eq!(
+        gm.matches(text).count(),
+        gm.matches(&marked).count(),
+        "{gm}"
+    );
+
+    let perceived = perceived_by_pc(&ops, &w.view);
+    let narrator = narration_prompt(&w.view, &[], &perceived, &[], &[], "I wait.");
+    // In what the PC knows here, and in this Turn's outcome.
+    assert!(narrator.scene.contains(&marked), "{}", narrator.scene);
+    assert!(narrator.recent.contains(&marked), "{}", narrator.recent);
+    let narrator = prefix(&narrator) + &narrator.recent;
+    assert_eq!(
+        narrator.matches(text).count(),
+        narrator.matches(&marked).count(),
+        "{narrator}"
+    );
+}
+
+/// An open key is a state key, but a GM-only open item stays a secret: a
+/// plan that names it does not reach the narrator.
+#[test]
+fn gm_only_open_fact_stays_a_secret_to_the_narrator() {
+    let mut w = World::new();
+    let orsel = w.orsel;
+    play_turn(
+        &mut w,
+        "turn-plot",
+        "I wait.",
+        "",
+        vec![add_fact(
+            orsel,
+            "pending_arrest",
+            "the courier",
+            "Orsel plans to arrest the courier.",
+            vec![],
+        )],
+    );
+    let reactions = vec![Reaction {
+        npc: Handle::Entity(orsel),
+        stance: Stance::Resist,
+        plan: "watch the courier closely".into(),
+        cause: None,
+    }];
+    let reactions = guard_plans(&w.view, &reactions);
+    let prompt = narration_prompt(&w.view, &[], &[], &[], &reactions, "I wait.");
+    for field in fields(&prompt) {
+        assert!(!field.contains("watch the courier closely"), "{field}");
+        assert!(!field.contains("arrest"), "{field}");
+    }
 }

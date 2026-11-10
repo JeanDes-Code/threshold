@@ -4,7 +4,11 @@
 
 use std::collections::BTreeSet;
 
-use threshold_core::{domain::is_state_key, store::WorldView, world::pc_knowledge};
+use threshold_core::{
+    domain::{is_open_key, is_state_key},
+    store::WorldView,
+    world::pc_knowledge,
+};
 
 /// Below this length a token is a fragment, not a name (SNEQ `MIN_TOKEN_LENGTH`).
 const MIN_TOKEN_LENGTH: usize = 3;
@@ -71,11 +75,13 @@ impl Token {
 }
 
 /// The tokens the PC cannot hold after this Turn (the SNEQ floor, adapted):
-/// the value of every live, non-state fact whose slot the PC holds no Belief
-/// about, plus the scenario's `declared` stems. A token is never forbidden
-/// when it is not distinctive, or when it appears in text the PC can
-/// legitimately read: the premise, the PC concept, entity names, Voice Cards
-/// (the narrator gets them), the PC's Beliefs, or the Player's own Intents.
+/// the value of every live fact whose slot the PC holds no Belief about,
+/// plus the scenario's `declared` stems. A fact on a state key is skipped,
+/// but not one on an open key: a plan the PC does not know is a secret. A
+/// token is never forbidden when it is not distinctive, or when it appears
+/// in text the PC can legitimately read: the premise, the PC concept, entity
+/// names, Voice Cards (the narrator gets them), the PC's Beliefs, or the
+/// Player's own Intents.
 pub fn forbidden_tokens(view: &WorldView, intents: &[String], declared: &[String]) -> Vec<Token> {
     let knowledge = pc_knowledge(view);
     let mut allowed = String::new();
@@ -113,7 +119,7 @@ pub fn forbidden_tokens(view: &WorldView, intents: &[String], declared: &[String
 
     let mut out = BTreeSet::new();
     for f in &view.live_facts {
-        if is_state_key(&f.slot.key) {
+        if is_state_key(&f.slot.key) && !is_open_key(&f.slot.key) {
             continue;
         }
         let held = knowledge
@@ -266,6 +272,46 @@ mod tests {
         assert_eq!(
             without_names("Orsel says: welcome to Varn, scribe.", &names),
             "[name] says: welcome to [name], scribe."
+        );
+    }
+
+    /// An open key is a state key, but an open item the PC does not hold is
+    /// still a leak if the narration shows it.
+    #[test]
+    fn open_fact_the_pc_does_not_hold_is_forbidden() {
+        use threshold_core::{
+            domain::{Canon, FactSource, Slot},
+            store::Fact,
+        };
+        let fact = |key: &str, value: &str| Fact {
+            id: 1,
+            slot: Slot {
+                subject: 1,
+                key: key.into(),
+                value: value.into(),
+            },
+            text: String::new(),
+            canon: Canon::Established,
+            source: FactSource::AdventureSeed,
+            created_turn: 1,
+            superseded_by: None,
+            seen_by: vec![],
+        };
+        let view = WorldView {
+            live_facts: vec![
+                fact("pending_arrest", "midnight raid"),
+                fact("mood", "sullen anger"),
+            ],
+            ..WorldView::default()
+        };
+        let tokens = forbidden_tokens(&view, &[], &[]);
+        assert!(
+            tokens.contains(&Token::Phrase("midnight raid".into())),
+            "{tokens:?}"
+        );
+        assert!(
+            !tokens.contains(&Token::Phrase("sullen anger".into())),
+            "{tokens:?}"
         );
     }
 }

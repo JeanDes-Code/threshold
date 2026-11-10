@@ -1,4 +1,5 @@
-//! Content Boundary: an intimate proposal involves adults only. Participants
+//! Content Boundary: no new NPC is younger than the Adventure Seed's
+//! `min_age`, and an intimate proposal involves adults only. Participants
 //! are the present entities, the reacting NPCs and the new NPCs. Adult status
 //! comes from the stored age through `domain::is_adult`, and only here.
 
@@ -11,6 +12,15 @@ use crate::{
 };
 
 pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
+    if let Some(min_age) = view.adventure_seed.as_ref().and_then(|s| s.min_age) {
+        for npc in p.new_npcs.iter().filter(|n| n.age < min_age) {
+            errs.push(Rejection::new(
+                CheckKind::ContentBoundary,
+                Some(npc.id),
+                format!("every character is at least {min_age} years old"),
+            ));
+        }
+    }
     if !p.intimate {
         return;
     }

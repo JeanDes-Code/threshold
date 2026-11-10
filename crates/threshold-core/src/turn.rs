@@ -18,8 +18,8 @@ use serde_json::json;
 use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     context::{
-        adventure_block, guard_events, guard_plans, narration_prompt, one_line, perceived_by_pc,
-        proposal_context, seen_present,
+        adventure_block, fact_text, guard_events, guard_plans, narration_prompt, one_line,
+        perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource,
@@ -682,11 +682,10 @@ fn stored_events(proposal_json: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The OOC prompt: rules, the Adventure Seed's premise, PC, language and
-/// boundaries (the narration prompt's stable block), then PC Knowledge, then
-/// the question.
+/// The OOC prompt: rules, the narration prompt's stable block, then PC
+/// Knowledge, then the question.
 fn ooc_prompt(view: &WorldView, question: &str) -> Prompt {
-    let stable = adventure_block(view);
+    let stable = adventure_block(view, None);
     let mut scene = String::from("WHAT THE PC KNOWS\n");
     let name = |id: u64| {
         view.entities
@@ -698,10 +697,10 @@ fn ooc_prompt(view: &WorldView, question: &str) -> Prompt {
         match (belief.how, belief.source) {
             (Knowing::Told, Some(speaker)) => scene.push_str(&format!(
                 "- {} (told by {})\n",
-                one_line(&belief.text),
+                fact_text(&belief.key, &belief.text),
                 name(speaker)
             )),
-            _ => scene.push_str(&format!("- {}\n", one_line(&belief.text))),
+            _ => scene.push_str(&format!("- {}\n", fact_text(&belief.key, &belief.text))),
         }
     }
     Prompt {

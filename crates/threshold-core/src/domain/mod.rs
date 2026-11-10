@@ -4,7 +4,9 @@ mod proposal;
 mod types;
 mod world_setup;
 
-pub use adventure_seed::{AdventureSeed, OtherName, PcSeed, SeedEntity, SeedFact};
+pub use adventure_seed::{
+    AdventureSeed, OpenDetail, OpenMode, OtherName, PcSeed, SeedEntity, SeedFact, StartSeed,
+};
 pub use handle::{Handle, HandleError};
 pub use proposal::{
     ActionKind, Cancel, Cause, CheckDraft, DecisionProposal, EventDraft, Factor, NewFact, NewNpc,
@@ -12,7 +14,8 @@ pub use proposal::{
 };
 pub use types::{
     Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef, FactDraft, FactSource,
-    GoalStatus, Key, Knowing, LedgerOp, STATE_KEYS, Slot, Stance, Trigger, Value, is_state_key,
+    GoalStatus, Key, Knowing, LedgerOp, OPEN_KEY_PREFIX, STATE_KEYS, Slot, Stance, Trigger, Value,
+    is_open_key, is_state_key,
 };
 pub use world_setup::{
     AttitudeEntry, EffectEntry, EventEntry, FactEntry, GoalEntry, ObstacleEntry, VoiceCardEntry,

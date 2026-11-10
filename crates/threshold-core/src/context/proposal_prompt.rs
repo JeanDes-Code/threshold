@@ -1,10 +1,12 @@
 //! The Decision Proposal prompt. The GM model sees every fact it retrieves,
 //! hidden ones included, marked as such.
 
-use super::{Retrieval, one_line, recent_block, render_voice, with_fragments};
+use super::{
+    Retrieval, adventure_block, fact_text, one_line, recent_block, render_voice, with_fragments,
+};
 use crate::{
     HandleContext,
-    domain::{Canon, EntityId, Handle, Trigger},
+    domain::{Canon, EntityId, Handle, Trigger, is_open_key},
     model::Prompt,
     pack::ContentPack,
     store::{Entity, Fact},
@@ -72,7 +74,7 @@ pub fn proposal_context(
     ProposalContext {
         prompt: Prompt {
             system: system(packs),
-            stable: stable(&r),
+            stable: adventure_block(r.view, r.pc),
             scene: scene(&r),
             recent: recent(&r, intent),
         },
@@ -105,29 +107,6 @@ fn handles(r: &Retrieval<'_>) -> HandleContext {
 
 fn system(packs: &[ContentPack]) -> String {
     with_fragments(PROPOSAL_RULES, packs)
-}
-
-fn stable(r: &Retrieval<'_>) -> String {
-    let mut out = String::from("ADVENTURE\n");
-    if let Some(seed) = &r.view.adventure_seed {
-        out.push_str(&format!("Premise: {}\n", one_line(&seed.premise)));
-        let pc = r.pc.map_or_else(String::new, |id| format!("E{id} "));
-        out.push_str(&format!(
-            "PC: {pc}{}, {}\n",
-            one_line(&seed.pc.name),
-            one_line(&seed.pc.concept)
-        ));
-        out.push_str(&format!("Story language: {}\n", seed.story_language));
-        if seed.boundaries.is_empty() {
-            out.push_str("Boundaries: none beyond the rules\n");
-        } else {
-            out.push_str("Boundaries (always hold):\n");
-            for b in &seed.boundaries {
-                out.push_str(&format!("- {}\n", one_line(b)));
-            }
-        }
-    }
-    out
 }
 
 /// One entity line. It takes the `Entity` itself, so an unknown id can never
@@ -170,10 +149,16 @@ fn fact_line(r: &Retrieval<'_>, f: &Fact) -> String {
     } else {
         "hidden"
     };
-    format!(
-        "F{} E{} {} = {} ({canon}, {seen})\n",
+    let mut line = format!(
+        "F{} E{} {} = {} ({canon}, {seen})",
         f.id, f.slot.subject, f.slot.key, f.slot.value
-    )
+    );
+    // An open item shows its text with the marker, after its key.
+    if is_open_key(&f.slot.key) {
+        line.push_str(&format!(": {}", fact_text(&f.slot.key, &f.text)));
+    }
+    line.push('\n');
+    line
 }
 
 fn scene(r: &Retrieval<'_>) -> String {

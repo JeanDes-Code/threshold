@@ -1,7 +1,8 @@
 //! The context builder (design §6.1 step 2, ADR 0001).
 //!
 //! Each prompt has a fixed order: `system` (rules and Content Pack fragments,
-//! stable for the campaign), `stable` (the Adventure Seed), `scene` (place,
+//! stable for the campaign), `stable` (the agreed parts of the Adventure
+//! Seed, `adventure_block`), `scene` (place,
 //! present entities with their Voice Cards, their facts and keys, open
 //! obstacles; stable within a Scene), then `recent` (clock, entities named in
 //! the Intent or the last 3 Turns, recent Turns, the Intent; changes every
@@ -13,14 +14,13 @@
 mod narration_prompt;
 mod proposal_prompt;
 
-pub(crate) use narration_prompt::adventure_block;
 pub use narration_prompt::{guard_events, guard_plans, narration_prompt, perceived_by_pc};
 pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, proposal_prompt};
 
 use std::collections::BTreeSet;
 
 use crate::{
-    domain::{EntityId, EntityKind, Trigger},
+    domain::{AdventureSeed, EntityId, EntityKind, Trigger, is_open_key},
     normalize,
     pack::{ContentPack, InsertPoint},
     store::{Entity, Fact, Goal, StoredTurn, VoiceCard, WorldEvent, WorldView},
@@ -33,6 +33,12 @@ pub const RECENT_TURNS: usize = 6;
 pub const RECENT_MAX_CHARS: usize = 6_000;
 /// Entities named in this many of the latest Turns are retrieved.
 pub const NAMED_TURNS: usize = 3;
+/// The longest stable block an Adventure Seed may give (data shape 3.1),
+/// about 600 tokens. See `adventure_block_chars`.
+pub const ADVENTURE_BLOCK_MAX_CHARS: usize = 2_400;
+
+/// The marker before the text of an open fact (ADR 0005).
+const OPEN_MARKER: &str = "(open, not done)";
 
 /// What the context builder shows for one Turn.
 pub(crate) struct Retrieval<'a> {
@@ -277,6 +283,81 @@ pub(crate) fn render_voice(name: &str, card: &VoiceCard) -> String {
     }
     line.push('\n');
     line
+}
+
+/// The text of a fact, a Claim or a Belief on `key`, on one line. The text
+/// of an open item (ADR 0005) gets the marker, so no prompt reads a plan as
+/// done. Every prompt line that shows such a text goes through here.
+pub(crate) fn fact_text(key: &str, text: &str) -> String {
+    let text = one_line(text);
+    if is_open_key(key) {
+        format!("{OPEN_MARKER} {text}")
+    } else {
+        text
+    }
+}
+
+/// The stable block of every prompt: the agreed parts of the Adventure Seed
+/// (data shape 3.1). The proposal prompt passes the PC's id, so the PC line
+/// carries its handle; the narrator and the OOC prompt pass `None`.
+pub(crate) fn adventure_block(view: &WorldView, pc: Option<EntityId>) -> String {
+    view.adventure_seed
+        .as_ref()
+        .map_or_else(|| "ADVENTURE\n".to_owned(), |seed| seed_block(seed, pc))
+}
+
+/// The length in chars of the stable block that `seed` gives, without the
+/// PC's handle. `ADVENTURE_BLOCK_MAX_CHARS` caps it.
+pub fn adventure_block_chars(seed: &AdventureSeed) -> usize {
+    seed_block(seed, None).chars().count()
+}
+
+/// Premise, the PC line with age and other names, story language,
+/// boundaries, the `min_age` line, themes and the GM agreement. Never
+/// `resolution` (the Ruleset owns dice, ADR 0002), `start` or
+/// `open_details`.
+fn seed_block(seed: &AdventureSeed, pc: Option<EntityId>) -> String {
+    let mut out = String::from("ADVENTURE\n");
+    out.push_str(&format!("Premise: {}\n", one_line(&seed.premise)));
+    let handle = pc.map_or_else(String::new, |id| format!("E{id} "));
+    let mut about = format!("age {}", seed.pc.age);
+    if !seed.pc.other_names.is_empty() {
+        let names: Vec<String> = seed
+            .pc
+            .other_names
+            .iter()
+            .map(|n| one_line(&n.name))
+            .collect();
+        about.push_str(&format!("; also called {}", names.join(", ")));
+    }
+    out.push_str(&format!(
+        "PC: {handle}{} ({about}), {}\n",
+        one_line(&seed.pc.name),
+        one_line(&seed.pc.concept)
+    ));
+    out.push_str(&format!("Story language: {}\n", seed.story_language));
+    if seed.boundaries.is_empty() {
+        out.push_str("Boundaries: none beyond the rules\n");
+    } else {
+        out.push_str("Boundaries (always hold):\n");
+        for b in &seed.boundaries {
+            out.push_str(&format!("- {}\n", one_line(b)));
+        }
+    }
+    if let Some(min_age) = seed.min_age {
+        out.push_str(&format!(
+            "Every character is at least {min_age} years old.\n"
+        ));
+    }
+    if !seed.themes.is_empty() {
+        let themes: Vec<String> = seed.themes.iter().map(|t| one_line(t)).collect();
+        out.push_str(&format!("Themes: {}\n", themes.join(", ")));
+    }
+    let agreement = seed.gm_agreement.trim();
+    if !agreement.is_empty() {
+        out.push_str(&format!("GM agreement:\n{agreement}\n"));
+    }
+    out
 }
 
 /// Collapses whitespace, so one item stays on one line.

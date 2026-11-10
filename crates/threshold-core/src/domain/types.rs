@@ -10,9 +10,10 @@ pub type Key = String;
 pub type Value = String;
 pub type ClockMin = u64;
 
-/// Keys that hold changing state (normalized). A fact on one of these keys is
-/// never Persistent, so the state can change on a later Turn. `alive` is not a
-/// state key: a death stays protected.
+/// Keys that hold changing state (normalized). A fact on one of these keys, or
+/// on an open key (`is_open_key`), is never Persistent, so the state can
+/// change on a later Turn. `alive` is not a state key: a death stays
+/// protected.
 pub const STATE_KEYS: &[&str] = &[
     "location",
     "condition",
@@ -25,10 +26,21 @@ pub const STATE_KEYS: &[&str] = &[
     "debt",
 ];
 
-/// True when `key`, once normalized, is in `STATE_KEYS`.
+/// True when `key`, once normalized, is in `STATE_KEYS` or is an open key.
 pub fn is_state_key(key: &str) -> bool {
     let key = crate::normalize::key(key);
-    STATE_KEYS.contains(&key.as_str())
+    STATE_KEYS.contains(&key.as_str()) || key.starts_with(OPEN_KEY_PREFIX)
+}
+
+/// The prefix of an open key (ADR 0005). A fact on an open key is an open
+/// item: planned, proposed or pending, not done. Its outcome slot is the
+/// key without the prefix, and stays empty until the item is done.
+pub const OPEN_KEY_PREFIX: &str = "pending_";
+
+/// True when `key`, once normalized, starts with `OPEN_KEY_PREFIX`. An open
+/// key is a state key, so its fact is never Persistent.
+pub fn is_open_key(key: &str) -> bool {
+    crate::normalize::key(key).starts_with(OPEN_KEY_PREFIX)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

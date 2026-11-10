@@ -12,9 +12,15 @@
 
 use std::collections::HashSet;
 
-use super::{Retrieval, one_line, recent_block, render_voice, seen_present, with_fragments};
+use super::{
+    Retrieval, adventure_block, fact_text, one_line, recent_block, render_voice, seen_present,
+    with_fragments,
+};
 use crate::{
-    domain::{EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, is_state_key},
+    domain::{
+        EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, is_open_key,
+        is_state_key,
+    },
     model::Prompt,
     normalize,
     pack::ContentPack,
@@ -75,7 +81,8 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
 /// quote a GM-only fact, so a plan that names a secret is dropped; the NPC
 /// and the stance stay.
 ///
-/// A secret is a live fact on a key that is not a state key, with no PC
+/// A secret is a live fact on a key that is not a state key (or that is an
+/// open key), with no PC
 /// Belief on the same slot and value. A plan names it when the fact's key
 /// or value appears in the plan as whole words, after normalization
 /// (case, articles, `_` and punctuation count as word breaks). A key or
@@ -125,8 +132,10 @@ pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
 }
 
 /// The words of every live fact the PC holds no Belief about, on a key that
-/// is not a state key: its key and its value. Entity names are public, so a
-/// key or value that is an entity name is left out.
+/// is not a state key or that is an open key: its key and its value. An open
+/// key is a state key only so that its fact stays replaceable; a plan the PC
+/// does not know stays a secret. Entity names are public, so a key or value
+/// that is an entity name is left out.
 fn secret_terms(view: &WorldView) -> Vec<Vec<String>> {
     let known: HashSet<(EntityId, String, String)> = pc_knowledge(view)
         .into_iter()
@@ -135,7 +144,7 @@ fn secret_terms(view: &WorldView) -> Vec<Vec<String>> {
     let names: HashSet<Vec<String>> = view.entities.iter().map(|e| words(&e.name)).collect();
     view.live_facts
         .iter()
-        .filter(|f| !is_state_key(&f.slot.key))
+        .filter(|f| !is_state_key(&f.slot.key) || is_open_key(&f.slot.key))
         .filter(|f| {
             !known.contains(&(
                 f.slot.subject,
@@ -179,29 +188,10 @@ pub fn narration_prompt(
     let r = Retrieval::new(view_after, "");
     Prompt {
         system: with_fragments(NARRATION_RULES, packs),
-        stable: adventure_block(view_after),
+        stable: adventure_block(view_after, None),
         scene: scene(&r),
         recent: recent(&r, perceived, events, reactions, intent),
     }
-}
-
-/// The stable block: the Adventure Seed's premise, PC, story language and
-/// boundaries. The OOC prompt uses it too.
-pub(crate) fn adventure_block(view: &WorldView) -> String {
-    let mut out = String::from("ADVENTURE\n");
-    if let Some(seed) = &view.adventure_seed {
-        out.push_str(&format!("Premise: {}\n", one_line(&seed.premise)));
-        out.push_str(&format!(
-            "PC: {}, {}\n",
-            one_line(&seed.pc.name),
-            one_line(&seed.pc.concept)
-        ));
-        out.push_str(&format!("Story language: {}\n", seed.story_language));
-        for b in &seed.boundaries {
-            out.push_str(&format!("Boundary: {}\n", one_line(b)));
-        }
-    }
-    out
 }
 
 fn scene(r: &Retrieval<'_>) -> String {
@@ -235,9 +225,13 @@ fn scene(r: &Retrieval<'_>) -> String {
         .filter(|b| shown.contains(&b.subject))
         .map(|b| match (b.how, b.source) {
             (Knowing::Told, Some(speaker)) => {
-                format!("- {} (told by {})\n", one_line(&b.text), r.name(speaker))
+                format!(
+                    "- {} (told by {})\n",
+                    fact_text(&b.key, &b.text),
+                    r.name(speaker)
+                )
             }
-            _ => format!("- {}\n", one_line(&b.text)),
+            _ => format!("- {}\n", fact_text(&b.key, &b.text)),
         })
         .collect();
     if !known.is_empty() {
@@ -270,12 +264,14 @@ fn new_name(local: u8, perceived: &[LedgerOp]) -> String {
 
 fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Option<String> {
     Some(match op {
-        LedgerOp::AddFact { text, .. } => format!("- {}\n", one_line(text)),
-        LedgerOp::SupersedeFact { new, .. } => format!("- {}\n", one_line(&new.text)),
+        LedgerOp::AddFact { slot, text, .. } => format!("- {}\n", fact_text(&slot.key, text)),
+        LedgerOp::SupersedeFact { new, .. } => {
+            format!("- {}\n", fact_text(&new.slot.key, &new.text))
+        }
         LedgerOp::AddClaim { claim, .. } => format!(
             "- {} says: {}\n",
             entity_name(r, &claim.speaker, perceived),
-            one_line(&claim.text)
+            fact_text(&claim.slot.key, &claim.text)
         ),
         LedgerOp::AddEntity { name, .. } => format!("- {} is here.\n", one_line(name)),
         LedgerOp::RecordRoll { outcome, .. } => format!("- The Check result: {outcome}.\n"),

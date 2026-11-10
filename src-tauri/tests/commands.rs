@@ -133,6 +133,44 @@ fn journal_hides_gm_only_facts() {
 }
 
 #[test]
+fn journal_marks_open_items() {
+    let dir = tempfile::tempdir().unwrap();
+    let world = dir.path().join("world.toml");
+    std::fs::write(
+        &world,
+        r#"
+[[facts]]
+subject = "Hessa"
+key = "shopping_trip"
+value = "the market"
+text = "Hessa plans a shopping trip to the market."
+known_by = ["Wren"]
+open = true
+"#,
+    )
+    .unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    s.new_campaign(&town_dir().join("adventure-seed.toml"), &world, 11)
+        .unwrap();
+
+    let journal = s.get_journal().unwrap();
+    let trip = journal
+        .observations
+        .iter()
+        .find(|e| e.text.contains("shopping trip"))
+        .expect("the PC holds the open item");
+    assert!(trip.open);
+    assert!(
+        journal
+            .observations
+            .iter()
+            .filter(|e| !e.text.contains("shopping trip"))
+            .all(|e| !e.open)
+    );
+}
+
+#[test]
 fn turn_streams_and_reopens() {
     let dir = tempfile::tempdir().unwrap();
     let gm = RecordedGm::new(vec![allowed()], vec!["The hall is quiet.".into()]);

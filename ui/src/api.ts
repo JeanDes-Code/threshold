@@ -47,6 +47,8 @@ export interface JournalEntry {
   subject: string;
   text: string;
   source: string | null;
+  /** An open item: planned or pending, not done. */
+  open: boolean;
 }
 
 export interface JournalView {

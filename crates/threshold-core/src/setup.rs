@@ -14,7 +14,8 @@ use std::{
 
 use crate::{
     domain::{
-        AdventureSeed, Canon, Effect, EntityRef, FactSource, LedgerOp, Slot, Trigger, WorldSetup,
+        AdventureSeed, Canon, Effect, EntityRef, FactSource, LedgerOp, OPEN_KEY_PREFIX, Slot,
+        Trigger, WorldSetup, is_open_key,
     },
     normalize,
     store::{CampaignId, CommitError, Store, StoreError, TurnKind, TurnRecord},
@@ -73,12 +74,24 @@ pub fn commit_world(
     };
 
     let mut ops = Vec::new();
-    // An `open` entry commits as a plain fact: no `pending_` key here.
+    // ADR 0005: an open entry commits on the `pending_` key, so its outcome
+    // slot stays empty. A settled entry may not use that prefix.
     for f in &world.facts {
+        let key = normalize::key(&f.key);
+        let key = if f.open {
+            format!("{OPEN_KEY_PREFIX}{key}")
+        } else if is_open_key(&key) {
+            return Err(SetupError::Invalid(format!(
+                "{key} of {} starts with {OPEN_KEY_PREFIX}, but the entry is not open",
+                f.subject
+            )));
+        } else {
+            key
+        };
         ops.push(LedgerOp::AddFact {
             slot: Slot {
                 subject: EntityRef::Id(id(&f.subject)?),
-                key: normalize::key(&f.key),
+                key,
                 value: normalize::value(&f.value),
             },
             text: f.text.clone(),

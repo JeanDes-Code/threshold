@@ -872,6 +872,44 @@ fn alive_stays_protected() {
     assert_eq!(errs[0].handle, Some(f(dead)));
 }
 
+/// ADR 0005: an open key is a state key. A PC-witnessed open item stays
+/// Established, and a later Turn may write the same `pending_` slot.
+#[test]
+fn open_fact_can_be_replaced_by_a_turn() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(
+        slot(e(w.orsel), "pending_inspection", "tonight"),
+        Seen::Pc,
+        vec![],
+    )];
+    apply(&mut w, &p, None);
+    assert_eq!(
+        w.view
+            .live_fact(w.orsel, "pending_inspection")
+            .unwrap()
+            .canon,
+        Canon::Established
+    );
+
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(
+        slot(e(w.orsel), "pending_inspection", "tomorrow"),
+        Seen::Pc,
+        vec![],
+    )];
+    ok(validate(&p, &w.view));
+    apply(&mut w, &p, None);
+    assert_eq!(
+        w.view
+            .live_fact(w.orsel, "pending_inspection")
+            .unwrap()
+            .slot
+            .value,
+        "tomorrow"
+    );
+}
+
 #[test]
 fn schedule_effect_may_set_pc_reputation() {
     let w = World::new();

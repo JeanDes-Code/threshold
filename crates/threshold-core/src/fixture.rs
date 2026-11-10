@@ -8,7 +8,8 @@
 //!   hidden facts, attitudes, goals, Voice Cards, open obstacles and World
 //!   Events. `setup::commit_world` commits it as one more Setup Turn.
 //!   Entities are named, never numbered. A fact's `known_by` names its
-//!   holders (empty means GM only). An obstacle names the live fact it
+//!   holders (empty means GM only). An `open` fact is an open item (ADR
+//!   0005): it commits on the `pending_` key. An obstacle names the live fact it
 //!   stands on by subject and key. An event is a World Event due `at`
 //!   minutes after the campaign starts; `seen_by` names the NPCs who witness
 //!   it (empty means GM only).

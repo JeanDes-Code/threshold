@@ -6,7 +6,7 @@ use threshold_core::{
     domain::{
         ActionKind, AdventureSeed, Canon, CheckDraft, DecisionProposal, EntityKind, EntityRef,
         FactSource, GoalStatus, Handle, LedgerOp, NewFact, NewNpc, PcSeed, Reaction, SeedEntity,
-        SeedFact, Seen, Slot, SlotDraft, Stance, Trigger, Verdict,
+        SeedFact, Seen, Slot, SlotDraft, Stance, StartSeed, Trigger, Verdict,
     },
     rules::RollResult,
     store::{Store, TurnKind, TurnRecord, WorldView},
@@ -93,6 +93,12 @@ pub fn adventure_seed() -> AdventureSeed {
         ],
         proposed: vec![seed_fact("Orsel", "bribable", "yes")],
         story_language: "en".into(),
+        themes: vec![],
+        gm_agreement: String::new(),
+        resolution: String::new(),
+        min_age: None,
+        start: StartSeed::default(),
+        open_details: vec![],
     }
 }
 

@@ -3,7 +3,7 @@ use std::path::Path;
 use threshold_core::{
     domain::{
         AdventureSeed, Canon, EntityKind, EntityRef, FactSource, Handle, LedgerOp, PcSeed,
-        SeedFact, Slot,
+        SeedFact, Slot, StartSeed,
     },
     store::{CommitError, Store, TurnKind, TurnRecord},
 };
@@ -32,6 +32,12 @@ fn adventure_seed() -> AdventureSeed {
             text: "A raven may help.".into(),
         }],
         story_language: "en".into(),
+        themes: vec![],
+        gm_agreement: String::new(),
+        resolution: String::new(),
+        min_age: None,
+        start: StartSeed::default(),
+        open_details: vec![],
     }
 }
 fn record(campaign_id: u64, op: &str) -> TurnRecord {

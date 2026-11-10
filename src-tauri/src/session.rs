@@ -13,7 +13,7 @@ use std::{
 use serde::{Serialize, Serializer};
 use threshold_core::{
     Gm,
-    domain::{EntityKind, Knowing},
+    domain::{EntityKind, Knowing, is_open_key},
     fixture::{load_adventure_seed, load_world_setup},
     model::GmError,
     rules::{D10, RollResult},
@@ -103,6 +103,8 @@ pub struct JournalEntry {
     pub subject: String,
     pub text: String,
     pub source: Option<String>,
+    /// An open item (ADR 0005): planned or pending, not done.
+    pub open: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -364,6 +366,7 @@ impl Session {
                 subject: name(belief.subject),
                 text: belief.text,
                 source: belief.source.map(name),
+                open: is_open_key(&belief.key),
             };
             match belief.how {
                 Knowing::Witnessed => journal.observations.push(entry),

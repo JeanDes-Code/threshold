@@ -13,7 +13,7 @@ use threshold_core::{
     context::proposal_context,
     domain::{
         AdventureSeed, DecisionProposal, EntityKind, EntityRef, LedgerOp, PcSeed, SeedEntity,
-        SeedFact, Verdict,
+        SeedFact, StartSeed, Verdict,
     },
     proposal_schema_for,
     store::{Store, TurnKind, TurnRecord, WorldView},
@@ -86,6 +86,12 @@ fn fixture() -> Result<WorldView, Box<dyn Error>> {
         ],
         proposed: vec![],
         story_language: "en".into(),
+        themes: vec![],
+        gm_agreement: String::new(),
+        resolution: String::new(),
+        min_age: None,
+        start: StartSeed::default(),
+        open_details: vec![],
     };
     let campaign = store.create_campaign(&seed, 11)?;
     let view = store.snapshot(campaign)?;
