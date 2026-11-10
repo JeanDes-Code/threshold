@@ -227,6 +227,20 @@ The architect and the domain-modeling step may rename them. They land in `GLOSSA
 - This slice stores who knows that two names are one person, and does not enforce it in play.
 - The old two-file path leaves the normal UI.
 
+## 11b. Changes after the final review (2026-11-10)
+
+- **The Player confirms every age**, not only the ages the model proposed. The adults-only limit reads the stored age, so the gate must not rest on the model's claim that the text states an age. The model's claim stays as a label in the review.
+- **A hidden fact or a secret is Established, not Persistent.** A fact is Persistent only when the PC holds it. An NPC's plan or feeling must be able to change in play.
+- **The World Build prompts carry the Content Boundaries, the themes and the minimum age.**
+- **The World autonomy check also counts** a goal against the PC and a secret about the PC.
+- **A build call times out after 240 s** and is retried twice.
+
+Accepted risks, not fixed:
+
+- **Text from the Source Text reaches the play prompts.** The GM agreement, hidden facts, goals, secrets and Voice Cards come from the document through the model. A hostile document could carry instructions for the GM model. Code stops the cases it can check: names outside the roster, the PC as holder of a secret, a hand-written `pending_` key, a PC act in an event. It cannot stop a sentence that reads as an instruction. The Source Text is the Player's own choice of input, and the Player reads the GM agreement at the review.
+- **The core trusts the list of ages still to confirm that the app sends.** The review screen is the only writer today. A dedicated command that the core owns is a follow-up for project 2.
+- **The debug file of a build holds the hidden world in plain text**, whatever the debug toggle says, so that a failed build can be diagnosed. The Campaign file holds the same content.
+
 ## 12. Decisions from the owner
 
 - Three ways to start a Campaign; the interview is never forced (2026-11-10).
