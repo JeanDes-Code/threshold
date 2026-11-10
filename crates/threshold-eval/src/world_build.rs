@@ -85,23 +85,41 @@ pub struct Item {
 /// An open item of the Source Text: planned, proposed, pending or not
 /// established. `about` finds it kept open. `done` lists phrases that only
 /// a completed event would hold ("married", "sold wheel"): a settled fact
-/// that holds one of them states the item as done.
+/// that holds one of them states the item as done. When no phrase can tell
+/// a completed event from a correct settled fact, the item sets
+/// `not_scored_for_false_past` instead, and false past skips it.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenItem {
     pub subject: String,
     pub about: String,
+    #[serde(default)]
     pub done: Vec<String>,
+    #[serde(default)]
+    pub not_scored_for_false_past: bool,
 }
 
 impl Expected {
     pub fn parse(text: &str) -> Result<Self, String> {
         let expected: Self = toml::from_str(text).map_err(|e| e.to_string())?;
-        if let Some(item) = expected.open.iter().find(|o| o.done.is_empty()) {
-            return Err(format!(
-                "the open item on {} ({}) needs at least one done phrase",
-                item.subject, item.about
-            ));
+        for item in &expected.open {
+            let at = format!("the open item on {} ({})", item.subject, item.about);
+            match (item.done.is_empty(), item.not_scored_for_false_past) {
+                (true, false) => {
+                    return Err(format!(
+                        "{at} needs a done phrase, or not_scored_for_false_past = true"
+                    ));
+                }
+                (false, true) => {
+                    return Err(format!(
+                        "{at} has done phrases and not_scored_for_false_past: keep one"
+                    ));
+                }
+                _ => {}
+            }
+            if item.done.iter().any(|p| words(p).is_empty()) {
+                return Err(format!("{at} has an empty done phrase"));
+            }
         }
         Ok(expected)
     }
@@ -325,13 +343,22 @@ pub fn fact_recall(expected: &Expected, seed: &AdventureSeed, facts: &[FactEntry
 }
 
 /// Per open item: a settled fact (`open = false`) holds one of its `done`
-/// phrases, so it states the item as done.
-pub fn false_past(expected: &Expected, seed: &AdventureSeed, facts: &[FactEntry]) -> Vec<bool> {
+/// phrases, so it states the item as done. `None` for an item that is not
+/// scored for false past.
+pub fn false_past(
+    expected: &Expected,
+    seed: &AdventureSeed,
+    facts: &[FactEntry],
+) -> Vec<Option<bool>> {
     let items = expected
         .open
         .iter()
         .map(|i| (&i.subject, i.done.as_slice()));
     found(expected, seed, items, facts, Some(false))
+        .into_iter()
+        .zip(&expected.open)
+        .map(|(hit, item)| (!item.not_scored_for_false_past).then_some(hit))
+        .collect()
 }
 
 /// Per open item: found in an open fact, through `about`.
@@ -398,17 +425,20 @@ fn words(text: &str) -> Vec<String> {
 
 /// How many of `goals` and `secrets` name the PC, and how many there are.
 /// The build's own rule, `build::names_pc`: a text names the PC when it
-/// holds, as whole words, a full name of the PC or the first word of its
-/// main name. `pcs` gives the PC's names as (main name, other names); a
-/// text that names one of them names the PC.
+/// holds, as whole words, a full name of the PC, or the first word of its
+/// main name when no name of `roster` holds that word. `pcs` gives the PC's
+/// names as (main name, other names); a text that names one of them names
+/// the PC. `roster` holds the main and other names of every other drafted
+/// entry, as the WorldAutonomy check passes them (`roster_names`).
 pub fn pc_centred(
     pcs: &[(String, Vec<String>)],
+    roster: &[&str],
     goals: &[GoalEntry],
     secrets: &[FactEntry],
 ) -> (usize, usize) {
     let named = |text: &str| {
         pcs.iter()
-            .any(|(main, others)| names_pc(main, others, &[], text))
+            .any(|(main, others)| names_pc(main, others, roster, text))
     };
     goals
         .iter()
@@ -417,6 +447,15 @@ pub fn pc_centred(
         .fold((0, 0), |(naming, total), text| {
             (naming + usize::from(named(text)), total + 1)
         })
+}
+
+/// The main and other names of every drafted entry but the PC.
+pub fn roster_names(seed: &AdventureSeed) -> Vec<&str> {
+    seed.entities
+        .iter()
+        .flat_map(|e| std::iter::once(&e.name).chain(e.other_names.iter().map(|o| &o.name)))
+        .map(String::as_str)
+        .collect()
 }
 
 /// The PC's names, as (main name, other names): the expected ones and the
@@ -508,9 +547,16 @@ impl Recall {
                 .2
                 .insert(format!("{}: {}", item.subject, item.about));
         }
-        self.false_past.0 += hits(&past);
-        self.false_past.1 += past.len();
-        for (item, _) in expected.open.iter().zip(&past).filter(|(_, f)| **f) {
+        // Only the scored open items count, in both terms.
+        let scored: Vec<bool> = past.iter().flatten().copied().collect();
+        self.false_past.0 += hits(&scored);
+        self.false_past.1 += scored.len();
+        for (item, _) in expected
+            .open
+            .iter()
+            .zip(&past)
+            .filter(|(_, f)| **f == Some(true))
+        {
             self.false_past
                 .2
                 .insert(format!("{}: {}", item.subject, item.about));
@@ -518,7 +564,7 @@ impl Recall {
         self.open.0 += hits(&open);
         self.open.1 += open.len();
         let cell = |v: &[bool]| format!("{} of {}", hits(v), v.len());
-        [cell(&settled), cell(&past), cell(&open)]
+        [cell(&settled), cell(&scored), cell(&open)]
     }
 }
 
@@ -670,7 +716,12 @@ pub fn section(
         let mut world_events = "-".to_owned();
         if let Some(world) = &run.world {
             built += 1;
-            let (n, of) = pc_centred(&pc_names(expected, &draft.seed), &world.goals, &run.secrets);
+            let (n, of) = pc_centred(
+                &pc_names(expected, &draft.seed),
+                &roster_names(&draft.seed),
+                &world.goals,
+                &run.secrets,
+            );
             naming += n;
             items += of;
             if of > 0 {
@@ -721,7 +772,7 @@ pub fn section(
     }
     let _ = writeln!(
         out,
-        " Each run drafts a Seed Draft, confirms every proposed age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a fact with the same subject (through the main and other names) holds every word of one of the item's phrases in its key, value and text. The draft lines score the known facts of each draft; the world lines score the facts of each built world (known facts included) and cover only the runs that built one. Fact recall and open recall use the item's `about` phrase. False past counts the open items for which a settled fact (`open = false`) holds one of the item's `done` phrases: words that only a completed event would hold, so a settled fact about the plan itself does not count. A paraphrase does not match, so every fact line is a lower bound. The run confirms every proposed age, so a proposed minor shows only on the line of characters drafted under 18. PC-centred share: the NPC goals and secrets whose text names the PC by one of its full names or by the first word of its main name, as whole words (the build's own rule); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
+        " Each run drafts a Seed Draft, confirms every proposed age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a fact with the same subject (through the main and other names) holds every word of one of the item's phrases in its key, value and text. The draft lines score the known facts of each draft; the world lines score the facts of each built world (known facts included) and cover only the runs that built one. Fact recall and open recall use the item's `about` phrase. False past counts the open items for which a settled fact (`open = false`) holds one of the item's `done` phrases: words that only a completed event would hold, so a settled fact about the plan itself does not count. An open item for which no such phrase exists is not scored for false past, and the false past lines leave it out of both terms. A paraphrase does not match, so every fact line is a lower bound. The run confirms every proposed age, so a proposed minor shows only on the line of characters drafted under 18. PC-centred share: the NPC goals and secrets whose text names the PC by one of its full names, or by the first word of its main name when no other drafted entry has that word in a name, as whole words (the build's own rule, `build::names_pc`, with the drafted roster); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
     );
 
     let n = runs.len();
@@ -805,6 +856,17 @@ pub fn section(
             missed("stated as done", private, &r.false_past.2)
         );
     }
+    let unscored: BTreeSet<String> = expected
+        .open
+        .iter()
+        .filter(|i| i.not_scored_for_false_past)
+        .map(|i| format!("{}: {}", i.subject, i.about))
+        .collect();
+    let _ = writeln!(
+        out,
+        "- Open items not scored for false past: {}",
+        named(unscored.len(), &unscored)
+    );
     for (r, over, lists) in fact_lines(&t) {
         let _ = writeln!(
             out,

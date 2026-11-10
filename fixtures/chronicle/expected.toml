@@ -6,7 +6,8 @@
 # subject holds every word of `about` in its key, value and text. An open
 # item is stated as done (false past) when a settled fact on its subject
 # holds every word of one of its `done` phrases: words that only a completed
-# event would hold, and that no settled statement of the source holds.
+# event would hold, and that no settled statement of the source holds. An
+# item with no such phrase sets not_scored_for_false_past instead.
 
 pc_name = "Teodor Brandt"
 pc_age = 34
@@ -169,11 +170,13 @@ subject = "Teodor Brandt"
 about = "post"
 done = ["carried post", "delivered post"]
 
-# Who wrote the sealed letter is not established. "wrote letter" is not a
-# done phrase: a settled fact that says nobody knows who wrote it holds those
-# words too. A fact that names the writer may take the writer as subject;
-# this item then misses it.
+# Who wrote the sealed letter is not established. No done phrase can tell a
+# fact that names the writer from a correct settled fact about the letter:
+# "wrote letter" and "letter written by" both fit "a sealed letter written by
+# an unknown hand". So this item is not scored for false past; open recall
+# still reads it. A fact on it may take the writer as subject; open recall
+# then misses it.
 [[open]]
 subject = "Teodor Brandt"
 about = "letter"
-done = ["letter written by"]
+not_scored_for_false_past = true

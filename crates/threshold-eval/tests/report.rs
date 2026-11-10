@@ -586,6 +586,59 @@ done = ["owns ferry", "bought ferry"]
         assert!(error.contains("Osric Fell"), "{error}");
         let missing = EXPECTED.replace(r#"done = ["married", "wedding took place"]"#, "");
         assert!(Expected::parse(&missing).is_err());
+        // An empty phrase can never match: it is refused.
+        for phrase in ["\"\"", "\"  \"", "\"--\""] {
+            let blank = EXPECTED.replace(
+                r#"done = ["married", "wedding took place"]"#,
+                &format!(r#"done = ["married", {phrase}]"#),
+            );
+            let error = Expected::parse(&blank).unwrap_err();
+            assert!(error.contains("empty done phrase"), "{phrase}: {error}");
+        }
+        // The flag replaces the phrases; it may not come with them.
+        let flagged = EXPECTED.replace(
+            r#"done = ["married", "wedding took place"]"#,
+            "not_scored_for_false_past = true",
+        );
+        assert!(Expected::parse(&flagged).is_ok());
+        let both = EXPECTED.replace(
+            r#"done = ["married", "wedding took place"]"#,
+            "done = [\"married\"]\nnot_scored_for_false_past = true",
+        );
+        assert!(Expected::parse(&both).is_err());
+    }
+
+    #[test]
+    fn an_open_item_not_scored_for_false_past_is_never_counted() {
+        let flagged = EXPECTED.replace(
+            r#"done = ["married", "wedding took place"]"#,
+            "not_scored_for_false_past = true",
+        );
+        let expected = Expected::parse(&flagged).unwrap();
+        let facts = vec![
+            fact("Osric Fell", "daughter", "married", "She married.", false),
+            fact("Toll-Master", "owns_ferry", "yes", "He owns it now.", false),
+        ];
+        assert_eq!(
+            false_past(&expected, &seed(), &facts),
+            vec![None, Some(true)]
+        );
+        let report = section(&expected, &runs(), &fixture(), 1);
+        assert!(
+            report.contains("- Open items not scored for false past: 1 (Osric Fell: wedding)"),
+            "{report}"
+        );
+        assert!(
+            report.contains(
+                "- False past, draft knowledge (open items stated as done): 0 of 3 over 3 drafts"
+            ),
+            "{report}"
+        );
+        let private = section(&expected, &runs(), &Shown::Private, 1);
+        assert!(
+            private.contains("- Open items not scored for false past: 1\n"),
+            "{private}"
+        );
     }
 
     #[test]
@@ -599,7 +652,10 @@ done = ["owns ferry", "bought ferry"]
             true,
         );
         let mut facts = vec![planned];
-        assert_eq!(false_past(&expected, &seed, &facts), vec![false, false]);
+        assert_eq!(
+            false_past(&expected, &seed, &facts),
+            vec![Some(false), Some(false)]
+        );
         assert_eq!(open_recall(&expected, &seed, &facts), vec![true, false]);
 
         // A settled fact on the plan, with the `about` word but no `done`
@@ -611,7 +667,10 @@ done = ["owns ferry", "bought ferry"]
             "Osric has saved for the wedding feast for six years.",
             false,
         ));
-        assert_eq!(false_past(&expected, &seed, &facts), vec![false, false]);
+        assert_eq!(
+            false_past(&expected, &seed, &facts),
+            vec![Some(false), Some(false)]
+        );
 
         // The same item stated as done, on the same subject: a false past.
         facts.push(fact(
@@ -621,7 +680,10 @@ done = ["owns ferry", "bought ferry"]
             "Osric's daughter married at Harrowmere.",
             false,
         ));
-        assert_eq!(false_past(&expected, &seed, &facts), vec![true, false]);
+        assert_eq!(
+            false_past(&expected, &seed, &facts),
+            vec![Some(true), Some(false)]
+        );
 
         // Another subject does not count; a subject named through the draft's
         // other name does, with the word in the key.
@@ -632,7 +694,10 @@ done = ["owns ferry", "bought ferry"]
             "Agathe bought it.",
             false,
         ));
-        assert_eq!(false_past(&expected, &seed, &facts), vec![true, false]);
+        assert_eq!(
+            false_past(&expected, &seed, &facts),
+            vec![Some(true), Some(false)]
+        );
         facts.push(fact(
             "Toll-Master",
             "owns_ferry",
@@ -640,7 +705,10 @@ done = ["owns ferry", "bought ferry"]
             "He owns it now.",
             false,
         ));
-        assert_eq!(false_past(&expected, &seed, &facts), vec![true, true]);
+        assert_eq!(
+            false_past(&expected, &seed, &facts),
+            vec![Some(true), Some(true)]
+        );
         // Fact recall takes any fact on the subject that holds every word.
         assert_eq!(fact_recall(&expected, &seed, &facts), vec![false, false]);
         facts.push(fact(
@@ -718,7 +786,50 @@ done = ["owns ferry", "bought ferry"]
         assert_eq!(secrets.len(), 1, "{secrets:?}");
         assert_eq!(secrets[0].text, secret.text);
         // Goals 1, 2 and 5 and the secret name the PC; goals 3 and 4 do not.
-        assert_eq!(pc_centred(&names, &world.goals, &secrets), (4, 6));
+        assert_eq!(pc_centred(&names, &[], &world.goals, &secrets), (4, 6));
+
+        // An NPC of the drafted roster shares the PC's first word: "Teodor"
+        // alone now names that NPC, not the PC (the build's guard). Full
+        // names still name the PC.
+        let roster = ["Teodor Vane", "Gerrit Vane"];
+        assert_eq!(pc_centred(&names, &roster, &world.goals, &secrets), (3, 6));
+        // An other name of another entry counts too.
+        let roster = ["Odile Quast", "Teo"];
+        assert_eq!(pc_centred(&names, &roster, &world.goals, &secrets), (4, 6));
+    }
+
+    #[test]
+    fn pc_centred_metric_reads_the_drafted_roster() {
+        // A drafted NPC "Teodor Vane": a goal that names him is not about the
+        // PC. Without the roster, "Teodor" alone would count.
+        let mut seed = seed();
+        seed.entities.push(
+            serde_json::from_value(json!(
+                {"name": "Teodor Vane", "kind": "npc", "age": 40}
+            ))
+            .unwrap(),
+        );
+        let mut draft = SeedDraft::new("text".into(), seed);
+        draft.knowledge.clear();
+        let world = WorldSetup {
+            goals: vec![
+                goal("Gerrit Vane", "Pay Teodor back for the nets."),
+                goal("Osric Fell", "Buy the ferry from Teodor Brandt."),
+            ],
+            ..WorldSetup::default()
+        };
+        let run = BuildRun {
+            draft: Some(draft),
+            world: Some(world),
+            ..BuildRun::default()
+        };
+        let report = section(&expected(), &[run], &fixture(), 1);
+        assert!(
+            report.contains(
+                "- PC-centred share (NPC goals and secrets that name the PC): 1 of 2 (50%)"
+            ),
+            "{report}"
+        );
     }
 
     /// Three runs: one built, one not approvable, one failed in the build.
@@ -861,6 +972,7 @@ done = ["owns ferry", "bought ferry"]
             "- Draft gaps before approval, by kind: age_missing 1, unknown_name 1",
             "- Not approvable: 1 of 3 runs",
             "- Characters drafted under 18 that the expected list does not hold as children: 3 (Toll-Master)",
+            "- Open items not scored for false past: 0\n",
             "- Runs with a built world: 1 of 3",
             "- Fact recall, draft knowledge (settled items found): 3 of 6 over 3 drafts (50%); missed: Gerrit Vane: guild",
             "- Fact recall, built world (settled items found): 1 of 2 over 1 built worlds (50%); missed: Gerrit Vane: guild",
