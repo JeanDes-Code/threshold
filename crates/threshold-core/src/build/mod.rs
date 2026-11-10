@@ -8,6 +8,7 @@ mod draft;
 mod draft_stages;
 mod stages;
 mod store;
+mod world_prompts;
 mod world_stages;
 
 use serde::{Deserialize, Serialize};

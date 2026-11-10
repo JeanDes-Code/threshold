@@ -8,7 +8,7 @@ use threshold_core::{
         KnownFact, SeedDraft, Stage, apply_edit, approve, gaps,
     },
     context::ADVENTURE_BLOCK_MAX_CHARS,
-    domain::{AdventureSeed, EntityKind, OtherName, PcSeed, SeedEntity, StartSeed},
+    domain::{AdventureSeed, EntityKind, OtherName, PcSeed, SeedEntity, SeedFact, StartSeed},
 };
 
 /// An empty folder of its own under the system temp dir, removed on drop.
@@ -262,6 +262,71 @@ fn gaps_name_each_problem() {
     );
 }
 
+fn open(mut fact: KnownFact) -> KnownFact {
+    fact.open = true;
+    fact
+}
+
+#[test]
+fn slot_conflicts_are_gaps() {
+    let conflict = |at: &str| vec![gap(GapKind::SlotConflict, at)];
+
+    // Two known facts on one slot, any values; names resolve first.
+    assert_eq!(
+        gaps_after(|d| d.knowledge.push(known("jean", "Job", "Ferryman"))),
+        conflict("knowledge[2]")
+    );
+    assert_eq!(
+        gaps_after(|d| d.knowledge.push(known("Jean", "job", "sailor"))),
+        conflict("knowledge[2]")
+    );
+    assert_eq!(
+        gaps_after(|d| d.knowledge.push(known("Wren", "debt", "twelve"))),
+        conflict("knowledge[2]")
+    );
+    assert_eq!(
+        gaps_after(|d| {
+            d.knowledge.push(open(known("Jean", "move", "the city")));
+            d.knowledge.push(open(known("Jean", "move", "the coast")));
+        }),
+        conflict("knowledge[3]")
+    );
+
+    // A known fact on the slot of a seed `decided` fact, or of an other name.
+    let decided = SeedFact {
+        subject: "Jean".into(),
+        key: "job".into(),
+        value: "ferryman".into(),
+        text: "Jean runs the ferry.".into(),
+    };
+    assert_eq!(
+        gaps_after(|d| d.seed.decided.push(decided.clone())),
+        conflict("knowledge[0]")
+    );
+    assert_eq!(
+        gaps_after(|d| {
+            d.seed.decided.push(decided.clone());
+            d.knowledge[0].open = true;
+        }),
+        conflict("knowledge[0]")
+    );
+    assert_eq!(
+        gaps_after(|d| d.knowledge.push(known("Wren", "alias_jay", "Jay"))),
+        conflict("knowledge[2]")
+    );
+
+    // A settled and an open known fact on one subject and key: the later
+    // entry is named, in either order.
+    assert_eq!(
+        gaps_after(|d| d.knowledge.push(open(known("Jean", "job", "captain")))),
+        conflict("knowledge[2]")
+    );
+    assert_eq!(
+        gaps_after(|d| d.knowledge.insert(0, open(known("Jean", "job", "captain")))),
+        conflict("knowledge[1]")
+    );
+}
+
 #[test]
 fn edited_draft_never_panics() {
     let mut draft = valid_draft();
@@ -424,6 +489,10 @@ fn build_types_use_snake_case_on_the_wire() {
     assert_eq!(
         serde_json::to_value(gap(GapKind::SeedBlockTooLong, "seed")).unwrap(),
         serde_json::json!({"kind": "seed_block_too_long", "at": "seed"})
+    );
+    assert_eq!(
+        serde_json::to_value(gap(GapKind::SlotConflict, "knowledge[1]")).unwrap(),
+        serde_json::json!({"kind": "slot_conflict", "at": "knowledge[1]"})
     );
     assert_eq!(
         serde_json::to_value(DraftState::Approved).unwrap(),

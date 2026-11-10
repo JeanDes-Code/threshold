@@ -57,7 +57,10 @@ pub fn draft_from_text(
     let names = Names::of(&draft.seed);
     let parts = sections(text);
     report(ctl, Stage::DraftKnowledge, 0, parts.len());
-    let mut seen = HashSet::new();
+    // One known fact per slot: subject, key and open state. The same value
+    // is a duplicate; another value is the later state, so a fact from a
+    // later section, or later in a section, replaces the earlier one.
+    let mut slots: Vec<(String, String, bool)> = Vec::new();
     for (i, part) in parts.iter().enumerate() {
         let call = knowledge_call(&draft.seed, (i + 1, parts.len()), part);
         let staged = run_stage(gm, ctl, &draft.id, &call, |out| {
@@ -69,13 +72,18 @@ pub fn draft_from_text(
                     continue;
                 }
                 let fact = known_fact(&names, fact);
-                let slot = (
-                    normalize::name(&fact.subject),
-                    fact.key.clone(),
-                    normalize::name(&fact.value),
-                );
-                if seen.insert(slot) {
-                    draft.knowledge.push(fact);
+                let slot = (normalize::name(&fact.subject), fact.key.clone(), fact.open);
+                match slots.iter().position(|s| *s == slot) {
+                    None => {
+                        slots.push(slot);
+                        draft.knowledge.push(fact);
+                    }
+                    Some(at) => {
+                        let earlier = &draft.knowledge[at];
+                        if normalize::value(&earlier.value) != normalize::value(&fact.value) {
+                            draft.knowledge[at] = fact;
+                        }
+                    }
                 }
             }
         }

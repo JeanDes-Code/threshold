@@ -245,9 +245,31 @@ impl FactBook {
         true
     }
 
-    /// Writes a fact that code derives from the approved draft. It replaces
-    /// an earlier entry on its slot: a later known fact, and the start state
-    /// after all, are the later state. A slot of the seed's Setup Turn stays.
+    /// Accepts a known fact of the approved draft. A known fact on a slot of
+    /// the seed's Setup Turn fails `SettledFacts`; a clash with an earlier
+    /// known fact fails its check. `gaps` reports both as `SlotConflict`, so
+    /// `approve` refuses them: this guards a draft approved some other way.
+    pub fn known(&mut self, entry: FactEntry) -> Result<(), BuildCheck> {
+        let seed_slot = self.entries.iter().any(|b| {
+            b.fixed
+                && same_name(&b.entry.subject, &entry.subject)
+                && normalize::key(&b.entry.key) == normalize::key(&entry.key)
+        });
+        if seed_slot {
+            return Err(BuildCheck::SettledFacts);
+        }
+        match self.clash(&entry) {
+            Some(check) => Err(check),
+            None => {
+                self.add(entry);
+                Ok(())
+            }
+        }
+    }
+
+    /// Writes a `location` that code derives from the start state. It
+    /// replaces a known fact on its slot: the start state is the latest
+    /// state. A slot of the seed's Setup Turn stays.
     pub fn put(&mut self, entry: FactEntry) {
         match self
             .entries
@@ -458,6 +480,8 @@ pub(super) fn against(goal: &GoalOut) -> Option<&str> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum NpcItem {
     Goal(usize),
+    /// Only the `against` of a goal: the goal stays.
+    Against(usize),
     Attitude(usize),
     Secret,
 }
@@ -467,9 +491,10 @@ const MAX_GOALS: usize = 3;
 /// The fewest sample lines of a Voice Card.
 const MIN_SAMPLES: usize = 2;
 
-/// The checks on the hidden state of `npc`. Essential: a first goal and the
-/// Voice Card. `book` holds the accepted facts and the secrets of the
-/// other NPCs.
+/// The checks on the hidden state of `npc`. Each goal is an optional item;
+/// the NPC fails `Completeness` when no goal survives, or when its Voice
+/// Card is incomplete. `book` holds the accepted facts and the secrets of
+/// the other NPCs.
 pub(super) fn npc_state(
     roster: &Roster,
     book: &FactBook,
@@ -477,34 +502,34 @@ pub(super) fn npc_state(
     out: &NpcOut,
 ) -> Vec<Problem<NpcItem>> {
     let mut problems = vec![];
-    if out.goals.is_empty() {
+    let mut kept = 0;
+    for (i, goal) in out.goals.iter().enumerate() {
+        let mut drop = |check, rule| {
+            let note = Note::item("goals", i).says(rule);
+            problems.push(Problem::optional(check, NpcItem::Goal(i), note));
+        };
+        if goal.text.trim().is_empty() {
+            drop(BuildCheck::Schema, "goal text is empty");
+        } else if i >= MAX_GOALS {
+            drop(BuildCheck::Schema, "an NPC keeps at most three goals");
+        } else {
+            kept += 1;
+        }
+        if against(goal).is_some_and(|a| roster.find(a).is_none()) {
+            problems.push(Problem::optional(
+                BuildCheck::References,
+                NpcItem::Against(i),
+                Note::item("goals", i)
+                    .field("against")
+                    .says("is not a name from the ROSTER"),
+            ));
+        }
+    }
+    if kept == 0 {
         problems.push(Problem::essential(
             BuildCheck::Completeness,
             Note::part("goals").says("an NPC needs at least one goal"),
         ));
-    }
-    for (i, goal) in out.goals.iter().enumerate() {
-        let mut found = vec![];
-        if goal.text.trim().is_empty() {
-            found.push((BuildCheck::Schema, "goal text is empty"));
-        }
-        if i >= MAX_GOALS {
-            found.push((BuildCheck::Schema, "an NPC keeps at most three goals"));
-        }
-        if against(goal).is_some_and(|a| roster.find(a).is_none()) {
-            found.push((
-                BuildCheck::References,
-                "against is not a name from the ROSTER",
-            ));
-        }
-        for (check, rule) in found {
-            let note = Note::item("goals", i).says(rule);
-            problems.push(if i == 0 {
-                Problem::essential(check, note)
-            } else {
-                Problem::optional(check, NpcItem::Goal(i), note)
-            });
-        }
     }
 
     let card = &out.voice_card;
@@ -715,8 +740,14 @@ pub(super) fn location(npc: &str, place: &str, known_by: Vec<String>) -> FactEnt
 }
 
 /// Each problem drops one placement. A placement is checked against the
-/// accepted facts and the placements before it that passed.
-pub(super) fn start_state(roster: &Roster, book: &FactBook, out: &StartOut) -> Vec<Problem<usize>> {
+/// accepted facts and the placements before it that passed, and may not
+/// put an NPC at the start place.
+pub(super) fn start_state(
+    roster: &Roster,
+    book: &FactBook,
+    start_place: &str,
+    out: &StartOut,
+) -> Vec<Problem<usize>> {
     let mut book = book.clone();
     let mut problems = vec![];
     for (i, placement) in out.placements.iter().enumerate() {
@@ -743,6 +774,14 @@ pub(super) fn start_state(roster: &Roster, book: &FactBook, out: &StartOut) -> V
             (_, Some(p)) if p.kind != EntityKind::Place => Some((
                 BuildCheck::Kinds,
                 note().field("place").of(p).says("is not a place"),
+            )),
+            // An absent NPC is not at the start place: the approved start
+            // state lists who is there.
+            (Some(n), Some(p)) if same_name(&p.main, start_place) => Some((
+                BuildCheck::SettledFacts,
+                note()
+                    .of(n)
+                    .says("this NPC is absent at the start, so not at the start place"),
             )),
             (Some(n), Some(p)) => {
                 let entry = location(&n.main, &p.main, vec![n.main.clone()]);

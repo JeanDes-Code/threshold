@@ -567,3 +567,38 @@ fn a_roster_check_that_fails_twice_fails_the_draft() {
         }
     );
 }
+
+#[test]
+fn the_later_section_wins_a_slot() {
+    let gm = gm(&[
+        seed_out(),
+        roster_out(),
+        knowledge(&[
+            fact("Tobin Reed", "location", "Gull Point", false, true),
+            fact("Harbour Council", "vote", "new pier", true, true),
+        ]),
+        knowledge(&[
+            fact("Ada Venn", "role", "clerk", false, true),
+            fact("ada venn", "Role", "harbour clerk", false, true),
+        ]),
+        knowledge(&[
+            fact("Tobin Reed", "location", "Tide Hall", false, true),
+            fact("Harbour Council", "vote", "old pier", false, true),
+        ]),
+    ]);
+    let draft = run(&source(), &gm).result.unwrap();
+    // One fact per subject, key and open state: the later one, in its
+    // place. An open and a settled fact are two slots (a gap later).
+    assert_eq!(
+        draft.knowledge,
+        vec![
+            known("Tobin Reed", "location", "Tide Hall", false),
+            known("Harbour Council", "vote", "new pier", true),
+            KnownFact {
+                text: "ada venn: Role is harbour clerk.".into(),
+                ..known("Ada Venn", "role", "harbour clerk", false)
+            },
+            known("Harbour Council", "vote", "old pier", false),
+        ]
+    );
+}

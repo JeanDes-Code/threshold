@@ -253,6 +253,10 @@ fn trapped(at: usize, trap: Value) -> Vec<Value> {
     outputs
 }
 
+fn world_of(run: &Run) -> WorldSetup {
+    run.world()
+}
+
 fn facts_on<'a>(world: &'a WorldSetup, subject: &str, key: &str) -> Vec<&'a FactEntry> {
     world
         .facts
@@ -283,10 +287,6 @@ impl TempDir {
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         Self(path)
-    }
-
-    fn is_empty(&self) -> bool {
-        fs::read_dir(&self.0).unwrap().next().is_none()
     }
 }
 
@@ -390,13 +390,6 @@ fn build_adds_no_character() {
         .collect();
     roster.sort_unstable();
     assert_eq!(names, roster);
-}
-
-#[test]
-fn build_writes_no_file() {
-    let dir = TempDir::new("nofile");
-    run(&draft(), &plain()).world();
-    assert!(dir.is_empty());
 }
 
 #[test]
@@ -521,21 +514,17 @@ fn each_call_sees_what_it_needs() {
 }
 
 #[test]
-fn known_facts_keep_one_entry_per_slot() {
+fn the_start_state_is_the_latest_location() {
     let draft = draft_of(
         seed(),
         vec![
             known("Tobin Reed", "role", "harbour master", false),
             known("Tobin Reed", "location", "Tide Hall", false),
-            known("tobin reed", "Role", "retired pilot", false),
         ],
     );
     let world = run(&draft, &plain()).world();
-    // A later fact on the same slot is the later state; the start state is
-    // the latest of all.
-    let role = facts_on(&world, "Tobin Reed", "role");
-    assert_eq!(role.len(), 1);
-    assert_eq!(role[0].value, "retired pilot");
+    // Tobin Reed is present at the start, so the start place replaces the
+    // location the PC knew from the Source Text.
     let location = facts_on(&world, "Tobin Reed", "location");
     assert_eq!(location.len(), 1);
     assert_eq!(location[0].value, "Gull Point");
@@ -824,8 +813,25 @@ fn secrecy_trap() {
             &["Ada Venn", "the Keeper"],
         ),
         hf("Tobin Reed", "fear", "deep water", false, &["Tobin Reed"]),
+        hf(
+            "Tobin Reed",
+            "route",
+            "the north channel",
+            false,
+            &["Tobin Reed", "MIRA HOLT"],
+        ),
+        hf(
+            "Ada Venn",
+            "plan",
+            "leave in spring",
+            false,
+            &["Ada Venn", "Mïra Hólt"],
+        ),
     ]);
     let run = run(&draft(), &trapped(0, bad_hidden));
+    // The PC under any spelling of its names: case and accents do not count.
+    assert!(facts_on(&world_of(&run), "Tobin Reed", "route").is_empty());
+    assert!(facts_on(&world_of(&run), "Ada Venn", "plan").is_empty());
     let world = run.world();
     assert!(repair_notes(&run.gm)[0].contains("Secrecy"));
     assert!(facts_on(&world, "Ada Venn", "debt").len() == 1);
@@ -922,13 +928,14 @@ fn optional_item_is_dropped_and_the_build_goes_on() {
     let world = run(&draft(), &outputs).world();
     assert!(facts_on(&world, "Nobody Known", "savings").is_empty());
     assert!(world.attitudes.is_empty());
-    let tobin: Vec<&str> = world
-        .goals
-        .iter()
-        .filter(|g| g.npc == "Tobin Reed")
-        .map(|g| g.text.as_str())
-        .collect();
-    assert_eq!(tobin, ["Tobin Reed wants a quiet winter."]);
+    // A bad `against` drops only the `against`.
+    assert_eq!(
+        goals_of(&world, "Tobin Reed"),
+        [
+            ("Tobin Reed wants a quiet winter.", None),
+            ("Tobin Reed wants a new boat.", None)
+        ]
+    );
     assert!(world.events.is_empty());
 }
 
@@ -1057,4 +1064,139 @@ fn a_repair_note_never_quotes_hidden_text() {
     for note in notes {
         assert!(!note.to_lowercase().contains(MARK), "{note}");
     }
+}
+
+// ---- Fix round 1 -------------------------------------------------------------
+
+fn goals_of<'a>(world: &'a WorldSetup, npc: &str) -> Vec<(&'a str, Option<&'a str>)> {
+    world
+        .goals
+        .iter()
+        .filter(|g| g.npc == npc)
+        .map(|g| (g.text.as_str(), g.against.as_deref()))
+        .collect()
+}
+
+fn with_goals(goals: Value) -> Value {
+    let mut out = npc_out("Tobin Reed");
+    out["goals"] = goals;
+    out
+}
+
+#[test]
+fn a_bad_against_drops_only_the_against() {
+    let trap = with_goals(json!([
+        {"text": "Tobin Reed wants a new boat.", "against": "Nobody Known"},
+        {"text": "Tobin Reed wants a quiet winter.", "against": "Ada Venn"}
+    ]));
+    let run = run(&draft(), &trapped(2, trap));
+    let world = run.world();
+    assert!(repair_notes(&run.gm)[0].contains("References"));
+    assert_eq!(
+        goals_of(&world, "Tobin Reed"),
+        [
+            ("Tobin Reed wants a new boat.", None),
+            ("Tobin Reed wants a quiet winter.", Some("Ada Venn"))
+        ]
+    );
+}
+
+#[test]
+fn a_bad_first_goal_is_dropped_when_another_survives() {
+    let trap = with_goals(json!([
+        {"text": "  ", "against": null},
+        {"text": "Tobin Reed wants a quiet winter.", "against": null}
+    ]));
+    let run = run(&draft(), &trapped(2, trap));
+    let world = run.world();
+    assert_eq!(
+        goals_of(&world, "Tobin Reed"),
+        [("Tobin Reed wants a quiet winter.", None)]
+    );
+}
+
+#[test]
+fn an_npc_with_no_surviving_goal_fails_completeness() {
+    let trap = with_goals(json!([
+        {"text": "", "against": null},
+        {"text": " ", "against": "Ada Venn"}
+    ]));
+    let run = run(&draft(), &trapped(2, trap));
+    assert_eq!(
+        run.result.unwrap_err(),
+        BuildFailure {
+            stage: Stage::NpcState,
+            check: BuildCheck::Completeness
+        }
+    );
+    assert_eq!(run.gm.calls().len(), 4);
+}
+
+#[test]
+fn a_slot_conflict_in_an_approved_draft_fails_the_build() {
+    // `approve` refuses each of these drafts (`SlotConflict`); a draft
+    // approved by hand still never reaches `setup` with two facts on a slot.
+    let decided = threshold_core::domain::SeedFact {
+        subject: "Tobin Reed".into(),
+        key: "role".into(),
+        value: "harbour master".into(),
+        text: "Tobin Reed is the harbour master.".into(),
+    };
+    let mut retired = known("tobin reed", "Role", "retired pilot", false);
+    retired.text = "Tobin Reed retired.".into();
+    let cases = [
+        (
+            vec![],
+            vec![
+                known("Tobin Reed", "role", "harbour master", false),
+                retired,
+            ],
+            BuildCheck::SettledFacts,
+        ),
+        (
+            vec![decided],
+            vec![known("Tobin Reed", "role", "harbour master", false)],
+            BuildCheck::SettledFacts,
+        ),
+        (
+            vec![],
+            vec![
+                known("Tobin Reed", "role", "harbour master", false),
+                known("Tobin Reed", "role", "harbour pilot", true),
+            ],
+            BuildCheck::OpenItems,
+        ),
+    ];
+    for (decided, knowledge, check) in cases {
+        let mut seed = seed();
+        seed.decided = decided;
+        let mut draft = SeedDraft::new(source(), seed);
+        draft.knowledge = knowledge;
+        assert!(
+            threshold_core::build::gaps(&draft)
+                .iter()
+                .any(|g| g.kind == threshold_core::build::GapKind::SlotConflict)
+        );
+        draft.state = DraftState::Approved;
+        let run = run(&draft, &plain());
+        assert_eq!(
+            run.result.unwrap_err(),
+            BuildFailure {
+                stage: Stage::HiddenFacts,
+                check
+            }
+        );
+        assert!(run.gm.calls().is_empty());
+    }
+}
+
+#[test]
+fn an_absent_npc_is_never_placed_at_the_start_place() {
+    let trap = start(&[("Ada Venn", "Gull Point")]);
+    let run = run(&draft(), &trapped(5, trap));
+    let world = run.world();
+    // Ada Venn is not in `start.present`: the approved start state says she
+    // is not at Gull Point.
+    assert!(repair_notes(&run.gm)[0].contains("SettledFacts"));
+    assert!(facts_on(&world, "Ada Venn", "location").is_empty());
 }

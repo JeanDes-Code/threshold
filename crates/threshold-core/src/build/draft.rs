@@ -102,6 +102,11 @@ pub enum GapKind {
     WrongKind,
     /// The stable block is above `ADVENTURE_BLOCK_MAX_CHARS`.
     SeedBlockTooLong,
+    /// A known fact on a slot that another fact holds: a second known fact
+    /// on the same subject, key and open state; a known fact on the slot of
+    /// a `decided` fact or of an other name; or a settled and an open known
+    /// fact on the same subject and key. `at` names the later entry.
+    SlotConflict,
 }
 
 /// One thing to fix before approval.
@@ -243,6 +248,25 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
         }
     }
 
+    // One fact per slot (data shape 3.6). A known fact may not share its
+    // subject and key with an earlier known fact, open or settled, nor take
+    // a slot of the seed's Setup Turn.
+    let taken = seed_slots(seed, &roster);
+    let mut known: Vec<(usize, String)> = Vec::new();
+    for (i, fact) in draft.knowledge.iter().enumerate() {
+        let (Some(owner), key) = (roster.owner(&fact.subject), normalize::key(&fact.key)) else {
+            continue;
+        };
+        if key.is_empty() {
+            continue;
+        }
+        let slot = (owner, key);
+        if taken.contains(&slot) || known.contains(&slot) {
+            gap(GapKind::SlotConflict, format!("knowledge[{i}]"));
+        }
+        known.push(slot);
+    }
+
     // Where play starts.
     if seed.start.place.trim().is_empty() {
         gap(GapKind::Missing, "start.place".into());
@@ -318,20 +342,20 @@ fn names<'a>(
     )
 }
 
-/// Every name of the roster, main or other, normalized, with its kind.
-struct Roster(Vec<(String, EntityKind)>);
+/// Every name of the roster, main or other, normalized, with its kind and
+/// the index of its entry: 0 for the PC, `i + 1` for `entities[i]`.
+struct Roster(Vec<(String, EntityKind, usize)>);
 
 impl Roster {
     fn of(seed: &AdventureSeed) -> Self {
-        let pc = names(&seed.pc.name, &seed.pc.other_names).map(|(n, _)| (n, EntityKind::Pc));
-        let entities = seed
-            .entities
-            .iter()
-            .flat_map(|e| names(&e.name, &e.other_names).map(move |(n, _)| (n, e.kind)));
+        let pc = names(&seed.pc.name, &seed.pc.other_names).map(|(n, _)| (n, EntityKind::Pc, 0));
+        let entities = seed.entities.iter().enumerate().flat_map(|(i, e)| {
+            names(&e.name, &e.other_names).map(move |(n, _)| (n, e.kind, i + 1))
+        });
         Self(
             pc.chain(entities)
-                .map(|(n, kind)| (normalize::name(n), kind))
-                .filter(|(n, _)| !n.is_empty())
+                .map(|(n, kind, owner)| (normalize::name(n), kind, owner))
+                .filter(|(n, _, _)| !n.is_empty())
                 .collect(),
         )
     }
@@ -342,6 +366,39 @@ impl Roster {
 
     fn has_kind(&self, name: &str, kind: impl Fn(EntityKind) -> bool) -> bool {
         let name = normalize::name(name);
-        self.0.iter().any(|(n, k)| *n == name && kind(*k))
+        self.0.iter().any(|(n, k, _)| *n == name && kind(*k))
     }
+
+    /// The entry that `name` names; the first one on a tie.
+    fn owner(&self, name: &str) -> Option<usize> {
+        let name = normalize::name(name);
+        self.0
+            .iter()
+            .find(|(n, _, _)| *n == name)
+            .map(|(_, _, owner)| *owner)
+    }
+}
+
+/// The slots of the seed's Setup Turn that a known fact may not take: one
+/// `alias_` fact per other name, and each `decided` fact. A slot is a roster
+/// entry and a normalized key.
+fn seed_slots(seed: &AdventureSeed, roster: &Roster) -> Vec<(usize, String)> {
+    let pc = std::iter::once((0, &seed.pc.other_names));
+    let entities = seed
+        .entities
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (i + 1, &e.other_names));
+    let aliases = pc.chain(entities).flat_map(|(owner, others)| {
+        others.iter().map(move |o| {
+            let key = format!("alias_{}", normalize::name(&o.name).replace(' ', "_"));
+            (owner, normalize::key(&key))
+        })
+    });
+    let decided = seed.decided.iter().filter_map(|f| {
+        roster
+            .owner(&f.subject)
+            .map(|o| (o, normalize::key(&f.key)))
+    });
+    aliases.chain(decided).collect()
 }
