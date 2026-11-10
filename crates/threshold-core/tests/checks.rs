@@ -1456,3 +1456,56 @@ fn contested_act_without_a_check_gets_a_note_then_a_default_check() {
     assert!(contest_note(&impossible).is_none());
     assert!(default_check(&mut impossible, &w.view).is_none());
 }
+
+// --- Blockers (ADR 0007) -------------------------------------------------------
+
+#[test]
+fn an_impossible_verdict_opens_no_obstacle_and_a_check_does() {
+    let mut w = World::new();
+    let before = w.view.obstacles_open.len();
+    let mut p = proposal(Verdict::Impossible);
+    p.blockers = vec![f(w.gate_material)];
+    apply(&mut w, &p, None);
+    assert_eq!(w.view.obstacles_open.len(), before);
+
+    let mut p = proposal(Verdict::Check);
+    p.blockers = vec![f(w.gate_material)];
+    p.check = Some(check(
+        None,
+        slot(e(w.brann), "mood", "impressed"),
+        slot(e(w.ada), "fatigue", "winded"),
+    ));
+    apply(&mut w, &p, Some(roll(false)));
+    assert!(
+        w.view
+            .obstacles_open
+            .iter()
+            .any(|o| o.fact_id == w.gate_material)
+    );
+}
+
+#[test]
+fn a_fact_about_the_pc_itself_is_never_a_blocker() {
+    let mut w = World::new();
+    let location = w.view.live_fact(w.ada, "location").unwrap().id;
+    let ada = w.ada;
+    w.commit(vec![LedgerOp::AddFact {
+        slot: threshold_core::domain::Slot {
+            subject: threshold_core::domain::EntityRef::Id(ada),
+            key: "injury".into(),
+            value: "broken arm".into(),
+        },
+        text: "Ada's arm is broken.".into(),
+        canon: Canon::Established,
+        source: threshold_core::domain::FactSource::Proposal,
+        seen_by: vec![threshold_core::domain::EntityRef::Id(ada)],
+        causes: vec![],
+    }]);
+    let injury = w.view.live_fact(ada, "injury").unwrap().id;
+    let mut p = proposal(Verdict::Impossible);
+    p.blockers = vec![f(location), f(injury)];
+    let (settled, notes) = settle(p, &w.view);
+    assert_eq!(settled.blockers, [f(injury)], "an injury may block");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains(&format!("F{location}")), "{notes:?}");
+}

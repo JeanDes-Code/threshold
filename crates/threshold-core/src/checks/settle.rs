@@ -21,6 +21,7 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
         drop_pc_acts(&mut p, pc, &mut notes);
         drop_pc_location(&mut p, pc, &mut notes);
         drop_pc_stakes(&mut p, pc, &mut notes);
+        drop_pc_blockers(&mut p, view, pc, &mut notes);
     }
     if let Some(place) = p.move_to.filter(|h| !is_known_place(view, *h)) {
         p.move_to = None;
@@ -134,6 +135,29 @@ fn drop_pc_stakes(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>)
             *stake = None;
         }
     }
+}
+
+/// A blocker is something in the PC's way, never the PC's own place or
+/// identity: a blocker that is a fact on the PC, on a key other than
+/// `PC_INVOLUNTARY_KEYS` (an injury may block; `location` or `age` never
+/// does), goes (ADR 0007).
+fn drop_pc_blockers(
+    p: &mut DecisionProposal,
+    view: &WorldView,
+    pc: Handle,
+    notes: &mut Vec<String>,
+) {
+    p.blockers.retain(|blocker| {
+        let own = view.fact(*blocker).is_some_and(|f| {
+            Handle::Entity(f.slot.subject) == pc && !is_involuntary_key(&f.slot.key)
+        });
+        if own {
+            notes.push(format!(
+                "removed the blocker {blocker}: a fact about the PC itself never blocks"
+            ));
+        }
+        !own
+    });
 }
 
 /// A `location` value that names a known place, by its handle or by one of

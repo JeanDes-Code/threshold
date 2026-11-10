@@ -292,10 +292,13 @@ impl Builder<'_> {
         })
     }
 
-    /// Each blocker opens an obstacle when the verdict is impossible or check,
-    /// unless it is already open or a write of this Commit changes its slot.
+    /// Each blocker opens an obstacle when the verdict is check, unless it is
+    /// already open or a write of this Commit changes its slot. An
+    /// impossible verdict opens none (ADR 0007): the act does not happen,
+    /// and an obstacle it left would make the coincidence check reject a
+    /// later, legal act on the same slot.
     fn open_blockers(&mut self) {
-        if !matches!(self.p.verdict, Verdict::Impossible | Verdict::Check) {
+        if self.p.verdict != Verdict::Check {
             return;
         }
         let mut opened = HashSet::new();

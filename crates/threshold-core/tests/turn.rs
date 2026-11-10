@@ -1308,3 +1308,39 @@ fn contested_act_without_a_check_rolls_on_the_retry() {
     let stored = engine.store().turn_by_campaign_op(w.campaign, &"t1".into());
     assert!(stored.unwrap().is_some());
 }
+
+/// The recorded shape from the live run (ADR 0007): the impossible act
+/// cites the PC's own location as its blocker. The core drops it, opens no
+/// obstacle, and a legal move in the next Turn commits.
+#[test]
+fn impossible_act_citing_the_pc_location_does_not_block_a_later_move() {
+    let w0 = World::new();
+    let location = w0.view.live_fact(w0.ada, "location").unwrap().id;
+    let mut fly = proposal(Verdict::Impossible);
+    fly.blockers = vec![f(location)];
+    fly.minutes = 1;
+    let mut walk = proposal(Verdict::Allowed);
+    walk.action = ActionKind::Move;
+    walk.move_to = Some(e(w0.gate));
+    walk.minutes = 5;
+    let (mut engine, w, gm) = setup(vec![json(&fly), json(&walk)], vec!["No.", "You go."]);
+    let obstacles = snapshot(&engine, &w).obstacles_open.len();
+    engine
+        .play_turn("t1".into(), "I fly over the roofs.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(snapshot(&engine, &w).obstacles_open.len(), obstacles);
+    assert!(
+        steps(&engine, "t1")
+            .iter()
+            .any(|(step, raw)| step == "settle" && raw.contains("never blocks"))
+    );
+    engine
+        .play_turn("t2".into(), "I walk to the gate.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(kinds(&gm).len(), 4, "no retry");
+    let view = snapshot(&engine, &w);
+    assert_eq!(
+        view.live_fact(w.ada, "location").unwrap().slot.value,
+        "gate"
+    );
+}
