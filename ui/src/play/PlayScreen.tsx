@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { errorText, type EntityCard, type PlayView } from "../api";
+import { errorText, type EntityCard, type PlayView, type Target } from "../api";
+import { currentScene } from "../marks/logic";
 import ActionBar from "./ActionBar";
 import { storyItems, turnPhase } from "./logic";
 import SidePanel from "./SidePanel";
@@ -32,6 +33,10 @@ export interface PlayScreenProps {
   onBegin: () => void;
   onRenarrate: (turnId: number) => void;
   onDismissAnswer: () => void;
+  /** Pins or unpins a target; the core then sends a new view. */
+  onPin: (target: Target, on: boolean) => void;
+  /** Saves a Note; resolves with the core's refusal text, or null when saved. */
+  onNote: (body: string, about: Target | null) => Promise<string | null>;
 }
 
 /** The last answer of the core for one entity: its card, or the refusal text. */
@@ -66,6 +71,7 @@ export default function PlayScreen(props: PlayScreenProps) {
     };
   }, [selected, view, loadCard]);
   const shown = card !== null && card.entityId === selected ? card : null;
+  const scene = currentScene(view);
 
   const showCard = (entityId: number) => {
     setSelected(entityId);
@@ -110,6 +116,8 @@ export default function PlayScreen(props: PlayScreenProps) {
             cardRefusal={shown?.refusal ?? null}
             onSelect={showCard}
             onCloseCard={closeCard}
+            onPin={props.onPin}
+            onNote={props.onNote}
           />
         </aside>
       </div>
@@ -129,6 +137,8 @@ export default function PlayScreen(props: PlayScreenProps) {
         onRetry={props.onRetry}
         onBegin={props.onBegin}
         onDismissAnswer={props.onDismissAnswer}
+        hasScene={scene !== null}
+        onNote={(body, aboutScene) => props.onNote(body, aboutScene ? scene : null)}
       />
     </div>
   );

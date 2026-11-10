@@ -26,6 +26,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
     build::{BUILD_TIMEOUT_S, KnownFact, Progress},
     domain::AdventureSeed,
+    player::{Note, Target},
     rules::RollResult,
     turn::BEGIN_OP_ID,
     view::{CharacterView, EntityCard, JournalView, PlayView},
@@ -259,6 +260,31 @@ async fn get_journal(state: State<'_, Shared>) -> Result<JournalView, AppError> 
     blocking(&state, |s| s.get_journal()).await
 }
 
+/// A new Note. The shell stamps its time; no Note reaches the `Engine`.
+#[tauri::command(rename_all = "snake_case")]
+async fn add_note(
+    state: State<'_, Shared>,
+    body: String,
+    about: Option<Target>,
+) -> Result<Note, AppError> {
+    blocking(&state, move |s| s.add_note(&body, about)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn edit_note(state: State<'_, Shared>, note_id: u64, body: String) -> Result<Note, AppError> {
+    blocking(&state, move |s| s.edit_note(note_id, &body)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn delete_note(state: State<'_, Shared>, note_id: u64) -> Result<(), AppError> {
+    blocking(&state, move |s| s.delete_note(note_id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn set_pin(state: State<'_, Shared>, target: Target, on: bool) -> Result<(), AppError> {
+    blocking(&state, move |s| s.set_pin(&target, on)).await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 fn set_debug(flag: State<'_, DebugFlag>, on: bool) -> bool {
     flag.0.store(on, Ordering::SeqCst);
@@ -403,6 +429,10 @@ pub fn run() {
             get_character,
             get_entity_card,
             get_journal,
+            add_note,
+            edit_note,
+            delete_note,
+            set_pin,
             set_debug,
             get_debug,
             draft_from_text,

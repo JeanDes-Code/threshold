@@ -14,7 +14,7 @@ use threshold_core::{
     turn::create_campaign,
     view::{
         Block, JournalView, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view,
-        entity_card, journal_view, play_view,
+        entity_card, journal_view, pins_resolving_to, play_view,
     },
 };
 
@@ -853,5 +853,114 @@ fn play_view_json_matches_the_ui_types() {
         text,
         "run with BLESS_PLAY_VIEW=1 to write {}",
         path.display()
+    );
+}
+
+/// Review Focus 5: a Pin and a Note on a Turn that a Correction reverts
+/// follow the Correction Turn. A Pin on a Belief the Correction removed
+/// hides, and its Note shows as a free Note.
+#[test]
+fn pin_follows_the_correction_and_lost_target_hides() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let view = w.view();
+    let undone = w.play(
+        "I offer Orsel a trade.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            ada,
+            "pending_trade",
+            "salt for passage",
+            "Ada offered Orsel salt for passage.",
+            &[ada],
+        )],
+    );
+    // The Player writes the key in another case: one target all the same.
+    let belief = Target::Belief {
+        subject_id: ada,
+        key: "Pending_Trade".into(),
+    };
+    let note = |id: u64, about: Target| Note {
+        id,
+        body: format!("note {id}"),
+        about: Some(about),
+        created_ms: 1,
+        updated_ms: 1,
+    };
+    let marks = Marks {
+        notes: vec![
+            note(1, Target::Act { turn_id: undone }),
+            note(2, belief.clone()),
+            note(3, Target::Scene { turn_id: undone }),
+        ],
+        pins: vec![
+            Target::Act { turn_id: undone },
+            belief.clone(),
+            Target::Note { note_id: 2 },
+        ],
+    };
+    // Before the Correction every target resolves.
+    let pinned: Vec<Target> = play_view(&w.sight(), &marks)
+        .pinned
+        .into_iter()
+        .map(|p| p.target)
+        .collect();
+    assert_eq!(
+        pinned,
+        [
+            Target::Act { turn_id: undone },
+            Target::Belief {
+                subject_id: ada,
+                key: "pending_trade".into()
+            },
+            Target::Note { note_id: 2 },
+        ]
+    );
+
+    let fixed = w.revert(undone, "I only greet Orsel.", 0);
+    let sight = w.sight();
+    let view = play_view(&sight, &marks);
+    let pinned: Vec<&Target> = view.pinned.iter().map(|p| &p.target).collect();
+    assert_eq!(
+        pinned,
+        [
+            &Target::Act { turn_id: fixed },
+            &Target::Note { note_id: 2 }
+        ]
+    );
+    assert_eq!(view.pinned[0].title, "I only greet Orsel.");
+    assert_eq!(view.pinned[1].text, "note 2");
+
+    let journal = journal_view(&sight, &marks);
+    assert_eq!(
+        journal.pins,
+        [Target::Act { turn_id: fixed }, Target::Note { note_id: 2 }]
+    );
+    let about: Vec<Option<Target>> = journal.notes.iter().map(|n| n.about.clone()).collect();
+    let scene_of_fixed = journal
+        .scenes
+        .iter()
+        .find(|s| s.acts.iter().any(|a| a.turn_id == fixed))
+        .unwrap()
+        .turn_id;
+    assert_eq!(
+        about,
+        [
+            Some(Target::Act { turn_id: fixed }),
+            None,
+            Some(Target::Scene {
+                turn_id: scene_of_fixed
+            }),
+        ]
+    );
+    // The stored marks are not changed: the lost target is not lost.
+    assert_eq!(marks.notes[1].about, Some(belief));
+
+    // Removing the Pin as the screen shows it finds the stored Pin.
+    assert_eq!(
+        pins_resolving_to(&sight, &marks, &Target::Act { turn_id: fixed }),
+        [Target::Act { turn_id: undone }]
     );
 }

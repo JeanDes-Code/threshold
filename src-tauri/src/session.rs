@@ -16,7 +16,7 @@ use threshold_core::{
     build::Gap,
     fixture::{load_adventure_seed, load_world_setup},
     model::GmError,
-    player::Marks,
+    player::{Marks, Note, PlayerStore, Target},
     rules::{D10, RollResult},
     setup::{create_campaign_file, remove_part},
     store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
@@ -137,10 +137,20 @@ pub fn clock_nanos() -> u64 {
         .map_or(0, |d| d.as_nanos() as u64)
 }
 
+/// The open Campaign. `player` holds the Notes and Pins on a connection of
+/// its own; the `Engine` never sees it, so no Note reaches a prompt.
 struct Open {
     engine: Engine,
     campaign: CampaignId,
     db_path: PathBuf,
+    player: PlayerStore,
+}
+
+/// Milliseconds since the Unix epoch, for the times of a Note.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 /// Locks `m`, and takes the value of a poisoned lock: a panic in one
@@ -240,11 +250,13 @@ impl Session {
         campaign: CampaignId,
         db_path: PathBuf,
     ) -> Result<CampaignSummary, AppError> {
+        let player = PlayerStore::open(&db_path).map_err(failed)?;
         let engine = Engine::new(store, (self.make_gm)(), Box::new(D10), vec![], campaign);
         self.open = Some(Open {
             engine,
             campaign,
             db_path,
+            player,
         });
         self.summary()
     }
@@ -344,6 +356,46 @@ impl Session {
         pc_sight(&view, &turns, &reverted).ok_or_else(|| failed("the campaign has no PC"))
     }
 
+    /// The Player's Notes and Pins on the open Campaign.
+    fn marks(&self) -> Result<Marks, AppError> {
+        self.open()?.player.marks().map_err(failed)
+    }
+
+    /// A new Note, free or about `about`.
+    pub fn add_note(&self, body: &str, about: Option<Target>) -> Result<Note, AppError> {
+        self.open()?
+            .player
+            .add_note(body, about, now_ms())
+            .map_err(failed)
+    }
+
+    pub fn edit_note(&self, note_id: u64, body: &str) -> Result<Note, AppError> {
+        self.open()?
+            .player
+            .edit_note(note_id, body, now_ms())
+            .map_err(failed)
+    }
+
+    /// Removes a Note and its Pin.
+    pub fn delete_note(&self, note_id: u64) -> Result<(), AppError> {
+        self.open()?.player.delete_note(note_id).map_err(failed)
+    }
+
+    /// Pins `target`, or removes its Pin. The screens show a Pin where its
+    /// target stands now, so removing it also removes each stored Pin that
+    /// shows as `target` (a Pin on a Turn that a Correction replaced).
+    pub fn set_pin(&self, target: &Target, on: bool) -> Result<(), AppError> {
+        let player = &self.open()?.player;
+        if on {
+            return player.set_pin(target, true).map_err(failed);
+        }
+        let shown = view::pins_resolving_to(&self.sight()?, &self.marks()?, target);
+        for pin in std::iter::once(target).chain(&shown) {
+            player.set_pin(pin, false).map_err(failed)?;
+        }
+        Ok(())
+    }
+
     /// The PC as the PC knows itself: only its own Beliefs about itself.
     pub fn get_character(&self) -> Result<CharacterView, AppError> {
         Ok(view::character_view(&self.sight()?))
@@ -352,21 +404,21 @@ impl Session {
     /// The Play screen: the story and the side panel, from PC Knowledge
     /// only. The UI calls it after a Turn ends, never during one.
     pub fn get_play_view(&self) -> Result<PlayView, AppError> {
-        Ok(view::play_view(&self.sight()?, &Marks::default()))
+        Ok(view::play_view(&self.sight()?, &self.marks()?))
     }
 
     /// The card of one person, place or Faction the PC knows. Any other id
     /// gets the same refusal, so the Player cannot learn that a hidden
     /// entity exists by probing ids.
     pub fn get_entity_card(&self, entity_id: u64) -> Result<EntityCard, AppError> {
-        view::entity_card(&self.sight()?, &Marks::default(), entity_id)
+        view::entity_card(&self.sight()?, &self.marks()?, entity_id)
             .ok_or_else(|| failed(UNKNOWN_ENTITY))
     }
 
     /// The Journal: one entry per Scene, the Open Items, and what the PC
     /// knew before the Campaign, from PC Knowledge only.
     pub fn get_journal(&self) -> Result<JournalView, AppError> {
-        Ok(view::journal_view(&self.sight()?, &Marks::default()))
+        Ok(view::journal_view(&self.sight()?, &self.marks()?))
     }
 
     pub fn set_debug(&mut self, on: bool) {

@@ -312,7 +312,7 @@ pub struct ClosedItem {
 
 /// The Journal of `sight`. No model writes it: each entry comes from
 /// committed data and from Narration the Player already read.
-pub fn journal_view(sight: &PcSight, _marks: &Marks) -> JournalView {
+pub fn journal_view(sight: &PcSight, marks: &Marks) -> JournalView {
     JournalView {
         scenes: sight
             .scenes()
@@ -338,10 +338,8 @@ pub fn journal_view(sight: &PcSight, _marks: &Marks) -> JournalView {
             .iter()
             .filter_map(|b| fact_line(sight, b))
             .collect(),
-        // The rules that follow a Note or a Pin through a Correction come
-        // with the Notes and Pins commands; until then the shell passes none.
-        notes: Vec::new(),
-        pins: Vec::new(),
+        notes: notes_seen(sight, marks),
+        pins: pins_seen(sight, marks),
     }
 }
 
@@ -453,22 +451,201 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
             .filter(|b| named && b.subject == entity)
             .filter_map(|b| fact_line(sight, b))
             .collect(),
-        notes: marks
-            .notes
-            .iter()
+        notes: notes_seen(sight, marks)
+            .into_iter()
             .filter(|n| n.about.as_ref() == Some(&target))
-            .cloned()
             .collect(),
-        pinned: marks.pins.contains(&target),
+        pinned: pins_seen(sight, marks).contains(&target),
         who,
     })
 }
 
-/// The Pins whose target the PC can still see. No Pin resolves yet: the
-/// rules that follow a Pin through a Correction come with the Notes and
-/// Pins commands, and until then the shell passes no Pin.
-fn pin_lines(_sight: &PcSight, _marks: &Marks) -> Vec<PinLine> {
-    Vec::new()
+/// Where `target` points now, or `None` when it no longer resolves (data
+/// shape 3.7). A Scene or an Act of a reverted Turn follows the Correction
+/// that replaced it; a Scene resolves to its first Turn. A Belief resolves
+/// while the PC still holds it, an entity while the PC knows it, and a Note
+/// while it exists. The result is the target in its stored form.
+pub fn resolve_target(sight: &PcSight, marks: &Marks, target: &Target) -> Option<Target> {
+    match target.normalized() {
+        Target::Scene { turn_id } => {
+            let turn = follow(sight, turn_id);
+            let scene = sight
+                .scenes()
+                .into_iter()
+                .find(|scene| scene.iter().any(|m| m.turn == turn))?;
+            Some(Target::Scene {
+                turn_id: scene.first()?.turn,
+            })
+        }
+        Target::Act { turn_id } => {
+            let turn = follow(sight, turn_id);
+            sight
+                .moments
+                .iter()
+                .any(|m| m.turn == turn && m.kind != TurnKind::Opening)
+                .then_some(Target::Act { turn_id: turn })
+        }
+        Target::Belief { subject_id, key } => sight
+            .beliefs
+            .iter()
+            .any(|b| b.subject == subject_id && normalize::key(&b.key) == key)
+            .then_some(Target::Belief { subject_id, key }),
+        Target::Entity { entity_id } => sight
+            .known
+            .iter()
+            .any(|k| k.id == entity_id)
+            .then_some(Target::Entity { entity_id }),
+        Target::Note { note_id } => marks
+            .notes
+            .iter()
+            .any(|n| n.id == note_id)
+            .then_some(Target::Note { note_id }),
+    }
+}
+
+/// The stored Pins that show as `target`: the target itself, and each Pin
+/// that resolves to it. Removing the Pin of `target` removes all of them.
+pub fn pins_resolving_to(sight: &PcSight, marks: &Marks, target: &Target) -> Vec<Target> {
+    let target = target.normalized();
+    let resolved = resolve_target(sight, marks, &target);
+    marks
+        .pins
+        .iter()
+        .filter(|pin| {
+            pin.normalized() == target
+                || resolved.is_some() && resolve_target(sight, marks, pin) == resolved
+        })
+        .cloned()
+        .collect()
+}
+
+/// The Turn that stands for `turn`: the Correction Turn that replaced it,
+/// through each later Correction.
+fn follow(sight: &PcSight, mut turn: TurnId) -> TurnId {
+    for _ in 0..=sight.replaced_by.len() {
+        match sight.replaced_by.get(&turn) {
+            Some(next) => turn = *next,
+            None => break,
+        }
+    }
+    turn
+}
+
+/// The Pins whose target still resolves, resolved, each once, in the order
+/// the Player set them.
+fn pins_seen(sight: &PcSight, marks: &Marks) -> Vec<Target> {
+    let mut seen: Vec<Target> = Vec::new();
+    for target in marks
+        .pins
+        .iter()
+        .filter_map(|pin| resolve_target(sight, marks, pin))
+    {
+        if !seen.contains(&target) {
+            seen.push(target);
+        }
+    }
+    seen
+}
+
+/// Every Note, `about` resolved. A Note whose target no longer resolves
+/// shows as a free Note; its stored target is kept.
+fn notes_seen(sight: &PcSight, marks: &Marks) -> Vec<Note> {
+    marks
+        .notes
+        .iter()
+        .map(|note| Note {
+            about: note
+                .about
+                .as_ref()
+                .and_then(|about| resolve_target(sight, marks, about)),
+            ..note.clone()
+        })
+        .collect()
+}
+
+/// The Pinned card: one line per Pin that still resolves.
+fn pin_lines(sight: &PcSight, marks: &Marks) -> Vec<PinLine> {
+    pins_seen(sight, marks)
+        .into_iter()
+        .filter_map(|target| {
+            let (title, text) = pin_words(sight, marks, &target)?;
+            Some(PinLine {
+                target,
+                title,
+                text,
+            })
+        })
+        .collect()
+}
+
+/// The title and the text of a resolved Pin.
+fn pin_words(sight: &PcSight, marks: &Marks, target: &Target) -> Option<(String, String)> {
+    let intent = |turn: TurnId| {
+        sight
+            .story
+            .iter()
+            .find(|t| t.turn == turn)
+            .map(|t| t.intent.clone())
+    };
+    let scene_place = |turn: TurnId| {
+        let scene = sight
+            .scenes()
+            .into_iter()
+            .find(|scene| scene.iter().any(|m| m.turn == turn))?;
+        Some(place_title(sight, scene.first()?.place.as_deref()))
+    };
+    match target {
+        Target::Scene { turn_id } => {
+            let scene = sight
+                .scenes()
+                .into_iter()
+                .find(|scene| scene.first().is_some_and(|m| m.turn == *turn_id))?;
+            let first_act = scene
+                .iter()
+                .filter(|m| m.kind != TurnKind::Opening)
+                .find_map(|m| intent(m.turn))
+                .unwrap_or_default();
+            Some((scene_place(*turn_id)?, first_act))
+        }
+        Target::Act { turn_id } => Some((intent(*turn_id)?, scene_place(*turn_id)?)),
+        Target::Belief { subject_id, key } => {
+            let belief = sight
+                .beliefs
+                .iter()
+                .find(|b| b.subject == *subject_id && normalize::key(&b.key) == *key)?;
+            let line = fact_line(sight, belief)?;
+            Some((
+                line.subject.name.unwrap_or_else(|| "unknown".into()),
+                line.text,
+            ))
+        }
+        Target::Entity { entity_id } => {
+            let who = name_ref(sight, *entity_id)?;
+            let kind = match who.kind {
+                EntityKind::Pc => "You",
+                EntityKind::Npc => "A person",
+                EntityKind::Place => "A place",
+                EntityKind::Faction => "A faction",
+                EntityKind::Item => "A thing",
+            };
+            Some((
+                who.name.unwrap_or_else(|| "unknown".into()),
+                kind.to_owned(),
+            ))
+        }
+        Target::Note { note_id } => {
+            let note = marks.notes.iter().find(|n| n.id == *note_id)?;
+            Some(("Your note".to_owned(), note.body.clone()))
+        }
+    }
+}
+
+/// A Scene's place as a title: the place name, or "Somewhere".
+fn place_title(sight: &PcSight, place: Option<&str>) -> String {
+    match place.map(|text| place_name(sight, text)) {
+        Some(name) if !name.trim().is_empty() => name,
+        _ => "Somewhere".to_owned(),
+    }
 }
 
 fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {

@@ -102,6 +102,32 @@ export const journalView: JournalView = {
     fact(steps, "use", "The night porters wait for work on the Lantern Steps."),
     fact(maren, "known", "Maren has kept the night desk for twenty years."),
   ],
-  notes: [],
-  pins: [],
+  notes: [
+    {
+      id: 1,
+      body: "Maren knew about the struck-out berth before I asked. Who told her to keep quiet?",
+      about: { kind: "scene", turn_id: 1 },
+      created_ms: 1_762_700_000_000,
+      updated_ms: 1_762_700_000_000,
+    },
+    {
+      id: 2,
+      body: "Forty marks by Day 5. Tovin might lend, but he talks.",
+      about: null,
+      created_ms: 1_762_710_000_000,
+      updated_ms: 1_762_712_000_000,
+    },
+    {
+      id: 3,
+      body: "The man in the grey coat walks like a Guild clerk. Ask Orsel.",
+      about: { kind: "entity", entity_id: 3 },
+      created_ms: 1_762_720_000_000,
+      updated_ms: 1_762_720_000_000,
+    },
+  ],
+  pins: [
+    { kind: "note", note_id: 2 },
+    { kind: "act", turn_id: 8 },
+    { kind: "scene", turn_id: 6 },
+  ],
 };

@@ -1,5 +1,13 @@
 import { useRef, useState } from "react";
-import { BEGIN_OP_ID, errorText, turnNotice, type Attempt, type NarrationChunk, type PlayView } from "../api";
+import {
+  BEGIN_OP_ID,
+  errorText,
+  turnNotice,
+  type Attempt,
+  type NarrationChunk,
+  type PlayView,
+  type Target,
+} from "../api";
 import { api, play, turns, useEvent } from "../tauri";
 import PlayScreen from "./PlayScreen";
 
@@ -118,6 +126,34 @@ export default function LivePlay({ view, onView, onBusy }: Props) {
     }
   };
 
+  /** One view call after each note command: the Pinned card and the cards change. */
+  const marksChanged = async () => {
+    try {
+      onView(await play.noteChanged());
+    } catch (e) {
+      setNotice(`Could not reload the story: ${errorText(e)}`);
+    }
+  };
+
+  const pin = async (target: Target, on: boolean) => {
+    try {
+      await api.setPin(target, on);
+    } catch (e) {
+      setNotice(`Could not change the pin: ${errorText(e)}`);
+    }
+    await marksChanged();
+  };
+
+  const note = async (body: string, about: Target | null): Promise<string | null> => {
+    try {
+      await api.addNote(body, about);
+    } catch (e) {
+      return errorText(e);
+    }
+    await marksChanged();
+    return null;
+  };
+
   return (
     <PlayScreen
       view={view}
@@ -136,6 +172,8 @@ export default function LivePlay({ view, onView, onBusy }: Props) {
       onBegin={begin}
       onRenarrate={(turnId) => void renarrate(turnId)}
       onDismissAnswer={() => setAnswer(null)}
+      onPin={(target, on) => void pin(target, on)}
+      onNote={note}
     />
   );
 }

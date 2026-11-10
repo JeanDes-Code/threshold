@@ -157,6 +157,34 @@ describe("createApi", () => {
   });
 });
 
+describe("note commands", () => {
+  it("note commands send their arguments", async () => {
+    const calls: Call[] = [];
+    const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(undefined as T);
+    };
+    const api = createApi(invoke);
+    await api.addNote("Ask about the ford.", { kind: "scene", turn_id: 4 });
+    await api.addNote("A free note.", null);
+    await api.editNote(3, "Ask Maren about the ford.");
+    await api.deleteNote(3);
+    await api.setPin({ kind: "belief", subject_id: 2, key: "pending_roster" }, true);
+    await api.setPin({ kind: "note", note_id: 5 }, false);
+    expect(calls).toEqual([
+      { cmd: "add_note", args: { body: "Ask about the ford.", about: { kind: "scene", turn_id: 4 } } },
+      { cmd: "add_note", args: { body: "A free note.", about: null } },
+      { cmd: "edit_note", args: { note_id: 3, body: "Ask Maren about the ford." } },
+      { cmd: "delete_note", args: { note_id: 3 } },
+      {
+        cmd: "set_pin",
+        args: { target: { kind: "belief", subject_id: 2, key: "pending_roster" }, on: true },
+      },
+      { cmd: "set_pin", args: { target: { kind: "note", note_id: 5 }, on: false } },
+    ]);
+  });
+});
+
 describe("approveDraft", () => {
   const draft = { draft_id: "draft-1", state: "approved", gaps: [] };
 

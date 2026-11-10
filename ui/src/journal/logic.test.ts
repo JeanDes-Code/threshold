@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FactLine, JournalView, NameRef } from "../api";
 import { journalView } from "../fixtures/journalView";
-import { bySubject, clockSpan, decisions, placeTitle, sceneOfTurn, scenesNewestFirst } from "./logic";
+import { aboutText, bySubject, clockSpan, decisions, placeTitle, sceneOfTurn, scenesNewestFirst } from "./logic";
 
 const maren: NameRef = { entity_id: 2, kind: "npc", name: "Maren" };
 const pc: NameRef = { entity_id: 1, kind: "pc", name: "Ada" };
@@ -96,5 +96,24 @@ describe("journal logic", () => {
       ["Ada", 2],
       ["Maren", 1],
     ]);
+  });
+});
+
+describe("aboutText", () => {
+  it("names what a Note is about in words", () => {
+    const fixture = journalView;
+    const scene = fixture.scenes[1];
+    const act = scene?.acts[0];
+    const fact = fixture.known_before[0];
+    if (!scene || !act || !fact) throw new Error("the fixture has scenes, acts and facts");
+    expect(aboutText(fixture, null)).toBe("Free note");
+    expect(aboutText(fixture, { kind: "scene", turn_id: scene.turn_id })).toBe(
+      `Scene 2 · ${placeTitle(scene.place)}`,
+    );
+    expect(aboutText(fixture, { kind: "act", turn_id: act.turn_id })).toBe(`What you did: ${act.intent}`);
+    expect(aboutText(fixture, { kind: "belief", ...fact.belief })).toBe(`Fact: ${fact.text}`);
+    expect(aboutText(fixture, { kind: "entity", entity_id: 2 })).toBe("About Maren");
+    expect(aboutText(fixture, { kind: "entity", entity_id: 7 })).toBe("About someone you know");
+    expect(aboutText(fixture, { kind: "scene", turn_id: 9999 })).toBe("A scene");
   });
 });

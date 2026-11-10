@@ -454,6 +454,12 @@ export function createApi(invoke: Invoke) {
     getEntityCard: (entityId: number) =>
       invoke<EntityCard>("get_entity_card", { entity_id: entityId }),
     getJournal: () => invoke<JournalView>("get_journal"),
+    /** A new Note, free or about one target. It never reaches the GM. */
+    addNote: (body: string, about: Target | null) => invoke<Note>("add_note", { body, about }),
+    editNote: (noteId: number, body: string) => invoke<Note>("edit_note", { note_id: noteId, body }),
+    /** Removes the Note and its Pin. */
+    deleteNote: (noteId: number) => invoke<null>("delete_note", { note_id: noteId }),
+    setPin: (target: Target, on: boolean) => invoke<null>("set_pin", { target, on }),
     setDebug: (on: boolean) => invoke<boolean>("set_debug", { on }),
     getDebug: (turnId: number) => invoke<DebugView>("get_debug", { turn_id: turnId }),
     draftFromText: (text: string) => invoke<DraftView>("draft_from_text", { text }),

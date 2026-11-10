@@ -1,7 +1,15 @@
 // Pure rules of the Journal screen. The core writes every entry; these only
 // order and group what it sends.
 
-import { clockText, type Act, type FactLine, type JournalView, type NameRef, type SceneEntry } from "../api";
+import {
+  clockText,
+  type Act,
+  type FactLine,
+  type JournalView,
+  type NameRef,
+  type SceneEntry,
+  type Target,
+} from "../api";
 
 /** A Scene and its number in the Campaign, the first Scene being 1. */
 export interface NumberedScene {
@@ -54,4 +62,50 @@ export function bySubject(lines: FactLine[]): { subject: NameRef; lines: FactLin
     else groups.push({ subject: line.subject, lines: [line] });
   }
   return groups;
+}
+
+/** A NameRef the Journal holds for an entity, from any of its lists. */
+function nameIn(view: JournalView, entityId: number): NameRef | null {
+  const lines = [
+    ...view.scenes.flatMap((s) => s.learned),
+    ...view.open,
+    ...view.closed.map((c) => c.item),
+    ...view.known_before,
+  ];
+  const refs = [
+    ...view.scenes.flatMap((s) => s.present),
+    ...lines.map((l) => l.subject),
+    ...lines.flatMap((l) => (l.told_by ? [l.told_by] : [])),
+  ];
+  return refs.find((r) => r.entity_id === entityId) ?? null;
+}
+
+/** What a Note is about, in words: a Scene, an act, a fact, a person or place. */
+export function aboutText(view: JournalView, about: Target | null): string {
+  if (about === null) return "Free note";
+  switch (about.kind) {
+    case "scene": {
+      const where = sceneOfTurn(view, about.turn_id);
+      return where ? `Scene ${where.number} · ${placeTitle(where.scene.place)}` : "A scene";
+    }
+    case "act": {
+      const act = view.scenes.flatMap((s) => s.acts).find((a) => a.turn_id === about.turn_id);
+      return act ? `What you did: ${act.intent}` : "Something you did";
+    }
+    case "belief": {
+      const line = [
+        ...view.scenes.flatMap((s) => s.learned),
+        ...view.open,
+        ...view.closed.map((c) => c.item),
+        ...view.known_before,
+      ].find((l) => l.belief.subject_id === about.subject_id && l.belief.key === about.key);
+      return line ? `Fact: ${line.text}` : "A fact";
+    }
+    case "entity": {
+      const who = nameIn(view, about.entity_id);
+      return who?.name ? `About ${who.name}` : "About someone you know";
+    }
+    case "note":
+      return "A note";
+  }
 }

@@ -101,7 +101,13 @@ export default function App() {
         {campaign && tab === "play" && view && (
           <LivePlay key={campaign.db_path} view={view} onView={setView} onBusy={setTurnBusy} />
         )}
-        {campaign && tab === "journal" && <LiveJournal revision={story.length} pcName={campaign.pc_name} />}
+        {campaign && tab === "journal" && (
+          <LiveJournal
+            revision={story.length}
+            pcName={campaign.pc_name}
+            onMarksChanged={() => void play.noteChanged().then(setView, () => undefined)}
+          />
+        )}
         {campaign && tab === "character" && (
           <main>
             <Character revision={story.length} />

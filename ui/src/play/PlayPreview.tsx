@@ -3,7 +3,8 @@
 // `&busy=deciding` or `&busy=narrating` opens it in that state.
 
 import { useEffect, useRef, useState } from "react";
-import type { PlayView } from "../api";
+import type { PinLine, PlayView, Target } from "../api";
+import { sameTarget } from "../marks/logic";
 import { fixtureCard } from "../fixtures/entityCards";
 import { playView, streamText } from "../fixtures/playView";
 import PlayScreen from "./PlayScreen";
@@ -24,6 +25,7 @@ export default function PlayPreview() {
   const [replaying, setReplaying] = useState(false);
   const [stream, setStream] = useState<string | null>(null);
   const [answer, setAnswer] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<PinLine[]>(playView.pinned);
   const timers = useRef<number[]>([]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
@@ -60,7 +62,15 @@ export default function PlayPreview() {
   const busy = replaying || step !== "idle";
   const shownStream = replaying ? stream : step === "narrating" ? halfStream : step === "deciding" ? "" : null;
   // While a Turn runs, the story stops before the last Turn, as it would live.
-  const view = busy ? beforeLast : playView;
+  const view = { ...(busy ? beforeLast : playView), pinned };
+
+  // The preview keeps Pins in memory: the core would give a title and text.
+  const pin = (target: Target, on: boolean) =>
+    setPinned((list) =>
+      on
+        ? [...list, { target, title: "Pinned in the preview", text: "" }]
+        : list.filter((p) => !sameTarget(p.target, target)),
+    );
   const pendingIntent = busy ? (lastTurn?.intent ?? null) : null;
 
   return (
@@ -100,6 +110,8 @@ export default function PlayPreview() {
         onBegin={replay}
         onRenarrate={replay}
         onDismissAnswer={() => setAnswer(null)}
+        onPin={pin}
+        onNote={async () => null}
       />
     </div>
   );

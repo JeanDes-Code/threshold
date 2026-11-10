@@ -486,6 +486,95 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
   .journal-scene { padding-left: var(--space-5); }
 }
 
+/* ---------------------------------------------------------------------------
+ * Notes and Pins: the pin toggle, the Note field, and where they show.
+ * ------------------------------------------------------------------------ */
+.mark-pin, .mark-pin[aria-pressed] {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  color: var(--faint); background: none; border: 1px solid transparent; border-radius: var(--radius-2);
+  font-weight: 400; cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.mark-pin:hover:not(:disabled) { color: var(--text); background: var(--well); }
+.mark-pin--on, .mark-pin--on[aria-pressed] { color: var(--accent); }
+.mark-pin svg { display: block; }
+
+.note-field { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; }
+.note-field__text {
+  width: 100%; min-height: 72px; resize: vertical;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-story); font-size: var(--text-md); line-height: var(--leading-story);
+  color: var(--text); background: var(--well);
+  border: 1px solid var(--card-border); border-radius: var(--radius-2);
+}
+.note-field__text::placeholder { color: var(--faint); font-style: italic; }
+.note-field__text:focus { border-color: var(--accent); }
+.note-field__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.note-field__row .play-btn { height: 32px; }
+.note-field__hint { flex: 1; min-width: 8em; font-size: var(--text-xs); color: var(--faint); }
+.note-field__hint--over { color: var(--danger); }
+.note-field__about {
+  display: inline-flex; align-items: center; gap: var(--space-2); margin: 0;
+  font-size: var(--text-sm); color: var(--muted); cursor: pointer;
+}
+.note-field__about input { width: auto; margin: 0; accent-color: var(--accent); }
+.note-field__error { margin: 0; font-size: var(--text-sm); color: var(--danger); }
+.play-bar__row--note { margin-top: var(--space-2); }
+
+/* The Play screen: pins on facts and cards, the Pinned card, notes on a card. */
+.play-fact--pinnable { grid-template-columns: 10px minmax(0, 1fr) auto; }
+.play-fact--pinnable .mark-pin { margin-top: -4px; }
+.play-pin { display: flex; align-items: flex-start; gap: var(--space-2); padding-left: var(--space-2); border-left: 2px solid var(--accent); }
+.play-pin__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.play-pin__kind { font-size: var(--text-xs); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--faint); }
+.play-pin__open { padding: 0; font: inherit; font-weight: 600; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer; }
+.play-pin__open:hover { color: var(--link); }
+.play-pin__text {
+  color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.play-pin--note .play-pin__text { font-family: var(--font-story); font-style: italic; color: var(--text); }
+.play-entity__notes { margin-top: var(--space-4); }
+.play-notes { margin-bottom: var(--space-2); }
+.play-note {
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-story); font-style: italic; color: var(--text);
+  background: var(--well); border-radius: var(--radius-2);
+}
+.play-entity__add { padding-left: 0; }
+
+/* The Journal: pins on scenes, acts and facts; the Notes part. */
+.journal-scene__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.journal-scene__tools { display: flex; align-items: center; gap: var(--space-1); }
+.journal-act { grid-template-columns: 12px minmax(0, 1fr) auto; }
+.journal-fact--pinnable { grid-template-columns: 10px minmax(0, 1fr) auto; }
+.journal-act .mark-pin, .journal-fact--pinnable .mark-pin { margin-top: -2px; }
+.journal-decision { display: flex; align-items: flex-start; gap: var(--space-3); }
+.journal-decision__main { flex: 1; min-width: 0; }
+.journal-note-inline {
+  margin: 0 0 var(--space-2); padding-left: var(--space-3);
+  font-family: var(--font-story); font-style: italic; border-left: 2px solid var(--card-border);
+}
+.journal-notes__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
+.journal-notes__head .journal-section__hint { margin: 0; }
+.journal-notes__head .play-btn { height: 36px; }
+.journal-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.journal-note {
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-2);
+}
+.journal-note--pinned { border-left: 3px solid var(--accent); }
+.journal-note__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.journal-note__about { font-size: var(--text-xs); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted); }
+.journal-note__body {
+  margin: var(--space-2) 0;
+  font-family: var(--font-story); font-size: var(--text-lg); line-height: var(--leading-story); white-space: pre-wrap;
+}
+.journal-note__tools { display: flex; align-items: center; gap: var(--space-1); }
+.journal-note__spacer { flex: 1; }
+.journal-note__delete { color: var(--danger); }
+
 /* The app around the live Play screen: the menu, then the screen in the rest of the window. */
 .app { display: flex; flex-direction: column; height: 100vh; }
 .app__body { flex: 1; min-height: 0; overflow-y: auto; }

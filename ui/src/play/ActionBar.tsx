@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import type { SceneState } from "../api";
+import NoteField from "../marks/NoteField";
 import { isSendKey, type TurnPhase } from "./logic";
 
 interface Props {
@@ -26,6 +27,10 @@ interface Props {
   onRetry: () => void;
   onBegin: () => void;
   onDismissAnswer: () => void;
+  /** A Scene is shown: a quick Note can be about it. */
+  hasScene: boolean;
+  /** Saves a quick Note, about the current Scene or free; resolves with the refusal text or null. */
+  onNote: (body: string, aboutScene: boolean) => Promise<string | null>;
 }
 
 const PHASE_TEXT: Record<TurnPhase, string> = {
@@ -44,8 +49,11 @@ export default function ActionBar(props: Props) {
   const [fixing, setFixing] = useState(false);
   const [clarified, setClarified] = useState("");
   const [why, setWhy] = useState("");
+  const [noting, setNoting] = useState(false);
+  const [aboutScene, setAboutScene] = useState(true);
   const oocId = useId();
   const fixId = useId();
+  const noteId = useId();
   const busy = phase !== "idle";
 
   const act = async () => {
@@ -149,6 +157,15 @@ export default function ActionBar(props: Props) {
           </button>
           <button
             type="button"
+            className="play-btn play-btn--outline"
+            aria-expanded={noting}
+            aria-controls={noteId}
+            onClick={() => setNoting((n) => !n)}
+          >
+            Note
+          </button>
+          <button
+            type="button"
             className="play-btn play-btn--quiet play-bar__fix"
             aria-expanded={fixing}
             aria-controls={fixId}
@@ -191,6 +208,25 @@ export default function ActionBar(props: Props) {
           >
             Apply Correction
           </button>
+        </div>
+      )}
+
+      {noting && !needsBegin && (
+        <div className="play-bar__row play-bar__row--note" id={noteId}>
+          <NoteField
+            label="Your note"
+            placeholder="A note for yourself. The GM never reads it."
+            waiting={busy}
+            onSave={(body) => props.onNote(body, props.hasScene && aboutScene)}
+            onClose={() => setNoting(false)}
+          >
+            {props.hasScene && (
+              <label className="note-field__about">
+                <input type="checkbox" checked={aboutScene} onChange={(e) => setAboutScene(e.target.checked)} />
+                About this scene
+              </label>
+            )}
+          </NoteField>
         </div>
       )}
 

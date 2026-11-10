@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { EntityCard, EntityKind, FactLine, KnownLine, NameRef, PinLine, YouCard } from "../api";
+import type { EntityCard, EntityKind, FactLine, KnownLine, NameRef, PinLine, Target, YouCard } from "../api";
+import { factTarget, isPinned, notesNewestFirst } from "../marks/logic";
+import NoteField from "../marks/NoteField";
+import PinButton from "../marks/PinButton";
 import { filterKnown, nameText, npcColor } from "./logic";
 
 interface Props {
@@ -16,7 +19,20 @@ interface Props {
   cardRefusal: string | null;
   onSelect: (entityId: number) => void;
   onCloseCard: () => void;
+  /** Pins or unpins one target; the core then sends a new view. */
+  onPin: (target: Target, on: boolean) => void;
+  /** Saves a Note about one target; resolves with the refusal text or null. */
+  onNote: (body: string, about: Target) => Promise<string | null>;
 }
+
+/** What a Pin is, in one small word above its title. */
+const PIN_KIND: Record<Target["kind"], string> = {
+  scene: "Scene",
+  act: "Act",
+  belief: "Fact",
+  entity: "Card",
+  note: "Note",
+};
 
 const KIND_TEXT: Record<EntityKind, string> = {
   pc: "You",
@@ -28,7 +44,8 @@ const KIND_TEXT: Record<EntityKind, string> = {
 
 /** Stacked cards. Each reads PC Knowledge and what the PC perceives now, nothing else. */
 export default function SidePanel(props: Props) {
-  const { here, you, open, pinned, known, selected, onSelect } = props;
+  const { here, you, open, pinned, known, selected, onSelect, onPin } = props;
+  const pins = pinned.map((pin) => pin.target);
   return (
     <>
       {selected !== null && (
@@ -38,6 +55,9 @@ export default function SidePanel(props: Props) {
           card={props.card}
           refusal={props.cardRefusal}
           onClose={props.onCloseCard}
+          pins={pins}
+          onPin={onPin}
+          onNote={props.onNote}
         />
       )}
 
@@ -79,17 +99,18 @@ export default function SidePanel(props: Props) {
       </Card>
 
       <Card title="Open">
-        {open.length === 0 ? <p className="play-empty">Nothing open.</p> : <Facts lines={open} />}
+        {open.length === 0 ? (
+          <p className="play-empty">Nothing open.</p>
+        ) : (
+          <Facts lines={open} pins={pins} onPin={onPin} />
+        )}
       </Card>
 
       {pinned.length > 0 && (
         <Card title="Pinned">
           <ul className="play-list">
             {pinned.map((pin) => (
-              <li key={JSON.stringify(pin.target)} className="play-pin">
-                <span className="play-pin__title">{pin.title}</span>
-                <span className="play-pin__text">{pin.text}</span>
-              </li>
+              <PinRow key={JSON.stringify(pin.target)} pin={pin} onSelect={onSelect} onPin={onPin} />
             ))}
           </ul>
         </Card>
@@ -105,20 +126,62 @@ function whoOf(entityId: number, known: KnownLine[], here: NameRef[]): NameRef |
   return known.find((line) => line.who.entity_id === entityId)?.who ?? here.find((who) => who.entity_id === entityId) ?? null;
 }
 
-/** Fact lines: an Open Item gets a ring, a told fact names who told it. */
-function Facts({ lines }: { lines: FactLine[] }) {
+/** One line of the Pinned card. A card or a fact opens its card; the pin removes it. */
+function PinRow({
+  pin,
+  onSelect,
+  onPin,
+}: {
+  pin: PinLine;
+  onSelect: (entityId: number) => void;
+  onPin: (target: Target, on: boolean) => void;
+}) {
+  const { target } = pin;
+  const opens = target.kind === "entity" ? target.entity_id : target.kind === "belief" ? target.subject_id : null;
+  return (
+    <li className={`play-pin play-pin--${target.kind}`}>
+      <span className="play-pin__body">
+        <span className="play-pin__kind">{PIN_KIND[target.kind]}</span>
+        {opens !== null ? (
+          <button type="button" className="play-pin__title play-pin__open" onClick={() => onSelect(opens)}>
+            {pin.title}
+          </button>
+        ) : (
+          <span className="play-pin__title">{pin.title}</span>
+        )}
+        {pin.text !== "" && <span className="play-pin__text">{pin.text}</span>}
+      </span>
+      <PinButton pinned label={pin.title} onToggle={(on) => onPin(target, on)} />
+    </li>
+  );
+}
+
+/** Fact lines: an Open Item gets a ring, a told fact names who told it, each has a pin. */
+function Facts({
+  lines,
+  pins,
+  onPin,
+}: {
+  lines: FactLine[];
+  pins: Target[];
+  onPin: (target: Target, on: boolean) => void;
+}) {
   return (
     <ul className="play-list">
-      {lines.map((line) => (
-        <li key={`${line.belief.subject_id}:${line.belief.key}`} className="play-fact">
-          <span className={line.open ? "play-fact__mark play-fact__mark--open" : "play-fact__mark"} aria-hidden="true" />
-          <span>
-            {line.text}
-            {line.open && <span className="play-sr"> (open)</span>}
-            {line.told_by && <span className="play-faint"> · from {nameText(line.told_by)}</span>}
-          </span>
-        </li>
-      ))}
+      {lines.map((line) => {
+        const target = factTarget(line);
+        return (
+          <li key={`${line.belief.subject_id}:${line.belief.key}`} className="play-fact play-fact--pinnable">
+            <span className={line.open ? "play-fact__mark play-fact__mark--open" : "play-fact__mark"} aria-hidden="true" />
+            <span>
+              {line.text}
+              {line.open && <span className="play-sr"> (open)</span>}
+              {line.told_by && <span className="play-faint"> · from {nameText(line.told_by)}</span>}
+            </span>
+            <PinButton pinned={isPinned(pins, target)} label={line.text} onToggle={(on) => onPin(target, on)} />
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -129,11 +192,15 @@ interface CardViewProps {
   card: EntityCard | null;
   refusal: string | null;
   onClose: () => void;
+  pins: Target[];
+  onPin: (target: Target, on: boolean) => void;
+  onNote: (body: string, about: Target) => Promise<string | null>;
 }
 
 /** One entity as the PC knows it: what the core's card holds, nothing else. */
-function CardView({ who: listed, card, refusal, onClose }: CardViewProps) {
+function CardView({ who: listed, card, refusal, onClose, pins, onPin, onNote }: CardViewProps) {
   const section = useRef<HTMLElement>(null);
+  const [noting, setNoting] = useState(false);
   const who = card?.who ?? listed;
   const title = who ? nameText(who) : "Unknown";
 
@@ -156,6 +223,13 @@ function CardView({ who: listed, card, refusal, onClose }: CardViewProps) {
             {title}
           </h3>
         </div>
+        {card !== null && (
+          <PinButton
+            pinned={card.pinned}
+            label={title}
+            onToggle={(on) => onPin({ kind: "entity", entity_id: card.who.entity_id }, on)}
+          />
+        )}
         <button type="button" className="play-entity__close" aria-label="Close the card" onClick={onClose}>
           ×
         </button>
@@ -174,7 +248,33 @@ function CardView({ who: listed, card, refusal, onClose }: CardViewProps) {
             </p>
           )}
           <h4 className="play-label play-entity__part">What you know</h4>
-          {card.facts.length === 0 ? <p className="play-empty">Nothing more yet.</p> : <Facts lines={card.facts} />}
+          {card.facts.length === 0 ? (
+            <p className="play-empty">Nothing more yet.</p>
+          ) : (
+            <Facts lines={card.facts} pins={pins} onPin={onPin} />
+          )}
+          <h4 className="play-label play-entity__part play-entity__notes">Your notes</h4>
+          {card.notes.length > 0 && (
+            <ul className="play-list play-notes">
+              {notesNewestFirst(card.notes).map((note) => (
+                <li key={note.id} className="play-note">
+                  {note.body}
+                </li>
+              ))}
+            </ul>
+          )}
+          {noting ? (
+            <NoteField
+              label={`Note about ${title}`}
+              placeholder={`What you make of ${title}`}
+              onSave={(body) => onNote(body, { kind: "entity", entity_id: card.who.entity_id })}
+              onClose={() => setNoting(false)}
+            />
+          ) : (
+            <button type="button" className="play-btn play-btn--text play-entity__add" onClick={() => setNoting(true)}>
+              + Add a note
+            </button>
+          )}
         </>
       )}
     </section>
