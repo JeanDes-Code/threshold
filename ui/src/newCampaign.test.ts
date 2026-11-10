@@ -375,6 +375,60 @@ describe("createSaver", () => {
     await expect(saver.flush()).rejects.toThrow("disk full");
   });
 
+  /** A saver whose saves succeed or fail in the order of `outcomes`. */
+  function scripted(outcomes: ("ok" | "fail")[]) {
+    const sent: string[] = [];
+    const saver = createSaver<string, string>({
+      delayMs: 600,
+      save: (form) => {
+        sent.push(form);
+        return outcomes.shift() === "fail"
+          ? Promise.reject(new Error(`could not save ${form}`))
+          : Promise.resolve(form);
+      },
+      onResult: () => undefined,
+      onError: () => undefined,
+      onPending: () => undefined,
+    });
+    return { saver, sent };
+  }
+
+  it("flush() retries a form whose save failed before, and resolves when it succeeds", async () => {
+    const { saver, sent } = scripted(["fail", "ok"]);
+    saver.edit("a", true);
+    await vi.runAllTimersAsync();
+    await expect(saver.flush()).resolves.toBeUndefined();
+    expect(sent).toEqual(["a", "a"]);
+  });
+
+  it("flush() rejects when the retry of a failed form fails again", async () => {
+    const { saver, sent } = scripted(["fail", "fail"]);
+    saver.edit("a", true);
+    await vi.runAllTimersAsync();
+    await expect(saver.flush()).rejects.toThrow("could not save a");
+    expect(sent).toEqual(["a", "a"]);
+  });
+
+  it("after a rejected flush(), the next flush() does not resolve silently", async () => {
+    const { saver, sent } = scripted(["fail", "fail", "fail", "ok"]);
+    saver.edit("a", true);
+    await vi.runAllTimersAsync();
+    await expect(saver.flush()).rejects.toThrow();
+    await expect(saver.flush()).rejects.toThrow("could not save a");
+    await expect(saver.flush()).resolves.toBeUndefined();
+    expect(sent).toEqual(["a", "a", "a", "a"]);
+  });
+
+  it("a later save that succeeds clears the failed form", async () => {
+    const { saver, sent } = scripted(["fail", "ok"]);
+    saver.edit("a", true);
+    await vi.runAllTimersAsync();
+    saver.edit("ab", true);
+    await vi.runAllTimersAsync();
+    await expect(saver.flush()).resolves.toBeUndefined();
+    expect(sent).toEqual(["a", "ab"]);
+  });
+
   it("flush() with nothing to save resolves", async () => {
     const { saver } = setup();
     await expect(saver.flush()).resolves.toBeUndefined();

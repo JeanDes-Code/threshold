@@ -291,8 +291,9 @@ export interface Saver<F> {
   /** Takes edits and reports again after `stop()`. */
   start(): void;
   /**
-   * Saves the last edit now and waits until the store holds every edit.
-   * Rejects with the error of the last save when it failed.
+   * Saves the last edit now and waits until the store holds every edit. A
+   * form whose save failed earlier is sent once more. Rejects when the store
+   * still does not hold the latest form.
    */
   flush(): Promise<void>;
 }
@@ -311,6 +312,8 @@ export function createSaver<F, R>(opts: SaverOptions<F, R>): Saver<F> {
   let stopped = false;
   // The running save, and after it any save it starts; null when idle.
   let current: Promise<Outcome> | null = null;
+  // The latest form the store refused; cleared when a later save succeeds.
+  let unsaved: { form: F } | null = null;
 
   const settle = () => {
     const now = timer !== null || inFlight || waiting !== null;
@@ -328,10 +331,12 @@ export function createSaver<F, R>(opts: SaverOptions<F, R>): Saver<F> {
       .save(form)
       .then(
         (result): Outcome => {
+          unsaved = null;
           if (!stopped && waiting === null) opts.onResult(result);
           return { ok: true };
         },
         (error: unknown): Outcome => {
+          unsaved = { form };
           if (!stopped) opts.onError(error);
           return { ok: false, error };
         },
@@ -372,11 +377,19 @@ export function createSaver<F, R>(opts: SaverOptions<F, R>): Saver<F> {
       stopped = false;
     },
     async flush() {
+      const drain = async () => {
+        send();
+        let last: Outcome = { ok: true };
+        while (current) last = await current;
+        if (!last.ok) throw last.error;
+      };
       clearTimer();
-      send();
-      let last: Outcome = { ok: true };
-      while (current) last = await current;
-      if (!last.ok) throw last.error;
+      await drain();
+      // An earlier save failed and nothing newer replaced it: one more try.
+      if (unsaved) {
+        waiting = unsaved;
+        await drain();
+      }
     },
   };
 }
