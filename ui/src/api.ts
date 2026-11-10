@@ -82,6 +82,106 @@ export interface DebugView {
   entries: DebugLine[];
 }
 
+// The Play view: a mirror of shape 3.6 and 3.7. Every tagged enum is tagged
+// by `kind`. The core builds it from PC Knowledge only; the UI parses no text.
+
+export type TurnKind = "setup" | "play" | "correction" | "ooc" | "opening";
+
+/** A person, place or Faction as the PC knows it. `name` is null when the PC cannot name it. */
+export interface NameRef {
+  entity_id: number;
+  kind: EntityKind;
+  name: string | null;
+}
+
+export interface PlaceLine {
+  entity_id: number | null;
+  name: string;
+}
+
+export type Part = { kind: "text"; text: string } | { kind: "name"; entity_id: number; text: string };
+
+export type Block =
+  | { kind: "prose"; parts: Part[] }
+  | { kind: "speech"; speaker: NameRef; parts: Part[] };
+
+export type TurnBody = { kind: "narration"; blocks: Block[] } | { kind: "missing" };
+
+export interface StoryTurn {
+  turn_id: number;
+  kind: TurnKind;
+  intent: string;
+  roll: RollResult | null;
+  /** A later Correction reverted this Turn. Its body holds prose blocks only. */
+  reverted: boolean;
+  body: TurnBody;
+}
+
+/** A PC Belief about the PC on a state key (never `location`). */
+export interface StateLine {
+  key: string;
+  value: string;
+}
+
+export interface YouCard {
+  name: string;
+  concept: string;
+  state: StateLine[];
+}
+
+/** A token for one Belief. The UI does not show it. */
+export interface BeliefRef {
+  subject_id: number;
+  key: string;
+}
+
+export interface FactLine {
+  belief: BeliefRef;
+  subject: NameRef;
+  text: string;
+  /** An Open Item: planned or pending, not done. */
+  open: boolean;
+  told_by: NameRef | null;
+}
+
+/** A named NPC, place or Faction the PC knows. */
+export interface KnownLine {
+  who: NameRef;
+  other_names: string[];
+  here: boolean;
+}
+
+export type Target =
+  | { kind: "scene"; turn_id: number }
+  | { kind: "act"; turn_id: number }
+  | { kind: "belief"; subject_id: number; key: string }
+  | { kind: "entity"; entity_id: number }
+  | { kind: "note"; note_id: number };
+
+export interface PinLine {
+  target: Target;
+  title: string;
+  text: string;
+}
+
+/** The mature content module adds a variant; the UI reads the tag only. */
+export type SceneState = { kind: "plain" };
+
+export interface PlayView {
+  pc_name: string;
+  place: PlaceLine | null;
+  clock_min: number;
+  needs_begin: boolean;
+  can_correct: boolean;
+  scene: SceneState;
+  story: StoryTurn[];
+  here: NameRef[];
+  you: YouCard;
+  open: FactLine[];
+  pinned: PinLine[];
+  known: KnownLine[];
+}
+
 export interface Defaults {
   seed_path: string;
   world_path: string;

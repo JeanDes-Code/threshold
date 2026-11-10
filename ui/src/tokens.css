@@ -1,0 +1,74 @@
+/*
+ * The one tokens file. Every colour, space, radius, type size and font family
+ * of the UI lives here. Every other CSS file reads these names and holds no
+ * colour literal (theme.test.ts checks it). Dark is the only theme for now.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Ground and surfaces: a cool, very dark blue. */
+  --ground: #0e1320;
+  --card: #151c2b;
+  --card-border: #253049;
+  --well: #0b101b;
+  --rule: #222b3d;
+  --scrim: #05080fcc;
+
+  /* Text. */
+  --text: #e4e8f0;
+  --muted: #95a0b4;
+  --faint: #6b768b;
+
+  /* One accent for the main action. */
+  --accent: #4f8cff;
+  --accent-hover: #6a9dff;
+  --accent-text: #ffffff;
+  --link: #9cc0ff;
+
+  --danger: #e5675c;
+  --danger-text: #ffffff;
+  --ok: #5cc28a;
+
+  /* Eight warm NPC colours. An NPC keeps one for the whole Campaign (play/logic.ts). */
+  --npc-1: #e8a15c;
+  --npc-2: #e07a5f;
+  --npc-3: #d9a46b;
+  --npc-4: #f0c35a;
+  --npc-5: #e5989b;
+  --npc-6: #c98a6b;
+  --npc-7: #f4a261;
+  --npc-8: #d6b07a;
+
+  /* Space, radius. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --radius-3: 999px;
+
+  /* Type. */
+  --font-story: "Source Serif 4", Georgia, serif;
+  --font-ui: "Inter", system-ui, sans-serif;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --leading-story: 1.7;
+  --leading-ui: 1.45;
+  --tracking-label: 0.08em;
+
+  /* Focus: every button and link shows it on keyboard focus. */
+  --focus-ring: 2px solid #8fb6ff;
+  --focus-offset: 2px;
+
+  /* Layout. */
+  --panel-width: 248px;
+  --story-measure: 42rem;
+  /* The narrow-window breakpoint. A media query cannot read it: style.css repeats it once. */
+  --narrow: 760px;
+}

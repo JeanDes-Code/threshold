@@ -8,5 +8,6 @@ export default defineConfig({
   clearScreen: false,
   server: { host: "127.0.0.1", port: 5173, strictPort: true },
   build: { outDir: "dist", target: "es2022" },
-  test: { environment: "node" },
+  // `css.include` makes Vitest load CSS, so theme.test.ts reads the real `?raw` text.
+  test: { environment: "node", css: { include: [/.+/] } },
 });
