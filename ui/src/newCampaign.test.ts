@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdventureSeed } from "./api";
 import {
-  confirmAge,
+  agesToConfirm,
+  confirmRow,
   createSaver,
   failureText,
   fieldId,
   focusTarget,
   gapSentence,
-  needsConfirm,
+  flagsFromNames,
+  isUnconfirmed,
   parseAt,
   removeAt,
-  renameInAges,
+  removeEntityRow,
   replaceAt,
   progressText,
   splitList,
@@ -48,7 +50,7 @@ function form(): ReviewForm {
     knowledge: [
       { subject: "Agathe Morrow", key: "trade", value: "innkeeper", text: "Agathe runs the inn.", open: false },
     ],
-    ages_to_confirm: ["Sefa Lind"],
+    unconfirmed: { pc: false, entities: [false, true, false] },
   };
 }
 
@@ -134,10 +136,10 @@ describe("gapSentence", () => {
   it("names the field in plain words", () => {
     expect(sentence("missing", "premise")).toBe("The premise is empty.");
     expect(sentence("age_unconfirmed", "entities[1].age")).toBe(
-      "The age of Sefa Lind is a guess: confirm it or change it.",
+      "The age of Sefa Lind is a guess: confirm it.",
     );
     expect(sentence("age_unconfirmed", "pc.age")).toBe(
-      "Your character's age is a guess: confirm it or change it.",
+      "Your character's age is a guess: confirm it.",
     );
     expect(sentence("missing", "entities[2].name")).toBe("The name of entry 3 is empty.");
     expect(sentence("unknown_name", "start.present[0]")).toBe(
@@ -167,23 +169,87 @@ describe("gapSentence", () => {
 });
 
 describe("ages to confirm", () => {
-  it("matches names as the core does", () => {
-    expect(needsConfirm("Sefa Lind", ["sefa lind."])).toBe(true);
-    expect(needsConfirm("Chloé", ["CHLOE"])).toBe(true);
-    expect(needsConfirm("The Copper Kettle", ["copper kettle"])).toBe(true);
-    expect(needsConfirm("Agathe Morrow", ["Sefa Lind"])).toBe(false);
+  /** A form whose characters have these names; `flags` marks the unconfirmed ones. */
+  function roster(names: string[], flags: boolean[]): ReviewForm {
+    const base = form();
+    return {
+      ...base,
+      seed: {
+        ...base.seed,
+        entities: names.map((name) => ({
+          name,
+          kind: "npc" as const,
+          age: 40,
+          other_names: [],
+          hidden: false,
+        })),
+      },
+      unconfirmed: { pc: false, entities: flags },
+    };
+  }
+  const rename = (f: ReviewForm, i: number, name: string): ReviewForm => ({
+    ...f,
+    seed: { ...f.seed, entities: replaceAt(f.seed.entities, i, { name }) },
   });
 
-  it("a rename keeps the age unconfirmed", () => {
-    expect(renameInAges("Sefa Lind", "Sefa Linde", ["Pim", "sefa lind"])).toEqual([
-      "Pim",
-      "Sefa Linde",
-    ]);
-    expect(renameInAges("Agathe", "Agatha", ["Pim"])).toEqual(["Pim"]);
+  it("reads the drafted names as the core matches them", () => {
+    const f = roster(["Sefa Lind", "Chloé", "The Copper Kettle", "Agathe Morrow"], []);
+    expect(flagsFromNames(f.seed, ["sefa lind.", "CHLOE", "copper kettle"])).toEqual({
+      pc: false,
+      entities: [true, true, true, false],
+    });
+    expect(flagsFromNames(f.seed, ["TEODOR BRANDT"]).pc).toBe(true);
   });
 
-  it("confirming removes every matching name", () => {
-    expect(confirmAge("Sefa Lind", ["Sefa Lind", "Pim", "sefa  lind"])).toEqual(["Pim"]);
+  it("typing another row's name, key by key, never confirms that row", () => {
+    let f = roster(["Agathe", "Gerrit"], [false, true]);
+    for (const name of ["G", "Ge", "Gerrit", "Gerrit ", "Gerrit V", "Gerrit Vane"]) {
+      f = rename(f, 0, name);
+      expect(isUnconfirmed(f, 1)).toBe(true);
+      expect(agesToConfirm(f)).toEqual(["Gerrit"]);
+    }
+    expect(isUnconfirmed(f, 0)).toBe(false);
+  });
+
+  it("two rows with one name stay unconfirmed when one is renamed", () => {
+    let f = roster(["Sefa", "Sefa"], [true, true]);
+    f = rename(f, 0, "Sefa Lind");
+    expect([isUnconfirmed(f, 0), isUnconfirmed(f, 1)]).toEqual([true, true]);
+    expect(agesToConfirm(f)).toEqual(["Sefa Lind", "Sefa"]);
+  });
+
+  it("deleting a row drops only that row's entry", () => {
+    let f = roster(["Ann", "Bo", "Cy"], [true, false, true]);
+    f = removeEntityRow(f, 1);
+    expect(f.seed.entities.map((e) => e.name)).toEqual(["Ann", "Cy"]);
+    expect(f.unconfirmed.entities).toEqual([true, true]);
+    f = removeEntityRow(f, 0);
+    expect(agesToConfirm(f)).toEqual(["Cy"]);
+    expect(isUnconfirmed(f, 0)).toBe(true);
+  });
+
+  it("a confirmed row renamed to an unconfirmed row's name leaves that row unconfirmed", () => {
+    let f = roster(["Agathe", "Gerrit"], [false, true]);
+    f = rename(f, 0, "Gerrit");
+    expect(isUnconfirmed(f, 1)).toBe(true);
+    // The wire format names ages, so the store sees both rows as unconfirmed.
+    expect(isUnconfirmed(f, 0)).toBe(true);
+    expect(agesToConfirm(f)).toEqual(["Gerrit"]);
+    // Confirming one of two rows with one name confirms neither.
+    f = confirmRow(f, 0);
+    expect([isUnconfirmed(f, 0), isUnconfirmed(f, 1)]).toEqual([true, true]);
+    f = confirmRow(f, 1);
+    expect(agesToConfirm(f)).toEqual([]);
+  });
+
+  it("confirming a row clears its own entry only", () => {
+    let f = roster(["Ann", "Bo"], [true, true]);
+    f = { ...f, unconfirmed: { ...f.unconfirmed, pc: true } };
+    f = confirmRow(f, "pc");
+    expect(isUnconfirmed(f, "pc")).toBe(false);
+    expect(agesToConfirm(f)).toEqual(["Ann", "Bo"]);
+    f = confirmRow(f, 0);
+    expect(agesToConfirm(f)).toEqual(["Bo"]);
   });
 });
 
@@ -282,6 +348,36 @@ describe("createSaver", () => {
     finish[0]?.();
     await vi.runAllTimersAsync();
     expect(results).toEqual(["saved a"]);
+  });
+
+  it("flush() sends the last edit at once and waits for it", async () => {
+    const { saver, sent, finish } = setup();
+    saver.edit("a");
+    let done = false;
+    const flushed = saver.flush().then(() => (done = true));
+    expect(sent).toEqual(["a"]);
+    await Promise.resolve();
+    expect(done).toBe(false);
+    finish[0]?.();
+    await flushed;
+    expect(done).toBe(true);
+  });
+
+  it("flush() fails when the last save fails", async () => {
+    const saver = createSaver<string, string>({
+      delayMs: 600,
+      save: () => Promise.reject(new Error("disk full")),
+      onResult: () => undefined,
+      onError: () => undefined,
+      onPending: () => undefined,
+    });
+    saver.edit("a");
+    await expect(saver.flush()).rejects.toThrow("disk full");
+  });
+
+  it("flush() with nothing to save resolves", async () => {
+    const { saver } = setup();
+    await expect(saver.flush()).resolves.toBeUndefined();
   });
 
   it("stop() still saves the last edit, and reports nothing", async () => {

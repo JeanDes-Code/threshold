@@ -86,3 +86,4 @@ table.roster td:first-child { min-width: 11em; }
 table.roster th { color: var(--muted); font-size: 13px; font-weight: 400; }
 .review-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 8px 0; }
 .review-bar .error { flex: 1; }
+fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }

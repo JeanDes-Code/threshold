@@ -11,12 +11,25 @@ import type {
   KnownFact,
 } from "./api";
 
-/** What the review edits; `save_draft` takes all of it. */
+/**
+ * Which characters have an age the Player has not confirmed. It is kept per
+ * row, never by name: a name the Player is typing must not move a mark.
+ */
+export interface AgeFlags {
+  pc: boolean;
+  /** One flag per `seed.entities` entry, in the same order. */
+  entities: boolean[];
+}
+
+/** What the review edits. `save_draft` takes it, with `agesToConfirm` as the name list. */
 export interface ReviewForm {
   seed: AdventureSeed;
   knowledge: KnownFact[];
-  ages_to_confirm: string[];
+  unconfirmed: AgeFlags;
 }
+
+/** A character row: the PC, or an index in `seed.entities`. */
+export type Row = "pc" | number;
 
 const STAGES: Record<BuildStage, string> = {
   draft_roster: "Reading the characters",
@@ -146,7 +159,7 @@ export function fieldLabel(at: string, form: ReviewForm): string {
 const SENTENCES: Record<GapKind, (field: string) => string> = {
   missing: (f) => `${f} is empty.`,
   age_missing: (f) => `${f} is missing.`,
-  age_unconfirmed: (f) => `${f} is a guess: confirm it or change it.`,
+  age_unconfirmed: (f) => `${f} is a guess: confirm it.`,
   age_below_min: (f) => `${f} is below the minimum age.`,
   unknown_name: (f) => `${f} does not match a name of the right kind.`,
   duplicate_name: (f) => `${f} is used twice.`,
@@ -178,25 +191,67 @@ export function nameKey(name: string): string {
     .normalize("NFC");
 }
 
-/** True when the model proposed the age of `name` and the Player has not confirmed it. */
-export function needsConfirm(name: string, agesToConfirm: string[]): boolean {
-  const key = nameKey(name);
-  return key !== "" && agesToConfirm.some((n) => nameKey(n) === key);
+/** The rows whose name is in the draft's `ages_to_confirm`, matched as the core matches. */
+export function flagsFromNames(seed: AdventureSeed, names: string[]): AgeFlags {
+  const keys = new Set(names.map(nameKey));
+  return {
+    pc: keys.has(nameKey(seed.pc.name)),
+    entities: seed.entities.map((e) => keys.has(nameKey(e.name))),
+  };
 }
 
-/** `agesToConfirm` without `name`. */
-export function confirmAge(name: string, agesToConfirm: string[]): string[] {
-  const key = nameKey(name);
-  return agesToConfirm.filter((n) => nameKey(n) !== key);
+const rowName = (form: ReviewForm, row: Row) =>
+  row === "pc" ? form.seed.pc.name : (form.seed.entities[row]?.name ?? "");
+
+/**
+ * The `ages_to_confirm` list for `save_draft`: the current names of the
+ * unconfirmed rows, built only when saving.
+ */
+export function agesToConfirm(form: ReviewForm): string[] {
+  const rows: Row[] = [
+    ...(form.unconfirmed.pc ? (["pc"] as const) : []),
+    ...form.unconfirmed.entities.flatMap((on, i) => (on ? [i] : [])),
+  ];
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const row of rows) {
+    const name = rowName(form, row);
+    if (seen.has(nameKey(name))) continue;
+    seen.add(nameKey(name));
+    names.push(name);
+  }
+  return names;
 }
 
 /**
- * `agesToConfirm` after a character's rename: an unconfirmed age stays
- * unconfirmed under the new name.
+ * True while the row's age is unconfirmed. The store matches by name, so a
+ * row that shares its name with an unconfirmed row is unconfirmed too.
  */
-export function renameInAges(from: string, to: string, agesToConfirm: string[]): string[] {
-  const key = nameKey(from);
-  return agesToConfirm.map((n) => (nameKey(n) === key ? to : n));
+export function isUnconfirmed(form: ReviewForm, row: Row): boolean {
+  const own = row === "pc" ? form.unconfirmed.pc : form.unconfirmed.entities[row];
+  if (own) return true;
+  const key = nameKey(rowName(form, row));
+  return key !== "" && agesToConfirm(form).some((n) => nameKey(n) === key);
+}
+
+/** The Player confirms the age of one row; no other row changes. */
+export function confirmRow(form: ReviewForm, row: Row): ReviewForm {
+  const unconfirmed =
+    row === "pc"
+      ? { ...form.unconfirmed, pc: false }
+      : { ...form.unconfirmed, entities: replaceFlag(form.unconfirmed.entities, row) };
+  return { ...form, unconfirmed };
+}
+
+const replaceFlag = (flags: boolean[], i: number) => flags.map((on, j) => (j === i ? false : on));
+
+/** The form without the roster entry at `i`, and without that entry's flag only. */
+export function removeEntityRow(form: ReviewForm, i: number): ReviewForm {
+  return {
+    ...form,
+    seed: { ...form.seed, entities: removeAt(form.seed.entities, i) },
+    unconfirmed: { ...form.unconfirmed, entities: removeAt(form.unconfirmed.entities, i) },
+  };
 }
 
 /** `list` with the item at `i` patched. */
@@ -235,7 +290,14 @@ export interface Saver<F> {
   stop(): void;
   /** Takes edits and reports again after `stop()`. */
   start(): void;
+  /**
+   * Saves the last edit now and waits until the store holds every edit.
+   * Rejects with the error of the last save when it failed.
+   */
+  flush(): Promise<void>;
 }
+
+type Outcome = { ok: true } | { ok: false; error: unknown };
 
 /**
  * Saves a form after typing pauses. One save runs at a time, so two saves
@@ -247,6 +309,8 @@ export function createSaver<F, R>(opts: SaverOptions<F, R>): Saver<F> {
   let inFlight = false;
   let pending = false;
   let stopped = false;
+  // The running save, and after it any save it starts; null when idle.
+  let current: Promise<Outcome> | null = null;
 
   const settle = () => {
     const now = timer !== null || inFlight || waiting !== null;
@@ -260,18 +324,25 @@ export function createSaver<F, R>(opts: SaverOptions<F, R>): Saver<F> {
     waiting = null;
     inFlight = true;
     settle();
-    opts.save(form).then(
-      (result) => {
+    const done: Promise<Outcome> = opts
+      .save(form)
+      .then(
+        (result): Outcome => {
+          if (!stopped && waiting === null) opts.onResult(result);
+          return { ok: true };
+        },
+        (error: unknown): Outcome => {
+          if (!stopped) opts.onError(error);
+          return { ok: false, error };
+        },
+      )
+      .then((outcome) => {
         inFlight = false;
-        if (!stopped && waiting === null) opts.onResult(result);
+        if (current === done) current = null;
         send();
-      },
-      (e: unknown) => {
-        inFlight = false;
-        if (!stopped) opts.onError(e);
-        send();
-      },
-    );
+        return outcome;
+      });
+    current = done;
   };
 
   const clearTimer = () => {
@@ -299,6 +370,13 @@ export function createSaver<F, R>(opts: SaverOptions<F, R>): Saver<F> {
     },
     start() {
       stopped = false;
+    },
+    async flush() {
+      clearTimer();
+      send();
+      let last: Outcome = { ok: true };
+      while (current) last = await current;
+      if (!last.ok) throw last.error;
     },
   };
 }
