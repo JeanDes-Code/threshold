@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { CampaignCard, DraftLine, DraftState } from "../api";
 import { cardLine, fileName, lastPlayedText, unfinishedDrafts } from "./logic";
 
@@ -14,6 +14,8 @@ interface Props {
   /** A draft or a World Build runs: the new-Campaign screen keeps it. */
   jobRunning: boolean;
   onOpen: (card: CampaignCard) => void;
+  /** "Remove from list", after the Player confirmed: the file moves to the archive folder. */
+  onRemove: (card: CampaignCard) => void;
   onNew: () => void;
   onDraft: (draftId: string) => void;
   /** The menu: debug mode and the model status. */
@@ -28,7 +30,7 @@ const DRAFT_STATE: Record<DraftState, string> = {
 
 /** The first screen: the Player's Campaigns as cards, unfinished drafts, one way to start. */
 export default function Home(props: Props) {
-  const { cards, now, error, opening, jobRunning, onOpen, onNew, onDraft, menu } = props;
+  const { cards, now, error, opening, jobRunning, onOpen, onRemove, onNew, onDraft, menu } = props;
   const drafts = unfinishedDrafts(props.drafts);
   return (
     <div className="home">
@@ -78,6 +80,7 @@ export default function Home(props: Props) {
                       opening={opening === card.db_path}
                       disabled={opening !== null}
                       onOpen={() => onOpen(card)}
+                      onRemove={() => onRemove(card)}
                     />
                   </li>
                 ))}
@@ -118,17 +121,12 @@ interface CardProps {
   opening: boolean;
   disabled: boolean;
   onOpen: () => void;
+  onRemove: () => void;
 }
 
-function Card({ card, now, opening, disabled, onOpen }: CardProps) {
+function Card({ card, now, opening, disabled, onOpen, onRemove }: CardProps) {
   if (card.problem !== null) {
-    return (
-      <article className="home-card home-card--problem" aria-label={`${fileName(card.db_path)}: cannot open`}>
-        <p className="play-label">Cannot open</p>
-        <h3 className="home-card__name home-card__name--file">{fileName(card.db_path)}</h3>
-        <p className="home-card__problem">{cardLine(card)}</p>
-      </article>
-    );
+    return <ProblemCard card={card} disabled={disabled} onRemove={onRemove} />;
   }
   return (
     <button
@@ -152,5 +150,41 @@ function Card({ card, now, opening, disabled, onOpen }: CardProps) {
         <span className="home-card__when">{opening ? "Opening…" : lastPlayedText(card.last_played_ms, now)}</span>
       </span>
     </button>
+  );
+}
+
+/** A file that cannot open. "Remove from list" asks once, then moves the file to the archive folder. */
+function ProblemCard({ card, disabled, onRemove }: { card: CampaignCard; disabled: boolean; onRemove: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const name = fileName(card.db_path);
+  return (
+    <article className="home-card home-card--problem" aria-label={`${name}: cannot open`}>
+      <p className="play-label">Cannot open</p>
+      <h3 className="home-card__name home-card__name--file">{name}</h3>
+      <p className="home-card__problem">{cardLine(card)}</p>
+      {confirming ? (
+        <div className="home-card__confirm" role="group" aria-label={`Remove ${name} from the list?`}>
+          <p className="play-empty">The file moves to the archive folder of the app. Nothing is deleted.</p>
+          <button
+            type="button"
+            className="play-btn play-btn--outline"
+            disabled={disabled}
+            onClick={() => {
+              setConfirming(false);
+              onRemove();
+            }}
+          >
+            Move it to the archive
+          </button>
+          <button type="button" className="play-btn play-btn--text" onClick={() => setConfirming(false)}>
+            Keep it
+          </button>
+        </div>
+      ) : (
+        <button type="button" className="play-btn play-btn--text" disabled={disabled} onClick={() => setConfirming(true)}>
+          Remove from list
+        </button>
+      )}
+    </article>
   );
 }

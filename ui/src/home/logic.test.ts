@@ -16,6 +16,7 @@ const MIN = 60_000;
 const now = Date.UTC(2026, 10, 10, 18, 0);
 
 const card = (extra: Partial<CampaignCard> = {}): CampaignCard => ({
+  id: "campaign-1.sqlite",
   db_path: "/data/campaigns/campaign-1.sqlite",
   pc_name: "Ada Quell",
   premise: "A courier owes the Salt Guild more than she can pay.",

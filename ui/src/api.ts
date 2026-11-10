@@ -21,6 +21,8 @@ export interface CampaignSummary {
 
 /** One Campaign file on the home screen. A card with a `problem` cannot open. */
 export interface CampaignCard {
+  /** The card's own id (its file name). "Remove from list" sends it, never a path. */
+  id: string;
   db_path: string;
   pc_name: string;
   premise: string;
@@ -503,6 +505,8 @@ export function createApi(invoke: Invoke) {
     modelStatus: () => invoke<string>("model_status"),
     /** The home cards, the latest played first. */
     listCampaigns: () => invoke<CampaignCard[]>("list_campaigns"),
+    /** "Remove from list": moves the card's file to the archive folder of the data dir. Nothing is deleted. */
+    removeCampaign: (cardId: string) => invoke<null>("remove_campaign", { card_id: cardId }),
     openCampaign: (dbPath: string) => invoke<CampaignSummary>("open_campaign", { db_path: dbPath }),
     askOoc: (text: string) => invoke<string>("ask_ooc", { text }),
     renarrate: (turnId: number) => invoke<string>("renarrate", { turn_id: turnId }),

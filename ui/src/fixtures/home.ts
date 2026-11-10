@@ -10,6 +10,7 @@ const HOUR = 3_600_000;
 
 export const homeCards: CampaignCard[] = [
   {
+    id: "campaign-3.sqlite",
     db_path: "/data/campaigns/campaign-3.sqlite",
     pc_name: "Ada Quell",
     premise:
@@ -20,6 +21,7 @@ export const homeCards: CampaignCard[] = [
     problem: null,
   },
   {
+    id: "campaign-2.sqlite",
     db_path: "/data/campaigns/campaign-2.sqlite",
     pc_name: "Wren",
     premise: "An outsider scribe is hired to copy the town's charters, and one charter is missing a page.",
@@ -29,6 +31,7 @@ export const homeCards: CampaignCard[] = [
     problem: null,
   },
   {
+    id: "campaign-4.sqlite",
     db_path: "/data/campaigns/campaign-4.sqlite",
     pc_name: "Mira Holt",
     premise: "A lighthouse keeper's daughter comes home to Gull Point the week the lamp goes dark.",
@@ -38,6 +41,7 @@ export const homeCards: CampaignCard[] = [
     problem: null,
   },
   {
+    id: "campaign-1.sqlite",
     db_path: "/data/campaigns/campaign-1.sqlite",
     pc_name: "",
     premise: "",

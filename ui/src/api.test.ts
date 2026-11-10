@@ -147,6 +147,16 @@ describe("createApi", () => {
     expect(calls).toEqual([{ cmd: "get_play_view", args: undefined }]);
   });
 
+  it("removeCampaign sends the card's id, not a path", async () => {
+    const calls: Call[] = [];
+    const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(null as T);
+    };
+    await createApi(invoke).removeCampaign("campaign-old.sqlite");
+    expect(calls).toEqual([{ cmd: "remove_campaign", args: { card_id: "campaign-old.sqlite" } }]);
+  });
+
   it("getEntityCard sends the entity id", async () => {
     const calls: Call[] = [];
     const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {

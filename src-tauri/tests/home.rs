@@ -127,3 +127,58 @@ fn a_foreign_file_shows_a_problem_card() {
     );
     assert_ne!(problem, OLD_FILE);
 }
+
+/// B10 (QA, 2026-11-10): "Remove from list" moves an unopenable file into
+/// the archive folder of the data dir. It never deletes it, it takes the
+/// card's own id (a path never matches), and the open Campaign stays.
+#[test]
+fn remove_from_list_moves_the_file_to_the_archive() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let good = s.summary().unwrap().db_path;
+    let old = dir.path().join("campaigns").join("campaign-old.sqlite");
+    let sql = rusqlite::Connection::open(&old).unwrap();
+    sql.execute_batch(
+        "CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL);
+         PRAGMA user_version=2;",
+    )
+    .unwrap();
+    drop(sql);
+    let bytes = std::fs::read(&old).unwrap();
+    let card = s
+        .list_campaigns()
+        .into_iter()
+        .find(|c| c.problem.is_some())
+        .unwrap();
+    assert_eq!(card.id, "campaign-old.sqlite");
+
+    // A path is not a card id: nothing moves.
+    for id in [
+        old.display().to_string(),
+        "../campaigns/campaign-old.sqlite".into(),
+        "campaign-none.sqlite".into(),
+    ] {
+        assert!(s.remove_campaign(&id).is_err(), "{id}");
+        assert!(old.exists());
+    }
+    // The open Campaign cannot move.
+    let open_id = Path::new(&good)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(s.remove_campaign(&open_id).is_err());
+    assert!(Path::new(&good).exists());
+
+    let moved = s.remove_campaign(&card.id).unwrap();
+    assert!(!old.exists(), "the file left the campaigns folder");
+    assert_eq!(
+        moved,
+        dir.path().join("archive").join("campaign-old.sqlite")
+    );
+    assert_eq!(std::fs::read(&moved).unwrap(), bytes, "moved, not deleted");
+    let left: Vec<String> = s.list_campaigns().into_iter().map(|c| c.id).collect();
+    assert_eq!(left, [open_id]);
+}

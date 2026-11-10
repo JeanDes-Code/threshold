@@ -86,6 +86,9 @@ pub struct CampaignSummary {
     pub needs_begin: bool,
 }
 
+/// The folder in the data dir that removed Campaign files move to.
+pub const ARCHIVE_DIR: &str = "archive";
+
 /// The problem line of a Campaign file of an older schema version.
 pub const OLD_FILE: &str = "made by an older version of Threshold: import its Source Text again";
 
@@ -93,6 +96,9 @@ pub const OLD_FILE: &str = "made by an older version of Threshold: import its So
 /// `problem` cannot open.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CampaignCard {
+    /// The card's own id: its file name in the campaigns folder. The UI
+    /// names a card by this id, never by a path.
+    pub id: String,
     pub db_path: String,
     pub pc_name: String,
     pub premise: String,
@@ -250,6 +256,48 @@ impl Session {
                 .then_with(|| b.db_path.cmp(&a.db_path))
         });
         cards
+    }
+
+    /// The folder where "Remove from list" moves a Campaign file.
+    pub fn archive_dir(&self) -> PathBuf {
+        self.data_dir.join(ARCHIVE_DIR)
+    }
+
+    /// "Remove from list" (QA, 2026-11-10): moves the file of the card
+    /// `card_id` into `archive_dir`, never deletes it. `card_id` is a card's
+    /// own id as `list_campaigns` gives it, never a path: only a file the
+    /// list shows can move. The open Campaign cannot. Its SQLite side
+    /// files move with it. Returns the new path.
+    pub fn remove_campaign(&mut self, card_id: &str) -> Result<PathBuf, AppError> {
+        let card = self
+            .list_campaigns()
+            .into_iter()
+            .find(|c| c.id == card_id)
+            .ok_or_else(|| failed("this Campaign is not in the list"))?;
+        let from = PathBuf::from(&card.db_path);
+        if self.open.as_ref().is_some_and(|o| o.db_path == from) {
+            return Err(failed("close this Campaign before you remove it"));
+        }
+        let archive = self.archive_dir();
+        fs::create_dir_all(&archive).map_err(failed)?;
+        let stem = from
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut to = archive.join(&card.id);
+        let mut n = 1;
+        while to.exists() {
+            to = archive.join(format!("{stem}-{n}.sqlite"));
+            n += 1;
+        }
+        fs::rename(&from, &to).map_err(failed)?;
+        for side in ["-wal", "-shm", "-journal"] {
+            let file = PathBuf::from(format!("{}{side}", from.display()));
+            if file.exists() {
+                let _ = fs::rename(&file, PathBuf::from(format!("{}{side}", to.display())));
+            }
+        }
+        Ok(to)
     }
 
     /// Creates a campaign file from an Adventure Seed and a world file, and
@@ -520,6 +568,10 @@ fn campaign_card(path: &Path) -> CampaignCard {
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_millis() as u64);
     let mut card = CampaignCard {
+        id: path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         db_path: path.display().to_string(),
         pc_name: String::new(),
         premise: String::new(),

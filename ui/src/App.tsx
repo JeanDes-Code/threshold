@@ -95,6 +95,17 @@ export default function App() {
     play.opened().then(setView, (e: unknown) => setAppError(`Could not read the Campaign: ${errorText(e)}`));
   };
 
+  // "Remove from list": the core moves the file to the archive folder; the list is read again.
+  const removeCard = async (card: CampaignCard) => {
+    setAppError(null);
+    try {
+      await api.removeCampaign(card.id);
+    } catch (e) {
+      setAppError(`Could not remove the Campaign from the list: ${errorText(e)}`);
+    }
+    readHome();
+  };
+
   const openCard = async (card: CampaignCard) => {
     if (card.problem !== null || turnBusy) return;
     setOpening(card.db_path);
@@ -189,6 +200,7 @@ export default function App() {
             opening={opening}
             jobRunning={job}
             onOpen={(card) => void openCard(card)}
+            onRemove={(card) => void removeCard(card)}
             onNew={() => startNew(null)}
             onDraft={(id) => startNew(id)}
             menu={menu(false)}

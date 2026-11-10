@@ -682,6 +682,8 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 .home-card--problem .play-label { color: var(--danger); margin: 0; }
 .home-card__problem { font-size: var(--text-sm); color: var(--muted); }
 .home-card__problem::first-letter { text-transform: uppercase; }
+.home-card__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.home-card__confirm .play-empty { flex-basis: 100%; margin: 0; }
 .home-empty { padding: var(--space-5); background: var(--card); border: 1px dashed var(--card-border); border-radius: var(--radius-2); }
 .home-empty__title { font-family: var(--font-story); font-size: var(--text-lg); font-weight: 600; margin-bottom: var(--space-1); }
 .home-drafts { list-style: none; margin: 0; padding: 0; border: 1px solid var(--card-border); border-radius: var(--radius-2); background: var(--card); }

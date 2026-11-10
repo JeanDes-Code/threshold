@@ -25,6 +25,7 @@ export default function HomePreview() {
         opening={opening}
         jobRunning={false}
         onOpen={(card) => setOpening(card.db_path)}
+        onRemove={() => undefined}
         onNew={() => undefined}
         onDraft={() => undefined}
         menu={

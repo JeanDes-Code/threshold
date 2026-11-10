@@ -188,6 +188,7 @@ Changed and new commands. Every other command stays as it is.
 | Command | Arguments | Returns | Source |
 |---|---|---|---|
 | `list_campaigns` | none | `Vec<CampaignCard>` | view: `store::peek` and the file time |
+| `remove_campaign` | `card_id` | nothing | moves the card's file to `<data_dir>/archive/` (added after QA, 2026-11-10) |
 | `open_campaign` | `db_path` | `CampaignSummary` (no `turns`) | as today |
 | `get_play_view` | none | `PlayView` | view |
 | `get_journal` | none | `JournalView` (new form) | view |
@@ -201,7 +202,7 @@ Changed and new commands. Every other command stays as it is.
 `campaign_summary` is removed. `CampaignSummary` and the `start_build` result lose `turns`. The Debug view takes its Turn ids from `PlayView.story`. The UI calls `get_play_view` once after `open_campaign`, and once after each `turn_committed`, `turn_failed` or note command.
 
 ```rust
-pub struct CampaignCard { db_path: String, pc_name: String, premise: String, last_played_ms: u64,
+pub struct CampaignCard { id: String, db_path: String, pc_name: String, premise: String, last_played_ms: u64,
                           turn_count: u32, needs_begin: bool, problem: Option<String> }
 
 pub struct PlayView { pc_name: String, place: Option<PlaceLine>, clock_min: ClockMin, needs_begin: bool,
@@ -236,7 +237,7 @@ pub struct EntityCard  { who: NameRef, other_names: Vec<String>, here: bool, fac
 
 Rules:
 
-- `CampaignCard.last_played_ms` is the change time of the file. `turn_count` counts the Play and Correction Turns that stand. `pc_name` and `premise` come from the Adventure Seed. A file of schema 2 gives a card with `problem` set and cannot open.
+- `CampaignCard.last_played_ms` is the change time of the file. `turn_count` counts the Play and Correction Turns that stand. `pc_name` and `premise` come from the Adventure Seed. A file of schema 2 gives a card with `problem` set and cannot open. *Changed after QA (2026-11-10):* such a card has a "Remove from list" action. After a confirm step, `remove_campaign` moves the file (and its SQLite side files) into `<data_dir>/archive/`; it never deletes. It takes the card's own `id` (the file name), never a path, so only a file the list shows can move, and it refuses the open Campaign.
 - `YouCard.state` holds the PC Beliefs about the PC on a state key. The panel shows no other gauge.
 - `PlayView.open` holds the Open Items with `closed_in: None`. The core holds no Lead today (section 8).
 - The Decisions tab is each `Act` with `decision: true`, with the place and time of its `SceneEntry`.

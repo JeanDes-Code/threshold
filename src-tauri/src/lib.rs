@@ -161,6 +161,13 @@ async fn list_campaigns(state: State<'_, Shared>) -> Result<Vec<CampaignCard>, A
     blocking(&state, |s| Ok(s.list_campaigns())).await
 }
 
+/// "Remove from list": moves the card's file to the archive folder. Takes
+/// the card's own id, never a path.
+#[tauri::command(rename_all = "snake_case")]
+async fn remove_campaign(state: State<'_, Shared>, card_id: String) -> Result<(), AppError> {
+    blocking(&state, move |s| s.remove_campaign(&card_id).map(|_| ())).await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 async fn new_campaign(
     state: State<'_, Shared>,
@@ -437,6 +444,7 @@ pub fn run() {
             defaults,
             model_status,
             list_campaigns,
+            remove_campaign,
             new_campaign,
             open_campaign,
             get_play_view,
