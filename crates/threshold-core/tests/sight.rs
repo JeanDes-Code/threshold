@@ -9,8 +9,10 @@ use support::{hidden::*, *};
 use threshold_core::{
     RecordedGm,
     context::seen_present,
-    domain::{ActionKind, DecisionProposal, EntityRef, Knowing, LedgerOp, Seen, Verdict},
-    store::TurnId,
+    domain::{
+        ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Seen, Verdict,
+    },
+    store::{TurnId, TurnKind},
     world::{Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN},
 };
 
@@ -390,6 +392,232 @@ fn open_item_closes_on_a_fact_not_a_claim() {
         )],
     );
     assert_eq!(meet(&w.sight(), ada).closed_in, Some(met));
+}
+
+/// A proposal that restates a live fact with the same value writes one more
+/// PC row on it (`checks::ops` `witness`). That row must not re-open an
+/// item that an outcome closed, and the closing Turn stays a decision.
+#[test]
+fn closed_item_stays_closed_when_the_pc_learns_the_plan_again() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let view = w.view();
+    let met = w.play(
+        "I meet Brann at the mill.",
+        &action(ActionKind::Act),
+        10,
+        vec![set(
+            &view,
+            ada,
+            "meet",
+            "brann",
+            "Ada met Brann at the mill.",
+            &[ada],
+        )],
+    );
+    assert_eq!(meet(&w.sight(), ada).closed_in, Some(met));
+    let clock = w.view().clock_min;
+    w.play(
+        "I think back on the plan.",
+        &action(ActionKind::Observe),
+        0,
+        vec![LedgerOp::Know {
+            holder: EntityRef::Id(ada),
+            fact_id: Some(w.meet),
+            claim_id: None,
+            how: Knowing::Witnessed,
+            arrives_at: clock,
+        }],
+    );
+    let sight = w.sight();
+    assert_eq!(meet(&sight, ada).closed_in, Some(met));
+    assert!(moment(&sight, met).unwrap().decision);
+}
+
+/// Only an outcome learned after the plan closes it: an older row on the
+/// outcome slot does not.
+#[test]
+fn outcome_learned_before_the_plan_keeps_it_open() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let view = w.view();
+    w.play(
+        "I walk to the mill and back.",
+        &action(ActionKind::Act),
+        10,
+        vec![set(
+            &view,
+            ada,
+            "trip",
+            "the mill",
+            "Ada went to the mill.",
+            &[ada],
+        )],
+    );
+    let view = w.view();
+    w.play(
+        "I plan another trip.",
+        &action(ActionKind::Talk),
+        0,
+        vec![set(
+            &view,
+            ada,
+            "pending_trip",
+            "the mill",
+            "Ada plans a trip to the mill.",
+            &[ada],
+        )],
+    );
+    let sight = w.sight();
+    let trip = sight
+        .open_items
+        .iter()
+        .find(|i| i.key == "pending_trip")
+        .unwrap();
+    assert_eq!(trip.closed_in, None, "{trip:?}");
+}
+
+/// `op` with its fact source set to `source`.
+fn sourced(mut op: LedgerOp, source: FactSource) -> LedgerOp {
+    match &mut op {
+        LedgerOp::AddFact { source: s, .. } => *s = source,
+        LedgerOp::SupersedeFact { new, .. } => new.source = source,
+        other => panic!("not a fact op: {other:?}"),
+    }
+    op
+}
+
+/// The clauses of the decision rule that `decision_rule_marks_lasting_
+/// witnessed_acts` does not reach alone: a Persistent fact from a Check
+/// stake or a Correction, and a Turn whose only mark is that it closed an
+/// Open Item the PC knows.
+#[test]
+fn decision_rule_counts_stakes_corrections_and_closed_items() {
+    let mut w = HiddenWorld::new();
+    let (ada, gate) = (w.ada, w.gate);
+    let view = w.view();
+    let mark = |key: &str, source: FactSource| {
+        sourced(
+            set(
+                &view,
+                gate,
+                key,
+                "chalk",
+                "A chalk mark is on the gate.",
+                &[ada],
+            ),
+            source,
+        )
+    };
+    let stake = w.play(
+        "I bet my coin on the lock.",
+        &action(ActionKind::Act),
+        5,
+        vec![mark("bet", FactSource::Stake)],
+    );
+    let fixed = w.play(
+        "I scratch the gate.",
+        &action(ActionKind::Act),
+        5,
+        vec![mark("scratch", FactSource::Correction)],
+    );
+    let event = w.play(
+        "I watch the gate.",
+        &action(ActionKind::Act),
+        5,
+        vec![mark("stain", FactSource::WorldEvent)],
+    );
+    // `mood` is a state key: the outcome fact is never Persistent, so the
+    // only mark of this Turn is that it closes the Open Item.
+    let view = w.view();
+    w.play(
+        "I promise to keep calm.",
+        &action(ActionKind::Observe),
+        0,
+        vec![set(
+            &view,
+            ada,
+            "pending_mood",
+            "calm",
+            "Ada means to stay calm.",
+            &[ada],
+        )],
+    );
+    let view = w.view();
+    let calm = w.play(
+        "I breathe slowly.",
+        &action(ActionKind::Act),
+        0,
+        vec![set(&view, ada, "mood", "calm", "Ada is calm.", &[ada])],
+    );
+    let sight = w.sight();
+    let decision = |turn| moment(&sight, turn).is_some_and(|m| m.decision);
+    assert!(decision(stake), "a Persistent fact from a stake");
+    assert!(decision(fixed), "a Persistent fact from a Correction");
+    assert!(!decision(event), "a World Event fact is not the PC's act");
+    let item = sight
+        .open_items
+        .iter()
+        .find(|i| i.key == "pending_mood")
+        .unwrap();
+    assert_eq!(item.closed_in, Some(calm));
+    assert!(decision(calm), "it closed an Open Item the PC knows");
+}
+
+/// A PC row counts only once it has arrived: not in "Known before the
+/// Campaign", and not to close an Open Item.
+#[test]
+fn rows_that_have_not_arrived_count_nowhere() {
+    let mut w = HiddenWorld::new();
+    let (ada, brann) = (w.ada, w.brann);
+    w.commit(
+        TurnKind::Setup,
+        "",
+        "{}",
+        0,
+        vec![claim(brann, brann, "rumour", "a toll rise", &[ada], 60)],
+    );
+    // An outcome nobody saw, that the PC hears of in an hour.
+    let view = w.view();
+    w.play(
+        "I wait.",
+        &action(ActionKind::Observe),
+        0,
+        vec![set(
+            &view,
+            ada,
+            "meet",
+            "missed",
+            "Brann waited at the mill in vain.",
+            &[],
+        )],
+    );
+    let outcome = w.view().live_fact(ada, "meet").unwrap().id;
+    let clock = w.view().clock_min;
+    let heard = w.play(
+        "I wait more.",
+        &action(ActionKind::Observe),
+        0,
+        vec![LedgerOp::Know {
+            holder: EntityRef::Id(ada),
+            fact_id: Some(outcome),
+            claim_id: None,
+            how: Knowing::Told,
+            arrives_at: clock + 60,
+        }],
+    );
+    let sight = w.sight();
+    assert!(
+        sight.before.iter().all(|b| b.key != "rumour"),
+        "{:?}",
+        sight.before
+    );
+    assert_eq!(meet(&sight, ada).closed_in, None);
+
+    w.play("I wait an hour.", &action(ActionKind::Observe), 60, vec![]);
+    let sight = w.sight();
+    assert!(sight.before.iter().any(|b| b.key == "rumour"));
+    assert_eq!(meet(&sight, ada).closed_in, Some(heard));
 }
 
 #[test]

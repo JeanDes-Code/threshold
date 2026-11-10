@@ -799,6 +799,40 @@ fn plan_naming_an_open_key_without_its_prefix_is_dropped() {
     assert!(guarded[0].plan.is_empty(), "{guarded:?}");
 }
 
+/// A key that is the open prefix alone names no secret: it gives no term, so
+/// a plan that says "pending" is kept. The value still counts.
+#[test]
+fn bare_open_prefix_key_gives_no_secret_term() {
+    let mut w = World::new();
+    let orsel = w.orsel;
+    play_turn(
+        &mut w,
+        "turn-bare",
+        "I wait.",
+        "",
+        vec![add_fact(
+            orsel,
+            "pending_",
+            "toll",
+            "Orsel has something pending.",
+            vec![],
+        )],
+    );
+    assert!(w.view.live_fact(orsel, "pending_").is_some());
+    let plan = |text: &str| Reaction {
+        npc: Handle::Entity(orsel),
+        stance: Stance::Resist,
+        plan: text.into(),
+        cause: None,
+    };
+    let guarded = guard_plans(
+        &w.view,
+        &[plan("keep the matter pending"), plan("raise the toll")],
+    );
+    assert_eq!(guarded[0].plan, "keep the matter pending", "{guarded:?}");
+    assert!(guarded[1].plan.is_empty(), "{guarded:?}");
+}
+
 /// The narrator gets exactly one new rule line, the speech mark. No other
 /// prompt gets it.
 #[test]

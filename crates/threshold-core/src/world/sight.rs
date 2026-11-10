@@ -61,7 +61,8 @@ pub struct OpenItem {
     pub key: Key,
     pub text: String,
     /// The Turn of the first PC row from a fact on the outcome slot, learned
-    /// after the open one. A Claim never closes an item.
+    /// after the first PC row on the open fact. A Claim never closes an
+    /// item, and a closed item stays closed.
     pub closed_in: Option<TurnId>,
 }
 
@@ -213,9 +214,18 @@ pub fn pc_sight(
         .iter()
         .filter(|(b, _)| kept(b) && is_open_key(&b.key))
         .map(|(b, open)| {
+            // The first time the PC learned this open row. A later row on the
+            // same fact (a proposal that restates it) must not re-open an
+            // item that an outcome already closed.
+            let first = rows
+                .iter()
+                .copied()
+                .filter(|r| r.fact_id == open.fact_id && r.claim_id == open.claim_id)
+                .min_by_key(|r| at(r))
+                .unwrap_or(open);
             let closed_in = outcome_key(&b.key).and_then(|outcome| {
                 arrived()
-                    .filter(|r| at(r) > at(open))
+                    .filter(|r| at(r) > at(first))
                     .find(|r| {
                         r.fact_id
                             .and_then(|id| view.facts.iter().find(|f| f.id == id))

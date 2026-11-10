@@ -170,8 +170,14 @@ fn secret_terms(view: &WorldView) -> Vec<Vec<String>> {
             ))
         })
         .flat_map(|f| {
+            // An open key names its outcome; the bare prefix names nothing.
             let key = &f.slot.key;
-            [words(outcome_key(key).unwrap_or(key)), words(&f.slot.value)]
+            let term = if is_open_key(key) {
+                outcome_key(key).unwrap_or_default()
+            } else {
+                key
+            };
+            [words(term), words(&f.slot.value)]
         })
         .filter(|term| !term.is_empty() && !names.contains(term))
         .collect()

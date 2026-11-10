@@ -7,17 +7,17 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use support::hidden::*;
 use threshold_core::{
-    domain::{ActionKind, EntityKind, Verdict},
+    domain::{ActionKind, EntityKind, LedgerOp, Verdict},
     fixture::{load_adventure_seed, load_world},
     player::Marks,
-    store::{Store, TurnId},
+    store::{Store, TurnId, TurnKind, TurnRecord},
     turn::create_campaign,
     view::{Block, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view, play_view},
 };
 
-/// What `Session::get_character` gave for the town fixture before the view
-/// read `PcSight`.
-const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":0,"facts":[]}"#;
+/// The town fixture after one Turn that gave Wren a fact Wren saw and a
+/// fact only the GM knows.
+const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":5,"facts":[{"text":"Wren carries a satchel of quills.","open":false}]}"#;
 
 /// What it gave for the hidden world, from `WorldView`.
 const HIDDEN_CHARACTER: &str = r#"{"name":"Ada","concept":"Courier","clock_min":5,"facts":[{"text":"Ada plans to meet Brann at the mill.","open":true}]}"#;
@@ -40,7 +40,43 @@ fn character_view_shows_pc_knowledge_only() {
     }
     assert_eq!(json, HIDDEN_CHARACTER);
 
-    let (store, campaign) = town();
+    // The town fixture starts with no fact the PC holds about itself, so
+    // one Turn adds a seen fact and a GM-only fact.
+    let (mut store, campaign) = town();
+    let view = store.snapshot(campaign).unwrap();
+    let wren = view.entities.iter().find(|e| e.name == "Wren").unwrap().id;
+    store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: "wren-1".into(),
+                kind: TurnKind::Play,
+                intent: "I check my satchel.".into(),
+                proposal_json: "{}".into(),
+                clock_before: view.clock_min,
+                clock_after: view.clock_min + 5,
+            },
+            vec![
+                set(
+                    &view,
+                    wren,
+                    "carrying",
+                    "a satchel of quills",
+                    "Wren carries a satchel of quills.",
+                    &[wren],
+                ),
+                set(
+                    &view,
+                    wren,
+                    "watched_by",
+                    "the guild",
+                    "The guild has Wren watched.",
+                    &[],
+                ),
+                LedgerOp::AdvanceClock { minutes: 5 },
+            ],
+        )
+        .unwrap();
     let json = serde_json::to_string(&character_view(&sight_of(&store, campaign))).unwrap();
     assert_eq!(json, TOWN_CHARACTER);
 }
