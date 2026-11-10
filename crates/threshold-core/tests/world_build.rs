@@ -8,7 +8,7 @@ use threshold_core::{
     RecordedGm,
     build::{
         BuildCheck, BuildFailure, Control, DebugEntry, DraftState, KnownFact, PC_CENTRED_MAX_SHARE,
-        Progress, SeedDraft, Stage, approve, build_world,
+        Progress, SeedDraft, Stage, age_lines, approve, build_world, confirm_age,
     },
     domain::{
         AdventureSeed, EntityKind, FactEntry, OtherName, PcSeed, SeedEntity, StartSeed, WorldSetup,
@@ -104,6 +104,10 @@ fn known(subject: &str, key: &str, value: &str, open: bool) -> KnownFact {
 fn draft_of(seed: AdventureSeed, knowledge: Vec<KnownFact>) -> SeedDraft {
     let mut draft = SeedDraft::new(source(), seed);
     draft.knowledge = knowledge;
+    // The Player confirms every age.
+    for line in age_lines(&draft) {
+        confirm_age(&mut draft, &line.name).unwrap();
+    }
     approve(&mut draft).unwrap();
     assert_eq!(draft.state, DraftState::Approved);
     draft

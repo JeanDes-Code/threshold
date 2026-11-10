@@ -21,7 +21,7 @@ use threshold_app::{
 };
 use threshold_core::{
     Gm, GmError, Prompt, RecordedGm,
-    build::{BuildCheck, BuildFailure, DraftState, GapKind, Progress, Stage},
+    build::{AgeSource, BuildCheck, BuildFailure, DraftState, GapKind, Progress, Stage},
     domain::Handle,
     rules::D10,
     store::{Store, TurnKind},
@@ -475,6 +475,15 @@ impl Rig {
         }
     }
 
+    /// Confirms each age of `view`, one name at a time.
+    fn confirm_all(&self, view: &DraftView) -> DraftView {
+        let mut last = view.clone();
+        for line in &view.ages {
+            last = self.drafts.confirm_age(&view.draft_id, &line.name).unwrap();
+        }
+        last
+    }
+
     fn push(&self, outputs: &[Value]) {
         for out in outputs {
             self.build.push_proposal(out.to_string());
@@ -499,17 +508,14 @@ impl Rig {
             .collect()
     }
 
-    /// A draft from `doc_source()`, its age confirmed, approved.
+    /// A draft from `doc_source()`, every age confirmed, approved.
     fn approved_draft(&self) -> String {
         self.push(&draft_outputs());
         let view = self
             .drafts
             .draft_from_text(&doc_source(), &mut |_| {})
             .unwrap();
-        let view = self
-            .drafts
-            .save_draft(&view.draft_id, view.seed, view.knowledge, vec![], vec![])
-            .unwrap();
+        let view = self.confirm_all(&view);
         let view = self.drafts.approve_draft(&view.draft_id).unwrap();
         assert_eq!(view.state, DraftState::Approved);
         view.draft_id
@@ -686,11 +692,20 @@ fn draft_flow_end_to_end() {
     assert_eq!(view.state, DraftState::Draft);
     assert_eq!(view.seed.pc.name, "Mira Holt");
     // Every age waits for the Player; the model's claim is information.
+    let ages: Vec<(&str, AgeSource, bool)> = view
+        .ages
+        .iter()
+        .map(|l| (l.name.as_str(), l.source, l.confirmed))
+        .collect();
     assert_eq!(
-        view.ages_to_confirm,
-        ["Mira Holt", "Tobin Reed", "Ada Venn"]
+        ages,
+        [
+            ("Mira Holt", AgeSource::FromText, false),
+            ("Tobin Reed", AgeSource::FromText, false),
+            ("Ada Venn", AgeSource::Proposed, false),
+        ]
     );
-    assert_eq!(view.ages_stated, ["Mira Holt", "Tobin Reed"]);
+    assert!(view.cut.is_empty());
     for at in ["pc.age", "entities[0].age", "entities[1].age"] {
         assert!(
             view.gaps
@@ -720,16 +735,7 @@ fn draft_flow_end_to_end() {
         other => panic!("{other:?}"),
     }
     // The Player confirms every age: the draft has no gap left.
-    let saved = rig
-        .drafts
-        .save_draft(
-            &id,
-            view.seed.clone(),
-            view.knowledge.clone(),
-            vec![],
-            vec![],
-        )
-        .unwrap();
+    let saved = rig.confirm_all(&view);
     assert_eq!(saved.state, DraftState::Draft);
     assert!(saved.gaps.is_empty(), "{:?}", saved.gaps);
     let approved = rig.drafts.approve_draft(&id).unwrap();
@@ -872,6 +878,18 @@ fn source_text_is_checked_before_the_model() {
         err.contains(&threshold_core::build::SOURCE_TEXT_MAX_CHARS.to_string()),
         "{err}"
     );
+    // A text too short to hold a premise and a PC: a plain sentence that
+    // names the limit.
+    let err = rig
+        .drafts
+        .draft_from_text("hello", &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "This Source Text is too short to hold a premise and your character: it has 5 \
+         characters, and a draft needs at least 400. Add more of your document."
+    );
     assert!(rig.build.calls().is_empty());
 }
 
@@ -910,9 +928,15 @@ fn one_build_at_a_time() {
     assert!(draft.to_string().contains("running"), "{draft}");
     // The draft under build cannot change.
     let view = rig.drafts.get_draft(&id).unwrap();
+    let err = rig
+        .drafts
+        .save_draft(&id, view.seed, view.knowledge)
+        .unwrap_err();
+    assert!(err.to_string().contains("being built"), "{err}");
+    assert!(rig.drafts.confirm_age(&id, "Ada Venn").is_err());
     assert!(
         rig.drafts
-            .save_draft(&id, view.seed, view.knowledge, vec![], vec![])
+            .rename_draft_entity(&id, "Ada Venn", "Ada Marsh")
             .is_err()
     );
     assert!(rig.drafts.delete_draft(&id).is_err());
@@ -1132,4 +1156,128 @@ fn journal_marks_open_facts() {
     for hidden in HIDDEN_TEXT {
         assert!(texts.iter().all(|t| !t.contains(hidden)), "{texts:?}");
     }
+}
+
+#[test]
+fn save_draft_cannot_confirm_an_age() {
+    let rig = Rig::new();
+    rig.push(&draft_outputs());
+    let view = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap();
+    let id = view.draft_id.clone();
+    let unconfirmed = |v: &DraftView| -> Vec<String> {
+        v.gaps
+            .iter()
+            .filter(|g| g.kind == GapKind::AgeUnconfirmed)
+            .map(|g| g.at.clone())
+            .collect()
+    };
+    let all = ["pc.age", "entities[0].age", "entities[1].age"];
+    assert_eq!(unconfirmed(&view), all);
+
+    // A save with the same seed, or with every age changed, confirms none.
+    let saved = rig
+        .drafts
+        .save_draft(&id, view.seed.clone(), view.knowledge.clone())
+        .unwrap();
+    assert_eq!(unconfirmed(&saved), all);
+    let mut seed = view.seed.clone();
+    seed.pc.age = 32;
+    seed.entities[0].age = Some(59);
+    let saved = rig
+        .drafts
+        .save_draft(&id, seed.clone(), view.knowledge.clone())
+        .unwrap();
+    assert_eq!(unconfirmed(&saved), all);
+    assert!(saved.ages.iter().all(|l| !l.confirmed));
+    assert!(rig.drafts.approve_draft(&id).is_err());
+
+    // A confirmed age that a save changes needs a new confirmation.
+    let confirmed = rig.confirm_all(&saved);
+    assert!(confirmed.gaps.is_empty(), "{:?}", confirmed.gaps);
+    seed.entities[0].age = Some(60);
+    let saved = rig
+        .drafts
+        .save_draft(&id, seed, view.knowledge.clone())
+        .unwrap();
+    assert_eq!(unconfirmed(&saved), ["entities[0].age"]);
+    assert_eq!(saved.ages[1].source, AgeSource::Edited);
+    assert!(rig.drafts.approve_draft(&id).is_err());
+}
+
+#[test]
+fn confirm_age_confirms_one_name() {
+    let rig = Rig::new();
+    rig.push(&draft_outputs());
+    let view = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap();
+    let id = view.draft_id.clone();
+
+    let after = rig.drafts.confirm_age(&id, "Tobin Reed").unwrap();
+    let confirmed: Vec<(&str, bool)> = after
+        .ages
+        .iter()
+        .map(|l| (l.name.as_str(), l.confirmed))
+        .collect();
+    assert_eq!(
+        confirmed,
+        [
+            ("Mira Holt", false),
+            ("Tobin Reed", true),
+            ("Ada Venn", false)
+        ]
+    );
+    let gone: Vec<_> = view
+        .gaps
+        .iter()
+        .filter(|g| !after.gaps.contains(g))
+        .collect();
+    assert_eq!(gone.len(), 1);
+    assert_eq!(gone[0].at, "entities[0].age");
+    // The store holds it.
+    assert_eq!(rig.drafts.get_draft(&id).unwrap().ages, after.ages);
+
+    // An unknown name is refused with a plain sentence, and nothing changes.
+    let err = rig
+        .drafts
+        .confirm_age(&id, "Nobody")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("Nobody"), "{err}");
+    assert_eq!(rig.drafts.get_draft(&id).unwrap().ages, after.ages);
+}
+
+#[test]
+fn rename_draft_entity_follows_every_reference() {
+    let rig = Rig::new();
+    let id = rig.approved_draft();
+    let view = rig
+        .drafts
+        .rename_draft_entity(&id, "Tobin Reed", "Tobin Marsh")
+        .unwrap();
+    // A rename is an edit: the draft goes back to review, with no new gap.
+    assert_eq!(view.state, DraftState::Draft);
+    assert!(view.gaps.is_empty(), "{:?}", view.gaps);
+    assert_eq!(view.seed.entities[0].name, "Tobin Marsh");
+    assert_eq!(view.seed.start.present, ["Tobin Marsh"]);
+    assert_eq!(
+        view.seed.pc.other_names[0].known_to,
+        ["Mira Holt", "Tobin Marsh"]
+    );
+    assert!(view.ages[1].confirmed);
+
+    let err = rig
+        .drafts
+        .rename_draft_entity(&id, "Tobin Marsh", "ada venn")
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "Another entry already uses the name “ada venn”. Choose another name."
+    );
+    assert_eq!(rig.drafts.get_draft(&id).unwrap().seed, view.seed);
 }

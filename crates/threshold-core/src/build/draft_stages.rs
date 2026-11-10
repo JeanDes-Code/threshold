@@ -5,17 +5,17 @@
 //! stage that names a roster entry is an `enum` of roster names in its
 //! schema.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
-    BuildCheck, BuildFailure, Control, DraftState, KnownFact, SeedDraft, Stage,
+    AgeMark, BuildCheck, BuildFailure, Control, Cut, DraftState, KnownFact, SeedDraft, Stage,
     draft::new_draft_id,
     stages::{
-        Need, Problem, StageCall, essential, name_field, name_list, report, run_stage, schema_of,
-        sections,
+        CapAt, Need, Problem, StageCall, Step, essential, name_field, name_list, report, run_stage,
+        schema_of, sections, show,
     },
 };
 use crate::{
@@ -34,32 +34,73 @@ use crate::{
 /// answer. No text of this size has run on the live model yet.
 pub const SOURCE_TEXT_MAX_CHARS: usize = 40_000;
 
+/// The shortest Source Text, in characters without the blanks at its ends,
+/// that a draft accepts. A premise and a PC need a few sentences: the test
+/// sections of the fixture chronicle are about 450 characters each, and a
+/// word like "hello" never reaches the model.
+pub const SOURCE_TEXT_MIN_CHARS: usize = 400;
+
+/// Why a Source Text is refused before any model call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum SourceTextProblem {
+    Empty,
+    TooShort { min: usize },
+    TooLong { max: usize },
+}
+
+/// The one length check of a Source Text. `draft_from_text` and the shell
+/// both call it.
+pub fn check_source_text(text: &str) -> Result<(), SourceTextProblem> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        Err(SourceTextProblem::Empty)
+    } else if trimmed.chars().count() < SOURCE_TEXT_MIN_CHARS {
+        Err(SourceTextProblem::TooShort {
+            min: SOURCE_TEXT_MIN_CHARS,
+        })
+    } else if text.chars().count() > SOURCE_TEXT_MAX_CHARS {
+        Err(SourceTextProblem::TooLong {
+            max: SOURCE_TEXT_MAX_CHARS,
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /// Drafts a Seed Draft from a Source Text: the roster with the PC, the seed,
-/// then the PC Knowledge of each section. An empty or too long text is
-/// refused before any call, as `Completeness`. A failed roster or seed fails
-/// the draft; a known fact that fails its repair is dropped.
+/// then the PC Knowledge of each section. A text that `check_source_text`
+/// refuses is refused before any call, as `Completeness`. A failed roster or
+/// seed fails the draft; a known fact that fails its repair is dropped. Each
+/// list that the stage runner cut at its cap is kept in `cut`.
 pub fn draft_from_text(
     text: &str,
     gm: &dyn Gm,
     ctl: &mut Control,
 ) -> Result<SeedDraft, BuildFailure> {
-    if text.trim().is_empty() || text.chars().count() > SOURCE_TEXT_MAX_CHARS {
+    if check_source_text(text).is_err() {
         return Err(BuildFailure {
             stage: Stage::DraftSeed,
             check: BuildCheck::Completeness,
         });
     }
     let id = new_draft_id();
+    let mut cut = Vec::new();
 
     report(ctl, Stage::DraftRoster, 0, 1);
     let roster = run_stage(gm, ctl, &id, &roster_call(text), check_roster)?;
-    let roster = essential(Stage::DraftRoster, roster)?.output;
+    let roster = essential(Stage::DraftRoster, roster)?;
+    let characters = roster.output.characters.len();
+    note_cuts(&mut cut, &roster.cut, |path| roster_path(path, characters));
+    let roster = roster.output;
     report(ctl, Stage::DraftRoster, 1, 1);
 
     report(ctl, Stage::DraftSeed, 0, 1);
     let call = seed_call(text, &roster);
     let seed = run_stage(gm, ctl, &id, &call, |out| check_seed(&roster, out))?;
-    let seed = essential(Stage::DraftSeed, seed)?.output;
+    let seed = essential(Stage::DraftSeed, seed)?;
+    note_cuts(&mut cut, &seed.cut, show);
+    let seed = seed.output;
     report(ctl, Stage::DraftSeed, 1, 1);
 
     let mut draft = assemble(id, text, seed, roster);
@@ -76,6 +117,7 @@ pub fn draft_from_text(
             check_knowledge(&names, out)
         })?;
         if let Some(staged) = staged {
+            note_cuts(&mut cut, &staged.cut, knowledge_path);
             for (j, fact) in staged.output.facts.into_iter().enumerate() {
                 if !fact.pc_knows || staged.drop.contains(&j) {
                     continue;
@@ -98,7 +140,53 @@ pub fn draft_from_text(
         }
         report(ctl, Stage::DraftKnowledge, i + 1, parts.len());
     }
+    draft.cut = cut;
     Ok(draft)
+}
+
+/// Adds each cut list of a stage under its draft path, once.
+fn note_cuts(cut: &mut Vec<Cut>, found: &[CapAt], path: impl Fn(&[Step]) -> String) {
+    for (at, cap) in found {
+        let at = path(at);
+        if !cut.iter().any(|c| c.at == at) {
+            cut.push(Cut {
+                at,
+                cap: u32::try_from(*cap).unwrap_or(u32::MAX),
+            });
+        }
+    }
+}
+
+/// A roster path as a draft path: the two lists become `entities`, and an
+/// entry of `others` comes after every character.
+fn roster_path(path: &[Step], characters: usize) -> String {
+    match path {
+        [Step::Field(list), rest @ ..] if list == "characters" || list == "others" => {
+            let mut steps = vec![Step::Field("entities".into())];
+            match rest {
+                [Step::Index(i), more @ ..] => {
+                    let i = if list == "others" { characters + i } else { *i };
+                    steps.push(Step::Index(i));
+                    steps.extend_from_slice(more);
+                }
+                more => steps.extend_from_slice(more),
+            }
+            show(&steps)
+        }
+        _ => show(path),
+    }
+}
+
+/// A knowledge stage path as a draft path: `facts` is `knowledge`.
+fn knowledge_path(path: &[Step]) -> String {
+    match path {
+        [Step::Field(list), rest @ ..] if list == "facts" => {
+            let mut steps = vec![Step::Field("knowledge".into())];
+            steps.extend_from_slice(rest);
+            show(&steps)
+        }
+        _ => show(path),
+    }
 }
 
 // ---- Stage outputs -------------------------------------------------------
@@ -604,11 +692,17 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
     // Every age waits for the Player: the hard limit on intimate scenes
     // reads it, so it never rests on the model's word. What the model says
     // about the text is kept as information only.
-    let mut ages_to_confirm = vec![pc.clone()];
-    let mut ages_stated = vec![];
-    if roster.pc.age_stated {
-        ages_stated.push(pc.clone());
-    }
+    let mut ages = BTreeMap::new();
+    let mut mark = |name: &str, age: u16, stated: bool| {
+        let drafted = Some(age);
+        let mark = AgeMark {
+            drafted,
+            stated,
+            confirmed: None,
+        };
+        ages.insert(normalize::name(name), mark);
+    };
+    mark(pc, roster.pc.age, roster.pc.age_stated);
     let others = |list: Vec<NameOut>| -> Vec<OtherName> {
         list.into_iter()
             .map(|o| known_to_pc(o, pc, &pc_names))
@@ -616,10 +710,7 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
     };
     let mut entities = vec![];
     for character in roster.characters {
-        ages_to_confirm.push(character.name.clone());
-        if character.age_stated {
-            ages_stated.push(character.name.clone());
-        }
+        mark(&character.name, character.age, character.age_stated);
         entities.push(SeedEntity {
             other_names: others(character.other_names),
             name: character.name,
@@ -674,8 +765,8 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
                 .collect(),
         },
         knowledge: vec![],
-        ages_to_confirm,
-        ages_stated,
+        ages,
+        cut: vec![],
         last_failure: None,
         campaign_file: None,
     }

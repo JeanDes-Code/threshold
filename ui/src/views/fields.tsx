@@ -116,39 +116,107 @@ export function AgeInput({ path, label, value, nullable, onChange }: AgeProps) {
   );
 }
 
+interface NameProps {
+  path: string;
+  label: string;
+  /** What the field shows: the typed name, else the saved one. */
+  value: string;
+  /** The name the store holds. */
+  saved: string;
+  onType: (text: string) => void;
+  /** Enter or leaving the field: the caller renames or saves. */
+  onCommit: () => void;
+  /** Esc: back to the saved name. */
+  onCancel: () => void;
+  /** The core refused the last rename: why, in one sentence. */
+  error?: string | null;
+  hidden?: boolean;
+}
+
+/**
+ * A main name. Typing changes nothing in the draft: Enter or leaving the
+ * field asks the core to rename the entry everywhere it is named.
+ */
+export function NameInput({ path, label, value, saved, onType, onCommit, onCancel, error, hidden }: NameProps) {
+  const id = fieldId(path);
+  const changed = value.trim() !== saved;
+  const hint = `${id}-hint`;
+  return (
+    <div className="review-name">
+      {!hidden && <label htmlFor={id}>{label}</label>}
+      <input
+        id={id}
+        value={value}
+        aria-label={hidden ? label : undefined}
+        aria-describedby={changed || error ? hint : undefined}
+        aria-invalid={error ? true : undefined}
+        onChange={(e) => onType(e.target.value)}
+        onBlur={onCommit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onCommit();
+          } else if (e.key === "Escape") {
+            onCancel();
+          }
+        }}
+      />
+      {error ? (
+        <p id={hint} className="review-gap" role="alert">
+          {error}
+        </p>
+      ) : (
+        changed && (
+          <p id={hint} className="review-hint">
+            {saved.trim() === ""
+              ? "Press Enter to save this name."
+              : `Press Enter to rename “${saved}” everywhere in the draft. Esc keeps the old name.`}
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
 interface OtherNamesProps {
   path: string;
+  /** Whose names these are, for the labels: "Agathe Morrow", "your character". */
+  owner: string;
   value: OtherName[];
   /** `now`: an add or a delete, saved at once. */
   onChange: (value: OtherName[], now: boolean) => void;
 }
 
-/** A character's other names, and who knows that each one names them. */
-export function OtherNames({ path, value, onChange }: OtherNamesProps) {
+/** The other names of an entry, each with who knows it. Every box has a label and the full width. */
+export function OtherNames({ path, owner, value, onChange }: OtherNamesProps) {
   const set = (j: number, patch: Partial<OtherName>) => onChange(replaceAt(value, j, patch), false);
   return (
-    <div className="others">
+    <div className="review-others">
+      <p className="review-others__title">Other names</p>
+      {value.length === 0 && <p className="review-hint">No other name for {owner}.</p>}
       {value.map((o, j) => (
-        <div key={j} className="row">
-          <TextInput
-            path={`${path}[${j}].name`}
-            label="Other name"
-            hidden
-            placeholder="Other name"
-            value={o.name}
-            onChange={(name) => set(j, { name })}
-          />
-          <ListInput
-            path={`${path}[${j}].known_to`}
-            label={`Who knows that ${o.name || "this name"} is the same person`}
-            hidden
-            placeholder="Who knows it (comma between names)"
-            separator=","
-            value={o.known_to}
-            onChange={(known_to) => set(j, { known_to })}
-          />
+        <div key={j} className="review-others__row">
+          <div className="review-others__field">
+            <TextInput
+              path={`${path}[${j}].name`}
+              label={`Other name ${j + 1}`}
+              value={o.name}
+              onChange={(name) => set(j, { name })}
+            />
+          </div>
+          <div className="review-others__field review-others__field--wide">
+            <ListInput
+              path={`${path}[${j}].known_to`}
+              label={`Who knows that “${o.name || "this name"}” is ${owner} (comma between names)`}
+              separator=","
+              value={o.known_to}
+              onChange={(known_to) => set(j, { known_to })}
+            />
+          </div>
           <button
-            aria-label={`Delete ${o.name || "this name"}`}
+            type="button"
+            className="play-btn play-btn--text review-others__delete"
+            aria-label={`Delete the other name ${o.name || j + 1}`}
             onClick={() => onChange(removeAt(value, j), true)}
           >
             Delete
@@ -156,10 +224,11 @@ export function OtherNames({ path, value, onChange }: OtherNamesProps) {
         </div>
       ))}
       <button
-        className="muted"
+        type="button"
+        className="play-btn play-btn--text review-add-name"
         onClick={() => onChange([...value, { name: "", known_to: [] }], true)}
       >
-        Add a name
+        + Add another name
       </button>
     </div>
   );

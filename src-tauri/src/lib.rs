@@ -322,11 +322,30 @@ async fn save_draft(
     draft_id: String,
     seed: AdventureSeed,
     knowledge: Vec<KnownFact>,
-    ages_to_confirm: Vec<String>,
-    ages_stated: Vec<String>,
+) -> Result<DraftView, AppError> {
+    drafting(&drafts, move |d| d.save_draft(&draft_id, seed, knowledge)).await
+}
+
+/// The Player confirms one named age. The core owns every confirmation.
+#[tauri::command(rename_all = "snake_case")]
+async fn confirm_age(
+    drafts: State<'_, Drafts>,
+    draft_id: String,
+    name: String,
+) -> Result<DraftView, AppError> {
+    drafting(&drafts, move |d| d.confirm_age(&draft_id, &name)).await
+}
+
+/// A rename that follows every reference of the draft.
+#[tauri::command(rename_all = "snake_case")]
+async fn rename_draft_entity(
+    drafts: State<'_, Drafts>,
+    draft_id: String,
+    from: String,
+    to: String,
 ) -> Result<DraftView, AppError> {
     drafting(&drafts, move |d| {
-        d.save_draft(&draft_id, seed, knowledge, ages_to_confirm, ages_stated)
+        d.rename_draft_entity(&draft_id, &from, &to)
     })
     .await
 }
@@ -439,6 +458,8 @@ pub fn run() {
             list_drafts,
             get_draft,
             save_draft,
+            confirm_age,
+            rename_draft_entity,
             approve_draft,
             start_build,
             cancel_build,

@@ -5,10 +5,12 @@ use serde_json::{Value, json};
 use threshold_core::{
     RecordedGm,
     build::{
-        BuildCheck, BuildFailure, Control, DebugEntry, DraftState, GapKind, KnownFact, Progress,
-        SOURCE_TEXT_MAX_CHARS, SeedDraft, Stage, approve, draft_from_text, gaps,
+        AgeSource, BuildCheck, BuildFailure, Control, Cut, DebugEntry, DraftState, GapKind,
+        KnownFact, Progress, SOURCE_TEXT_MAX_CHARS, SOURCE_TEXT_MIN_CHARS, SeedDraft,
+        SourceTextProblem, Stage, age_lines, apply_edit, approve, build_world, check_source_text,
+        confirm_age, draft_from_text, gaps,
     },
-    domain::{EntityKind, OpenMode},
+    domain::{EntityKind, OpenMode, SeedEntity},
 };
 
 /// What one draft returned, reported and logged.
@@ -39,6 +41,30 @@ fn run_until(text: &str, gm: &RecordedGm, cancelled: &dyn Fn() -> bool) -> Run {
         result,
         progress,
         log,
+    }
+}
+
+/// Each character's name and where its age comes from, the PC first.
+fn sources(draft: &SeedDraft) -> Vec<(String, AgeSource)> {
+    age_lines(draft)
+        .into_iter()
+        .map(|l| (l.name, l.source))
+        .collect()
+}
+
+/// The names whose age is not confirmed.
+fn waiting(draft: &SeedDraft) -> Vec<String> {
+    age_lines(draft)
+        .into_iter()
+        .filter(|l| !l.confirmed)
+        .map(|l| l.name)
+        .collect()
+}
+
+/// Confirms every age, as the Player would one by one.
+fn confirm_all(draft: &mut SeedDraft) {
+    for line in age_lines(draft) {
+        confirm_age(draft, &line.name).unwrap();
     }
 }
 
@@ -259,11 +285,16 @@ fn draft_holds_seed_roster_and_known_facts() {
     );
     // Every age waits for the Player, the PC's too; the model's claim that
     // the text states an age is kept as information only.
+    assert_eq!(waiting(&draft), vec!["Mira Holt", "Tobin Reed", "Ada Venn"]);
     assert_eq!(
-        draft.ages_to_confirm,
-        vec!["Mira Holt", "Tobin Reed", "Ada Venn"]
+        sources(&draft),
+        vec![
+            ("Mira Holt".to_owned(), AgeSource::FromText),
+            ("Tobin Reed".to_owned(), AgeSource::FromText),
+            ("Ada Venn".to_owned(), AgeSource::Proposed),
+        ]
     );
-    assert_eq!(draft.ages_stated, vec!["Mira Holt", "Tobin Reed"]);
+    assert!(draft.cut.is_empty());
     // The PC knows every other name that the draft lists.
     assert_eq!(
         seed.pc.other_names[0].known_to,
@@ -272,7 +303,7 @@ fn draft_holds_seed_roster_and_known_facts() {
 
     // The draft passes its own review once every age is confirmed.
     let mut confirmed = draft.clone();
-    confirmed.ages_to_confirm.clear();
+    confirm_all(&mut confirmed);
     assert_eq!(gaps(&confirmed), vec![]);
 }
 
@@ -307,11 +338,15 @@ fn proposed_ages_are_listed_for_confirmation() {
         knowledge(&[]),
     ]);
     let draft = run(&source(), &gm).result.unwrap();
+    assert_eq!(waiting(&draft), vec!["Mira Holt", "Tobin Reed", "Ada Venn"]);
     assert_eq!(
-        draft.ages_to_confirm,
-        vec!["Mira Holt", "Tobin Reed", "Ada Venn"]
+        sources(&draft),
+        vec![
+            ("Mira Holt".to_owned(), AgeSource::Proposed),
+            ("Tobin Reed".to_owned(), AgeSource::FromText),
+            ("Ada Venn".to_owned(), AgeSource::Proposed),
+        ]
     );
-    assert_eq!(draft.ages_stated, vec!["Tobin Reed"]);
 }
 
 #[test]
@@ -327,9 +362,10 @@ fn an_age_the_model_calls_stated_still_needs_the_player() {
         knowledge(&[]),
     ]);
     let mut draft = run(&source(), &gm).result.unwrap();
-    assert_eq!(
-        draft.ages_stated,
-        vec!["Mira Holt", "Tobin Reed", "Ada Venn"]
+    assert!(
+        sources(&draft)
+            .iter()
+            .all(|(_, s)| *s == AgeSource::FromText)
     );
     let unconfirmed = |d: &SeedDraft| -> Vec<String> {
         gaps(d)
@@ -347,7 +383,7 @@ fn an_age_the_model_calls_stated_still_needs_the_player() {
     for name in ["Tobin Reed", "Ada Venn", "Mira Holt"] {
         assert!(approve(&mut draft).is_err());
         assert_eq!(draft.state, DraftState::Draft);
-        draft.ages_to_confirm.retain(|n| n != name);
+        confirm_age(&mut draft, name).unwrap();
     }
     assert_eq!(unconfirmed(&draft), Vec::<String>::new());
     assert_eq!(approve(&mut draft), Ok(()));
@@ -921,7 +957,7 @@ fn a_live_shaped_answer_with_a_start_place_phrase_still_drafts() {
         vec!["Agathe Morrow", "Sefa Lind", "Pim Quast"]
     );
     assert_eq!(
-        draft.ages_to_confirm,
+        waiting(&draft),
         vec![
             "Teodor Brandt",
             "Agathe Morrow",
@@ -934,8 +970,13 @@ fn a_live_shaped_answer_with_a_start_place_phrase_still_drafts() {
             "Osric Fell"
         ]
     );
+    let stated: Vec<String> = sources(&draft)
+        .into_iter()
+        .filter(|(_, s)| *s == AgeSource::FromText)
+        .map(|(n, _)| n)
+        .collect();
     assert_eq!(
-        draft.ages_stated,
+        stated,
         vec![
             "Teodor Brandt",
             "Agathe Morrow",
@@ -944,7 +985,7 @@ fn a_live_shaped_answer_with_a_start_place_phrase_still_drafts() {
             "Osric Fell"
         ]
     );
-    draft.ages_to_confirm.clear();
+    confirm_all(&mut draft);
     assert_eq!(gaps(&draft), vec![]);
 }
 
@@ -978,4 +1019,191 @@ fn the_seed_prompt_shows_other_names_of_places_and_characters() {
         names_at(&call.schema, &["start", "present", "[]"]),
         vec!["Tobin Reed", "Ada Venn"]
     );
+}
+
+// ---- Review: the Source Text length, cut lists, an added character ---------
+
+#[test]
+fn short_source_text_is_refused_before_any_call() {
+    assert_eq!(SOURCE_TEXT_MIN_CHARS, 400);
+    let short = "a".repeat(SOURCE_TEXT_MIN_CHARS - 1);
+    assert_eq!(
+        check_source_text(&short),
+        Err(SourceTextProblem::TooShort { min: 400 })
+    );
+    // Blanks at the ends do not count.
+    let padded = format!("  {short}\n\n  ");
+    assert_eq!(
+        check_source_text(&padded),
+        Err(SourceTextProblem::TooShort { min: 400 })
+    );
+    assert_eq!(check_source_text(""), Err(SourceTextProblem::Empty));
+    assert_eq!(check_source_text(" \n\t"), Err(SourceTextProblem::Empty));
+    assert_eq!(
+        check_source_text("hello"),
+        Err(SourceTextProblem::TooShort { min: 400 })
+    );
+    let long = "a".repeat(SOURCE_TEXT_MAX_CHARS + 1);
+    assert_eq!(
+        check_source_text(&long),
+        Err(SourceTextProblem::TooLong { max: 40_000 })
+    );
+
+    for text in [short.as_str(), "", "hello"] {
+        let gm = gm(&[]);
+        let run = run(text, &gm);
+        assert_eq!(
+            run.result.unwrap_err(),
+            BuildFailure {
+                stage: Stage::DraftSeed,
+                check: BuildCheck::Completeness
+            }
+        );
+        assert!(gm.calls().is_empty(), "{text}");
+        assert!(run.log.is_empty());
+    }
+
+    // 400 characters pass the check and reach the model, which has no
+    // recorded answer here.
+    let at_limit = "é".repeat(SOURCE_TEXT_MIN_CHARS);
+    assert_eq!(check_source_text(&at_limit), Ok(()));
+    let gm = gm(&[]);
+    run(&at_limit, &gm).result.unwrap_err();
+    assert_eq!(gm.calls().len(), 1);
+}
+
+#[test]
+fn cut_lists_are_reported() {
+    // 31 characters: the roster schema caps the list at 30.
+    let mut characters = vec![npc("Tobin Reed", 58, true)];
+    characters.extend((1..=30).map(|n| npc(&format!("Sailor {n}"), 30, false)));
+    let mut outputs = plain_outputs();
+    outputs[0] = roster(
+        &characters,
+        &[thing("Gull Point", "place"), thing("Tide Hall", "place")],
+    );
+    let first = gm(&outputs);
+    let draft = run(&source(), &first).result.unwrap();
+    assert_eq!(
+        draft.cut,
+        vec![Cut {
+            at: "entities".into(),
+            cap: 30
+        }]
+    );
+    assert_eq!(
+        draft
+            .seed
+            .entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::Npc)
+            .count(),
+        30
+    );
+
+    // A list of other names and a section's facts, in the path form of
+    // `Gap.at`; an entry of `others` comes after the characters.
+    let mut outputs = plain_outputs();
+    outputs[0]["others"][1]["other_names"] = json!(
+        (1..=5)
+            .map(|n| json!({"name": format!("the Hall {n}"), "known_to": []}))
+            .collect::<Vec<_>>()
+    );
+    let facts: Vec<Value> = (0..41)
+        .map(|n| fact("Gull Point", &format!("detail_{n}"), "stone", false, true))
+        .collect();
+    outputs[3] = knowledge(&facts);
+    let gm = gm(&outputs);
+    let draft = run(&source(), &gm).result.unwrap();
+    assert_eq!(
+        draft.cut,
+        vec![
+            Cut {
+                at: "entities[3].other_names".into(),
+                cap: 4
+            },
+            Cut {
+                at: "knowledge".into(),
+                cap: 40
+            },
+        ]
+    );
+    // The review keeps the report.
+    let mut edited = draft.clone();
+    apply_edit(&mut edited, draft.seed.clone(), vec![]);
+    assert_eq!(edited.cut, draft.cut);
+}
+
+fn hidden_out() -> Value {
+    json!({ "facts": [] })
+}
+
+fn npc_out(name: &str) -> Value {
+    json!({
+        "goals": [{"text": format!("{name} wants a quiet winter."), "against": null}],
+        "secret": null,
+        "attitudes": [],
+        "voice_card": {
+            "habits": format!("{name} speaks in short lines."),
+            "vocabulary": "tide, rope, lamp",
+            "samples": ["Mind the rope.", "The tide turns soon."]
+        }
+    })
+}
+
+#[test]
+fn added_character_reaches_the_world_build() {
+    let text = source();
+    let gm_draft = gm(&plain_outputs());
+    let mut draft = run(&text, &gm_draft).result.unwrap();
+
+    // The Player adds a character the draft missed, and saves.
+    let mut seed = draft.seed.clone();
+    seed.entities.push(SeedEntity {
+        name: "Nell Quay".into(),
+        kind: EntityKind::Npc,
+        age: Some(44),
+        other_names: vec![],
+        hidden: false,
+    });
+    let knowledge = draft.knowledge.clone();
+    apply_edit(&mut draft, seed, knowledge);
+    let added = age_lines(&draft).pop().unwrap();
+    assert_eq!(added.name, "Nell Quay");
+    assert_eq!(added.source, AgeSource::Edited);
+    assert!(!added.confirmed);
+    assert!(approve(&mut draft).is_err());
+    confirm_all(&mut draft);
+    assert_eq!(approve(&mut draft), Ok(()));
+
+    let outputs = [
+        hidden_out(),
+        hidden_out(),
+        hidden_out(),
+        npc_out("Tobin Reed"),
+        npc_out("Ada Venn"),
+        npc_out("Nell Quay"),
+        json!({"events": []}),
+        json!({"placements": [
+            {"npc": "Ada Venn", "place": "Tide Hall"},
+            {"npc": "Nell Quay", "place": "Tide Hall"}
+        ]}),
+    ];
+    let gm_build = gm(&outputs);
+    let mut progress = |_| {};
+    let mut log = |_| {};
+    let mut ctl = Control {
+        progress: &mut progress,
+        cancelled: &|| false,
+        log: &mut log,
+    };
+    let world = build_world(&draft, &gm_build, &mut ctl).unwrap();
+    let calls = gm_build.calls();
+    let named: Vec<_> = calls
+        .iter()
+        .filter(|c| c.prompt.recent.contains("NPC TO PREPARE\nNell Quay"))
+        .collect();
+    assert_eq!(named.len(), 1);
+    let voices: Vec<&str> = world.voice_cards.iter().map(|v| v.npc.as_str()).collect();
+    assert_eq!(voices, ["Tobin Reed", "Ada Venn", "Nell Quay"]);
 }

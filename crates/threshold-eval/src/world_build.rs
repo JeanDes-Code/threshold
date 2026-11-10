@@ -22,8 +22,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use threshold_core::{
     build::{
-        BuildFailure, Control, DebugEntry, Gap, PC_CENTRED_MAX_SHARE, Progress, SeedDraft, approve,
-        build_world, centres_on_pc, draft_from_text,
+        BuildFailure, Control, DebugEntry, Gap, PC_CENTRED_MAX_SHARE, Progress, SeedDraft,
+        age_lines, approve, build_world, centres_on_pc, confirm_age, draft_from_text,
     },
     domain::{AdventureSeed, EntityKind, FactEntry, GoalEntry, OtherName, WorldSetup, is_adult},
     normalize,
@@ -631,9 +631,10 @@ fn tally_draft(expected: &Expected, run: &BuildRun, draft: &SeedDraft, t: &mut T
     // The model's claim that the text states an age, against the list: an
     // age in the list means the text states it.
     let stated: BTreeSet<String> = draft
-        .ages_stated
+        .ages
         .iter()
-        .map(|n| normalize::name(n))
+        .filter(|(_, mark)| mark.stated)
+        .map(|(name, _)| name.clone())
         .collect();
     let characters = got
         .iter()
@@ -1152,7 +1153,10 @@ fn one_run(ctx: &mut Ctx, text: &str, run: usize) -> BuildRun {
     out.draft_ms = Some(ms_since(started));
     (ctx.log)(&format!("{tag} draft ok {}", secs(out.draft_ms)));
 
-    draft.ages_to_confirm.clear();
+    // The evaluation stands in for the Player: it confirms every age.
+    for line in age_lines(&draft) {
+        let _ = confirm_age(&mut draft, &line.name);
+    }
     if let Err(gaps) = approve(&mut draft) {
         let kinds: Vec<String> = gaps.iter().map(|g| label(g.kind)).collect();
         (ctx.log)(&format!("{tag} not approvable: {}", kinds.join(", ")));

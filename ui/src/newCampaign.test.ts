@@ -1,28 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AdventureSeed, DraftView } from "./api";
+import type { AdventureSeed, AgeLine, DraftView, GapKind } from "./api";
 import {
   CANCEL_NOTE,
   DOCUMENT_MAX_BYTES,
   readDocument,
-  ageSource,
-  agesStated,
-  agesToConfirm,
-  confirmRow,
+  addEntry,
+  ageLabel,
+  ageLineOf,
+  agesLeft,
   createSaver,
+  cutSections,
+  cutSentence,
   failureText,
   fieldId,
   focusTarget,
   gapSentence,
-  flagsFromNames,
+  gapsAt,
   formOfView,
-  isUnconfirmed,
+  nameChange,
   parseAt,
   removeAt,
-  removeEntityRow,
+  removeEntry,
+  renamed,
   replaceAt,
   progressText,
+  saveArgs,
+  sectionOf,
+  shownName,
   splitList,
   stageLabel,
+  typeName,
   type ReviewForm,
 } from "./newCampaign";
 
@@ -55,9 +62,22 @@ function form(): ReviewForm {
     seed,
     knowledge: [
       { subject: "Agathe Morrow", key: "trade", value: "innkeeper", text: "Agathe runs the inn.", open: false },
+      { subject: "Marlowe", key: "pending_trip", value: "the coast", text: "", open: true },
     ],
-    unconfirmed: { pc: false, entities: [false, true, false] },
-    stated: { pc: true, entities: [true, false, false] },
+    typed: {},
+  };
+}
+
+function view(f: ReviewForm, ages: AgeLine[] = []): DraftView {
+  return {
+    draft_id: "draft-1",
+    state: "draft",
+    seed: f.seed,
+    knowledge: f.knowledge,
+    ages,
+    cut: [],
+    gaps: [],
+    last_failure: null,
   };
 }
 
@@ -126,7 +146,8 @@ describe("focusTarget", () => {
     expect(focusTarget("entities[0].other_names[1]")).toBe("entities[0].other_names[1].name");
     expect(focusTarget("pc.other_names[0].known_to[2]")).toBe("pc.other_names[0].known_to");
     expect(focusTarget("start.present[2]")).toBe("start.present");
-    expect(focusTarget("knowledge[4]")).toBe("knowledge[4].text");
+    expect(focusTarget("knowledge[4]")).toBe("knowledge[4]");
+    expect(focusTarget("knowledge[4].subject")).toBe("knowledge[4]");
     expect(focusTarget("seed")).toBe("premise");
   });
 
@@ -140,163 +161,227 @@ describe("gapSentence", () => {
   const sentence = (kind: string, at: string) =>
     gapSentence({ kind: kind as never, at }, form());
 
-  it("names the field in plain words", () => {
-    expect(sentence("missing", "premise")).toBe("The premise is empty.");
+  it("each gap sentence says what is wrong and what to do", () => {
+    expect(sentence("missing", "premise")).toBe("The premise is empty. Write it in.");
+    expect(sentence("age_missing", "entities[1].age")).toBe(
+      "The age of Sefa Lind is missing. Enter an age in years.",
+    );
     expect(sentence("age_unconfirmed", "entities[1].age")).toBe(
-      "The age of Sefa Lind is not confirmed: check it, then confirm it.",
+      "The age of Sefa Lind is not confirmed yet. Check it, then press “Confirm age”.",
     );
     expect(sentence("age_unconfirmed", "pc.age")).toBe(
-      "Your character's age is not confirmed: check it, then confirm it.",
+      "Your character's age is not confirmed yet. Check it, then press “Confirm age”.",
     );
-    expect(sentence("missing", "entities[2].name")).toBe("The name of entry 3 is empty.");
+    expect(sentence("age_below_min", "entities[1].age")).toBe(
+      "The age of Sefa Lind is below the minimum age. Raise the age, or change the minimum age under “How you want to play”.",
+    );
+    expect(sentence("missing", "entities[2].name")).toBe("The name of entry 3 is empty. Write it in.");
     expect(sentence("unknown_name", "start.present[0]")).toBe(
-      "“Pim Quast” in “who is present” does not match a name of the right kind.",
+      "“Pim Quast” in “who is present” is not a character of the draft. Use a character's name, or add the character.",
+    );
+    expect(sentence("unknown_name", "start.place")).toBe(
+      "The start place is not a place of the draft. Use the name of a place below, or add the place.",
     );
     expect(sentence("unknown_name", "pc.other_names[0].known_to[0]")).toBe(
-      "“Agathe Morrow” in who knows “Wick” does not match a name of the right kind.",
+      "“Agathe Morrow” in who knows “Wick” is not a character of the draft. Use a character's name, or delete it.",
     );
+    expect(sentence("duplicate_name", "pc.other_names[0]")).toBe(
+      "The other name “Wick” of your character is used twice. Give one of them another name.",
+    );
+    expect(sentence("pc_in_roster", "entities[0].name")).toBe(
+      "The name of Agathe Morrow is a name of your character. Delete this entry, or give it another name.",
+    );
+    expect(sentence("wrong_kind", "entities[2].age")).toBe(
+      "The age of entry 3 is set, but only a character has an age. Clear it.",
+    );
+    expect(sentence("seed_block_too_long", "seed")).toBe(
+      "The story setup is too long for the GM to read. Shorten the premise, the GM agreement or the content limits.",
+    );
+  });
+
+  it("speaks of a fact by its sentence, never by its internal fields", () => {
     expect(sentence("slot_conflict", "knowledge[0]")).toBe(
-      "Known fact 1 repeats another fact on the same thing.",
+      "The fact “Agathe runs the inn.” says something about the same thing as another fact. Delete one of them, or merge them.",
     );
-    expect(sentence("missing", "knowledge[0].key")).toBe("The key of known fact 1 is empty.");
-    expect(sentence("seed_block_too_long", "seed")).toBe("The seed is too long: shorten some text.");
-    expect(sentence("age_below_min", "entities[1].age")).toBe(
-      "The age of Sefa Lind is below the minimum age.",
+    expect(sentence("missing", "knowledge[0].value")).toBe(
+      "“Value” in the fact “Agathe runs the inn.” is empty. Write it in.",
     );
+    expect(sentence("unknown_name", "knowledge[1].subject")).toBe(
+      "Fact 2 is about “Marlowe”, who is not in the draft. Press “edit” and change “About”, or add “Marlowe” as a character or a place.",
+    );
+    expect(sentence("wrong_kind", "knowledge[1].key")).toBe(
+      "Fact 2 has “pending” in its detail. Press “edit”, remove “pending” from “Detail”, and tick “Not done yet” instead.",
+    );
+    for (const at of ["knowledge[0]", "knowledge[0].subject", "knowledge[0].key", "knowledge[1].key"]) {
+      for (const kind of ["missing", "unknown_name", "wrong_kind", "slot_conflict"]) {
+        expect(sentence(kind, at)).not.toMatch(/\b(subject|key)\b/);
+      }
+    }
+  });
+
+  it("gives every kind two sentences: the problem, then the fix", () => {
+    const kinds: GapKind[] = [
+      "missing",
+      "age_missing",
+      "age_unconfirmed",
+      "age_below_min",
+      "unknown_name",
+      "duplicate_name",
+      "pc_in_roster",
+      "wrong_kind",
+      "seed_block_too_long",
+      "slot_conflict",
+    ];
+    for (const kind of [...kinds, "new_kind"]) {
+      const text = sentence(kind, "entities[0].age");
+      expect(text.split(/(?<=\.) /).length, text).toBeGreaterThanOrEqual(2);
+    }
+    expect(sentence("new_kind", "premise")).toBe("The premise needs a fix. Check it.");
   });
 
   it("keeps an unknown locator as it is", () => {
-    expect(sentence("missing", "decided[0].subject")).toBe("Decided fact 1 (subject) is empty.");
-    expect(sentence("missing", "weird.path")).toBe("weird.path is empty.");
-  });
-
-  it("has a sentence for an unknown kind", () => {
-    expect(sentence("new_kind", "premise")).toBe("The premise needs a fix.");
+    expect(sentence("missing", "decided[0].subject")).toBe("Decided fact 1 is empty. Write it in.");
+    expect(sentence("missing", "weird.path")).toBe("weird.path is empty. Write it in.");
   });
 });
 
-describe("ages to confirm", () => {
-  /** A form whose characters have these names; `flags` marks the unconfirmed ones. */
-  function roster(names: string[], flags: boolean[]): ReviewForm {
-    const base = form();
-    return {
-      ...base,
-      seed: {
-        ...base.seed,
-        entities: names.map((name) => ({
-          name,
-          kind: "npc" as const,
-          age: 40,
-          other_names: [],
-          hidden: false,
-        })),
-      },
-      unconfirmed: { pc: false, entities: flags },
-      stated: { pc: false, entities: names.map(() => false) },
-    };
-  }
-  const rename = (f: ReviewForm, i: number, name: string): ReviewForm => ({
-    ...f,
-    seed: { ...f.seed, entities: replaceAt(f.seed.entities, i, { name }) },
+describe("review sections", () => {
+  it("puts each gap in the part of the review that holds its field", () => {
+    const f = form();
+    expect(sectionOf("premise", f)).toBe("story");
+    expect(sectionOf("start.present[0]", f)).toBe("story");
+    expect(sectionOf("pc.other_names[0].known_to[0]", f)).toBe("you");
+    expect(sectionOf("entities[1].age", f)).toBe("people");
+    expect(sectionOf("entities[2].name", f)).toBe("places");
+    expect(sectionOf("knowledge[0].subject", f)).toBe("knows");
+    expect(sectionOf("knowledge[1]", f)).toBe("open");
+    expect(sectionOf("min_age", f)).toBe("play");
   });
 
-  it("reads the drafted names as the core matches them", () => {
-    const f = roster(["Sefa Lind", "Chloé", "The Copper Kettle", "Agathe Morrow"], []);
-    expect(flagsFromNames(f.seed, ["sefa lind.", "CHLOE", "copper kettle"])).toEqual({
-      pc: false,
-      entities: [true, true, true, false],
-    });
-    expect(flagsFromNames(f.seed, ["TEODOR BRANDT"]).pc).toBe(true);
+  it("finds the gaps of one field and of the fields inside it", () => {
+    const gaps = [
+      { kind: "missing" as const, at: "entities[1].name" },
+      { kind: "missing" as const, at: "entities[10].name" },
+      { kind: "slot_conflict" as const, at: "knowledge[1]" },
+      { kind: "missing" as const, at: "knowledge[1].value" },
+    ];
+    expect(gapsAt(gaps, "entities[1]").map((g) => g.at)).toEqual(["entities[1].name"]);
+    expect(gapsAt(gaps, "knowledge[1]")).toHaveLength(2);
+    expect(gapsAt(gaps, "entities[1].name")).toHaveLength(1);
+  });
+});
+
+describe("ages", () => {
+  const line = (name: string, source: AgeLine["source"], confirmed = false): AgeLine => ({
+    name,
+    source,
+    confirmed,
   });
 
-  it("typing another row's name, key by key, never confirms that row", () => {
-    let f = roster(["Agathe", "Gerrit"], [false, true]);
-    for (const name of ["G", "Ge", "Gerrit", "Gerrit ", "Gerrit V", "Gerrit Vane"]) {
-      f = rename(f, 0, name);
-      expect(isUnconfirmed(f, 1)).toBe(true);
-      expect(agesToConfirm(f)).toEqual(["Gerrit"]);
-    }
-    expect(isUnconfirmed(f, 0)).toBe(false);
+  it("an age label says edited by you only for an edited age", () => {
+    expect(ageLabel(line("Teodor Brandt", "from_text"))).toBe("from the text");
+    expect(ageLabel(line("Sefa Lind", "proposed"))).toBe("proposed by the model");
+    expect(ageLabel(line("Agathe Morrow", "edited"))).toBe("edited by you");
+    // A confirmation does not change where the age comes from.
+    expect(ageLabel(line("Agathe Morrow", "edited", true))).toBe("edited by you");
+    expect(ageLabel(line("Teodor Brandt", "from_text", true))).toBe("from the text");
+    // A row the core has no line for yet is the Player's own.
+    expect(ageLabel(undefined)).toBe("edited by you");
   });
 
-  it("two rows with one name stay unconfirmed when one is renamed", () => {
-    let f = roster(["Sefa", "Sefa"], [true, true]);
-    f = rename(f, 0, "Sefa Lind");
-    expect([isUnconfirmed(f, 0), isUnconfirmed(f, 1)]).toEqual([true, true]);
-    expect(agesToConfirm(f)).toEqual(["Sefa Lind", "Sefa"]);
+  it("reads each line by the saved name, and counts the ages left", () => {
+    const ages = [
+      line("Teodor Brandt", "from_text", true),
+      line("Agathe Morrow", "edited"),
+      line("Sefa Lind", "proposed"),
+    ];
+    expect(ageLineOf(ages, "Agathe Morrow")?.source).toBe("edited");
+    // No name matching of its own: the UI reads the core's lines as they are.
+    expect(ageLineOf(ages, "agathe morrow")).toBeUndefined();
+    expect(agesLeft(ages)).toBe(2);
   });
+});
 
-  it("deleting a row drops only that row's entry", () => {
-    let f = roster(["Ann", "Bo", "Cy"], [true, false, true]);
-    f = removeEntityRow(f, 1);
-    expect(f.seed.entities.map((e) => e.name)).toEqual(["Ann", "Cy"]);
-    expect(f.unconfirmed.entities).toEqual([true, true]);
-    f = removeEntityRow(f, 0);
-    expect(agesToConfirm(f)).toEqual(["Cy"]);
-    expect(isUnconfirmed(f, 0)).toBe(true);
-  });
-
-  it("a confirmed row renamed to an unconfirmed row's name leaves that row unconfirmed", () => {
-    let f = roster(["Agathe", "Gerrit"], [false, true]);
-    f = rename(f, 0, "Gerrit");
-    expect(isUnconfirmed(f, 1)).toBe(true);
-    // The wire format names ages, so the store sees both rows as unconfirmed.
-    expect(isUnconfirmed(f, 0)).toBe(true);
-    expect(agesToConfirm(f)).toEqual(["Gerrit"]);
-    // Confirming one of two rows with one name confirms neither.
-    f = confirmRow(f, 0);
-    expect([isUnconfirmed(f, 0), isUnconfirmed(f, 1)]).toEqual([true, true]);
-    f = confirmRow(f, 1);
-    expect(agesToConfirm(f)).toEqual([]);
-  });
-
-  it("a new draft asks for every age, the PC's too, whatever the model says", () => {
-    const base = form();
-    const view: DraftView = {
-      draft_id: "draft-1",
-      state: "draft",
-      seed: base.seed,
-      knowledge: base.knowledge,
-      ages_to_confirm: ["Teodor Brandt", "Agathe Morrow", "Sefa Lind"],
-      ages_stated: ["Teodor Brandt", "Agathe Morrow", "Sefa Lind"],
-      gaps: [],
-      last_failure: null,
-    };
-    let f = formOfView(view);
-    expect(f.unconfirmed).toEqual({ pc: true, entities: [true, true, false] });
-    expect(isUnconfirmed(f, "pc")).toBe(true);
-    expect(ageSource(f, "pc")).toBe("from the text");
-    // The PC row confirms on its own; the other rows still wait.
-    f = confirmRow(f, "pc");
-    expect(isUnconfirmed(f, "pc")).toBe(false);
-    expect(agesToConfirm(f)).toEqual(["Agathe Morrow", "Sefa Lind"]);
-    // A stated claim never confirms a row.
-    expect(isUnconfirmed(f, 0)).toBe(true);
-  });
-
-  it("labels each age with the model's claim, kept per row", () => {
+describe("names", () => {
+  it("a typed name stays out of the saved seed until the rename returns", () => {
     let f = form();
-    expect(ageSource(f, "pc")).toBe("from the text");
-    expect(ageSource(f, 0)).toBe("from the text");
-    expect(ageSource(f, 1)).toBe("proposed by the model");
-    // A rename keeps the label on its row and saves it under the new name.
-    f = { ...f, seed: { ...f.seed, entities: replaceAt(f.seed.entities, 0, { name: "Aggie" }) } };
-    expect(ageSource(f, 0)).toBe("from the text");
-    expect(agesStated(f)).toEqual(["Teodor Brandt", "Aggie"]);
-    // Deleting a row drops its label and no other.
-    f = removeEntityRow(f, 0);
-    expect(f.stated.entities).toEqual([false, false]);
-    expect(agesStated(f)).toEqual(["Teodor Brandt"]);
+    for (const text of ["A", "Ag", "Aggie", "Aggie Morrow"]) {
+      f = typeName(f, 0, text);
+      // The field shows what the Player types; the store gets the old name.
+      expect(shownName(f, 0)).toBe(text);
+      expect(saveArgs(f).seed.entities[0]?.name).toBe("Agathe Morrow");
+      expect(saveArgs(f)).not.toHaveProperty("typed");
+    }
+    expect(nameChange(f, 0)).toEqual({ kind: "rename", from: "Agathe Morrow", to: "Aggie Morrow" });
+
+    // The core renames every reference; the form takes the store's seed.
+    const seed = {
+      ...f.seed,
+      entities: replaceAt(f.seed.entities, 0, { name: "Aggie Morrow" }),
+      pc: { ...f.seed.pc, other_names: [{ name: "Wick", known_to: ["Aggie Morrow"] }] },
+    };
+    const knowledge = replaceAt(f.knowledge, 0, { subject: "Aggie Morrow" });
+    f = renamed(f, view({ ...f, seed, knowledge }), 0);
+    expect(f.typed).toEqual({});
+    expect(saveArgs(f).seed.entities[0]?.name).toBe("Aggie Morrow");
+    expect(saveArgs(f).seed.pc.other_names[0]?.known_to).toEqual(["Aggie Morrow"]);
+    expect(saveArgs(f).knowledge[0]?.subject).toBe("Aggie Morrow");
+    expect(nameChange(f, 0)).toEqual({ kind: "none" });
   });
 
-  it("confirming a row clears its own entry only", () => {
-    let f = roster(["Ann", "Bo"], [true, true]);
-    f = { ...f, unconfirmed: { ...f.unconfirmed, pc: true } };
-    f = confirmRow(f, "pc");
-    expect(isUnconfirmed(f, "pc")).toBe(false);
-    expect(agesToConfirm(f)).toEqual(["Ann", "Bo"]);
-    f = confirmRow(f, 0);
-    expect(agesToConfirm(f)).toEqual(["Bo"]);
+  it("commits nothing for an unchanged name, and saves a name that had none", () => {
+    let f = typeName(form(), "pc", "  Teodor Brandt ");
+    expect(nameChange(f, "pc")).toEqual({ kind: "none" });
+    f = typeName(form(), 2, "Ostley Crossing");
+    expect(nameChange(f, 2)).toEqual({ kind: "save", to: "Ostley Crossing" });
+    expect(nameChange(form(), 1)).toEqual({ kind: "none" });
+  });
+
+  it("adding and deleting a row keep the other rows", () => {
+    let f = typeName(form(), "pc", "Teo");
+    f = addEntry(f, { name: "Nell Quay", kind: "npc", age: 44, other_names: [], hidden: false });
+    expect(f.seed.entities.map((e) => e.name)).toEqual(["Agathe Morrow", "Sefa Lind", "", "Nell Quay"]);
+    f = typeName(f, 1, "Sefa");
+    f = removeEntry(f, 0);
+    expect(f.seed.entities.map((e) => e.name)).toEqual(["Sefa Lind", "", "Nell Quay"]);
+    // A typed roster name loses its row; the PC's stays.
+    expect(f.typed).toEqual({ pc: "Teo" });
+  });
+
+  it("a new view starts with nothing typed", () => {
+    expect(formOfView(view(form())).typed).toEqual({});
+  });
+});
+
+describe("cut lists", () => {
+  it("a cut list says it was cut", () => {
+    const f = form();
+    const say = (at: string, cap: number) => cutSentence({ at, cap }, f);
+    expect(say("entities", 30)).toBe(
+      "Your document names more than 30 people, or more than 30 places and groups. The draft kept the first 30 of each: add any missing one with “Add a character” or “Add a place”.",
+    );
+    expect(say("knowledge", 40)).toBe(
+      "A part of your document holds more than 40 facts. The draft kept the first 40 of that part, so some facts may be missing.",
+    );
+    expect(say("entities[0].other_names", 4)).toBe(
+      "Agathe Morrow has more than 4 other names in your document. The draft kept the first 4.",
+    );
+    expect(say("pc.other_names", 4)).toBe(
+      "Your character has more than 4 other names in your document. The draft kept the first 4.",
+    );
+    expect(say("themes", 8)).toBe("Your document gives more than 8 themes. The draft kept the first 8.");
+    expect(say("somewhere.new", 5)).toBe("A list of the draft was cut at 5 items.");
+    for (const at of ["entities", "knowledge", "themes", "start.present", "open_details"]) {
+      expect(say(at, 3)).toMatch(/kept the first 3|cut at 3/);
+    }
+  });
+
+  it("shows each cut in the part of the review it concerns", () => {
+    const f = form();
+    expect(cutSections({ at: "entities", cap: 30 }, f)).toEqual(["people", "places"]);
+    expect(cutSections({ at: "knowledge", cap: 40 }, f)).toEqual(["knows", "open"]);
+    expect(cutSections({ at: "entities[0].other_names", cap: 4 }, f)).toEqual(["people"]);
+    expect(cutSections({ at: "themes", cap: 8 }, f)).toEqual(["play"]);
   });
 });
 

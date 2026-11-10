@@ -1,41 +1,34 @@
-// Pure helpers of the New Campaign screen: labels, gap sentences, locators,
-// name matching and the draft saver.
+// Pure helpers of the New Campaign screen: labels, gap and cut sentences,
+// locators, the review's sections, typed names and the draft saver.
 
 import type {
   AdventureSeed,
+  AgeLine,
   BuildFailure,
   BuildProgress,
   BuildStage,
+  Cut,
   DraftView,
+  EntityKind,
   Gap,
   GapKind,
   KnownFact,
+  SeedEntity,
 } from "./api";
 
 /**
- * One flag per character row. It is kept per row, never by name: a name the
- * Player is typing must not move a mark.
- */
-export interface AgeFlags {
-  pc: boolean;
-  /** One flag per `seed.entities` entry, in the same order. */
-  entities: boolean[];
-}
-
-/**
- * What the review edits. `save_draft` takes it, with `agesToConfirm` and
- * `agesStated` as the name lists.
+ * What the review edits. `save_draft` takes `seed` and `knowledge` only.
+ * `typed` holds a name the Player is typing, by row: it stays out of the
+ * seed until the core's rename returns, so a half-typed name never reaches
+ * the store and never makes a new entry.
  */
 export interface ReviewForm {
   seed: AdventureSeed;
   knowledge: KnownFact[];
-  /** The rows whose age the Player has not confirmed. A new draft marks every character. */
-  unconfirmed: AgeFlags;
-  /** The rows whose age the model says the text states. Information only. */
-  stated: AgeFlags;
+  typed: Partial<Record<string, string>>;
 }
 
-/** A character row: the PC, or an index in `seed.entities`. */
+/** A roster row: the PC, or an index in `seed.entities`. */
 export type Row = "pc" | number;
 
 const STAGES: Record<BuildStage, string> = {
@@ -120,8 +113,9 @@ export function focusTarget(at: string): string {
   let target = at.replace(/\.known_to\[\d+\]$/, ".known_to");
   target = target.replace(/^start\.present\[\d+\]$/, "start.present");
   if (/other_names\[\d+\]$/.test(target)) target += ".name";
-  if (/^knowledge\[\d+\]$/.test(target)) target += ".text";
-  return target;
+  // A fact shows as a sentence: its "edit" button stands for every field.
+  const fact = /^knowledge\[\d+\]/.exec(target);
+  return fact ? fact[0] : target;
 }
 
 /** The element id of the input for a field path. */
@@ -130,10 +124,22 @@ export function fieldId(path: string): string {
 }
 
 const quote = (s: string) => `“${s}”`;
-const ENTITY_FIELDS: Record<string, string> = { name: "name", kind: "kind", age: "age" };
-const PC_FIELDS: Record<string, string> = { name: "name", age: "age", concept: "concept" };
+const PC_FIELDS: Record<string, string> = {
+  name: "Your character's name",
+  age: "Your character's age",
+  concept: "Your character's concept",
+};
+const FACT_FIELDS: Record<string, string> = { subject: "About", key: "Detail", value: "Value" };
 
-/** The field at `at`, in plain words, starting with a capital letter. */
+/** The sentence of known fact `i`, quoted, or its number when it has none. */
+function factName(form: ReviewForm, i: number): string {
+  const text = form.knowledge[i]?.text.trim();
+  return text ? `the fact ${quote(text)}` : `fact ${i + 1}`;
+}
+
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** The field at `at`, in plain words, starting with a capital letter. No internal field name. */
 export function fieldLabel(at: string, form: ReviewForm): string {
   const { seed } = form;
   const p = parseAt(at);
@@ -143,7 +149,12 @@ export function fieldLabel(at: string, form: ReviewForm): string {
     const name = seed.entities[i]?.name.trim();
     return name ? name : `entry ${i + 1}`;
   };
+  const owner = a === "pc" ? "your character" : entityName(num(b));
   const otherNames = a === "pc" ? seed.pc.other_names : seed.entities[num(b)]?.other_names;
+  const otherName = (j: number) => {
+    const name = otherNames?.[j]?.name.trim();
+    return name ? `The other name ${quote(name)} of ${owner}` : `Other name ${j + 1} of ${owner}`;
+  };
   const holderOf = (j: number, k: number) => {
     const other = otherNames?.[j];
     const holder = other?.known_to[k]?.trim() || `name ${k + 1}`;
@@ -151,28 +162,37 @@ export function fieldLabel(at: string, form: ReviewForm): string {
     return `${quote(holder)} in who knows ${quote(name)}`;
   };
 
-  if (p.length === 1 && a === "premise") return "The premise";
-  if (p.length === 1 && a === "story_language") return "The story language";
-  if (p.length === 1 && a === "seed") return "The seed";
+  if (p.length === 1) {
+    const top: Record<string, string> = {
+      premise: "The premise",
+      story_language: "The story language",
+      seed: "The story setup",
+      min_age: "The minimum age",
+      gm_agreement: "How the GM runs the game",
+      resolution: "How actions are resolved",
+    };
+    if (typeof a === "string" && Object.hasOwn(top, a)) return top[a] ?? at;
+  }
   if (a === "pc") {
     if (p.length === 2 && typeof b === "string" && Object.hasOwn(PC_FIELDS, b)) {
-      return `Your character's ${PC_FIELDS[b]}`;
+      return PC_FIELDS[b] ?? at;
     }
-    if (b === "other_names" && p.length === 3) return `Your character's other name ${num(c) + 1}`;
+    if (b === "other_names" && p.length === 3) return otherName(num(c));
     if (b === "other_names" && d === "known_to" && p.length === 5) return holderOf(num(c), num(e));
   }
   if (a === "entities" && typeof b === "number") {
-    if (p.length === 3 && typeof c === "string" && Object.hasOwn(ENTITY_FIELDS, c)) {
-      return `The ${ENTITY_FIELDS[c]} of ${entityName(b)}`;
+    if (p.length === 3 && (c === "name" || c === "kind" || c === "age")) {
+      return `The ${c} of ${entityName(b)}`;
     }
-    if (c === "other_names" && p.length === 4) {
-      return `Other name ${num(d) + 1} of ${entityName(b)}`;
-    }
+    if (c === "other_names" && p.length === 4) return otherName(num(d));
     if (c === "other_names" && e === "known_to" && p.length === 6) return holderOf(num(d), num(f));
   }
   if (a === "knowledge" && typeof b === "number") {
-    if (p.length === 2) return `Known fact ${b + 1}`;
-    if (p.length === 3 && typeof c === "string") return `The ${c} of known fact ${b + 1}`;
+    if (p.length === 2) return capital(factName(form, b));
+    if (p.length === 3 && c === "text") return `The sentence of fact ${b + 1}`;
+    if (p.length === 3 && typeof c === "string" && Object.hasOwn(FACT_FIELDS, c)) {
+      return `${quote(FACT_FIELDS[c] ?? c)} in ${factName(form, b)}`;
+    }
   }
   if (a === "start" && p.length === 2 && b === "place") return "The start place";
   if (a === "start" && b === "present" && p.length === 3) {
@@ -180,134 +200,230 @@ export function fieldLabel(at: string, form: ReviewForm): string {
     return `${quote(name)} in ${quote("who is present")}`;
   }
   if ((a === "decided" || a === "proposed") && typeof b === "number" && p.length === 3) {
-    return `${a === "decided" ? "Decided" : "Proposed"} fact ${b + 1} (${String(c)})`;
+    return `${a === "decided" ? "Decided" : "Proposed"} fact ${b + 1}`;
   }
   return at;
 }
 
-const SENTENCES: Record<GapKind, (field: string) => string> = {
-  missing: (f) => `${f} is empty.`,
-  age_missing: (f) => `${f} is missing.`,
-  age_unconfirmed: (f) => `${f} is not confirmed: check it, then confirm it.`,
-  age_below_min: (f) => `${f} is below the minimum age.`,
-  unknown_name: (f) => `${f} does not match a name of the right kind.`,
-  duplicate_name: (f) => `${f} is used twice.`,
-  pc_in_roster: (f) => `${f} is a name of your character.`,
-  wrong_kind: (f) => `${f} is not allowed here.`,
-  seed_block_too_long: () => "The seed is too long: shorten some text.",
-  slot_conflict: (f) => `${f} repeats another fact on the same thing.`,
-};
+/** What to do about a name that matches no entry, by the field that holds it. */
+function unknownName(at: string, field: string, form: ReviewForm): string {
+  const p = parseAt(at);
+  if (at === "start.place") {
+    return `${field} is not a place of the draft. Use the name of a place below, or add the place.`;
+  }
+  if (p[0] === "start" && p[1] === "present") {
+    return `${field} is not a character of the draft. Use a character's name, or add the character.`;
+  }
+  if (p.includes("known_to")) {
+    return `${field} is not a character of the draft. Use a character's name, or delete it.`;
+  }
+  if (p[0] === "knowledge" && typeof p[1] === "number") {
+    const about = form.knowledge[p[1]]?.subject.trim() ?? "";
+    return `${capital(factName(form, p[1]))} is about ${quote(about)}, who is not in the draft. Press “edit” and change “About”, or add ${quote(about)} as a character or a place.`;
+  }
+  return `${field} does not match a name of the draft. Use a name from the draft, or add the entry.`;
+}
 
-/** One plain sentence for a gap. */
+/** What to do about a field its entry may not have, by the field. */
+function wrongKind(at: string, field: string, form: ReviewForm): string {
+  const p = parseAt(at);
+  if (p.at(-1) === "age") return `${field} is set, but only a character has an age. Clear it.`;
+  if (p.at(-1) === "kind") {
+    return `${field} is “your character”, and the draft already has one. Choose another kind.`;
+  }
+  if (p[0] === "knowledge" && typeof p[1] === "number") {
+    return `${capital(factName(form, p[1]))} has “pending” in its detail. Press “edit”, remove “pending” from “Detail”, and tick “Not done yet” instead.`;
+  }
+  return `${field} is not allowed here. Change it.`;
+}
+
+/** One sentence for a gap: what is wrong, then what to do. */
 export function gapSentence(gap: Gap, form: ReviewForm): string {
   const field = fieldLabel(gap.at, form);
-  return Object.hasOwn(SENTENCES, gap.kind) ? SENTENCES[gap.kind](field) : `${field} needs a fix.`;
-}
-
-/** A character that a name drops at its ends: anything not a letter or digit. */
-const EDGES = /^[^\p{Alphabetic}\p{N}]+|[^\p{Alphabetic}\p{N}]+$/gu;
-
-/** The normal form of a name, as `normalize::name` in the core makes it. */
-export function nameKey(name: string): string {
-  const lowered = name.normalize("NFKC").toLowerCase().replace(/[‘’]/g, "'");
-  const collapsed = lowered.replace(EDGES, "").split(/\s+/).filter(Boolean).join(" ");
-  const article = ["the ", "a ", "an "].find((a) => collapsed.startsWith(a));
-  const bare = article ? collapsed.slice(article.length) : collapsed;
-  return bare
-    .replace(EDGES, "")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .normalize("NFC");
-}
-
-/** The rows whose name is in the draft's `ages_to_confirm`, matched as the core matches. */
-export function flagsFromNames(seed: AdventureSeed, names: string[]): AgeFlags {
-  const keys = new Set(names.map(nameKey));
-  return {
-    pc: keys.has(nameKey(seed.pc.name)),
-    entities: seed.entities.map((e) => keys.has(nameKey(e.name))),
+  const min = form.seed.min_age;
+  const sentences: Record<GapKind, () => string> = {
+    missing: () => `${field} is empty. Write it in.`,
+    age_missing: () => `${field} is missing. Enter an age in years.`,
+    age_unconfirmed: () => `${field} is not confirmed yet. Check it, then press “Confirm age”.`,
+    age_below_min: () =>
+      `${field} is below the minimum age${min === null ? "" : ` of ${min}`}. Raise the age, or change the minimum age under “How you want to play”.`,
+    unknown_name: () => unknownName(gap.at, field, form),
+    duplicate_name: () => `${field} is used twice. Give one of them another name.`,
+    pc_in_roster: () => `${field} is a name of your character. Delete this entry, or give it another name.`,
+    wrong_kind: () => wrongKind(gap.at, field, form),
+    seed_block_too_long: () =>
+      "The story setup is too long for the GM to read. Shorten the premise, the GM agreement or the content limits.",
+    slot_conflict: () =>
+      `${field} says something about the same thing as another fact. Delete one of them, or merge them.`,
   };
+  return Object.hasOwn(sentences, gap.kind)
+    ? sentences[gap.kind]()
+    : `${field} needs a fix. Check it.`;
+}
+
+/** The parts of the review, in order: a guided path through the draft. */
+export type SectionId = "story" | "you" | "people" | "places" | "knows" | "open" | "play";
+
+export const SECTIONS: readonly (readonly [SectionId, string])[] = [
+  ["story", "The story"],
+  ["you", "Your character"],
+  ["people", "People"],
+  ["places", "Places and groups"],
+  ["knows", "What your character knows"],
+  ["open", "Open matters"],
+  ["play", "How you want to play"],
+];
+
+/** The part of the review that holds the field at `at`. */
+export function sectionOf(at: string, form: ReviewForm): SectionId {
+  const [a, b] = parseAt(at);
+  if (a === "pc") return "you";
+  if (a === "entities") {
+    const entry = typeof b === "number" ? form.seed.entities[b] : undefined;
+    return entry && isCharacter(entry.kind) ? "people" : entry ? "places" : "people";
+  }
+  if (a === "knowledge") {
+    return typeof b === "number" && form.knowledge[b]?.open ? "open" : "knows";
+  }
+  if (a === "open_details") return "open";
+  if (a === "themes" || a === "boundaries" || a === "gm_agreement" || a === "resolution" || a === "min_age") {
+    return "play";
+  }
+  return "story";
+}
+
+/** The gaps of the field at `path`, and of the fields inside it. */
+export function gapsAt(gaps: Gap[], path: string): Gap[] {
+  return gaps.filter(
+    (g) => g.at === path || g.at.startsWith(`${path}.`) || g.at.startsWith(`${path}[`),
+  );
+}
+
+/** One sentence for a list the app cut at its cap: what was cut, and what it means. */
+export function cutSentence(cut: Cut, form: ReviewForm): string {
+  const p = parseAt(cut.at);
+  const n = cut.cap;
+  if (cut.at === "entities") {
+    return `Your document names more than ${n} people, or more than ${n} places and groups. The draft kept the first ${n} of each: add any missing one with “Add a character” or “Add a place”.`;
+  }
+  if (cut.at === "knowledge") {
+    return `A part of your document holds more than ${n} facts. The draft kept the first ${n} of that part, so some facts may be missing.`;
+  }
+  if (cut.at === "themes") return `Your document gives more than ${n} themes. The draft kept the first ${n}.`;
+  if (cut.at === "open_details") {
+    return `Your document leaves more than ${n} things open. The draft kept the first ${n}.`;
+  }
+  if (cut.at === "start.present") {
+    return `More than ${n} people are present at the start. The draft kept the first ${n}.`;
+  }
+  if (p.at(-1) === "other_names") {
+    const owner = p[0] === "pc" ? "Your character" : (form.seed.entities[Number(p[1])]?.name ?? "An entry");
+    return `${owner} has more than ${n} other names in your document. The draft kept the first ${n}.`;
+  }
+  if (p.at(-1) === "known_to") {
+    return `More than ${n} people know one of the other names. The draft kept the first ${n}.`;
+  }
+  return `A list of the draft was cut at ${n} items.`;
+}
+
+/** The parts of the review where a cut list shows. */
+export function cutSections(cut: Cut, form: ReviewForm): SectionId[] {
+  if (cut.at === "entities") return ["people", "places"];
+  if (cut.at === "knowledge") return ["knows", "open"];
+  return [sectionOf(cut.at, form)];
 }
 
 /** The review form of a draft as the store holds it. */
 export function formOfView(view: DraftView): ReviewForm {
-  return {
-    seed: view.seed,
-    knowledge: view.knowledge,
-    unconfirmed: flagsFromNames(view.seed, view.ages_to_confirm),
-    stated: flagsFromNames(view.seed, view.ages_stated),
-  };
+  return { seed: view.seed, knowledge: view.knowledge, typed: {} };
 }
 
-const rowName = (form: ReviewForm, row: Row) =>
+/** What `save_draft` receives: never a typed name, never an age list. */
+export function saveArgs(form: ReviewForm): { seed: AdventureSeed; knowledge: KnownFact[] } {
+  return { seed: form.seed, knowledge: form.knowledge };
+}
+
+/** The key of a row in `typed`, in the path form of a gap. */
+export const rowPath = (row: Row): string => (row === "pc" ? "pc" : `entities[${row}]`);
+
+/** The saved main name of a row. */
+export const savedName = (form: ReviewForm, row: Row): string =>
   row === "pc" ? form.seed.pc.name : (form.seed.entities[row]?.name ?? "");
 
-/**
- * The `ages_to_confirm` list for `save_draft`: the current names of the
- * unconfirmed rows, built only when saving.
- */
-export function agesToConfirm(form: ReviewForm): string[] {
-  return rowNames(form, form.unconfirmed);
+/** The name the field shows: what the Player is typing, else the saved name. */
+export const shownName = (form: ReviewForm, row: Row): string =>
+  form.typed[rowPath(row)] ?? savedName(form, row);
+
+/** The Player types in a name field. The seed does not change. */
+export function typeName(form: ReviewForm, row: Row, text: string): ReviewForm {
+  return { ...form, typed: { ...form.typed, [rowPath(row)]: text } };
 }
 
-/** The `ages_stated` list for `save_draft`: the current names of the rows the model calls stated. */
-export function agesStated(form: ReviewForm): string[] {
-  return rowNames(form, form.stated);
-}
-
-/** Where a row's age comes from, as the model said it. It never confirms the age. */
-export function ageSource(form: ReviewForm, row: Row): "from the text" | "proposed by the model" {
-  const stated = row === "pc" ? form.stated.pc : form.stated.entities[row];
-  return stated ? "from the text" : "proposed by the model";
-}
-
-/** The current names of the flagged rows, each name once. */
-function rowNames(form: ReviewForm, flags: AgeFlags): string[] {
-  const rows: Row[] = [
-    ...(flags.pc ? (["pc"] as const) : []),
-    ...flags.entities.flatMap((on, i) => (on ? [i] : [])),
-  ];
-  const seen = new Set<string>();
-  const names: string[] = [];
-  for (const row of rows) {
-    const name = rowName(form, row);
-    if (seen.has(nameKey(name))) continue;
-    seen.add(nameKey(name));
-    names.push(name);
-  }
-  return names;
+/** The Player leaves a name field without a change (Esc). */
+export function dropTyped(form: ReviewForm, row: Row): ReviewForm {
+  const key = rowPath(row);
+  const typed = Object.fromEntries(Object.entries(form.typed).filter(([k]) => k !== key));
+  return { ...form, typed };
 }
 
 /**
- * True while the row's age is unconfirmed. The store matches by name, so a
- * row that shares its name with an unconfirmed row is unconfirmed too.
+ * How a typed name commits. A saved name goes through the core's rename,
+ * which follows every reference. A row with no saved name has nothing to
+ * follow: the name is saved as an edit, and its age needs a confirmation.
  */
-export function isUnconfirmed(form: ReviewForm, row: Row): boolean {
-  const own = row === "pc" ? form.unconfirmed.pc : form.unconfirmed.entities[row];
-  if (own) return true;
-  const key = nameKey(rowName(form, row));
-  return key !== "" && agesToConfirm(form).some((n) => nameKey(n) === key);
+export type NameChange =
+  | { kind: "none" }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "save"; to: string };
+
+export function nameChange(form: ReviewForm, row: Row): NameChange {
+  const typed = form.typed[rowPath(row)];
+  if (typed === undefined) return { kind: "none" };
+  const from = savedName(form, row);
+  const to = typed.trim();
+  if (to === from) return { kind: "none" };
+  if (from.trim() === "") return { kind: "save", to };
+  return { kind: "rename", from, to };
 }
 
-/** The Player confirms the age of one row; no other row changes. */
-export function confirmRow(form: ReviewForm, row: Row): ReviewForm {
-  const unconfirmed =
-    row === "pc"
-      ? { ...form.unconfirmed, pc: false }
-      : { ...form.unconfirmed, entities: replaceFlag(form.unconfirmed.entities, row) };
-  return { ...form, unconfirmed };
+/**
+ * The form after the core renamed a row: the seed and knowledge come back
+ * from the store, every reference renamed. Other typed names stay.
+ */
+export function renamed(form: ReviewForm, view: DraftView, row: Row): ReviewForm {
+  return { ...dropTyped(form, row), seed: view.seed, knowledge: view.knowledge };
 }
 
-const replaceFlag = (flags: boolean[], i: number) => flags.map((on, j) => (j === i ? false : on));
+/** True for the kinds that have an age. */
+export const isCharacter = (kind: EntityKind): boolean => kind === "npc" || kind === "pc";
 
-/** The form without the roster entry at `i`, and without that entry's flags only. */
-export function removeEntityRow(form: ReviewForm, i: number): ReviewForm {
-  return {
-    ...form,
-    seed: { ...form.seed, entities: removeAt(form.seed.entities, i) },
-    unconfirmed: { ...form.unconfirmed, entities: removeAt(form.unconfirmed.entities, i) },
-    stated: { ...form.stated, entities: removeAt(form.stated.entities, i) },
-  };
+/** The age line of a saved name; none for a row that is not a character. */
+export function ageLineOf(ages: AgeLine[], name: string): AgeLine | undefined {
+  return ages.find((line) => line.name === name);
+}
+
+/**
+ * Where an age comes from, in the Player's words. "from the text" stays only
+ * on an untouched value the text states; any value the Player changed or
+ * added says "edited by you".
+ */
+export function ageLabel(line: AgeLine | undefined): string {
+  if (!line || line.source === "edited") return "edited by you";
+  return line.source === "from_text" ? "from the text" : "proposed by the model";
+}
+
+/** How many ages still wait for the Player's confirmation. */
+export const agesLeft = (ages: AgeLine[]): number => ages.filter((l) => !l.confirmed).length;
+
+/** The form with one more roster entry, as "Add a character" or "Add a place" makes it. */
+export function addEntry(form: ReviewForm, entry: SeedEntity): ReviewForm {
+  return { ...form, seed: { ...form.seed, entities: [...form.seed.entities, entry] } };
+}
+
+/** The form without the roster entry at `i`. Typed names of the roster are dropped: their rows move. */
+export function removeEntry(form: ReviewForm, i: number): ReviewForm {
+  const typed = form.typed.pc === undefined ? {} : { pc: form.typed.pc };
+  return { ...form, seed: { ...form.seed, entities: removeAt(form.seed.entities, i) }, typed };
 }
 
 /** `list` with the item at `i` patched. */

@@ -195,6 +195,7 @@ export default function App() {
                 onOpened={opened}
                 locked={turnBusy}
                 onJob={setJob}
+                debug={debug}
               />
             </ScreenFrame>
           </div>

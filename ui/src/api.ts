@@ -345,14 +345,31 @@ export interface BuildFailure {
   check: string;
 }
 
+/** Where a character's current age comes from. The core derives it. */
+export type AgeSource = "from_text" | "proposed" | "edited";
+
+/** One character's age as the core sees it: the PC first, then the roster order. */
+export interface AgeLine {
+  /** The main name, as the seed writes it. */
+  name: string;
+  source: AgeSource;
+  /** The Player confirmed this very age through `confirm_age`. */
+  confirmed: boolean;
+}
+
+/** A list the draft run cut at its cap. `at` has the path form of `Gap.at`. */
+export interface Cut {
+  at: string;
+  cap: number;
+}
+
 export interface DraftView {
   draft_id: string;
   state: DraftState;
   seed: AdventureSeed;
   knowledge: KnownFact[];
-  ages_to_confirm: string[];
-  /** Information only: the names whose age the model says the text states. */
-  ages_stated: string[];
+  ages: AgeLine[];
+  cut: Cut[];
   gaps: Gap[];
   last_failure: BuildFailure | null;
 }
@@ -479,20 +496,15 @@ export function createApi(invoke: Invoke) {
     draftFromText: (text: string) => invoke<DraftView>("draft_from_text", { text }),
     listDrafts: () => invoke<DraftLine[]>("list_drafts"),
     getDraft: (draftId: string) => invoke<DraftView>("get_draft", { draft_id: draftId }),
-    saveDraft: (
-      draftId: string,
-      seed: AdventureSeed,
-      knowledge: KnownFact[],
-      agesToConfirm: string[],
-      agesStated: string[],
-    ) =>
-      invoke<DraftView>("save_draft", {
-        draft_id: draftId,
-        seed,
-        knowledge,
-        ages_to_confirm: agesToConfirm,
-        ages_stated: agesStated,
-      }),
+    /** Saves an edit. It never confirms an age, and never renames: see the next two. */
+    saveDraft: (draftId: string, seed: AdventureSeed, knowledge: KnownFact[]) =>
+      invoke<DraftView>("save_draft", { draft_id: draftId, seed, knowledge }),
+    /** The core confirms the current age of one character, by main name. */
+    confirmAge: (draftId: string, name: string) =>
+      invoke<DraftView>("confirm_age", { draft_id: draftId, name }),
+    /** Renames one entry in every field of the draft that names it. */
+    renameDraftEntity: (draftId: string, from: string, to: string) =>
+      invoke<DraftView>("rename_draft_entity", { draft_id: draftId, from, to }),
     /** Approves the draft, or returns its gaps. Any other error rejects. */
     approveDraft: async (draftId: string): Promise<Approval> => {
       try {

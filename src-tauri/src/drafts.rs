@@ -11,8 +11,9 @@ use std::{
 use serde::Serialize;
 use threshold_core::{
     build::{
-        self, BuildCheck, BuildFailure, Control, DebugEntry, DraftState, DraftStore,
-        DraftStoreError, Gap, KnownFact, Progress, SOURCE_TEXT_MAX_CHARS, SeedDraft, Stage,
+        self, AgeLine, BuildCheck, BuildFailure, Control, Cut, DebugEntry, DraftState, DraftStore,
+        DraftStoreError, Gap, KnownFact, Progress, ReviewError, SeedDraft, SourceTextProblem,
+        Stage,
     },
     domain::AdventureSeed,
     setup::{SetupError, create_campaign_file},
@@ -32,9 +33,11 @@ pub struct DraftView {
     pub state: DraftState,
     pub seed: AdventureSeed,
     pub knowledge: Vec<KnownFact>,
-    pub ages_to_confirm: Vec<String>,
-    /// Information only: the names whose age the model says the text states.
-    pub ages_stated: Vec<String>,
+    /// The age of each character: where it comes from, and whether the
+    /// Player confirmed it through `confirm_age`.
+    pub ages: Vec<AgeLine>,
+    /// The lists that the draft run cut at their cap.
+    pub cut: Vec<Cut>,
     pub gaps: Vec<Gap>,
     pub last_failure: Option<BuildFailure>,
 }
@@ -43,12 +46,12 @@ impl DraftView {
     fn of(draft: SeedDraft) -> Self {
         Self {
             gaps: build::gaps(&draft),
+            ages: build::age_lines(&draft),
             draft_id: draft.id,
             state: draft.state,
             seed: draft.seed,
             knowledge: draft.knowledge,
-            ages_to_confirm: draft.ages_to_confirm,
-            ages_stated: draft.ages_stated,
+            cut: draft.cut,
             last_failure: draft.last_failure,
         }
     }
@@ -127,21 +130,15 @@ impl Drafts {
     }
 
     /// Drafts a Seed Draft from a Source Text and saves it. The text is
-    /// checked here first, so an empty or too long text costs no model call
-    /// and gets a message that names the limit.
+    /// checked here first (`build::check_source_text`), so an empty, too
+    /// short or too long text costs no model call and gets a sentence that
+    /// names the limit.
     pub fn draft_from_text(
         &self,
         text: &str,
         on_progress: &mut dyn FnMut(Progress),
     ) -> Result<DraftView, AppError> {
-        if text.trim().is_empty() {
-            return Err(failed("the Source Text is empty"));
-        }
-        if text.chars().count() > SOURCE_TEXT_MAX_CHARS {
-            return Err(failed(format!(
-                "the Source Text is too long: the limit is {SOURCE_TEXT_MAX_CHARS} characters"
-            )));
-        }
+        build::check_source_text(text).map_err(|p| failed(source_text_sentence(p, text)))?;
         let _slot = self.start_job(Job::Draft)?;
         let gm = (self.make_gm)();
         // The core picks the draft id, and each log entry carries it: the
@@ -193,23 +190,40 @@ impl Drafts {
         Ok(DraftView::of(draft))
     }
 
-    /// A Player edit: it replaces the seed, the knowledge, the ages to
-    /// confirm and the ages the model calls stated, and returns the draft to
-    /// `Draft`.
+    /// A Player edit: it replaces the seed and the knowledge, and returns
+    /// the draft to `Draft`. It cannot confirm an age, and a name changed
+    /// here is a new entry whose age needs a confirmation: a rename goes
+    /// through `rename_draft_entity`.
     pub fn save_draft(
         &self,
         draft_id: &str,
         seed: AdventureSeed,
         knowledge: Vec<KnownFact>,
-        ages_to_confirm: Vec<String>,
-        ages_stated: Vec<String>,
     ) -> Result<DraftView, AppError> {
-        let store = lock(&self.store);
-        self.refuse_under_build(draft_id)?;
-        let mut draft = store.load(draft_id).map_err(draft_error)?;
-        build::apply_edit(&mut draft, seed, knowledge, ages_to_confirm, ages_stated);
-        store.save(&draft).map_err(draft_error)?;
-        Ok(DraftView::of(draft))
+        self.change(draft_id, |draft| {
+            build::apply_edit(draft, seed, knowledge);
+            Ok(())
+        })
+    }
+
+    /// The Player confirms the current age of one character, by main name.
+    pub fn confirm_age(&self, draft_id: &str, name: &str) -> Result<DraftView, AppError> {
+        self.change(draft_id, |draft| {
+            build::confirm_age(draft, name).map_err(|e| failed(confirm_sentence(e, name)))
+        })
+    }
+
+    /// Renames one entry of the draft in every field that names it, and
+    /// returns the draft to `Draft`. A refused rename changes nothing.
+    pub fn rename_draft_entity(
+        &self,
+        draft_id: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<DraftView, AppError> {
+        self.change(draft_id, |draft| {
+            build::rename(draft, from, to).map_err(|e| failed(rename_sentence(e, from, to)))
+        })
     }
 
     /// Approves a draft with no gap; on a gap, returns every gap.
@@ -344,6 +358,21 @@ impl Drafts {
         let _ = lock(&self.store).append_debug(&entry.op_id, entry);
     }
 
+    /// Loads a draft that no build holds, applies a review action and saves
+    /// it, under one store lock. A refused action saves nothing.
+    fn change(
+        &self,
+        draft_id: &str,
+        action: impl FnOnce(&mut SeedDraft) -> Result<(), AppError>,
+    ) -> Result<DraftView, AppError> {
+        let store = lock(&self.store);
+        self.refuse_under_build(draft_id)?;
+        let mut draft = store.load(draft_id).map_err(draft_error)?;
+        action(&mut draft)?;
+        store.save(&draft).map_err(draft_error)?;
+        Ok(DraftView::of(draft))
+    }
+
     /// Loads, changes and saves a draft under one store lock.
     fn update(&self, draft_id: &str, change: impl FnOnce(&mut SeedDraft)) -> Result<(), AppError> {
         let store = lock(&self.store);
@@ -357,6 +386,49 @@ impl Drafts {
         // The build error matters more than a failed save of it.
         let _ = self.update(draft_id, |d| d.last_failure = Some(failure));
         job_error(failure)
+    }
+}
+
+/// The Player's sentence for a refused Source Text: what is wrong, with the
+/// limit, and what to do.
+fn source_text_sentence(problem: SourceTextProblem, text: &str) -> String {
+    match problem {
+        SourceTextProblem::Empty => {
+            "The Source Text is empty. Paste your document, or choose a file.".to_owned()
+        }
+        SourceTextProblem::TooShort { min } => format!(
+            "This Source Text is too short to hold a premise and your character: it has {} \
+             characters, and a draft needs at least {min}. Add more of your document.",
+            text.trim().chars().count()
+        ),
+        SourceTextProblem::TooLong { max } => format!(
+            "This Source Text is too long: the limit is {max} characters. Remove the parts \
+             you do not need, or split the document."
+        ),
+    }
+}
+
+/// The Player's sentence for a refused rename.
+fn rename_sentence(e: ReviewError, from: &str, to: &str) -> String {
+    match e {
+        ReviewError::UnknownName => format!(
+            "No entry of this draft is called “{from}” any more. Open the draft again, then rename it."
+        ),
+        ReviewError::NameInUse => format!(
+            "Another entry already uses the name “{}”. Choose another name.",
+            to.trim()
+        ),
+        ReviewError::Empty => "A name cannot be empty. Type a name.".to_owned(),
+    }
+}
+
+/// The Player's sentence for a refused age confirmation.
+fn confirm_sentence(e: ReviewError, name: &str) -> String {
+    match e {
+        ReviewError::Empty => format!("{name} has no age yet. Enter an age, then confirm it."),
+        ReviewError::UnknownName | ReviewError::NameInUse => format!(
+            "No character of this draft is called “{name}” any more. Open the draft again, then confirm the age."
+        ),
     }
 }
 

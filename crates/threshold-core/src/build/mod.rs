@@ -1,4 +1,4 @@
-//! The Seed Draft, its rules and its store, the stage runner, the draft
+//! The Seed Draft, its rules (gaps, ages, renames) and its store, the stage runner, the draft
 //! stages, the World Build stages and their checks, and the types every
 //! build stage shares (data shape 2, 3.5 and 3.6).
 //! `build` calls the model through `Gm::propose` only, and knows no SQL.
@@ -14,8 +14,14 @@ mod world_stages;
 use serde::{Deserialize, Serialize};
 
 pub use checks::{centres_on_pc, names_pc};
-pub use draft::{DraftState, Gap, GapKind, KnownFact, SeedDraft, apply_edit, approve, gaps};
-pub use draft_stages::{SOURCE_TEXT_MAX_CHARS, draft_from_text};
+pub use draft::{
+    AgeLine, AgeMark, AgeSource, Cut, DraftState, Gap, GapKind, KnownFact, ReviewError, SeedDraft,
+    age_lines, apply_edit, approve, confirm_age, gaps, rename,
+};
+pub use draft_stages::{
+    SOURCE_TEXT_MAX_CHARS, SOURCE_TEXT_MIN_CHARS, SourceTextProblem, check_source_text,
+    draft_from_text,
+};
 pub use stages::BUILD_TIMEOUT_S;
 pub use store::{DraftLine, DraftStore, DraftStoreError};
 pub use world_stages::{NpcState, PC_CENTRED_MAX_SHARE, Placement, build_world};

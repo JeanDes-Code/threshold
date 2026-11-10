@@ -11,6 +11,8 @@ import {
 import { CANCEL_NOTE, failureText, progressText, readDocument } from "../newCampaign";
 import { api, useEvent } from "../tauri";
 import SeedReview from "./SeedReview";
+import SetupSteps from "./SetupSteps";
+import SourceStep from "./SourceStep";
 
 interface Props {
   /** The World Build ended and its Campaign is open: "Begin" is next. */
@@ -21,6 +23,8 @@ interface Props {
   initialDraft?: string | null;
   /** Told when a draft or a World Build starts and ends. */
   onJob?: (running: boolean) => void;
+  /** Debug mode: the review shows the internal fields of each fact. */
+  debug?: boolean;
 }
 
 /** Source: the text and the saved drafts. Review: the Seed Draft. Build: the World Build. */
@@ -39,7 +43,7 @@ const screenOf = (view: DraftView): Screen =>
   view.state === "approved" ? { kind: "build", view } : { kind: "review", view };
 
 /** A new Campaign from a document: Source Text, review, World Build. */
-export default function NewCampaign({ onOpened, locked, initialDraft = null, onJob }: Props) {
+export default function NewCampaign({ onOpened, locked, initialDraft = null, onJob, debug = false }: Props) {
   const [screen, setScreen] = useState<Screen>({ kind: "source" });
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<DraftLine[]>([]);
@@ -166,15 +170,19 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
 
   if (screen.kind === "review") {
     return (
-      <SeedReview
-        key={screen.view.draft_id}
-        view={screen.view}
-        onApproved={(view) => go({ kind: "build", view })}
-        onBack={() => {
-          go({ kind: "source" });
-          refresh();
-        }}
-      />
+      <>
+        <SetupSteps current="review" />
+        <SeedReview
+          key={screen.view.draft_id}
+          view={screen.view}
+          debug={debug}
+          onApproved={(view) => go({ kind: "build", view })}
+          onBack={() => {
+            go({ kind: "source" });
+            refresh();
+          }}
+        />
+      </>
     );
   }
 
@@ -183,6 +191,7 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
     const failure = error ?? (view.last_failure ? failureText(view.last_failure) : null);
     return (
       <section>
+        <SetupSteps current="build" />
         <h2>Prepare the world</h2>
         <p className="muted">
           The app now makes the hidden part of the world: what the other characters want and hide,
@@ -210,38 +219,16 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
 
   return (
     <section>
-      <h2>New campaign from a document</h2>
-      <p className="muted">
-        Paste your Source Text, or choose a .md or .txt file. The app reads it and drafts the
-        Adventure Seed. You check the draft before anything else happens.
-      </p>
-      <label htmlFor="source">Source Text</label>
-      <textarea
-        id="source"
-        rows={10}
-        value={text}
-        disabled={job !== null}
-        onChange={(e) => setText(e.target.value)}
+      <SetupSteps current="source" />
+      <SourceStep
+        text={text}
+        onText={setText}
+        onFile={(file) => void loadFile(file)}
+        onDraft={() => void draft()}
+        busy={job !== null}
+        running={job === "draft" ? running : null}
+        error={error}
       />
-      <div className="row">
-        <input
-          type="file"
-          className="file"
-          accept=".md,.txt,text/markdown,text/plain"
-          aria-label="Choose a .md or .txt file"
-          disabled={job !== null}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void loadFile(file);
-            e.target.value = "";
-          }}
-        />
-        <button disabled={job !== null || !text.trim()} onClick={() => void draft()}>
-          Draft
-        </button>
-      </div>
-      {job === "draft" ? running : <p className="muted">A draft takes a few minutes.</p>}
-      {error && <p className="error">{error}</p>}
 
       <h2>Saved drafts</h2>
       {drafts.length === 0 ? (

@@ -440,8 +440,12 @@ fn offscreen_measures_the_seeded_event() {
 mod world_build {
     use serde_json::json;
     use threshold_core::{
-        build::{BuildCheck, BuildFailure, DebugEntry, Gap, GapKind, KnownFact, SeedDraft, Stage},
+        build::{
+            AgeMark, BuildCheck, BuildFailure, DebugEntry, Gap, GapKind, KnownFact, SeedDraft,
+            Stage,
+        },
         domain::{AdventureSeed, EffectEntry, EventEntry, FactEntry, GoalEntry, WorldSetup},
+        normalize,
     };
     use threshold_eval::world_build::{
         BuildRun, Calls, Expected, Shown, VoiceLine, fact_recall, false_past, is_public,
@@ -896,11 +900,14 @@ done = ["owns ferry", "bought ferry"]
         let mut draft = SeedDraft::new("text".into(), seed());
         // The model calls Gerrit's age stated (the list has none) and leaves
         // out Pim and Osric (the list states theirs).
-        draft.ages_stated = vec![
-            "Teodor Brandt".into(),
-            "Agathe Morrow".into(),
-            "Toll-Master".into(),
-        ];
+        for name in ["Teodor Brandt", "Agathe Morrow", "Toll-Master"] {
+            let mark = AgeMark {
+                drafted: None,
+                stated: true,
+                confirmed: None,
+            };
+            draft.ages.insert(normalize::name(name), mark);
+        }
         draft.knowledge.push(KnownFact {
             subject: "Teodor Brandt".into(),
             key: "ferry".into(),

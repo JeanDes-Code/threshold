@@ -155,7 +155,7 @@ fn hidden_facts(
         let staged = run_stage(gm, ctl, &draft.id, &call, |out| {
             checks::hidden_facts(roster, book, out)
         })?;
-        if let Some(Staged { output, drop }) = staged {
+        if let Some(Staged { output, drop, .. }) = staged {
             for (j, fact) in output.facts.iter().enumerate() {
                 if !drop.contains(&j) {
                     book.add(fact_entry(roster, fact, &fact.known_by));
@@ -301,7 +301,7 @@ fn world_events(
         checks::world_events(roster, out)
     })?;
     report(ctl, Stage::WorldEvents, 1, 1);
-    let Some(Staged { output, drop }) = staged else {
+    let Some(Staged { output, drop, .. }) = staged else {
         return Ok(vec![]);
     };
     Ok(output
@@ -365,7 +365,7 @@ fn start_state(
     let staged = run_stage(gm, ctl, &draft.id, &call, |out| {
         checks::start_state(roster, book, &draft.seed.start.place, out)
     })?;
-    let Staged { output, drop } = essential(Stage::StartState, staged)?;
+    let Staged { output, drop, .. } = essential(Stage::StartState, staged)?;
     report(ctl, Stage::StartState, 1, 1);
     Ok(output
         .placements
@@ -381,7 +381,7 @@ fn start_state(
 
 /// A checked NpcState answer, without its dropped items.
 fn npc_state_of(roster: &Roster, npc: &Member, staged: Staged<NpcOut, NpcItem>) -> NpcState {
-    let Staged { output, drop } = staged;
+    let Staged { output, drop, .. } = staged;
     let keep = |item| !drop.contains(&item);
     NpcState {
         goals: output

@@ -263,7 +263,9 @@ describe("draft commands", () => {
     const api = createApi(invoke);
     const seed = { premise: "p" } as unknown as AdventureSeed;
     await api.draftFromText("text");
-    await api.saveDraft("draft-1", seed, [], ["Sefa Lind"], ["Agathe Morrow"]);
+    await api.saveDraft("draft-1", seed, []);
+    await api.confirmAge("draft-1", "Sefa Lind");
+    await api.renameDraftEntity("draft-1", "Sefa Lind", "Sefa Marsh");
     await api.startBuild("draft-1");
     await api.cancelBuild();
     await api.begin();
@@ -271,15 +273,12 @@ describe("draft commands", () => {
     await api.getBuildDebug("draft-1");
     expect(calls).toEqual([
       { cmd: "draft_from_text", args: { text: "text" } },
+      // No list of ages: the core owns each confirmation.
+      { cmd: "save_draft", args: { draft_id: "draft-1", seed, knowledge: [] } },
+      { cmd: "confirm_age", args: { draft_id: "draft-1", name: "Sefa Lind" } },
       {
-        cmd: "save_draft",
-        args: {
-          draft_id: "draft-1",
-          seed,
-          knowledge: [],
-          ages_to_confirm: ["Sefa Lind"],
-          ages_stated: ["Agathe Morrow"],
-        },
+        cmd: "rename_draft_entity",
+        args: { draft_id: "draft-1", from: "Sefa Lind", to: "Sefa Marsh" },
       },
       { cmd: "start_build", args: { draft_id: "draft-1" } },
       { cmd: "cancel_build", args: undefined },

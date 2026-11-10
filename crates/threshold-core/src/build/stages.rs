@@ -6,8 +6,8 @@
 //! notes that code wrote. After the repair, an optional item that still
 //! fails is dropped; an essential part that still fails fails the stage.
 //! The runner applies in code the list and text caps that a stage schema
-//! declares: a list is cut to its cap, a text above its cap is a `Schema`
-//! problem of its item.
+//! declares: a list is cut to its cap and reported, a text above its cap is
+//! a `Schema` problem of its item.
 
 use std::{ops::Range, time::Instant};
 
@@ -121,7 +121,7 @@ impl StageItem for usize {
 }
 
 /// A path as a note shows it: `facts[3].text`.
-fn show(path: &[Step]) -> String {
+pub(crate) fn show(path: &[Step]) -> String {
     let mut out = String::new();
     for step in path {
         match step {
@@ -133,30 +133,35 @@ fn show(path: &[Step]) -> String {
     out
 }
 
-/// Applies the caps that `schema` declares to `value`, as the model server
-/// does when it reads the schema; serde ignores them. A list above its
-/// `maxItems` is cut to that length. Each text above its `maxLength`, in
-/// characters, is returned with its path and its cap.
-fn apply_caps(schema: &Value, value: &mut Value) -> Vec<(Vec<Step>, u64)> {
-    let mut long = vec![];
-    walk_caps(schema, schema, value, &mut vec![], &mut long);
-    long
+/// A path into a stage output and a cap.
+pub(crate) type CapAt = (Vec<Step>, u64);
+
+/// What `apply_caps` found: each text above its cap, and each list it cut.
+#[derive(Default)]
+struct Caps {
+    long: Vec<CapAt>,
+    cut: Vec<CapAt>,
 }
 
-fn walk_caps(
-    root: &Value,
-    node: &Value,
-    value: &mut Value,
-    path: &mut Vec<Step>,
-    long: &mut Vec<(Vec<Step>, u64)>,
-) {
+/// Applies the caps that `schema` declares to `value`, as the model server
+/// does when it reads the schema; serde ignores them. A list above its
+/// `maxItems` is cut to that length and returned with its path and its cap.
+/// Each text above its `maxLength`, in characters, is returned with its path
+/// and its cap.
+fn apply_caps(schema: &Value, value: &mut Value) -> Caps {
+    let mut caps = Caps::default();
+    walk_caps(schema, schema, value, &mut vec![], &mut caps);
+    caps
+}
+
+fn walk_caps(root: &Value, node: &Value, value: &mut Value, path: &mut Vec<Step>, caps: &mut Caps) {
     if let Some(def) = node
         .get("$ref")
         .and_then(Value::as_str)
         .and_then(|r| r.strip_prefix('#'))
         .and_then(|pointer| root.pointer(pointer))
     {
-        walk_caps(root, def, value, path, long);
+        walk_caps(root, def, value, path, caps);
     }
     for key in ["anyOf", "oneOf", "allOf"] {
         for branch in node
@@ -165,7 +170,7 @@ fn walk_caps(
             .into_iter()
             .flatten()
         {
-            walk_caps(root, branch, value, path, long);
+            walk_caps(root, branch, value, path, caps);
         }
     }
     match value {
@@ -173,17 +178,20 @@ fn walk_caps(
             if let Some(max) = node.get("maxLength").and_then(Value::as_u64)
                 && text.chars().count() as u64 > max
             {
-                long.push((path.clone(), max));
+                caps.long.push((path.clone(), max));
             }
         }
         Value::Array(list) => {
-            if let Some(max) = node.get("maxItems").and_then(Value::as_u64) {
+            if let Some(max) = node.get("maxItems").and_then(Value::as_u64)
+                && list.len() as u64 > max
+            {
                 list.truncate(usize::try_from(max).unwrap_or(usize::MAX));
+                caps.cut.push((path.clone(), max));
             }
             if let Some(items) = node.get("items").filter(|i| i.is_object()) {
                 for (i, item) in list.iter_mut().enumerate() {
                     path.push(Step::Index(i));
-                    walk_caps(root, items, item, path, long);
+                    walk_caps(root, items, item, path, caps);
                     path.pop();
                 }
             }
@@ -197,7 +205,7 @@ fn walk_caps(
             {
                 if let Some(field) = fields.get_mut(name) {
                     path.push(Step::Field(name.clone()));
-                    walk_caps(root, sub, field, path, long);
+                    walk_caps(root, sub, field, path, caps);
                     path.pop();
                 }
             }
@@ -206,10 +214,12 @@ fn walk_caps(
     }
 }
 
-/// A stage output that passed, and the optional items to drop from it.
+/// A stage output that passed, the optional items to drop from it, and the
+/// lists the runner cut at their cap.
 pub(crate) struct Staged<T, I> {
     pub output: T,
     pub drop: Vec<I>,
+    pub cut: Vec<CapAt>,
 }
 
 /// Sends `call`, checks its output with `check`, and sends one repair call
@@ -351,6 +361,7 @@ struct Attempt<T, I> {
     /// `None` when the output does not parse.
     output: Option<T>,
     problems: Vec<Problem<I>>,
+    cut: Vec<CapAt>,
 }
 
 impl<T, I> Attempt<T, I> {
@@ -363,7 +374,8 @@ impl<T, I> Attempt<T, I> {
 
     fn into_staged(self) -> Option<Staged<T, I>> {
         let drop = self.problems.into_iter().filter_map(|p| p.item).collect();
-        self.output.map(|output| Staged { output, drop })
+        let cut = self.cut;
+        self.output.map(|output| Staged { output, drop, cut })
     }
 }
 
@@ -418,19 +430,21 @@ where
                 BuildCheck::Schema,
                 "the answer is far longer than the schema allows",
             )],
+            cut: vec![],
         });
     }
     let parsed = serde_json::from_str::<Value>(&raw)
         .ok()
         .and_then(|mut value| {
-            let long = apply_caps(&call.schema, &mut value);
+            let caps = apply_caps(&call.schema, &mut value);
             serde_json::from_value::<T>(value)
                 .ok()
-                .map(|out| (out, long))
+                .map(|out| (out, caps))
         });
     Ok(match parsed {
-        Some((output, long)) => {
-            let mut problems: Vec<Problem<I>> = long
+        Some((output, caps)) => {
+            let mut problems: Vec<Problem<I>> = caps
+                .long
                 .into_iter()
                 .map(|(path, max)| {
                     let note = format!("{} is longer than {max} characters", show(&path));
@@ -444,6 +458,7 @@ where
             Attempt {
                 problems,
                 output: Some(output),
+                cut: caps.cut,
             }
         }
         None => Attempt {
@@ -452,6 +467,7 @@ where
                 BuildCheck::Schema,
                 "the answer is not JSON that matches the schema",
             )],
+            cut: vec![],
         },
     })
 }
@@ -886,6 +902,12 @@ mod tests {
         assert_eq!(texts, ["a", "b"]);
         assert_eq!(staged.output.notes[0].tags, ["x"]);
         assert!(staged.drop.is_empty());
+        // Each cut list is reported with its path and its cap.
+        let cut: Vec<(String, u64)> = staged.cut.iter().map(|(p, c)| (show(p), *c)).collect();
+        assert_eq!(
+            cut,
+            [("notes".to_owned(), 2), ("notes[0].tags".to_owned(), 1)]
+        );
         // Cutting a list needs no repair.
         assert_eq!(steps.len(), 1);
     }
@@ -907,6 +929,8 @@ mod tests {
         ]);
         let staged = run_capped(&gm, Need::Optional).0.unwrap().unwrap();
         assert_eq!(staged.drop, vec![0]);
+        // A list at its cap is not cut.
+        assert!(staged.cut.is_empty());
 
         // A text above its cap outside any item fails an essential call.
         let answer = || capped("A title far above twelve", &[]);

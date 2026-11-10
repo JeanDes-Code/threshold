@@ -1,5 +1,6 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
+    fmt,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -33,14 +34,15 @@ pub struct SeedDraft {
     pub seed: AdventureSeed,
     /// PC Knowledge: the PC is the implied holder of each fact.
     pub knowledge: Vec<KnownFact>,
-    /// Main names whose age the Player has not confirmed yet. A new draft
-    /// lists every character, the PC included: an age never passes on the
-    /// model's word.
-    pub ages_to_confirm: Vec<String>,
-    /// Main names whose age the model says the Source Text states.
-    /// Information for the Player only: it never removes a confirmation.
+    /// The age of each character, under `normalize::name` of its main
+    /// name: what the draft gave, and what the Player confirmed. Only
+    /// `confirm_age` writes a confirmation, so a draft file from before this
+    /// field loads with every age unconfirmed.
     #[serde(default)]
-    pub ages_stated: Vec<String>,
+    pub ages: BTreeMap<String, AgeMark>,
+    /// The lists that the draft run cut at their cap.
+    #[serde(default)]
+    pub cut: Vec<Cut>,
     #[serde(default)]
     pub last_failure: Option<BuildFailure>,
     /// The Campaign file the build wrote; set when the state is `Built`.
@@ -57,13 +59,79 @@ impl SeedDraft {
             source_text,
             seed,
             knowledge: vec![],
-            ages_to_confirm: vec![],
-            ages_stated: vec![],
+            ages: BTreeMap::new(),
+            cut: vec![],
             last_failure: None,
             campaign_file: None,
         }
     }
 }
+
+/// The age of one character (data shape 3.8). An age is confirmed when
+/// `confirmed` holds the current age, so any change of the age removes the
+/// confirmation, whatever path changed it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgeMark {
+    /// The age the draft stage gave; `None` for an entry the Player added.
+    pub drafted: Option<u16>,
+    /// The model says the Source Text states the age. Information only.
+    pub stated: bool,
+    /// The age the Player confirmed through `confirm_age`.
+    pub confirmed: Option<u16>,
+}
+
+/// Where the current age of a character comes from. Derived, never stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgeSource {
+    /// The draft's age, untouched, and the model says the text states it.
+    FromText,
+    /// The draft's age, untouched, and the model proposed it.
+    Proposed,
+    /// The Player changed the age, or added the entry.
+    Edited,
+}
+
+/// One character's age as the review shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgeLine {
+    /// The main name, as the seed writes it.
+    pub name: String,
+    pub source: AgeSource,
+    pub confirmed: bool,
+}
+
+/// A list that the draft run cut at its cap. `at` has the path form of
+/// `Gap.at`: `entities`, `knowledge`, `entities[2].other_names`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Cut {
+    pub at: String,
+    pub cap: u32,
+}
+
+/// Why a review action changed nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewError {
+    /// No entry of the right kind has this main name.
+    UnknownName,
+    /// Another entry has this name, main or other, or it is "world".
+    NameInUse,
+    /// The new name is empty, or the character has no age to confirm.
+    Empty,
+}
+
+impl fmt::Display for ReviewError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::UnknownName => "no entry of the draft has that name",
+            Self::NameInUse => "another entry has that name",
+            Self::Empty => "the value is empty",
+        })
+    }
+}
+
+impl std::error::Error for ReviewError {}
 
 /// A fresh draft id, `draft-<nanos>`, from the system clock.
 pub(crate) fn new_draft_id() -> String {
@@ -92,8 +160,8 @@ pub enum GapKind {
     Missing,
     /// A character has no age.
     AgeMissing,
-    /// The Player has not confirmed the age yet. A new draft lists every
-    /// character, whatever the model says about the text.
+    /// The Player has not confirmed the current age through
+    /// `confirm_age`, whatever the model says about the text.
     AgeUnconfirmed,
     /// An age is below the seed's `min_age`.
     AgeBelowMin,
@@ -140,11 +208,6 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
     let mut out = Vec::new();
     let mut gap = |kind, at: String| out.push(Gap { kind, at });
     let below_min = |age: u16| seed.min_age.is_some_and(|min| age < min);
-    let to_confirm: HashSet<String> = draft
-        .ages_to_confirm
-        .iter()
-        .map(|n| normalize::name(n))
-        .collect();
     let roster = Roster::of(seed);
 
     for (text, at) in [
@@ -163,7 +226,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
     if below_min(pc.age) {
         gap(GapKind::AgeBelowMin, "pc.age".into());
     }
-    if to_confirm.contains(&normalize::name(&pc.name)) {
+    if age_waits(draft, &pc.name, Some(pc.age)) {
         gap(GapKind::AgeUnconfirmed, "pc.age".into());
     }
     let pc_names: HashSet<String> = names(&pc.name, &pc.other_names)
@@ -226,7 +289,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
                 if below_min(age) {
                     gap(GapKind::AgeBelowMin, at("age"));
                 }
-                if to_confirm.contains(&normalize::name(&entity.name)) {
+                if age_waits(draft, &entity.name, Some(age)) {
                     gap(GapKind::AgeUnconfirmed, at("age"));
                 }
             }
@@ -315,24 +378,187 @@ pub fn approve(draft: &mut SeedDraft) -> Result<(), Vec<Gap>> {
 }
 
 /// A Player edit of the draft (the `save_draft` command): it replaces the
-/// seed, the knowledge, the ages to confirm and the ages the model calls
-/// stated (under the rows' current names), and returns the draft to
-/// `Draft`. The last failure and the Campaign file belong to the build of
-/// the content it replaces, so both are cleared. The caller then saves.
-pub fn apply_edit(
-    draft: &mut SeedDraft,
-    seed: AdventureSeed,
-    knowledge: Vec<KnownFact>,
-    ages_to_confirm: Vec<String>,
-    ages_stated: Vec<String>,
-) {
+/// seed and the knowledge, and returns the draft to `Draft`. It cannot
+/// confirm an age: it does not take the age marks. A mark whose character
+/// left the roster is dropped, so a name that comes back is a new entry and
+/// needs a new confirmation. The last failure and the Campaign file belong
+/// to the build of the content it replaces, so both are cleared. `cut`
+/// stays. The caller then saves.
+pub fn apply_edit(draft: &mut SeedDraft, seed: AdventureSeed, knowledge: Vec<KnownFact>) {
     draft.seed = seed;
     draft.knowledge = knowledge;
-    draft.ages_to_confirm = ages_to_confirm;
-    draft.ages_stated = ages_stated;
+    let names: HashSet<String> = characters(&draft.seed)
+        .map(|(name, _)| normalize::name(name))
+        .collect();
+    draft.ages.retain(|name, _| names.contains(name));
+    edited(draft);
+}
+
+/// Confirms the current age of the character whose main name is `name`
+/// (through `normalize::name`). The only writer of `AgeMark.confirmed`.
+pub fn confirm_age(draft: &mut SeedDraft, name: &str) -> Result<(), ReviewError> {
+    let key = normalize::name(name);
+    let (_, age) = characters(&draft.seed)
+        .find(|(main, _)| !key.is_empty() && normalize::name(main) == key)
+        .ok_or(ReviewError::UnknownName)?;
+    let age = age.ok_or(ReviewError::Empty)?;
+    draft.ages.entry(key).or_default().confirmed = Some(age);
+    Ok(())
+}
+
+/// Renames the entry whose main name is `from` (through `normalize::name`)
+/// to `to`, in every field that names it: the main name, each `known_to`,
+/// `start.place`, `start.present`, the subject of each known, decided and
+/// proposed fact, and the key of its age mark. The old name, with the same
+/// spelling and as whole words, also changes in the text of each known fact
+/// and in `start.situation`. A name that another entry has, main or other,
+/// is refused, and the draft does not change. A change of case or accent
+/// of the same name is allowed.
+pub fn rename(draft: &mut SeedDraft, from: &str, to: &str) -> Result<(), ReviewError> {
+    let to = to.trim();
+    let (from_key, to_key) = (normalize::name(from), normalize::name(to));
+    if to_key.is_empty() {
+        return Err(ReviewError::Empty);
+    }
+    let seed = &draft.seed;
+    // `None`: the PC; `Some(i)`: `entities[i]`.
+    let owner = if !from_key.is_empty() && normalize::name(&seed.pc.name) == from_key {
+        None
+    } else {
+        let found = seed
+            .entities
+            .iter()
+            .position(|e| !from_key.is_empty() && normalize::name(&e.name) == from_key);
+        Some(found.ok_or(ReviewError::UnknownName)?)
+    };
+    let pc = std::iter::once((None, &seed.pc.name, &seed.pc.other_names));
+    let entities = seed
+        .entities
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (Some(i), &e.name, &e.other_names));
+    let taken = pc.chain(entities).any(|(entry, main, others)| {
+        let main_taken = entry != owner && normalize::name(main) == to_key;
+        main_taken || others.iter().any(|o| normalize::name(&o.name) == to_key)
+    });
+    if taken || to_key == "world" {
+        return Err(ReviewError::NameInUse);
+    }
+
+    let old = match owner {
+        None => std::mem::replace(&mut draft.seed.pc.name, to.to_owned()),
+        Some(i) => std::mem::replace(&mut draft.seed.entities[i].name, to.to_owned()),
+    };
+    let follow = |name: &mut String| {
+        if normalize::name(name) == from_key {
+            *name = to.to_owned();
+        }
+    };
+    let seed = &mut draft.seed;
+    let others = seed.pc.other_names.iter_mut().chain(
+        seed.entities
+            .iter_mut()
+            .flat_map(|e| e.other_names.iter_mut()),
+    );
+    others.flat_map(|o| o.known_to.iter_mut()).for_each(follow);
+    follow(&mut seed.start.place);
+    seed.start.present.iter_mut().for_each(follow);
+    let facts = seed.decided.iter_mut().chain(seed.proposed.iter_mut());
+    facts.for_each(|f| follow(&mut f.subject));
+    seed.start.situation = replace_words(&seed.start.situation, &old, to);
+    for fact in &mut draft.knowledge {
+        follow(&mut fact.subject);
+        fact.text = replace_words(&fact.text, &old, to);
+    }
+    if let Some(mark) = draft.ages.remove(&from_key) {
+        draft.ages.insert(to_key, mark);
+    }
+    edited(draft);
+    Ok(())
+}
+
+/// The age of each character, the PC first, in roster order.
+pub fn age_lines(draft: &SeedDraft) -> Vec<AgeLine> {
+    characters(&draft.seed)
+        .map(|(name, age)| {
+            let mark = draft.ages.get(&normalize::name(name));
+            let source = match mark {
+                Some(m) if m.drafted.is_some() && m.drafted == age => {
+                    if m.stated {
+                        AgeSource::FromText
+                    } else {
+                        AgeSource::Proposed
+                    }
+                }
+                _ => AgeSource::Edited,
+            };
+            AgeLine {
+                name: name.to_owned(),
+                source,
+                confirmed: age_confirmed(draft, name, age),
+            }
+        })
+        .collect()
+}
+
+/// A Player edit returns the draft to `Draft`. The last failure and the
+/// Campaign file belong to the content it replaces.
+fn edited(draft: &mut SeedDraft) {
     draft.state = DraftState::Draft;
     draft.last_failure = None;
     draft.campaign_file = None;
+}
+
+/// True when the Player confirmed `age` for the character `name`. A
+/// character with no name is a `Missing` gap: its age waits for the name.
+fn age_waits(draft: &SeedDraft, name: &str, age: Option<u16>) -> bool {
+    !normalize::name(name).is_empty() && !age_confirmed(draft, name, age)
+}
+
+/// True when the Player confirmed `age` for the character `name`.
+fn age_confirmed(draft: &SeedDraft, name: &str, age: Option<u16>) -> bool {
+    age.is_some()
+        && draft
+            .ages
+            .get(&normalize::name(name))
+            .is_some_and(|m| m.confirmed == age)
+}
+
+/// The main name and age of each character, the PC first. An entry of kind
+/// `Pc` counts: it is a gap, and its age still needs a confirmation.
+fn characters(seed: &AdventureSeed) -> impl Iterator<Item = (&str, Option<u16>)> {
+    let pc = std::iter::once((seed.pc.name.as_str(), Some(seed.pc.age)));
+    let entities = seed
+        .entities
+        .iter()
+        .filter(|e| is_character(e.kind))
+        .map(|e| (e.name.as_str(), e.age));
+    pc.chain(entities)
+}
+
+/// `text` with each whole-word `old`, in the same spelling, replaced by
+/// `new`. A word is whole when no letter or digit touches it.
+fn replace_words(text: &str, old: &str, new: &str) -> String {
+    if old.is_empty() {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = 0;
+    for (at, _) in text.match_indices(old) {
+        if at < rest {
+            continue;
+        }
+        let before = text[..at].chars().next_back();
+        let after = text[at + old.len()..].chars().next();
+        if before.is_some_and(char::is_alphanumeric) || after.is_some_and(char::is_alphanumeric) {
+            continue;
+        }
+        out.push_str(&text[rest..at]);
+        out.push_str(new);
+        rest = at + old.len();
+    }
+    out.push_str(&text[rest..]);
+    out
 }
 
 fn is_character(kind: EntityKind) -> bool {
