@@ -5,7 +5,7 @@
 //! Five rules live here: who the PC can name (3.5), who is here and the
 //! Moment of each Turn (3.3), the state of each Open Item (3.4), and which
 //! Turn is a decision of the PC (3.2). It also resolves each speech mark
-//! (3.1), because that needs `WorldView::entities_by_name`.
+//! (3.1), because that needs the names of `WorldView`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -453,11 +453,44 @@ pub fn unnameable_names(
     }
     view.entities
         .iter()
-        .flat_map(|e| std::iter::once(&e.name).chain(&e.other_names))
+        .flat_map(|e| {
+            std::iter::once(e.name.clone())
+                .chain(e.other_names.iter().cloned())
+                .chain(first_names(e).map(str::to_owned))
+        })
         .filter(|name| hides_a_name(view, name, &named, &known))
-        .map(|name| normalize::name(name))
+        .map(|name| normalize::name(&name))
         .filter(|name| !name.is_empty())
         .collect()
+}
+
+/// The leading words of a character's main name, through `normalize::name`,
+/// the whole name left out: "agathe" for Agathe Morrow. A narrator often
+/// tags a speaker so. Nothing for a place, a group or an object.
+fn first_names(entity: &Entity) -> impl Iterator<Item = &str> {
+    let character = matches!(entity.kind, EntityKind::Npc | EntityKind::Pc);
+    let name = entity.norm_name.as_str();
+    name.match_indices(' ')
+        .filter(move |_| character)
+        .map(move |(at, _)| &name[..at])
+}
+
+/// True when `tag`, through `normalize::name`, is the main name of `entity`
+/// or its first names (`first_names`).
+fn is_main_name(entity: &Entity, tag: &str) -> bool {
+    entity.norm_name == tag || first_names(entity).any(|first| first == tag)
+}
+
+/// The entities a speech tag names: those of `WorldView::entities_by_name`,
+/// and each character whose first names the tag is (`first_names`).
+fn tagged<'a>(view: &'a WorldView, tag: &str) -> impl Iterator<Item = &'a Entity> {
+    let tag = normalize::name(tag);
+    view.entities.iter().filter(move |e| {
+        is_main_name(e, &tag)
+            || e.other_names
+                .iter()
+                .any(|other| normalize::name(other) == tag)
+    })
 }
 
 /// The entities the PC can name (data shape 3.5): the PC; an Adventure Seed
@@ -514,10 +547,11 @@ fn named(
 }
 
 /// The speaker of a speech mark (data shape 3.1), or `None`: the line then
-/// stays prose. `name` must give exactly one entity, of kind NPC, present
-/// in the Turn, whom the PC can name; and it must be a name the PC knows
-/// for it: the main name, or an other name the PC holds the Belief for.
-/// A hidden other name never resolves, so a bubble cannot reveal it.
+/// stays prose. `name` must give exactly one entity (`tagged`), of kind
+/// NPC, present in the Turn, whom the PC can name; and it must be a name
+/// the PC knows for it: the main name or its first names, or an other name
+/// the PC holds the Belief for. A hidden other name never resolves, so a
+/// bubble cannot reveal it.
 fn speaker(
     view: &WorldView,
     name: &str,
@@ -525,7 +559,7 @@ fn speaker(
     named: &HashSet<EntityId>,
     known: &[Known],
 ) -> Option<EntityId> {
-    let mut found = view.entities_by_name(name);
+    let mut found = tagged(view, name);
     let entity = found.next()?;
     if found.next().is_some()
         || entity.kind != EntityKind::Npc
@@ -538,8 +572,8 @@ fn speaker(
 }
 
 /// True when the PC can call `entity` by `name`: the PC can name the entity
-/// (data shape 3.5), and `name` is its main name or an other name the PC
-/// holds the Belief for.
+/// (data shape 3.5), and `name` is its main name, its first names, or an
+/// other name the PC holds the Belief for.
 fn pc_knows_the_name(
     entity: &Entity,
     name: &str,
@@ -548,7 +582,7 @@ fn pc_knows_the_name(
 ) -> bool {
     let tag = normalize::name(name);
     named.contains(&entity.id)
-        && (entity.norm_name == tag
+        && (is_main_name(entity, &tag)
             || known
                 .iter()
                 .filter(|k| k.id == entity.id)
@@ -557,13 +591,13 @@ fn pc_knows_the_name(
 }
 
 /// True when the tag of a mark that did not resolve is a name of an entity
-/// (main name or other name) that the PC cannot call by that name. The line
-/// then loses its tag, so the story never prints a name the PC does not
-/// know (data shape 3.1, as changed after review). A tag that names no
-/// entity stays: it tells the Player nothing about the world.
+/// (`tagged`: main name, first names or other name) that the PC cannot
+/// call by that name. The line then loses its tag, so the story never
+/// prints a name the PC does not know (data shape 3.1, as changed after
+/// review). A tag that names no entity stays: it tells the Player nothing
+/// about the world.
 fn hides_a_name(view: &WorldView, name: &str, named: &HashSet<EntityId>, known: &[Known]) -> bool {
-    view.entities_by_name(name)
-        .any(|entity| !pc_knows_the_name(entity, name, named, known))
+    tagged(view, name).any(|entity| !pc_knows_the_name(entity, name, named, known))
 }
 
 /// The PC's `location` after the Turn of `seq` `at`: the fact that was live

@@ -80,6 +80,8 @@ Any other line is a `Prose` block. A line that the PC speaks is prose: the Inten
 
 This covers the tag only. A name the narrator writes inside prose is not covered (ADR 0006).
 
+**Changed after QA (2026-11-10).** The narrator tags a speaker by the first name: `Agathe:` for Agathe Morrow. That tag named no entity, so the line stayed plain text with its tag, and a stranger's first name printed. A tag now also names each character (PC or NPC) whose main name starts with the tag's words, through `normalize::name`: "agathe" names Agathe Morrow. Rules 1 to 3 and the removal rules above apply to that match as to a main name, and `world::unnameable_names` holds those first names too.
+
 **Why.** It adds no model call and no proposal field. The cost is about three output tokens for each spoken line, which is an estimate and not a measurement. The speaker is the narrator's own statement, so it is as certain as the prose. Recent Turns in the prompt show the mark, and that helps the model keep the format. When the Gemma model drifts, the parser finds no mark and the line stays plain text.
 
 Rejected:

@@ -2,7 +2,10 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use serde_json::Value;
 use support::hidden::*;
@@ -16,6 +19,7 @@ use threshold_core::{
         Block, JournalView, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view,
         entity_card, journal_view, pins_resolving_to, play_view,
     },
+    world::unnameable_names,
 };
 
 /// The town fixture after one Turn that gave Wren a fact Wren saw and a
@@ -310,6 +314,57 @@ fn tag_shared_with_a_name_the_pc_cannot_name_is_removed() {
     let got = blocks(&view, said);
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(prose(&got[0]), r#""Salt, fresh salt.""#);
+}
+
+/// A narrator often tags a speaker by the first name of a longer main name:
+/// `Agathe:` for Agathe Morrow. That tag resolves when the PC can name the
+/// NPC. When the PC cannot, the tag goes, on the screens and in the stream
+/// filter's set, as a full name would.
+#[test]
+fn speech_tag_by_first_name_resolves_or_is_removed() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let met = w.play(
+        "I wait.",
+        &observe(),
+        0,
+        newcomer("Marta Holt", "gate square", &[ada]),
+    );
+    w.narrate(met, "Marta Holt sets down a basket.");
+    w.play(
+        "I wait.",
+        &observe(),
+        0,
+        newcomer("Sola Brandt", "gate square", &[ada]),
+    );
+    let said = w.play("I listen.", &observe(), 0, vec![]);
+    w.narrate(
+        said,
+        "Marta: \"Fresh bread.\"\n\nSola: \"You do not know me.\"\n\nMarta Holt: \"Still warm.\"",
+    );
+    let marta = id_of(&w.view(), "Marta Holt");
+    let view = view_of(&w);
+    let got = blocks(&view, said);
+    assert_eq!(got.len(), 3, "{got:?}");
+    for (block, words) in [(&got[0], "Fresh bread."), (&got[2], "Still warm.")] {
+        let Block::Speech { speaker, parts } = block else {
+            panic!("Marta speaks: {block:?}");
+        };
+        assert_eq!(*speaker, named(marta, EntityKind::Npc, "Marta Holt"));
+        assert_eq!(text(parts), words);
+    }
+    assert_eq!(prose(&got[1]), r#""You do not know me.""#);
+
+    let turns = w.store.turns(w.campaign).unwrap();
+    let set = unnameable_names(&w.view(), &turns, &HashSet::new());
+    assert!(
+        set.contains("sola") && set.contains("sola brandt"),
+        "{set:?}"
+    );
+    assert!(
+        !set.contains("marta") && !set.contains("marta holt"),
+        "{set:?}"
+    );
 }
 
 /// Review Focus 1: accents and case in a speech tag and in a name link.
