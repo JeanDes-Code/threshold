@@ -756,10 +756,13 @@ fn draft_flow_end_to_end() {
         [(Stage::Commit, 0, 1), (Stage::Commit, 1, 1)]
     );
     assert!(Path::new(&summary.db_path).exists());
-    assert_eq!(
-        rig.session().list_campaigns(),
-        vec![summary.db_path.clone()]
-    );
+    let paths: Vec<String> = rig
+        .session()
+        .list_campaigns()
+        .into_iter()
+        .map(|card| card.db_path)
+        .collect();
+    assert_eq!(paths, vec![summary.db_path.clone()]);
     assert_eq!(rig.drafts.get_draft(&id).unwrap().state, DraftState::Built);
 
     // The Campaign is the open one: Begin plays its Opening Turn.
@@ -1052,7 +1055,8 @@ fn part_files_are_deleted_at_start() {
         .collect();
     left.sort();
     assert!(left.is_empty(), "{left:?}");
-    assert_eq!(s.list_campaigns(), vec![kept]);
+    let paths: Vec<String> = s.list_campaigns().into_iter().map(|c| c.db_path).collect();
+    assert_eq!(paths, vec![kept]);
 }
 
 #[test]

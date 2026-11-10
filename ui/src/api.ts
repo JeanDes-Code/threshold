@@ -19,6 +19,19 @@ export interface CampaignSummary {
   needs_begin: boolean;
 }
 
+/** One Campaign file on the home screen. A card with a `problem` cannot open. */
+export interface CampaignCard {
+  db_path: string;
+  pc_name: string;
+  premise: string;
+  /** The change time of the file, in ms since the epoch. */
+  last_played_ms: number;
+  /** The Play and Correction Turns that stand. */
+  turn_count: number;
+  needs_begin: boolean;
+  problem: string | null;
+}
+
 /** A committed Turn. `narration` is null when the narration failed after the Commit. */
 export interface TurnSummary {
   turn_id: number;
@@ -445,7 +458,8 @@ export function createApi(invoke: Invoke) {
     /** The Play screen, from PC Knowledge only. Call it after a Turn ends, never during one. */
     getPlayView: () => invoke<PlayView>("get_play_view"),
     modelStatus: () => invoke<string>("model_status"),
-    listCampaigns: () => invoke<string[]>("list_campaigns"),
+    /** The home cards, the latest played first. */
+    listCampaigns: () => invoke<CampaignCard[]>("list_campaigns"),
     openCampaign: (dbPath: string) => invoke<CampaignSummary>("open_campaign", { db_path: dbPath }),
     askOoc: (text: string) => invoke<string>("ask_ooc", { text }),
     renarrate: (turnId: number) => invoke<string>("renarrate", { turn_id: turnId }),

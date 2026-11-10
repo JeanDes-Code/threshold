@@ -5,15 +5,8 @@ use rusqlite::Connection;
 /// there is no migration, and the file stays as it is.
 pub(super) fn apply(db: &Connection) -> Result<(), StoreError> {
     let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if version > SCHEMA_VERSION {
-        return Err(StoreError::Invalid(format!(
-            "database schema version {version} is newer than supported version {SCHEMA_VERSION}"
-        )));
-    }
-    if version != 0 && version < SCHEMA_VERSION {
-        return Err(StoreError::Invalid(format!(
-            "this campaign file uses schema version {version}; this build opens version {SCHEMA_VERSION} only and does not migrate older files"
-        )));
+    if version != 0 && version != SCHEMA_VERSION {
+        return Err(StoreError::Version(version));
     }
     db.execute_batch("PRAGMA foreign_keys=ON;")?;
     if version == 0 {

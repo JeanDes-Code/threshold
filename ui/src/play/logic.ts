@@ -2,7 +2,8 @@
 
 import type { KnownLine, NameRef, PlayView, StoryTurn } from "../api";
 
-export type TurnPhase = "idle" | "deciding" | "narrating";
+/** "answering": the GM answers an out-of-character question; no Turn runs. */
+export type TurnPhase = "idle" | "deciding" | "narrating" | "answering";
 
 export type StoryItem = { kind: "turn"; turn: StoryTurn } | { kind: "stream"; text: string };
 
@@ -19,10 +20,32 @@ export function nameText(who: NameRef): string {
   return who.name ?? "unknown";
 }
 
-/** The GM decides until the first chunk arrives, then narrates. */
-export function turnPhase(busy: boolean, stream: string): TurnPhase {
+/**
+ * The GM decides until the first chunk arrives, then narrates. A busy
+ * screen with no stream at all is an out-of-character question.
+ */
+export function turnPhase(busy: boolean, stream: string | null): TurnPhase {
   if (!busy) return "idle";
+  if (stream === null) return "answering";
   return stream === "" ? "deciding" : "narrating";
+}
+
+/** The words of the action bar for each phase. */
+export const PHASE_TEXT: Record<TurnPhase, string> = {
+  idle: "",
+  deciding: "The GM decides",
+  narrating: "The GM narrates",
+  answering: "The GM answers out of character",
+};
+
+/** "Correct last Turn" opens only on a standing Play Turn, and never while a Turn runs. */
+export function canOpenCorrection(canCorrect: boolean, busy: boolean): boolean {
+  return canCorrect && !busy;
+}
+
+/** The stream as the story shows it: a quiet "…" until the first chunk. */
+export function streamShown(text: string): { text: string; waiting: boolean } {
+  return text === "" ? { text: "…", waiting: true } : { text, waiting: false };
 }
 
 /** True when the Player has not scrolled up from the bottom of the story. */

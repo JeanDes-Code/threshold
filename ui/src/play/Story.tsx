@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { rollText, type Block, type Part, type StoryTurn } from "../api";
-import { nameText, npcColor, shouldFollow, type StoryItem } from "./logic";
+import { nameText, npcColor, shouldFollow, streamShown, type StoryItem } from "./logic";
 
 interface Props {
   items: StoryItem[];
@@ -41,14 +41,22 @@ export default function Story({ items, pendingIntent, onName, onRenarrate, busy 
           ) : (
             <article key="stream" className="play-turn play-turn--live" aria-live="polite">
               {pendingIntent && <Intent text={pendingIntent} />}
-              <div className="play-stream">
-                {item.text}
-                <span className="play-stream__caret" aria-hidden="true" />
-              </div>
+              <Stream text={item.text} />
             </article>
           ),
         )}
       </div>
+    </div>
+  );
+}
+
+/** The raw Narration while it streams; a quiet "…" before its first chunk. */
+function Stream({ text }: { text: string }) {
+  const shown = streamShown(text);
+  return (
+    <div className={shown.waiting ? "play-stream play-stream--waiting" : "play-stream"}>
+      {shown.waiting ? <span aria-label="The GM is deciding">{shown.text}</span> : shown.text}
+      <span className="play-stream__caret" aria-hidden="true" />
     </div>
   );
 }

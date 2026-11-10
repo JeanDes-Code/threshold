@@ -15,18 +15,29 @@ pub type TurnId = u64;
 
 /// The schema version of a Campaign file. An older file is refused, with no
 /// migration.
-pub(crate) const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 3;
 pub type OpId = String;
 
 #[derive(Debug)]
 pub enum StoreError {
     Database(String),
     Invalid(String),
+    /// A Campaign file of another schema version. This build opens
+    /// `SCHEMA_VERSION` only and migrates nothing.
+    Version(u32),
 }
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Database(s) | Self::Invalid(s) => f.write_str(s),
+            Self::Version(found) if *found > SCHEMA_VERSION => write!(
+                f,
+                "database schema version {found} is newer than supported version {SCHEMA_VERSION}"
+            ),
+            Self::Version(found) => write!(
+                f,
+                "this campaign file uses schema version {found}; this build opens version {SCHEMA_VERSION} only and does not migrate older files"
+            ),
         }
     }
 }
@@ -275,6 +286,75 @@ pub struct DebugEntry {
 }
 pub struct Store {
     db: Connection,
+}
+
+/// What the home screen shows of a Campaign file, read without opening it
+/// for play.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CampaignPeek {
+    pub pc_name: String,
+    pub premise: String,
+    /// The Play and Correction Turns that stand. The Opening and the Setup
+    /// Turns do not count, nor a reverted Turn.
+    pub turn_count: u32,
+    /// No Opening Turn and no Play Turn yet.
+    pub needs_begin: bool,
+}
+
+/// Reads the last Campaign of a file for the home screen. It opens the file
+/// read-only, runs no migration and writes nothing. Any schema version but
+/// `SCHEMA_VERSION` is refused with `StoreError::Version`.
+pub fn peek(path: &Path) -> Result<CampaignPeek, StoreError> {
+    let not_ours = || {
+        StoreError::Invalid(format!(
+            "{} is not a Threshold campaign file",
+            path.display()
+        ))
+    };
+    if !path.is_file() {
+        return Err(StoreError::Invalid(format!(
+            "no file at {}",
+            path.display()
+        )));
+    }
+    let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let version: u32 = db
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(|_| not_ours())?;
+    if version == 0 {
+        return Err(not_ours());
+    }
+    if version != SCHEMA_VERSION {
+        return Err(StoreError::Version(version));
+    }
+    let store = Store { db };
+    let campaign = *store
+        .campaigns()
+        .map_err(|_| not_ours())?
+        .last()
+        .ok_or_else(|| StoreError::Invalid("the file holds no campaign".into()))?;
+    let seed: String = store.db.query_row(
+        "SELECT adventure_seed_json FROM campaign WHERE id=?1",
+        [campaign],
+        |r| r.get(0),
+    )?;
+    let seed: AdventureSeed = serde_json::from_str(&seed)?;
+    let turns = store.turns(campaign)?;
+    let reverted = store.reverted_turns(campaign)?;
+    let turn_count = turns
+        .iter()
+        .filter(|t| matches!(t.record.kind, TurnKind::Play | TurnKind::Correction))
+        .filter(|t| !reverted.contains(&t.id))
+        .count() as u32;
+    let needs_begin = !turns
+        .iter()
+        .any(|t| matches!(t.record.kind, TurnKind::Opening | TurnKind::Play));
+    Ok(CampaignPeek {
+        pc_name: seed.pc.name,
+        premise: seed.premise,
+        turn_count,
+        needs_begin,
+    })
 }
 
 impl Store {

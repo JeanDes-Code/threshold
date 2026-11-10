@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { errorText, type JournalView } from "../api";
 import { api } from "../tauri";
 import Journal, { type JournalActions } from "./Journal";
@@ -9,10 +9,12 @@ interface Props {
   pcName: string;
   /** Told after each note or pin command, so the Play screen reads its view again. */
   onMarksChanged: () => void;
+  /** The screen switch and the Campaign menu. */
+  tools: ReactNode;
 }
 
 /** The Journal of the open Campaign, from `get_journal`. */
-export default function LiveJournal({ revision, pcName, onMarksChanged }: Props) {
+export default function LiveJournal({ revision, pcName, onMarksChanged, tools }: Props) {
   const [view, setView] = useState<JournalView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,5 +47,5 @@ export default function LiveJournal({ revision, pcName, onMarksChanged }: Props)
 
   if (error) return <p className="error page">{error}</p>;
   if (!view) return <p className="muted page">Loading…</p>;
-  return <Journal view={view} pcName={pcName} actions={actions} />;
+  return <Journal view={view} pcName={pcName} actions={actions} tools={tools} />;
 }

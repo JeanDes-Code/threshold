@@ -19,8 +19,8 @@ use std::{
 use drafts::{DraftLine, DraftView, Drafts};
 use serde::Serialize;
 use session::{
-    AppError, CampaignSummary, DebugLine, DebugView, Session, TurnSummary, clock_nanos,
-    load_config, lock,
+    AppError, CampaignCard, CampaignSummary, DebugLine, DebugView, Session, TurnSummary,
+    clock_nanos, load_config, lock,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
@@ -157,7 +157,7 @@ fn model_status(status: State<'_, ModelStatus>) -> String {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-async fn list_campaigns(state: State<'_, Shared>) -> Result<Vec<String>, AppError> {
+async fn list_campaigns(state: State<'_, Shared>) -> Result<Vec<CampaignCard>, AppError> {
     blocking(&state, |s| Ok(s.list_campaigns())).await
 }
 

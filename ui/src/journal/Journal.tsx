@@ -42,6 +42,8 @@ interface Props {
   actions: JournalActions;
   /** The part shown first. */
   initialPart?: JournalPart;
+  /** The screen switch and the Campaign menu, on the right of the top bar. */
+  tools?: ReactNode;
 }
 
 /**
@@ -50,7 +52,7 @@ interface Props {
  * before the Campaign, and the Player's own Notes and Pins. It reads the
  * core's JournalView and parses no text.
  */
-export default function Journal({ view, pcName, actions, initialPart = "timeline" }: Props) {
+export default function Journal({ view, pcName, actions, initialPart = "timeline", tools }: Props) {
   const [part, setPart] = useState<JournalPart>(initialPart);
   const count: Record<JournalPart, number> = {
     timeline: view.scenes.length,
@@ -66,8 +68,11 @@ export default function Journal({ view, pcName, actions, initialPart = "timeline
   return (
     <div className="journal">
       <header className="journal-top">
-        <p className="play-label">Journal</p>
-        <h1 className="journal-top__title">{pcName}</h1>
+        <div>
+          <p className="play-label">Journal</p>
+          <h1 className="journal-top__title">{pcName}</h1>
+        </div>
+        {tools && <div className="journal-top__tools">{tools}</div>}
       </header>
       <div className="journal__body">
         <nav className="journal-nav" aria-label="Journal parts">

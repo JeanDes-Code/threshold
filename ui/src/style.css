@@ -10,10 +10,6 @@ html {
 body { margin: 0; background: var(--ground); }
 :focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .banner { background: var(--danger); color: var(--danger-text); padding: 6px 16px; font-weight: 600; }
-.menu { display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
-.menu .spacer { flex: 1; }
-.menu .status { color: var(--muted); font-size: 13px; }
-.tabs { display: flex; gap: 4px; padding: 8px 16px 0; }
 button[aria-pressed="true"] { font-weight: 700; border-bottom: 2px solid var(--accent); }
 main { padding: 16px; max-width: 900px; }
 button { font: inherit; padding: 4px 10px; cursor: pointer; color: var(--text); background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-1); }
@@ -574,6 +570,147 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 .journal-note__tools { display: flex; align-items: center; gap: var(--space-1); }
 .journal-note__spacer { flex: 1; }
 .journal-note__delete { color: var(--danger); }
+
+/* ---------------------------------------------------------------------------
+ * The streaming placeholder, the Correction row, and the top-bar tools.
+ * ------------------------------------------------------------------------ */
+.play-stream--waiting { color: var(--faint); letter-spacing: 0.2em; }
+.play-bar__label { align-self: center; font-size: var(--text-xs); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.play-top__right { flex-wrap: wrap; justify-content: flex-end; }
+
+.view-switch {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--well); border: 1px solid var(--card-border); border-radius: var(--radius-2);
+}
+.view-switch__item {
+  height: 30px; padding: 0 var(--space-3);
+  font-family: var(--font-ui); font-size: var(--text-sm); font-weight: 500;
+  color: var(--muted); background: none; border: 0; border-radius: var(--radius-1);
+}
+.view-switch__item:hover { color: var(--text); }
+.view-switch__item[aria-current="page"] { color: var(--text); background: var(--card); font-weight: 600; }
+
+/* The Campaign menu. */
+.app-menu { position: relative; }
+.app-menu__button { height: 36px; gap: var(--space-2); }
+.app-menu__caret { width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.app-menu__dot { width: 7px; height: 7px; border-radius: var(--radius-3); background: var(--faint); flex: none; }
+.app-menu__dot--ready { background: var(--ok); }
+.app-menu__dot--warming { background: var(--npc-4); animation: play-pulse 1.4s ease-in-out infinite; }
+.app-menu__dot--down { background: var(--danger); }
+.app-menu__list {
+  position: absolute; right: 0; top: calc(100% + var(--space-2)); z-index: 10;
+  width: 300px; padding: var(--space-2);
+  background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-2);
+  box-shadow: 0 18px 48px var(--scrim);
+}
+.app-menu__item, .app-menu__item[aria-checked] {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui); font-size: var(--text-sm); font-weight: 600; text-align: left;
+  color: var(--text); background: none; border: 0; border-radius: var(--radius-1);
+}
+.app-menu__item:hover:not(:disabled), .app-menu__item:focus-visible { background: var(--well); }
+.app-menu__item:disabled { opacity: 1; color: var(--faint); }
+.app-menu__item--check, .app-menu__item--check[aria-checked] { flex-direction: row; align-items: flex-start; gap: var(--space-3); }
+.app-menu__sub { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--muted); }
+.app-menu__item:disabled .app-menu__sub { color: var(--faint); }
+.app-menu__box { flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--muted); border-radius: var(--radius-1); }
+.app-menu__box--on { background: var(--danger); border-color: var(--danger); box-shadow: inset 0 0 0 2px var(--card); }
+.app-menu__rule { height: 1px; margin: var(--space-2) 0; background: var(--rule); }
+.app-menu__status { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--muted); }
+
+/* The Journal's top bar holds the tools too. */
+.journal-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.journal-top__tools { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; justify-content: flex-end; }
+
+/* A screen of the app: the top bar of the Play screen, one column below. */
+.screen { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; background: var(--ground); }
+.screen-top {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap;
+  padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--rule);
+}
+.screen-top__title { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.screen-top__title .play-label { margin: 0; color: var(--faint); }
+.screen-top__name { margin: 0; font-family: var(--font-story); font-size: var(--text-xl); font-weight: 600; line-height: 1.2; }
+.screen-top__back { padding-left: 0; }
+.screen-top__tools { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.screen-page { overflow-y: auto; padding: var(--space-5) var(--space-6) var(--space-6); max-width: none; }
+.screen-page__measure { max-width: 48rem; margin: 0 auto; }
+.screen-page__measure h2 { font-family: var(--font-story); font-size: var(--text-lg); font-weight: 600; }
+.screen-page__measure textarea { font-family: var(--font-story); font-size: var(--text-md); line-height: var(--leading-story); padding: var(--space-3); border-radius: var(--radius-2); background: var(--well); border-color: var(--card-border); }
+.screen-page__measure button:not(.play-btn) { padding: var(--space-1) var(--space-3); border-radius: var(--radius-2); }
+.app__screen { height: 100%; }
+.app__screen[hidden] { display: none; }
+
+/* ---------------------------------------------------------------------------
+ * Home: the Player's Campaigns as cards, unfinished drafts, one way to start.
+ * ------------------------------------------------------------------------ */
+.home {
+  display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    var(--ground);
+  color: var(--text); font-family: var(--font-ui);
+}
+:where(.home) p, :where(.home) h1, :where(.home) h2, :where(.home) h3 { margin: 0; }
+.home-top { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--rule); }
+.home-top__brand { display: flex; align-items: center; gap: var(--space-3); }
+.home-top__sigil {
+  width: 18px; height: 22px; border: 2px solid var(--accent); border-bottom: 0; border-radius: 9px 9px 0 0;
+  box-shadow: inset 0 -3px 0 var(--ground), 0 3px 0 -1px var(--accent);
+}
+.home-top__name { font-family: var(--font-story); font-size: var(--text-lg); font-weight: 600; letter-spacing: 0.04em; }
+.home-page { overflow-y: auto; padding: var(--space-6); max-width: none; }
+.home-page__measure { max-width: 64rem; margin: 0 auto; }
+.home-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-5); flex-wrap: wrap; margin: var(--space-5) 0 var(--space-6); }
+.home-hero .play-label { color: var(--accent); }
+.home-hero__title { font-family: var(--font-story); font-size: var(--text-2xl); font-weight: 600; line-height: 1.15; }
+.home-hero__new { height: 44px; font-size: var(--text-md); }
+.home-section { margin-bottom: var(--space-6); }
+.home-section > .play-label { margin-bottom: var(--space-3); }
+.home-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
+.home-cards > li { display: flex; }
+.home-card {
+  flex: 1; display: flex; flex-direction: column; gap: var(--space-3);
+  min-height: 210px; padding: var(--space-4) var(--space-5);
+  font-family: var(--font-ui); text-align: left; color: var(--text);
+  background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-2);
+  cursor: pointer; transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+.home-card:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 12px 32px var(--scrim); }
+.home-card:disabled { opacity: 0.6; cursor: default; }
+.home-card__head { display: flex; align-items: center; gap: var(--space-3); }
+.home-card__initial { width: 40px; height: 40px; font-size: var(--text-lg); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--card-border)); }
+.home-card__name { font-family: var(--font-story); font-size: var(--text-xl); font-weight: 600; line-height: 1.2; }
+.home-card__name--file { font-family: var(--font-ui); font-size: var(--text-md); color: var(--muted); }
+.home-card__premise {
+  font-family: var(--font-story); font-size: var(--text-md); line-height: var(--leading-story); color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.home-card__foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--rule); font-size: var(--text-xs); }
+.home-card__count { font-weight: 600; color: var(--text); }
+.home-card__count--new { color: var(--npc-4); }
+.home-card__when { color: var(--faint); }
+.home-card--problem { min-height: 0; cursor: default; background: transparent; border-style: dashed; }
+.home-card--problem .play-label { color: var(--danger); margin: 0; }
+.home-card__problem { font-size: var(--text-sm); color: var(--muted); }
+.home-card__problem::first-letter { text-transform: uppercase; }
+.home-empty { padding: var(--space-5); background: var(--card); border: 1px dashed var(--card-border); border-radius: var(--radius-2); }
+.home-empty__title { font-family: var(--font-story); font-size: var(--text-lg); font-weight: 600; margin-bottom: var(--space-1); }
+.home-drafts { list-style: none; margin: 0; padding: 0; border: 1px solid var(--card-border); border-radius: var(--radius-2); background: var(--card); }
+.home-draft { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+.home-draft + .home-draft { border-top: 1px solid var(--rule); }
+.home-draft__title { flex: 1; min-width: 0; font-family: var(--font-story); font-size: var(--text-md); }
+.home-draft__state { font-size: var(--text-xs); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted); }
+.home-draft__go { height: 32px; }
+
+/* Narrow window. 760px is --narrow in tokens.css. */
+@media (max-width: 760px) {
+  .home-page, .screen-page { padding: var(--space-4); }
+  .home-top, .screen-top { padding: var(--space-2) var(--space-4); }
+  .home-hero__title { font-size: var(--text-xl); }
+}
 
 /* The app around the live Play screen: the menu, then the screen in the rest of the window. */
 .app { display: flex; flex-direction: column; height: 100vh; }

@@ -19,7 +19,7 @@ use threshold_core::{
     player::{Marks, Note, PlayerStore, Target},
     rules::{D10, RollResult},
     setup::{create_campaign_file, remove_part},
-    store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
+    store::{self, CampaignId, Store, StoreError, StoredTurn, TurnKind, WorldView},
     turn::{Engine, TurnError, TurnOutcome, stored_roll},
     view::{self, CharacterView, EntityCard, JournalView, PlayView},
     world::{PcSight, pc_sight},
@@ -84,6 +84,24 @@ pub struct CampaignSummary {
     pub premise: String,
     /// No Opening Turn and no play Turn yet: the Player still has to Begin.
     pub needs_begin: bool,
+}
+
+/// The problem line of a Campaign file of an older schema version.
+pub const OLD_FILE: &str = "made by an older version of Threshold: import its Source Text again";
+
+/// One Campaign file on the home screen (data shape 3.6). A card with a
+/// `problem` cannot open.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CampaignCard {
+    pub db_path: String,
+    pub pc_name: String,
+    pub premise: String,
+    /// The change time of the file.
+    pub last_played_ms: u64,
+    /// The Play and Correction Turns that stand.
+    pub turn_count: u32,
+    pub needs_begin: bool,
+    pub problem: Option<String>,
 }
 
 /// A committed Turn. `narration` is `None` when the Turn is committed but
@@ -203,19 +221,24 @@ impl Session {
         self.data_dir.join("campaigns")
     }
 
-    /// The campaign files in the data dir, newest first.
-    pub fn list_campaigns(&self) -> Vec<String> {
-        let mut files: Vec<String> = fs::read_dir(self.campaigns_dir())
+    /// A card for each Campaign file in the data dir, the latest played
+    /// first. Each file is read with `store::peek`, which writes nothing; a
+    /// file that cannot open gets a card with its problem.
+    pub fn list_campaigns(&self) -> Vec<CampaignCard> {
+        let mut cards: Vec<CampaignCard> = fs::read_dir(self.campaigns_dir())
             .into_iter()
             .flatten()
             .flatten()
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "sqlite"))
-            .map(|path| path.display().to_string())
+            .map(|path| campaign_card(&path))
             .collect();
-        files.sort();
-        files.reverse();
-        files
+        cards.sort_by(|a, b| {
+            b.last_played_ms
+                .cmp(&a.last_played_ms)
+                .then_with(|| b.db_path.cmp(&a.db_path))
+        });
+        cards
     }
 
     /// Creates a campaign file from an Adventure Seed and a world file, and
@@ -476,6 +499,37 @@ impl Session {
             .filter(|t| t.record.campaign_id == open.campaign)
             .ok_or_else(|| failed(format!("no turn {turn_id}")))
     }
+}
+
+/// The home card of one Campaign file.
+fn campaign_card(path: &Path) -> CampaignCard {
+    let last_played_ms = fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as u64);
+    let mut card = CampaignCard {
+        db_path: path.display().to_string(),
+        pc_name: String::new(),
+        premise: String::new(),
+        last_played_ms,
+        turn_count: 0,
+        needs_begin: false,
+        problem: None,
+    };
+    match store::peek(path) {
+        Ok(peek) => {
+            card.pc_name = peek.pc_name;
+            card.premise = peek.premise;
+            card.turn_count = peek.turn_count;
+            card.needs_begin = peek.needs_begin;
+        }
+        Err(StoreError::Version(found)) if found < store::SCHEMA_VERSION => {
+            card.problem = Some(OLD_FILE.into())
+        }
+        Err(e) => card.problem = Some(format!("this file cannot be opened: {e}")),
+    }
+    card
 }
 
 /// A Turn result as the app reports it. A Turn whose Narration failed after

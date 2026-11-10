@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import type { SceneState } from "../api";
 import NoteField from "../marks/NoteField";
-import { isSendKey, type TurnPhase } from "./logic";
+import { PHASE_TEXT, isSendKey, type TurnPhase } from "./logic";
 
 interface Props {
   /** The mature content module decides its buttons from `scene` and `phase`. */
@@ -19,6 +19,9 @@ interface Props {
   canRetry: boolean;
   /** The latest Turn is a standing Play Turn. */
   canCorrect: boolean;
+  /** The Correction fields are open: the Campaign menu opens them. */
+  fixing: boolean;
+  onFixing: (open: boolean) => void;
   /** Resolves true when the Intent was taken: the field then clears. */
   onAct: (text: string) => Promise<boolean>;
   onAsk: (text: string) => Promise<boolean>;
@@ -33,20 +36,13 @@ interface Props {
   onNote: (body: string, aboutScene: boolean) => Promise<string | null>;
 }
 
-const PHASE_TEXT: Record<TurnPhase, string> = {
-  idle: "",
-  deciding: "The GM decides",
-  narrating: "The GM narrates",
-};
-
 /** The Intent field, "Act", quiet buttons, and an empty slot on the right for later modules. */
 export default function ActionBar(props: Props) {
   const { scene, phase, pcName, needsBegin, answer, failure, notice, onAct, onAsk } = props;
-  const { canRetry, canCorrect, onCorrect, onRetry, onBegin, onDismissAnswer } = props;
+  const { canRetry, canCorrect, fixing, onFixing, onCorrect, onRetry, onBegin, onDismissAnswer } = props;
   const [intent, setIntent] = useState("");
   const [ooc, setOoc] = useState("");
   const [asking, setAsking] = useState(false);
-  const [fixing, setFixing] = useState(false);
   const [clarified, setClarified] = useState("");
   const [why, setWhy] = useState("");
   const [noting, setNoting] = useState(false);
@@ -72,7 +68,7 @@ export default function ActionBar(props: Props) {
     const text = clarified.trim();
     if (!text || !why.trim() || busy) return;
     if (await onCorrect(text, why.trim())) {
-      setFixing(false);
+      onFixing(false);
       setClarified("");
       setWhy("");
     }
@@ -164,23 +160,15 @@ export default function ActionBar(props: Props) {
           >
             Note
           </button>
-          <button
-            type="button"
-            className="play-btn play-btn--quiet play-bar__fix"
-            aria-expanded={fixing}
-            aria-controls={fixId}
-            disabled={!canCorrect && !fixing}
-            onClick={() => setFixing((f) => !f)}
-          >
-            Correct last Turn
-          </button>
           <div className="action-bar__later" />
         </div>
       )}
 
       {fixing && !needsBegin && (
-        <div className="play-bar__row play-bar__row--ooc" id={fixId}>
+        <div className="play-bar__row play-bar__row--ooc" id={fixId} aria-label="Correct the last Turn">
+          <span className="play-bar__label">Correct the last Turn</span>
           <input
+            autoFocus
             className="play-ooc-field"
             aria-label="What you meant"
             placeholder="What you meant"
@@ -207,6 +195,9 @@ export default function ActionBar(props: Props) {
             onClick={() => void correct()}
           >
             Apply Correction
+          </button>
+          <button type="button" className="play-btn play-btn--text" onClick={() => onFixing(false)}>
+            Cancel
           </button>
         </div>
       )}

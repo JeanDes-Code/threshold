@@ -5,8 +5,8 @@ import "./tokens.css";
 import "./fonts.css";
 import "./style.css";
 
-// Dev build only: `?preview=play` shows the Play screen on fixture data, and
-// `?preview=journal` the Journal. A production build drops these branches and
+// Dev build only: `?preview=play` shows the Play screen on fixture data,
+// `?preview=journal` the Journal and `?preview=home` the home screen. A production build drops these branches and
 // the fixtures with them.
 const preview = new URLSearchParams(window.location.search).get("preview");
 const Root: ComponentType =
@@ -14,7 +14,9 @@ const Root: ComponentType =
     ? (await import("./play/PlayPreview")).default
     : import.meta.env.DEV && preview === "journal"
       ? (await import("./journal/JournalPreview")).default
-      : App;
+      : import.meta.env.DEV && preview === "home"
+        ? (await import("./home/HomePreview")).default
+        : App;
 
 const root = document.getElementById("root");
 if (!root) throw new Error("no #root element");

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { clockText, type PlaceLine } from "../api";
 
 interface Props {
@@ -5,10 +6,12 @@ interface Props {
   clockMin: number;
   panelOpen: boolean;
   onTogglePanel: () => void;
+  /** The screen switch and the Campaign menu. */
+  tools?: ReactNode;
 }
 
 /** The place on the left, the World Clock on the right, a thin rule under both. */
-export default function TopBar({ place, clockMin, panelOpen, onTogglePanel }: Props) {
+export default function TopBar({ place, clockMin, panelOpen, onTogglePanel, tools }: Props) {
   return (
     <header className="play-top">
       <div className="play-top__place">
@@ -26,6 +29,7 @@ export default function TopBar({ place, clockMin, panelOpen, onTogglePanel }: Pr
         >
           Panel
         </button>
+        {tools}
       </div>
     </header>
   );

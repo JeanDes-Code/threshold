@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PinLine, PlayView, Target } from "../api";
+import Menu from "../home/Menu";
 import { sameTarget } from "../marks/logic";
 import { fixtureCard } from "../fixtures/entityCards";
 import { playView, streamText } from "../fixtures/playView";
@@ -26,6 +27,8 @@ export default function PlayPreview() {
   const [stream, setStream] = useState<string | null>(null);
   const [answer, setAnswer] = useState<string | null>(null);
   const [pinned, setPinned] = useState<PinLine[]>(playView.pinned);
+  const [fixing, setFixing] = useState(false);
+  const [debug, setDebug] = useState(false);
   const timers = useRef<number[]>([]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
@@ -112,6 +115,34 @@ export default function PlayPreview() {
         onDismissAnswer={() => setAnswer(null)}
         onPin={pin}
         onNote={async () => null}
+        fixing={fixing}
+        onFixing={setFixing}
+        tools={
+          <>
+            <nav className="view-switch" aria-label="Campaign screens">
+              <button type="button" className="view-switch__item" aria-current="page">
+                Story
+              </button>
+              <button type="button" className="view-switch__item">
+                Journal
+              </button>
+              <button type="button" className="view-switch__item">
+                Character
+              </button>
+            </nav>
+            <Menu
+              label="Campaign"
+              onHome={() => undefined}
+              onCorrect={() => setFixing(true)}
+              canCorrect={!busy && view.can_correct}
+              correctHint="Wait until the GM is done"
+              debug={debug}
+              onDebug={setDebug}
+              model="ready"
+              initiallyOpen={new URLSearchParams(window.location.search).get("menu") === "open"}
+            />
+          </>
+        }
       />
     </div>
   );

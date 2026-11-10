@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   errorText,
   parseBuildProgress,
@@ -17,6 +17,10 @@ interface Props {
   onOpened: (summary: CampaignSummary) => void;
   /** True while a Turn runs: no Campaign may open then. */
   locked: boolean;
+  /** A saved draft to open first, from the home screen. */
+  initialDraft?: string | null;
+  /** Told when a draft or a World Build starts and ends. */
+  onJob?: (running: boolean) => void;
 }
 
 /** Source: the text and the saved drafts. Review: the Seed Draft. Build: the World Build. */
@@ -35,7 +39,7 @@ const screenOf = (view: DraftView): Screen =>
   view.state === "approved" ? { kind: "build", view } : { kind: "review", view };
 
 /** A new Campaign from a document: Source Text, review, World Build. */
-export default function NewCampaign({ onOpened, locked }: Props) {
+export default function NewCampaign({ onOpened, locked, initialDraft = null, onJob }: Props) {
   const [screen, setScreen] = useState<Screen>({ kind: "source" });
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<DraftLine[]>([]);
@@ -52,6 +56,17 @@ export default function NewCampaign({ onOpened, locked }: Props) {
   }, []);
   useEffect(refresh, [refresh]);
 
+  // A draft chosen on the home screen opens where it stands.
+  const firstDraft = useRef(initialDraft);
+  useEffect(() => {
+    const draftId = firstDraft.current;
+    if (!draftId) return;
+    api.getDraft(draftId).then(
+      (view) => setScreen(screenOf(view)),
+      (e: unknown) => setError(`Could not open the draft: ${errorText(e)}`),
+    );
+  }, []);
+
   useEvent<unknown>("build_progress", (payload) => {
     const p = parseBuildProgress(payload);
     if (p && job) setProgress(p);
@@ -66,6 +81,7 @@ export default function NewCampaign({ onOpened, locked }: Props) {
   /** Runs a draft or a build. A finished job after "Cancel" still counts. */
   const run = async (kind: "draft" | "build", call: () => Promise<void>) => {
     setJob(kind);
+    onJob?.(true);
     setProgress(null);
     setCancelling(false);
     setError(null);
@@ -75,6 +91,7 @@ export default function NewCampaign({ onOpened, locked }: Props) {
       setError(errorText(e));
     } finally {
       setJob(null);
+      onJob?.(false);
       refresh();
     }
   };

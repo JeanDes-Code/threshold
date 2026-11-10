@@ -10,6 +10,9 @@ import {
   shouldFollow,
   storyItems,
   turnPhase,
+  PHASE_TEXT,
+  canOpenCorrection,
+  streamShown,
 } from "./logic";
 
 describe("play logic", () => {
@@ -74,5 +77,25 @@ describe("play logic", () => {
     expect(isSendKey({ key: "Enter", shiftKey: false })).toBe(true);
     expect(isSendKey({ key: "Enter", shiftKey: true })).toBe(false);
     expect(isSendKey({ key: "a", shiftKey: false })).toBe(false);
+  });
+});
+
+describe("Task 5 fixes", () => {
+  it("an OOC question says the GM answers out of character, not that it decides", () => {
+    expect(turnPhase(true, null)).toBe("answering");
+    expect(PHASE_TEXT[turnPhase(true, null)]).toBe("The GM answers out of character");
+    expect(PHASE_TEXT[turnPhase(true, "")]).toBe("The GM decides");
+    expect(turnPhase(false, null)).toBe("idle");
+  });
+
+  it("Correct last Turn cannot open while a Turn runs", () => {
+    expect(canOpenCorrection(true, false)).toBe(true);
+    expect(canOpenCorrection(true, true)).toBe(false);
+    expect(canOpenCorrection(false, false)).toBe(false);
+  });
+
+  it("before the first chunk the story shows a quiet placeholder", () => {
+    expect(streamShown("")).toEqual({ text: "…", waiting: true });
+    expect(streamShown("Orsel")).toEqual({ text: "Orsel", waiting: false });
   });
 });

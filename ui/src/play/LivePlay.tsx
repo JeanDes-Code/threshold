@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   BEGIN_OP_ID,
   errorText,
@@ -17,6 +17,11 @@ interface Props {
   onView: (view: PlayView) => void;
   /** Told whenever a Turn starts or ends. */
   onBusy: (busy: boolean) => void;
+  /** The Correction fields are open: the Campaign menu opens them. */
+  fixing: boolean;
+  onFixing: (open: boolean) => void;
+  /** The screen switch and the Campaign menu. */
+  tools: ReactNode;
 }
 
 /** Narration again: its chunks come under the Turn's old op_id, so any chunk counts. */
@@ -26,7 +31,7 @@ const ANY_OP = "*";
  * The Play screen on a real Campaign. While a Turn runs, the story shows the
  * raw stream; when it ends, the core's new PlayView replaces it.
  */
-export default function LivePlay({ view, onView, onBusy }: Props) {
+export default function LivePlay({ view, onView, onBusy, fixing, onFixing, tools }: Props) {
   const [busy, setBusyHere] = useState(false);
   const [stream, setStream] = useState<string | null>(null);
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
@@ -174,6 +179,9 @@ export default function LivePlay({ view, onView, onBusy }: Props) {
       onDismissAnswer={() => setAnswer(null)}
       onPin={(target, on) => void pin(target, on)}
       onNote={note}
+      fixing={fixing}
+      onFixing={onFixing}
+      tools={tools}
     />
   );
 }

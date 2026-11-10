@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { errorText, type EntityCard, type PlayView, type Target } from "../api";
 import { currentScene } from "../marks/logic";
 import ActionBar from "./ActionBar";
@@ -37,6 +37,11 @@ export interface PlayScreenProps {
   onPin: (target: Target, on: boolean) => void;
   /** Saves a Note; resolves with the core's refusal text, or null when saved. */
   onNote: (body: string, about: Target | null) => Promise<string | null>;
+  /** The Correction fields are open (the Campaign menu opens them). */
+  fixing: boolean;
+  onFixing: (open: boolean) => void;
+  /** The screen switch and the Campaign menu, on the right of the top bar. */
+  tools?: ReactNode;
 }
 
 /** The last answer of the core for one entity: its card, or the refusal text. */
@@ -95,6 +100,7 @@ export default function PlayScreen(props: PlayScreenProps) {
         clockMin={view.clock_min}
         panelOpen={panelOpen}
         onTogglePanel={() => setPanelOpen((o) => !o)}
+        tools={props.tools}
       />
       <div className="play__body">
         <Story
@@ -123,7 +129,7 @@ export default function PlayScreen(props: PlayScreenProps) {
       </div>
       <ActionBar
         scene={view.scene}
-        phase={turnPhase(busy, stream ?? "")}
+        phase={turnPhase(busy, stream)}
         pcName={view.pc_name}
         needsBegin={view.needs_begin}
         answer={answer}
@@ -131,6 +137,8 @@ export default function PlayScreen(props: PlayScreenProps) {
         notice={props.notice}
         canRetry={props.canRetry}
         canCorrect={view.can_correct}
+        fixing={props.fixing}
+        onFixing={props.onFixing}
         onAct={props.onAct}
         onAsk={props.onAsk}
         onCorrect={props.onCorrect}
