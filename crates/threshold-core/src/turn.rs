@@ -2,8 +2,8 @@
 //!
 //! `turn` is the only module that follows time order. A play Turn runs:
 //! duplicate `op_id` check, Intent check, proposal prompt, `Gm::propose`,
-//! parse, shape check, engine-owned wait, the core's repairs
-//! (`checks::settle`), Commit checks (one shared retry
+//! parse, engine-owned wait, the core's repairs (`checks::settle`, and
+//! `checks::default_check` on the retry), shape and Commit checks (one shared retry
 //! with the errors in `recent`), Roll, `to_ops`, World Clock, perception on arrival, one Commit,
 //! then the streamed Narration and `set_narration`. Validation, `to_ops` and
 //! the World Clock all read the snapshot taken before the Turn, so a fact a
@@ -35,7 +35,6 @@ use crate::{
         CampaignId, CommitError, DebugEntry, OpId, Store, StoreError, StoredTurn, TurnId, TurnKind,
         TurnRecord, WorldView,
     },
-    validate_shape,
     world::{self, pc_knowledge},
 };
 
@@ -624,9 +623,15 @@ impl Engine {
             let raw = raw?;
 
             let step = Instant::now();
+            let retry = attempt == "propose_retry";
             let parsed = match parse(&raw) {
                 Ok(p) => {
-                    let (p, notes) = checks::settle(engine_wait(p, view), view);
+                    let (mut p, mut notes) = checks::settle(engine_wait(p, view), view);
+                    // A contested act with no Check: one repair note on the
+                    // first attempt, a default Check on the retry (ADR 0007).
+                    if retry {
+                        notes.extend(checks::default_check(&mut p, view));
+                    }
                     if !notes.is_empty() {
                         self.log(op_id, "settle", &Prompt::default(), &notes.join("\n"), step)?;
                     }
@@ -634,10 +639,17 @@ impl Engine {
                 }
                 Err(errs) => Err(errs),
             };
-            let checked = parsed
-                .as_ref()
-                .map_err(Clone::clone)
-                .and_then(|p| checks::validate(p, view));
+            let checked = parsed.as_ref().map_err(Clone::clone).and_then(|p| {
+                let checked = checks::validate(p, view);
+                match (retry, checks::contest_note(p)) {
+                    (false, Some(note)) => {
+                        let mut errs = checked.err().unwrap_or_default();
+                        errs.push(note);
+                        Err(errs)
+                    }
+                    _ => checked,
+                }
+            });
             timings.validate_ms += ms(step);
             let errs = match checked {
                 Ok(valid) => {
@@ -654,7 +666,7 @@ impl Engine {
                 &lines.join("\n"),
                 step,
             )?;
-            if attempt == "propose_retry" {
+            if retry {
                 return Err(TurnError::Rejected(errs));
             }
             prompt
@@ -794,12 +806,11 @@ fn schema_error(reason: String) -> Vec<Rejection> {
     }]
 }
 
-/// Parses the model text and checks its shape.
+/// Parses the model text. The shape check runs with the Commit checks
+/// (`checks::validate`), after the core's repairs: on the retry, a missing
+/// Check is one the core can build (`checks::default_check`).
 fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
-    let p: DecisionProposal =
-        serde_json::from_str(raw.trim()).map_err(|e| schema_error(format!("invalid JSON: {e}")))?;
-    validate_shape(&p).map_err(|e| schema_error(e.to_string()))?;
-    Ok(p)
+    serde_json::from_str(raw.trim()).map_err(|e| schema_error(format!("invalid JSON: {e}")))
 }
 
 /// The engine owns the length of a wait (`world::wait_minutes`), so the

@@ -926,18 +926,20 @@ fn lost_check_is_told_as_a_failure() {
     assert!(!won.recent.contains("fails"), "{}", won.recent);
 }
 
-/// B5 (QA, 2026-11-10): an arm-wrestle came back as an allowed talk with no
-/// Roll. The proposal rules say that an opposed contest is a Check.
+/// ADR 0007: an opposed contest is the `contested` field, described in one
+/// rule line; the B5 prompt line is gone.
 #[test]
-fn proposal_rules_make_an_opposed_contest_a_check() {
+fn proposal_rules_describe_contested_in_one_line() {
     let w = World::new();
     let system = proposal_prompt(&w.view, &[], "I arm-wrestle Brann.").system;
-    let line = system
-        .lines()
-        .find(|l| l.contains("contest against an NPC"))
-        .unwrap_or_else(|| panic!("no contest rule: {system}"));
-    assert!(line.contains("is a check"), "{line}");
-    assert!(line.contains("physical or social"), "{line}");
+    let lines: Vec<&str> = system.lines().filter(|l| l.contains("contested")).collect();
+    assert_eq!(lines.len(), 1, "{system}");
+    assert!(
+        lines[0].starts_with("- contested: true when an NPC actively opposes"),
+        "{}",
+        lines[0]
+    );
+    assert!(!system.contains("A contest against an NPC"), "{system}");
 }
 
 /// ADR 0007: the scene lists the places the PC knows, by handle, and the

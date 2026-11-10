@@ -157,6 +157,8 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         set(&mut schema, "/$defs/Close/properties/item", &ctx.open_items);
     }
     require(&mut schema, "", "closes");
+    schema["properties"]["contested"] = json!({"type": "boolean"});
+    require(&mut schema, "", "contested");
     for stake in ["win", "lose"] {
         schema["$defs"]["CheckDraft"]["properties"][stake] = json!({"$ref": "#/$defs/SlotDraft"});
         require(&mut schema, "/$defs/CheckDraft", stake);

@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use super::{closed, pc, references::is_known_place, same_key};
+use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
     domain::{DecisionProposal, EntityKind, Handle, SlotDraft},
     normalize,
@@ -20,6 +20,7 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     if let Some(pc) = pc(view).map(Handle::Entity) {
         drop_pc_acts(&mut p, pc, &mut notes);
         drop_pc_location(&mut p, pc, &mut notes);
+        drop_pc_stakes(&mut p, pc, &mut notes);
     }
     if let Some(place) = p.move_to.filter(|h| !is_known_place(view, *h)) {
         p.move_to = None;
@@ -110,6 +111,27 @@ fn drop_pc_location(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String
                     "removed the {name} stake on the PC's ({pc}) location: move_to moves the PC"
                 ));
             }
+        }
+    }
+}
+
+/// A stake on the PC on a key the agency rule refuses (anything but
+/// `PC_INVOLUNTARY_KEYS`) goes. Dropping a stake adds no PC act; the Check
+/// still rolls (ADR 0007).
+fn drop_pc_stakes(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
+    let Some(c) = p.check.as_mut() else {
+        return;
+    };
+    for (name, stake) in [("win", &mut c.win), ("lose", &mut c.lose)] {
+        if let Some(slot) = stake.as_ref()
+            && slot.subject == pc
+            && !is_involuntary_key(&slot.key)
+        {
+            notes.push(format!(
+                "removed the {name} stake on the PC ({pc}) key {}: a stake on the PC may only set an involuntary key",
+                slot.key
+            ));
+            *stake = None;
         }
     }
 }

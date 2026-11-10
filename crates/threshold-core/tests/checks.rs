@@ -710,6 +710,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let good = serde_json::json!({
         "action": "talk",
         "verdict": "allowed",
+        "contested": false,
         "move_to": null,
         "closes": [],
         "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}}],
@@ -742,6 +743,9 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let mut silent = good.clone();
     silent.as_object_mut().unwrap().remove("move_to");
     assert!(!validator.is_valid(&silent));
+    let mut unsaid = good.clone();
+    unsaid.as_object_mut().unwrap().remove("contested");
+    assert!(!validator.is_valid(&unsaid));
     // `closes` is required; its items name an open item the PC holds.
     let mut closing = good.clone();
     closing["closes"] = serde_json::json!([{"item": "E1 pending_trip", "outcome": "accepted"}]);
@@ -1380,4 +1384,75 @@ fn outcome_of_an_npc_open_item_needs_no_unlock() {
         vec![],
     )];
     ok(validate(&p, &w.view));
+}
+
+// --- Contests (ADR 0007) -------------------------------------------------------
+
+/// The recorded shape from the live run: a contest whose win stake writes
+/// a PC key the agency rule refuses. `settle` drops that stake and logs it;
+/// the Check stays valid and still rolls.
+#[test]
+fn illegal_pc_stake_is_dropped_and_the_check_still_rolls() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Check);
+    p.contested = true;
+    p.check = Some(check(
+        Some(e(w.brann)),
+        slot(e(w.ada), &format!("E{}_strength", w.ada), "proven"),
+        slot(e(w.ada), "fatigue", "sore_arm"),
+    ));
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+    let (settled, notes) = settle(p, &w.view);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("win stake"), "{notes:?}");
+    let c = settled.check.as_ref().unwrap();
+    assert!(c.win.is_none() && c.lose.is_some());
+    ok(validate(&settled, &w.view));
+    let facts = w.view.facts.len();
+    apply(&mut w, &settled, Some(roll(true)));
+    assert_eq!(
+        w.view.facts.len(),
+        facts,
+        "a won Check with no win stake writes nothing"
+    );
+    let rolls = w
+        .store
+        .turn_ops(w.view.recent_turns.last().unwrap().id)
+        .unwrap()
+        .into_iter()
+        .filter(|op| matches!(op, LedgerOp::RecordRoll { .. }))
+        .count();
+    assert_eq!(rolls, 1);
+}
+
+#[test]
+fn contested_act_without_a_check_gets_a_note_then_a_default_check() {
+    use threshold_core::checks::{contest_note, default_check};
+    let w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.contested = true;
+    p.reactions = vec![
+        reaction(e(w.orsel), Stance::Resist, None),
+        reaction(e(w.brann), Stance::Neutral, None),
+    ];
+    let note = contest_note(&p).expect("a contested act with no check");
+    assert_eq!(note.check, CheckKind::Contest);
+    let mut built = p.clone();
+    let log = default_check(&mut built, &w.view).expect("the core builds the Check");
+    assert!(log.contains(&format!("E{}", w.orsel)), "{log}");
+    assert_eq!(built.verdict, Verdict::Check);
+    let c = built.check.as_ref().unwrap();
+    assert_eq!(c.against, Some(e(w.orsel)));
+    assert!(c.win.is_none() && c.lose.is_none() && c.factors.is_empty());
+    assert!(contest_note(&built).is_none());
+    ok(validate(&built, &w.view));
+    // Not contested, or impossible: nothing to do.
+    let mut calm = p.clone();
+    calm.contested = false;
+    assert!(contest_note(&calm).is_none());
+    assert!(default_check(&mut calm, &w.view).is_none());
+    let mut impossible = p;
+    impossible.verdict = Verdict::Impossible;
+    assert!(contest_note(&impossible).is_none());
+    assert!(default_check(&mut impossible, &w.view).is_none());
 }

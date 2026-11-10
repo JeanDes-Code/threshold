@@ -1264,3 +1264,47 @@ fn impossible_attempt_is_told_as_not_happening_without_the_blocker() {
     let last = prompts(&gm, CallKind::Narrate).pop().unwrap();
     assert!(!last.recent.contains("does not happen"), "{}", last.recent);
 }
+
+/// ADR 0007: a contested act with no Check gets one repair note; when the
+/// retry still has none, the core builds a default Check and the Turn
+/// commits with a Roll. The narrator gets the result.
+#[test]
+fn contested_act_without_a_check_rolls_on_the_retry() {
+    let w0 = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Act;
+    p.contested = true;
+    p.minutes = 5;
+    p.reactions = vec![Reaction {
+        npc: e(w0.brann),
+        stance: Stance::Resist,
+        plan: "pushes back".into(),
+        cause: None,
+    }];
+    let (mut engine, w, gm) = setup(vec![json(&p), json(&p)], vec!["You strain."]);
+    let outcome = engine
+        .play_turn("t1".into(), "I arm-wrestle Brann.", &mut no_chunks())
+        .unwrap();
+    let roll = outcome.roll.expect("the default Check rolls");
+    assert_eq!(roll.difficulty, 6, "the Ruleset's normal difficulty");
+    let retry = &prompts(&gm, CallKind::Propose)[1];
+    assert!(
+        retry.recent.contains("contest: contested is true"),
+        "{}",
+        retry.recent
+    );
+    let log = steps(&engine, "t1");
+    assert!(
+        log.iter()
+            .any(|(step, raw)| step == "settle" && raw.contains("default Check")),
+        "{log:?}"
+    );
+    let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(
+        narration.recent.contains("The Check result:"),
+        "{}",
+        narration.recent
+    );
+    let stored = engine.store().turn_by_campaign_op(w.campaign, &"t1".into());
+    assert!(stored.unwrap().is_some());
+}

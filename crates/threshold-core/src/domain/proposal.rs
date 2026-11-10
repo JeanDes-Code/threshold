@@ -6,6 +6,11 @@ use super::{Handle, Stance};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DecisionProposal {
     pub action: ActionKind,
+    /// True when an NPC actively opposes this act and the result is
+    /// uncertain. Such an act needs a Check (ADR 0007). Required in the
+    /// per-Turn schema.
+    #[serde(default)]
+    pub contested: bool,
     pub verdict: Verdict,
     /// The known place the PC goes to, when the Intent moves the PC there;
     /// `None` when the PC stays. The core writes the PC's `location` from it

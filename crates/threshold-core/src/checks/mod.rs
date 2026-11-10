@@ -3,6 +3,7 @@
 
 mod agency;
 mod boundary;
+mod contest;
 mod ops;
 mod references;
 mod settle;
@@ -17,6 +18,7 @@ use crate::{
 };
 
 pub(crate) use agency::is_involuntary_key;
+pub use contest::{contest_note, default_check};
 pub use ops::{Resolved, to_ops};
 pub use settle::settle;
 
@@ -25,6 +27,7 @@ pub enum CheckKind {
     Schema,
     References,
     Agency,
+    Contest,
     Coincidence,
     NpcFolds,
     FactBends,
@@ -38,6 +41,7 @@ impl fmt::Display for CheckKind {
             Self::Schema => "schema",
             Self::References => "references",
             Self::Agency => "agency",
+            Self::Contest => "contest",
             Self::Coincidence => "coincidence",
             Self::NpcFolds => "npc folds",
             Self::FactBends => "fact bends",
