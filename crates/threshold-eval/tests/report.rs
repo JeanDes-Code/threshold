@@ -499,19 +499,21 @@ about = "guild"
 [[open]]
 subject = "Osric Fell"
 about = "wedding"
+done = ["married", "wedding took place"]
 
 [[open]]
 subject = "Gerrit Vane"
 about = "ferry"
+done = ["owns ferry", "bought ferry"]
 "#;
 
     fn expected() -> Expected {
         Expected::parse(EXPECTED).unwrap()
     }
 
-    /// The draft roster: Gerrit Vane under his other name, the Lamplighters
-    /// as an npc, Sefa Lind missing, a heron that the list does not hold,
-    /// and Osric Fell five years too young.
+    /// The draft roster: Gerrit Vane under his other name and with a
+    /// proposed age of 12, the Lamplighters as an npc, Sefa Lind missing, a
+    /// heron that the list does not hold, and Osric Fell five years too young.
     fn seed() -> AdventureSeed {
         serde_json::from_value(json!({
             "premise": "A ferry on the Sallow.",
@@ -523,7 +525,7 @@ about = "ferry"
             },
             "entities": [
                 {"name": "Agathe Morrow", "kind": "npc", "age": 67},
-                {"name": "Toll-Master", "kind": "npc", "age": 50,
+                {"name": "Toll-Master", "kind": "npc", "age": 12,
                  "other_names": [{"name": "Gerrit", "known_to": []}]},
                 {"name": "Lamplighters", "kind": "npc", "age": 30},
                 {"name": "Pim Quast", "kind": "npc", "age": 11},
@@ -578,6 +580,15 @@ about = "ferry"
     }
 
     #[test]
+    fn an_open_item_needs_a_done_phrase() {
+        let empty = EXPECTED.replace(r#"done = ["married", "wedding took place"]"#, "done = []");
+        let error = Expected::parse(&empty).unwrap_err();
+        assert!(error.contains("Osric Fell"), "{error}");
+        let missing = EXPECTED.replace(r#"done = ["married", "wedding took place"]"#, "");
+        assert!(Expected::parse(&missing).is_err());
+    }
+
+    #[test]
     fn false_past_counts_a_settled_fact_on_an_open_item() {
         let (expected, seed) = (expected(), seed());
         let planned = fact(
@@ -591,12 +602,23 @@ about = "ferry"
         assert_eq!(false_past(&expected, &seed, &facts), vec![false, false]);
         assert_eq!(open_recall(&expected, &seed, &facts), vec![true, false]);
 
+        // A settled fact on the plan, with the `about` word but no `done`
+        // phrase, is right: no false past.
+        facts.push(fact(
+            "Osric Fell",
+            "savings",
+            "wedding feast",
+            "Osric has saved for the wedding feast for six years.",
+            false,
+        ));
+        assert_eq!(false_past(&expected, &seed, &facts), vec![false, false]);
+
         // The same item stated as done, on the same subject: a false past.
         facts.push(fact(
             "Osric Fell",
             "daughter",
             "married",
-            "Osric's daughter had her wedding at Harrowmere.",
+            "Osric's daughter married at Harrowmere.",
             false,
         ));
         assert_eq!(false_past(&expected, &seed, &facts), vec![true, false]);
@@ -709,14 +731,24 @@ about = "ferry"
             text: "Teodor put an iron chain on the ferry.".into(),
             open: false,
         });
+        // A built world holds the known facts too.
         let world = WorldSetup {
-            facts: vec![fact(
-                "Osric Fell",
-                "wedding",
-                "done",
-                "The wedding took place.",
-                false,
-            )],
+            facts: vec![
+                fact(
+                    "Teodor Brandt",
+                    "ferry",
+                    "iron chain",
+                    "Teodor put an iron chain on the ferry.",
+                    false,
+                ),
+                fact(
+                    "Osric Fell",
+                    "wedding",
+                    "done",
+                    "The wedding took place.",
+                    false,
+                ),
+            ],
             goals: vec![
                 goal("Gerrit Vane", "Buy the ferry from Teodor Brandt."),
                 goal("Osric Fell", "Marry off his daughter."),
@@ -828,9 +860,17 @@ about = "ferry"
             "- Start place right: 3 of 3 drafts; present characters found: 3 of 3",
             "- Draft gaps before approval, by kind: age_missing 1, unknown_name 1",
             "- Not approvable: 1 of 3 runs",
-            "- Fact recall (settled items found): 3 of 6 over 3 drafts (50%)",
-            "- False past (open items stated as settled facts): 1 of 6 over 3 drafts",
-            "- Open recall (open items kept open): 0 of 6 over 3 drafts",
+            "- Characters drafted under 18 that the expected list does not hold as children: 3 (Toll-Master)",
+            "- Runs with a built world: 1 of 3",
+            "- Fact recall, draft knowledge (settled items found): 3 of 6 over 3 drafts (50%); missed: Gerrit Vane: guild",
+            "- Fact recall, built world (settled items found): 1 of 2 over 1 built worlds (50%); missed: Gerrit Vane: guild",
+            "- False past, draft knowledge (open items stated as done): 0 of 6 over 3 drafts\n",
+            "- False past, built world (open items stated as done): 1 of 2 over 1 built worlds; stated as done: Osric Fell: wedding",
+            "- Open recall, draft knowledge (open items kept open): 0 of 6 over 3 drafts",
+            "- Open recall, built world (open items kept open): 0 of 2 over 1 built worlds",
+            "| run | draft | gaps | build | roster | settled found (draft / world) | false past (draft / world) | open kept (draft / world) | PC-centred | events (with effect) | draft calls (repairs, retries) | build calls (repairs, retries) | draft time | build time |",
+            "| 1 | ok | 0 | ok | 8 of 9 | 1 of 2 / 1 of 2 | 0 of 2 / 1 of 2 | 0 of 2 / 0 of 2 | 1 of 2 | 2 (1) | 5 (1, 1) | 14 (2, 0) | 90.0 s | 150.0 s |",
+            "| 2 | ok | 2 | not approvable | 8 of 9 | 1 of 2 / - | 0 of 2 / - | 0 of 2 / - | - | - | - | - | 80.0 s | n/a |",
             "- PC-centred share (NPC goals and secrets that name the PC): 1 of 2 (50%) over 1 built worlds; highest world 50%; the build's limit is 50%",
             "- World Events: 2 over 1 built worlds; with at least one effect: 1",
             "- Voice distance: matched 1 / 2 judged sample lines (50%), chance 25%; judge errors 1",
@@ -861,7 +901,9 @@ about = "ferry"
             "- Missing entries: 3\n",
             "- Ages that differ from a stated age: 3 of 12\n",
             "- Child (stated age under 18) drafted under 18: 3 of 3\n",
-            "- False past (open items stated as settled facts): 1 of 6 over 3 drafts",
+            "- Characters drafted under 18 that the expected list does not hold as children: 3\n",
+            "- Fact recall, draft knowledge (settled items found): 3 of 6 over 3 drafts (50%)\n",
+            "- False past, built world (open items stated as done): 1 of 2 over 1 built worlds\n",
             "- Voice distance: matched 1 / 2 judged sample lines (50%), chance 25%; judge errors 1",
         ] {
             assert!(report.contains(line), "missing {line:?}:\n{report}");
@@ -875,6 +917,8 @@ about = "ferry"
             "Osric",
             "Pim",
             "Gerrit",
+            "Toll",
+            "wedding",
             "pennies",
             "fixtures/",
             "Sample Voice Card lines",

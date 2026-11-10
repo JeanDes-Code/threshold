@@ -3,7 +3,10 @@
 #
 # A name matches through normalize::name on the main name and the other
 # names. A [[settled]] or [[open]] item is found when a fact on the same
-# subject holds every word of `about` in its key, value and text.
+# subject holds every word of `about` in its key, value and text. An open
+# item is stated as done (false past) when a settled fact on its subject
+# holds every word of one of its `done` phrases: words that only a completed
+# event would hold, and that no settled statement of the source holds.
 
 pc_name = "Teodor Brandt"
 pc_age = 34
@@ -111,26 +114,66 @@ about = "barge"
 subject = "Osric Fell"
 about = "ledger"
 
+# Events 3 to 7 of "What has happened".
+[[settled]]
+subject = "Odile Quast"
+about = "missing"
+
+[[settled]]
+subject = "Henrike Sall"
+about = "loan"
+
+[[settled]]
+subject = "Gerrit Vane"
+about = "ferry"
+
+[[settled]]
+subject = "Ludo Brenn"
+about = "mug"
+
+[[settled]]
+subject = "Teodor Brandt"
+about = "fog"
+
+# The source states the plan of some open items as settled ("the Guild has
+# proposed to buy the ferry", "has saved for the wedding feast", "has a buyer
+# for her potter's wheel"). A settled fact on the plan is right, so `done`
+# never holds a word of those statements.
 [[open]]
 subject = "The Bargemen's Guild"
 about = "ferry"
+done = ["bought ferry", "owns ferry"]
 
 [[open]]
 subject = "Osric Fell"
 about = "wedding"
+done = ["married", "wedding took place", "wedding was held"]
 
 [[open]]
 subject = "The Lamplighters"
 about = "meeting"
+done = ["met", "meeting took place", "meeting was held"]
 
 [[open]]
 subject = "Odile Quast"
 about = "inquiry"
+done = ["questioned", "inquiry ended", "inquiry closed"]
 
 [[open]]
 subject = "Henrike Sall"
 about = "wheel"
+done = ["sold wheel", "bought wheel"]
 
 [[open]]
 subject = "Teodor Brandt"
 about = "post"
+done = ["carried post", "delivered post"]
+
+# Who wrote the sealed letter is not established. "wrote letter" is not a
+# done phrase: a settled fact that says nobody knows who wrote it holds those
+# words too. A fact that names the writer may take the writer as subject;
+# this item then misses it.
+[[open]]
+subject = "Teodor Brandt"
+about = "letter"
+done = ["letter written by"]
