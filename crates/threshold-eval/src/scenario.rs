@@ -17,6 +17,15 @@ pub struct Latency {
     pub intents: Vec<String>,
 }
 
+/// Intents that invite dialogue, for the speech mark (ADR 0006).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Speech {
+    #[serde(default = "default_fixture")]
+    pub fixture: String,
+    pub intents: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Memory {

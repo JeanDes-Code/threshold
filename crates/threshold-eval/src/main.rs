@@ -3,8 +3,8 @@
 //!
 //! Options:
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
-//!   voices, shortcuts, agency_leaks, offscreen, world_build. Repeat or
-//!   comma-separate.
+//!   voices, shortcuts, agency_leaks, offscreen, world_build, speech.
+//!   Repeat or comma-separate.
 //! - `--runs <n>` (default 3)
 //! - `--judge local` (default): the same local model, with a short rubric.
 //!   A frontier judge is not built in this slice.

@@ -1,0 +1,18 @@
+# The speech mark (ADR 0006) on the town demo. Ten Intents that invite
+# dialogue with Orsel, Hessa and Doul, one campaign per run. The report
+# gives the mark rate (bubbles over quoted spans), the marks that do not
+# resolve and why, the bubbles the judge gives to another speaker, and the
+# Turn time.
+fixture = "town"
+intents = [
+    "I greet Magistrate Orsel and ask him which charter he wants copied first.",
+    "I ask Hessa the clerk where I can set up my writing desk.",
+    "I ask Doul, the man by the door, what his work is here.",
+    "I ask Orsel and Hessa together how old the oldest charter is.",
+    "I ask Hessa what she thinks of the magistrate's court.",
+    "I ask Doul whether the town hall is safe at night.",
+    "I tell Orsel that the ink on the third charter is fading, and ask what he wants done.",
+    "I ask Hessa and Doul how long each of them has lived in Varn.",
+    "I ask Orsel how much the town will pay me, and when.",
+    "I thank all three of them and ask who will check my copies.",
+]

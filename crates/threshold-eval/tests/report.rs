@@ -68,13 +68,14 @@ fn report_has_every_metric() {
         "Agency per 100 Turns",
         "Secret leaks per 100 Turns",
         "Offscreen consequence observed",
+        "Mark rate",
     ] {
         assert!(report.contains(metric), "missing {metric}:\n{report}");
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4 = 83 Turns.
-    assert!(report.contains("- Turns played: 166 (0 failed"), "{report}");
+    // agency_leaks 12, offscreen 4, speech 10 = 93 Turns.
+    assert!(report.contains("- Turns played: 186 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1111,6 +1112,157 @@ done = ["owns ferry", "bought ferry"]
             "Sample Voice Card lines",
         ] {
             assert!(!report.contains(name), "{name} in:\n{report}");
+        }
+    }
+}
+
+// ---- speech -----------------------------------------------------------------
+
+mod speech {
+    use threshold_core::{
+        Gm, RecordedGm,
+        store::{Store, TurnId, TurnKind, TurnRecord},
+    };
+    use threshold_eval::{
+        Config, run,
+        speech::{Tally, quoted_spans, read_turn},
+    };
+
+    use super::{FirstChoice, PROPOSAL, root, town};
+
+    /// Commits a Play Turn and stores `narration` as its Narration.
+    fn narrated(store: &mut Store, campaign: u64, op: &str, narration: &str) -> TurnId {
+        let clock = store.snapshot(campaign).unwrap().clock_min;
+        let turn = store
+            .commit(
+                TurnRecord {
+                    campaign_id: campaign,
+                    op_id: op.into(),
+                    kind: TurnKind::Play,
+                    intent: "I listen.".into(),
+                    proposal_json: "{}".into(),
+                    clock_before: clock,
+                    clock_after: clock + 1,
+                },
+                vec![threshold_core::domain::LedgerOp::AdvanceClock { minutes: 1 }],
+            )
+            .unwrap();
+        store.set_narration(turn, narration).unwrap();
+        turn
+    }
+
+    #[test]
+    fn mark_rate_counts_resolved_marks_over_spoken_lines() {
+        let (mut store, campaign) = town();
+        let turn = narrated(
+            &mut store,
+            campaign,
+            "speech-1",
+            "Orsel: \"Sit down.\"\n\nNobody: \"Nobody is here.\"\n\nHessa mutters \"Ink is dear.\" and turns a page.",
+        );
+        let read = read_turn(&store, campaign, turn).unwrap();
+        assert_eq!(read.tally.spoken, 3);
+        assert_eq!(read.tally.marks, 2);
+        assert_eq!(read.tally.resolved, 1);
+        assert_eq!(read.tally.unresolved(), 1);
+        assert_eq!(read.tally.no_entity, 1);
+        assert_eq!(read.tally.rate(), Some((1, 3)));
+        assert_eq!(read.bubbles.len(), 1);
+        assert_eq!(read.bubbles[0].speaker, "Orsel");
+        // The judge reads the Narration with every tag removed.
+        assert!(
+            !read.bubbles[0].context.contains("Orsel:"),
+            "{:?}",
+            read.bubbles[0]
+        );
+        assert!(read.bubbles[0].context.contains("\"Sit down.\""));
+        let mut present = read.bubbles[0].present.clone();
+        present.sort();
+        assert_eq!(present, ["Doul", "Hessa", "Orsel"]);
+    }
+
+    #[test]
+    fn marks_the_narrator_misuses_are_counted_apart() {
+        let (mut store, campaign) = town();
+        let turn = narrated(
+            &mut store,
+            campaign,
+            "speech-2",
+            "Wren: \"I am the scribe.\"\n\nOrsel: You are late.\n\nThunder: \"Boom.\"",
+        );
+        let read = read_turn(&store, campaign, turn).unwrap();
+        assert_eq!(read.tally.marks, 2);
+        assert_eq!(read.tally.resolved, 0);
+        assert_eq!(read.tally.pc, 1);
+        assert_eq!(read.tally.no_entity, 1);
+        assert_eq!(read.tally.unquoted, 1);
+        assert_eq!(read.tally.spoken, 2);
+    }
+
+    #[test]
+    fn quoted_spans_are_counted_once_per_span() {
+        assert_eq!(quoted_spans(r#""Late," he says, "very late.""#), 2);
+        assert_eq!(quoted_spans("\u{201c}Yes.\u{201d} \u{ab}Oui.\u{bb}"), 2);
+        assert_eq!(quoted_spans(r#"Orsel: "Late.""#), 1);
+        assert_eq!(quoted_spans("Wren's quill isn't dry."), 0);
+        assert_eq!(quoted_spans(r#"An open quote " with no end"#), 0);
+        assert_eq!(quoted_spans(""), 0);
+    }
+
+    #[test]
+    fn a_turn_with_no_speech_adds_nothing_to_the_rate() {
+        let (mut store, campaign) = town();
+        let quiet = narrated(
+            &mut store,
+            campaign,
+            "speech-3",
+            "The rain stops. Orsel reads.",
+        );
+        let read = read_turn(&store, campaign, quiet).unwrap();
+        assert_eq!(read.tally, Tally::default());
+        assert!(read.bubbles.is_empty());
+
+        let said = narrated(&mut store, campaign, "speech-4", "Orsel: \"Again.\"");
+        let mut total = read_turn(&store, campaign, said).unwrap().tally;
+        let before = total.rate();
+        total.add(&read.tally);
+        assert_eq!(total.rate(), before);
+        assert_eq!(before, Some((1, 1)));
+        assert_eq!(Tally::default().rate(), None);
+    }
+
+    #[test]
+    fn report_has_every_speech_metric() {
+        let gm = RecordedGm::new(
+            vec![PROPOSAL.to_owned(); 500],
+            vec!["Orsel: \"Sit.\"\n\nHessa looks up. \"Morning,\" she says.".to_owned(); 500],
+        );
+        let config = Config {
+            root: root(),
+            scenarios: vec!["speech".into()],
+            runs: 2,
+            model: "recorded".into(),
+            judge: "first-choice".into(),
+            memory_turns: None,
+            source: None,
+            expected: None,
+        };
+        let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+        let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
+        assert_eq!(report.matches("\n## speech\n").count(), 1, "{report}");
+        for metric in [
+            "Turn time p50",
+            "Turn time p90",
+            "Turn time max",
+            "Lines of speech (quoted spans): 40",
+            "Mark rate: 20 / 40 (50%)",
+            "Marks: 20; resolved 20; not resolved 0",
+            "Marked lines without quotes: 0",
+            "Wrong marks (judge):",
+            "- Run 1:",
+            "- Run 2:",
+        ] {
+            assert!(report.contains(metric), "missing {metric}:\n{report}");
         }
     }
 }

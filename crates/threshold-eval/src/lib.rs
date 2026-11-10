@@ -10,6 +10,7 @@
 mod judge;
 pub mod scan;
 mod scenario;
+pub mod speech;
 pub mod world_build;
 
 use std::{
@@ -35,7 +36,7 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 7] = [
+pub const SCENARIOS: [&str; 8] = [
     "latency",
     "memory",
     "voices",
@@ -43,6 +44,7 @@ pub const SCENARIOS: [&str; 7] = [
     "agency_leaks",
     "offscreen",
     "world_build",
+    "speech",
 ];
 
 /// The latency pass line (design §10): p90 at or under 15 s, warm.
@@ -130,6 +132,7 @@ pub fn run(
             "agency_leaks" => agency_leaks(&mut ctx)?,
             "offscreen" => offscreen(&mut ctx)?,
             "world_build" => world_build::scenario(&mut ctx)?,
+            "speech" => speech::scenario(&mut ctx)?,
             _ => unreachable!("checked above"),
         };
         sections.insert(name, section);
