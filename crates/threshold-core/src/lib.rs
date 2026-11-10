@@ -31,6 +31,9 @@ pub struct HandleContext {
     pub events: Vec<domain::Handle>,
     pub goals: Vec<domain::Handle>,
     pub new_slots: u8,
+    /// The places the PC knows (`world::known_places`): the values of
+    /// `move_to` besides `null`.
+    pub places: Vec<domain::Handle>,
 }
 
 pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
@@ -135,7 +138,36 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
     } else {
         set(&mut schema, "/$defs/EventDraft/properties/goal", &goals);
     }
+    // ADR 0007: the fields the code needs are required and enum-typed.
+    let places: Vec<serde_json::Value> = ctx
+        .places
+        .iter()
+        .filter(|h| matches!(h, Handle::Entity(_)))
+        .map(|h| json!(h.to_string()))
+        .chain([serde_json::Value::Null])
+        .collect();
+    schema["properties"]["move_to"] = json!({"type": ["string", "null"], "enum": places});
+    require(&mut schema, "", "move_to");
+    for stake in ["win", "lose"] {
+        schema["$defs"]["CheckDraft"]["properties"][stake] = json!({"$ref": "#/$defs/SlotDraft"});
+        require(&mut schema, "/$defs/CheckDraft", stake);
+    }
     schema
+}
+
+/// Adds `key` to the `required` list of the object schema at `path`.
+fn require(schema: &mut serde_json::Value, path: &str, key: &str) {
+    let required = schema
+        .pointer_mut(path)
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("the proposal schema has this object")
+        .entry("required")
+        .or_insert_with(|| serde_json::json!([]));
+    if let Some(list) = required.as_array_mut()
+        && !list.iter().any(|k| k == key)
+    {
+        list.push(serde_json::json!(key));
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

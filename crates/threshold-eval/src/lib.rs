@@ -54,11 +54,10 @@ pub const P90_PASS_MS: u64 = 15_000;
 
 /// The Commit checks, as `CheckKind` prints them at the start of a rejection
 /// line in the debug log.
-const CHECK_NAMES: [&str; 9] = [
+const CHECK_NAMES: [&str; 8] = [
     "schema",
     "references",
     "agency",
-    "move",
     "coincidence",
     "npc folds",
     "fact bends",

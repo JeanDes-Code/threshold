@@ -16,8 +16,8 @@ fn check(helps: &[bool]) -> CheckDraft {
     };
     CheckDraft {
         against: None,
-        win: slot.clone(),
-        lose: slot,
+        win: Some(slot.clone()),
+        lose: Some(slot),
         factors: helps
             .iter()
             .map(|&helps| Factor {

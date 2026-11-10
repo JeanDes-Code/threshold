@@ -4,8 +4,8 @@ use support::*;
 use threshold_core::{
     HandleContext,
     checks::{
-        CheckKind, PC_INVOLUNTARY_KEYS, Rejection, STANCE_CEILINGS, ceiling, move_note, settle,
-        to_ops, validate,
+        CheckKind, PC_INVOLUNTARY_KEYS, Rejection, STANCE_CEILINGS, ceiling, settle, to_ops,
+        validate,
     },
     domain::{Cancel, Canon, Cause, EventDraft, Handle, Knowing, LedgerOp, Seen, Stance, Verdict},
     proposal_schema_for,
@@ -702,12 +702,14 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         events: vec![Handle::WorldEvent(3)],
         goals: vec![Handle::Goal(2)],
         new_slots: 1,
+        places: vec![Handle::Entity(7)],
     };
     let schema = proposal_schema_for(&ctx);
     let validator = jsonschema::validator_for(&schema).unwrap();
     let good = serde_json::json!({
         "action": "talk",
         "verdict": "allowed",
+        "move_to": null,
         "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}}],
         "facts": [{"slot": {"subject": "N1", "key": "mood", "value": "calm"}, "seen": "pc", "because": ["F40"]}],
         "new_npcs": [{"id": "N1", "name": "Kett", "age": 34, "voice": "terse"}]
@@ -725,6 +727,19 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let mut too_old = good.clone();
     too_old["new_npcs"][0]["age"] = 1000.into();
     assert!(!validator.is_valid(&too_old));
+    // ADR 0007: `move_to` is required, a known place or null.
+    let mut moving = good.clone();
+    moving["move_to"] = "E7".into();
+    assert!(
+        validator.is_valid(&moving),
+        "{:?}",
+        validator.validate(&moving)
+    );
+    moving["move_to"] = "E2".into();
+    assert!(!validator.is_valid(&moving));
+    let mut silent = good.clone();
+    silent.as_object_mut().unwrap().remove("move_to");
+    assert!(!validator.is_valid(&silent));
 }
 
 // --- Fix round 1 -----------------------------------------------------------
@@ -824,81 +839,110 @@ fn state_keys_never_persistent() {
 }
 
 #[test]
-fn pc_move_sets_location_only_for_move_action() {
+fn move_to_writes_the_pc_location_when_the_action_happens() {
     let mut w = World::new();
+    // A PC location fact is still an agency error when it reaches the
+    // checks directly; `settle` drops it first (ADR 0007).
     let mut p = proposal(Verdict::Allowed);
+    p.action = threshold_core::domain::ActionKind::Move;
     p.facts = vec![fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![])];
     rejected(validate(&p, &w.view), CheckKind::Agency);
 
+    let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Move;
+    p.move_to = Some(e(w.gate));
     ok(validate(&p, &w.view));
+    apply(&mut w, &p, None);
+    let location = w.view.live_fact(w.ada, "location").unwrap();
+    assert_eq!(location.slot.value, "gate");
+    assert!(location.seen_by.contains(&w.ada));
+    assert!(
+        !w.view.present().contains(&w.orsel),
+        "Orsel stayed at the gate square"
+    );
+}
+
+#[test]
+fn a_check_moves_the_pc_on_a_success_only() {
+    for (success, moved) in [(false, false), (true, true)] {
+        let mut w = World::new();
+        let mut p = proposal(Verdict::Check);
+        p.action = threshold_core::domain::ActionKind::Move;
+        p.move_to = Some(e(w.gate));
+        p.check = Some(check(
+            None,
+            slot(e(w.brann), "mood", "impressed"),
+            slot(e(w.ada), "injury", "sprain"),
+        ));
+        apply(&mut w, &p, Some(roll(success)));
+        let at = w
+            .view
+            .live_fact(w.ada, "location")
+            .unwrap()
+            .slot
+            .value
+            .clone();
+        assert_eq!(at == "gate", moved, "success {success}: {at}");
+    }
+    // An impossible verdict moves nobody.
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Impossible);
+    p.action = threshold_core::domain::ActionKind::Move;
+    p.move_to = Some(e(w.gate));
     apply(&mut w, &p, None);
     assert_eq!(
         w.view.live_fact(w.ada, "location").unwrap().slot.value,
-        "tavern"
+        "gate square"
     );
-    assert!(
-        !w.view.present().contains(&w.orsel),
-        "Orsel stayed at the gate"
-    );
-
-    // The win stake of a move's Check may move the PC (changed after QA,
-    // 2026-11-10): the PC moves only on a success.
-    let mut p = proposal(Verdict::Check);
-    p.action = threshold_core::domain::ActionKind::Move;
-    p.check = Some(check(
-        None,
-        slot(e(w.ada), "location", "roof"),
-        slot(e(w.ada), "injury", "sprain"),
-    ));
-    ok(validate(&p, &w.view));
-    // The lose stake still cannot.
-    p.check = Some(check(
-        None,
-        slot(e(w.ada), "injury", "sprain"),
-        slot(e(w.ada), "location", "roof"),
-    ));
-    rejected(validate(&p, &w.view), CheckKind::Agency);
 }
 
-// --- Move (QA, 2026-11-10) -------------------------------------------------
-
+/// R1: a move with `move_to: null` is not rejected: the PC stays.
 #[test]
-fn allowed_move_without_a_pc_location_is_rejected_with_the_note() {
+fn move_with_no_destination_is_not_rejected() {
     let w = World::new();
     let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Move;
     p.minutes = 10;
-    let errs = rejected(validate(&p, &w.view), CheckKind::Move);
-    assert_eq!(errs[0].handle, Some(e(w.ada)));
-    assert_eq!(errs[0].reason, move_note(e(w.ada)));
-    // Another entity's location is not the PC's.
-    p.facts = vec![fact(
-        slot(e(w.brann), "location", "tavern"),
-        Seen::Pc,
-        vec![],
-    )];
-    rejected(validate(&p, &w.view), CheckKind::Move);
-    p.facts = vec![fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![])];
     ok(validate(&p, &w.view));
 }
 
 #[test]
-fn move_check_needs_the_location_and_impossible_move_does_not() {
+fn move_to_names_a_place_the_pc_knows() {
+    let w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.action = threshold_core::domain::ActionKind::Move;
+    p.move_to = Some(e(w.orsel));
+    rejected(validate(&p, &w.view), CheckKind::References);
+    let (settled, notes) = settle(p, &w.view);
+    assert_eq!(settled.move_to, None);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    ok(validate(&settled, &w.view));
+}
+
+/// R1: the model's own PC location, in a fact or a stake, is dropped and
+/// logged; the rest of the proposal stays.
+#[test]
+fn settle_drops_a_pc_location_fact_and_stake() {
     let w = World::new();
     let mut p = proposal(Verdict::Check);
     p.action = threshold_core::domain::ActionKind::Move;
+    p.facts = vec![
+        fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![]),
+        fact(slot(e(w.brann), "mood", "wary"), Seen::Pc, vec![]),
+    ];
     p.check = Some(check(
         None,
-        slot(e(w.brann), "mood", "impressed"),
+        slot(e(w.ada), "location", "roof"),
         slot(e(w.ada), "injury", "sprain"),
     ));
-    rejected(validate(&p, &w.view), CheckKind::Move);
-
-    let mut p = proposal(Verdict::Impossible);
-    p.action = threshold_core::domain::ActionKind::Move;
-    p.blockers = vec![f(w.gate_locked)];
-    ok(validate(&p, &w.view));
+    let (settled, notes) = settle(p, &w.view);
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert_eq!(settled.facts.len(), 1);
+    assert_eq!(settled.facts[0].slot.subject, e(w.brann));
+    let c = settled.check.as_ref().unwrap();
+    assert!(c.win.is_none());
+    assert!(c.lose.is_some());
+    ok(validate(&settled, &w.view));
 }
 
 #[test]
@@ -1117,7 +1161,7 @@ fn new_npc_on_a_move_turn_stands_at_the_new_place() {
     let mut w = World::new();
     let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Move;
-    p.facts = vec![fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![])];
+    p.move_to = Some(e(w.gate));
     p.new_npcs = vec![new_npc(1, "Kett", 34)];
     apply(&mut w, &p, None);
     let kett = w
@@ -1129,7 +1173,7 @@ fn new_npc_on_a_move_turn_stands_at_the_new_place() {
         .id;
     assert_eq!(
         w.view.live_fact(kett, "location").unwrap().slot.value,
-        "tavern"
+        "gate"
     );
     assert!(w.view.present().contains(&kett));
 }
@@ -1205,14 +1249,17 @@ fn settle_spells_a_known_place_by_its_name() {
     let w = World::new();
     for value in [format!("E{}", w.gate), "the gate.".into(), "GATE".into()] {
         let mut p = proposal(Verdict::Allowed);
-        p.action = threshold_core::domain::ActionKind::Move;
-        p.facts = vec![fact(slot(e(w.ada), "location", &value), Seen::Pc, vec![])];
+        p.facts = vec![fact(slot(e(w.brann), "location", &value), Seen::Pc, vec![])];
         let (settled, _) = settle(p, &w.view);
         assert_eq!(settled.facts[0].slot.value, "Gate", "{value}");
     }
     // A place that is not an entity stays as written.
     let mut p = proposal(Verdict::Allowed);
-    p.facts = vec![fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![])];
+    p.facts = vec![fact(
+        slot(e(w.brann), "location", "tavern"),
+        Seen::Pc,
+        vec![],
+    )];
     let (settled, notes) = settle(p, &w.view);
     assert_eq!(settled.facts[0].slot.value, "tavern");
     assert!(notes.is_empty());

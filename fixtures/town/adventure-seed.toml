@@ -17,6 +17,10 @@ name = "Tithe archive"
 kind = "place"
 
 [[entities]]
+name = "Varn mill"
+kind = "place"
+
+[[entities]]
 name = "Orsel"
 kind = "npc"
 age = 54

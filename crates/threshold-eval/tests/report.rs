@@ -402,8 +402,9 @@ fn offscreen_measures_the_seeded_event() {
     let (pc, hessa) = (id(&view, "Wren"), id(&view, "Hessa"));
     let talk = PROPOSAL.to_owned();
     let walk = |place: &str, minutes: u32| {
+        let place = id(&view, place);
         format!(
-            r#"{{"action":"move","verdict":"allowed","check":null,"schedule":null,"minutes":{minutes},"facts":[{{"slot":{{"subject":"E{pc}","key":"location","value":"{place}"}},"seen":"pc","said_by":null,"because":[]}}]}}"#
+            r#"{{"action":"move","verdict":"allowed","move_to":"E{place}","check":null,"schedule":null,"minutes":{minutes}}}"#
         )
     };
     let tell = format!(
@@ -1371,13 +1372,12 @@ fn play_basics_counts_each_step() {
         r#"{{"action":"talk","verdict":"allowed","check":null,"schedule":null,"minutes":2,"facts":[{}]}}"#,
         fact("copy_tithe_roll", "accepted")
     );
+    let mill = id("Varn mill");
     let away = format!(
-        r#"{{"action":"move","verdict":"allowed","check":null,"schedule":null,"minutes":15,"facts":[{}]}}"#,
-        fact("location", "Varn mill")
+        r#"{{"action":"move","verdict":"allowed","move_to":"E{mill}","check":null,"schedule":null,"minutes":15}}"#
     );
     let back = format!(
-        r#"{{"action":"move","verdict":"allowed","check":null,"schedule":null,"minutes":15,"facts":[{}]}}"#,
-        fact("location", &format!("E{hall}"))
+        r#"{{"action":"move","verdict":"allowed","move_to":"E{hall}","check":null,"schedule":null,"minutes":15}}"#
     );
     let gm = RecordedGm::new(
         vec![contest, impossible, accept, away, back],

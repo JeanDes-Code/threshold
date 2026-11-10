@@ -3,7 +3,7 @@
 
 use super::{CheckKind, Origin, PC_INVOLUNTARY_KEYS, Rejection, pc, same_key, writes};
 use crate::{
-    domain::{ActionKind, DecisionProposal, Handle},
+    domain::{DecisionProposal, Handle},
     store::WorldView,
     world::pc_open_outcomes,
 };
@@ -44,17 +44,16 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
     // one with a fact (changed after QA, 2026-11-10).
     let settles = pc_open_outcomes(view);
     // Every slot write on the PC: facts, both stakes and schedule effects.
-    for w in writes(p).iter().filter(|w| Handle::Entity(w.subject) == pc) {
-        // The Player's Intent chose the move, so a move Turn may set where the
-        // PC is: in a fact, or in the win stake of its Check (changed after
-        // QA, 2026-11-10). The lose stake never moves the PC.
-        let chosen_move = matches!(w.origin, Origin::Fact | Origin::WinStake)
-            && p.action == ActionKind::Move
-            && same_key(w.key, "location");
+    // The core writes the PC's location from `move_to` (ADR 0007): the
+    // Player's Intent chose that move, so it is no PC act of the model's.
+    for w in writes(p, view)
+        .iter()
+        .filter(|w| Handle::Entity(w.subject) == pc && w.origin != Origin::Move)
+    {
         let settled = w.origin == Origin::Fact && settles.iter().any(|k| same_key(k, w.key));
-        if !is_involuntary_key(w.key) && !chosen_move && !settled {
+        if !is_involuntary_key(w.key) && !settled {
             err(&format!(
-                "a write on the PC may only set {} (or location on a move Turn, or the outcome of an open item the PC holds); got {}",
+                "a write on the PC may only set {} (or the outcome of an open item the PC holds); got {}",
                 PC_INVOLUNTARY_KEYS.join(", "),
                 w.key
             ));

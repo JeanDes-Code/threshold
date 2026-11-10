@@ -156,6 +156,7 @@ fn schema_for_limits_entity_handles() {
         events: vec![Handle::WorldEvent(3)],
         goals: vec![Handle::Goal(4)],
         new_slots: 1,
+        ..Default::default()
     };
     let s = proposal_schema_for(&ctx);
     assert_eq!(
@@ -200,6 +201,7 @@ fn schema_for_omits_event_fields_without_events() {
         events: vec![],
         goals: vec![],
         new_slots: 0,
+        ..Default::default()
     };
     let s = proposal_schema_for(&ctx);
     assert_eq!(s["additionalProperties"], false);

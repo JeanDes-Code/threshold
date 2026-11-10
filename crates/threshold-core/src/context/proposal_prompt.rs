@@ -10,7 +10,7 @@ use crate::{
     model::Prompt,
     pack::ContentPack,
     store::{Entity, Fact},
-    world::pc_open_outcomes,
+    world::{known_places, pc_open_outcomes},
 };
 
 /// The rules part of the system prompt. Its first lines are the wording
@@ -40,7 +40,7 @@ LATER ACTIONS
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
-- A move always has this fact, with the PC's handle and the destination place (its name, never a handle): facts:[{\"slot\":{\"subject\":\"<PC handle>\",\"key\":\"location\",\"value\":\"<destination>\"},\"seen\":\"pc\",\"said_by\":null,\"because\":[]}]. On a check, that slot is the win stake instead.
+- move_to: when the player moves the PC to a place listed under PLACES, that place's handle; else null, and the PC stays. Never write the PC's location in facts or stakes.
 - An open item is a fact on a key pending_x. When the player's intent settles it (accepts, refuses or does it), add a fact on key x of the same subject, seen = pc, in facts (never in a schedule): that closes it. Example for the PC: facts:[{\"slot\":{\"subject\":\"<PC handle>\",\"key\":\"x\",\"value\":\"accepted\"},\"seen\":\"pc\",\"said_by\":null,\"because\":[]}]. On the PC, write x only for the keys listed after settles on the PC's line.
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.
@@ -89,8 +89,10 @@ pub fn proposal_context(
 }
 
 fn handles(r: &Retrieval<'_>) -> HandleContext {
+    let places = known_places(r.view);
     let mut entities: Vec<EntityId> = r.scene_entities.clone();
     entities.extend(&r.mentioned);
+    entities.extend(&places);
     entities.sort_unstable();
     entities.dedup();
     let mut facts: Vec<u64> = r
@@ -108,6 +110,7 @@ fn handles(r: &Retrieval<'_>) -> HandleContext {
         events: r.events.iter().map(|w| Handle::WorldEvent(w.id)).collect(),
         goals: r.goals.iter().map(|g| Handle::Goal(g.id)).collect(),
         new_slots: 1,
+        places: places.into_iter().map(Handle::Entity).collect(),
     }
 }
 
@@ -179,6 +182,13 @@ fn scene(r: &Retrieval<'_>) -> String {
         (Some(location), Some(place)) => out.push_str(&format!("Place: {location} (E{place})\n")),
         (Some(location), None) => out.push_str(&format!("Place: {location}\n")),
         _ => out.push_str("Place: unknown\n"),
+    }
+    let places: Vec<String> = known_places(r.view)
+        .into_iter()
+        .map(|id| format!("E{id} {}", r.known(id).name))
+        .collect();
+    if !places.is_empty() {
+        out.push_str(&format!("PLACES (for move_to): {}\n", places.join(", ")));
     }
     out.push_str("ENTITIES\n");
     for id in &r.scene_entities {

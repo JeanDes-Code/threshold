@@ -184,7 +184,7 @@ fn seeded_check_is_reproducible() {
 fn correction_keeps_seed() {
     let w0 = World::new();
     let mut clarified = gate_check(&w0);
-    clarified.check.as_mut().unwrap().lose = slot(e(w0.ada), "injury", "bruised hand");
+    clarified.check.as_mut().unwrap().lose = Some(slot(e(w0.ada), "injury", "bruised hand"));
     let (mut engine, w, gm) = setup(
         vec![json(&gate_check(&w0)), json(&clarified)],
         vec!["first", "second"],
@@ -512,6 +512,7 @@ fn arrival_shows_open_npcs_and_keeps_hidden_out() {
         value: "market".into(),
         text: "Vell lurks in the market.".into(),
     });
+    seed.entities.push(place("Market"));
     let mut store = Store::open_in_memory().unwrap();
     let campaign = create_campaign(&mut store, &seed, 7).unwrap();
     let view = store.snapshot(campaign).unwrap();
@@ -522,7 +523,7 @@ fn arrival_shows_open_npcs_and_keeps_hidden_out() {
     let mut walk = proposal(Verdict::Allowed);
     walk.action = ActionKind::Move;
     walk.minutes = 10;
-    walk.facts = vec![fact(slot(e(ada), "location", "market"), Seen::Pc, vec![])];
+    walk.move_to = Some(e(id("Market")));
     let gm = RecordedGm::new(
         vec![json(&look), json(&walk)],
         vec!["At the gate.".into(), "At the market.".into()],
@@ -668,7 +669,7 @@ fn event_moved_npc_is_seen_on_arrival(same_turn: bool) {
     let mut walk = proposal(Verdict::Allowed);
     walk.action = ActionKind::Move;
     walk.minutes = 10;
-    walk.facts = vec![fact(slot(e(w.ada), "location", "market"), Seen::Pc, vec![])];
+    walk.move_to = Some(e(w.add_place("Market")));
     let mut proposals = vec![json(&walk)];
     if !same_turn {
         proposals.insert(0, json(&wait));
@@ -1074,54 +1075,75 @@ fn steps(engine: &Engine, op_id: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// B1: "I leave and go to the tavern" came back as a move with no fact. The
-/// check rejects it with a repair note, and the retry writes the location.
+/// ADR 0007: the model names the destination in `move_to`, and the core
+/// writes the PC's location. A PC location fact the model writes itself is
+/// dropped, not rejected, and logged. The narrator is told where the PC is.
 #[test]
-fn move_without_location_is_repaired_on_the_retry() {
+fn move_to_moves_the_pc_and_a_model_location_fact_is_dropped() {
     let w0 = World::new();
-    let mut silent = proposal(Verdict::Allowed);
-    silent.action = ActionKind::Move;
-    silent.minutes = 10;
-    let mut moved = silent.clone();
-    moved.facts = vec![fact(
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.minutes = 10;
+    p.move_to = Some(e(w0.gate));
+    p.facts = vec![fact(
         slot(e(w0.ada), "location", "tavern"),
         Seen::Pc,
         vec![],
     )];
-    let (mut engine, w, gm) = setup(vec![json(&silent), json(&moved)], vec!["You walk in."]);
+    let (mut engine, w, gm) = setup(vec![json(&p)], vec!["You walk to the gate."]);
     engine
-        .play_turn("t1".into(), "I go to the tavern.", &mut no_chunks())
+        .play_turn("t1".into(), "I walk to the gate.", &mut no_chunks())
         .unwrap();
-    let retry = &prompts(&gm, CallKind::Propose)[1];
-    assert!(
-        retry.recent.contains(&format!(
-            "move E{}: {}",
-            w.ada,
-            threshold_core::checks::move_note(e(w.ada))
-        )),
-        "{}",
-        retry.recent
-    );
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
     let view = snapshot(&engine, &w);
     assert_eq!(
         view.live_fact(w.ada, "location").unwrap().slot.value,
-        "tavern"
+        "gate"
     );
     assert!(!view.present().contains(&w.orsel));
+    let log = steps(&engine, "t1");
+    let settle = log
+        .iter()
+        .find(|(step, _)| step == "settle")
+        .expect("a settle row");
+    assert!(settle.1.contains("location fact"), "{}", settle.1);
+    let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(
+        narration
+            .recent
+            .contains(&format!("{}Gate.", threshold_core::context::PC_PLACE_LINE)),
+        "{}",
+        narration.recent
+    );
 }
 
+/// R4: a move with no known destination commits; the PC stays, and the
+/// narrator is told that the move does not happen and where the PC still is.
 #[test]
-fn move_without_location_twice_fails_the_turn() {
-    let mut silent = proposal(Verdict::Allowed);
-    silent.action = ActionKind::Move;
-    let (mut engine, w, _gm) = setup(vec![json(&silent), json(&silent)], vec!["never"]);
-    let before = snapshot(&engine, &w);
-    let result = engine.play_turn("t1".into(), "I go to the tavern.", &mut no_chunks());
-    let Err(TurnError::Rejected(errs)) = result else {
-        panic!("expected Rejected, got {result:?}");
-    };
-    assert!(errs.iter().any(|r| r.check == CheckKind::Move), "{errs:?}");
-    assert_eq!(snapshot(&engine, &w), before);
+fn move_with_no_destination_commits_and_the_pc_stays() {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.minutes = 10;
+    let (mut engine, w, gm) = setup(vec![json(&p)], vec!["You do not find the way."]);
+    let before = snapshot(&engine, &w)
+        .live_fact(w.ada, "location")
+        .unwrap()
+        .id;
+    engine
+        .play_turn("t1".into(), "I go to the tavern.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
+    let view = snapshot(&engine, &w);
+    assert_eq!(view.live_fact(w.ada, "location").unwrap().id, before);
+    let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(
+        narration.recent.contains(&format!(
+            "{}gate square.",
+            threshold_core::context::NOT_MOVED_LINE
+        )),
+        "{}",
+        narration.recent
+    );
 }
 
 /// B4: a PC reaction, the PC in an event's seen_by, and an event whose

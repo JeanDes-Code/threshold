@@ -76,8 +76,14 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         if let Some(against) = c.against {
             entity(against, "check.against");
         }
-        entity(c.win.subject, "check.win.subject");
-        entity(c.lose.subject, "check.lose.subject");
+        for (stake, field) in [
+            (&c.win, "check.win.subject"),
+            (&c.lose, "check.lose.subject"),
+        ] {
+            if let Some(stake) = stake {
+                entity(stake.subject, field);
+            }
+        }
     }
     for fact in &p.facts {
         entity(fact.slot.subject, "facts.slot.subject");
@@ -158,7 +164,7 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         }
     }
     if let Some(c) = &p.check {
-        for stake in [&c.win, &c.lose] {
+        for stake in [&c.win, &c.lose].into_iter().flatten() {
             if written.contains(&key(stake.subject, &stake.key)) {
                 err(
                     Some(stake.subject),
@@ -180,8 +186,20 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         }
     }
 
+    if let Some(place) = p.move_to
+        && !is_known_place(view, place)
+    {
+        err(Some(place), "move_to: not a place the PC knows".into());
+    }
+
     if let Err(shape) = crate::validate_shape(p) {
         errs.push(Rejection::new(CheckKind::Schema, None, shape.to_string()));
     }
     errs
+}
+
+/// True when `handle` names a place the PC knows (`world::known_places`):
+/// the only values of `move_to` (ADR 0007).
+pub(super) fn is_known_place(view: &WorldView, handle: Handle) -> bool {
+    matches!(handle, Handle::Entity(id) if crate::world::known_places(view).contains(&id))
 }

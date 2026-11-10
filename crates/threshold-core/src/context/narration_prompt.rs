@@ -20,8 +20,8 @@ use super::{
 };
 use crate::{
     domain::{
-        EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, Verdict, is_open_key,
-        is_state_key, outcome_key,
+        ActionKind, EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, Verdict,
+        is_open_key, is_state_key, outcome_key,
     },
     model::Prompt,
     normalize,
@@ -210,14 +210,14 @@ pub fn narration_prompt(
     events: &[String],
     reactions: &[Reaction],
     intent: &str,
-    verdict: Option<Verdict>,
+    turn: Option<(ActionKind, Verdict)>,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
     Prompt {
         system: with_fragments(NARRATION_RULES, packs),
         stable: adventure_block(view_after, None),
         scene: scene(&r),
-        recent: recent(&r, perceived, events, reactions, intent, verdict),
+        recent: recent(&r, perceived, events, reactions, intent, turn),
     }
 }
 
@@ -225,6 +225,15 @@ pub fn narration_prompt(
 /// 2026-11-10). It carries the verdict only: the blockers can be GM-only
 /// facts, so their text never reaches the narrator.
 pub const IMPOSSIBLE_LINE: &str = "- The attempt does not happen: the world prevents it. Nothing changes beyond what is listed here.\n";
+
+/// The outcome line that says where the PC is after the Turn, from the
+/// Commit (ADR 0007). The place's name follows.
+pub const PC_PLACE_LINE: &str = "- After this Turn the PC is at ";
+
+/// The outcome line of a move that the Commit did not make: the PC does not
+/// arrive (ADR 0007). The place's name follows.
+pub const NOT_MOVED_LINE: &str =
+    "- The move does not happen: the PC does not arrive. After this Turn the PC is still at ";
 
 /// The words after a lost Check's result line.
 pub const FAILED_CHECK_LINE: &str =
@@ -343,17 +352,45 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
     })
 }
 
+/// Where the PC is after the Turn, from the Commit (`view_after`). A move
+/// whose Commit wrote no PC `location` did not happen.
+fn place_line(
+    r: &Retrieval<'_>,
+    perceived: &[LedgerOp],
+    action: Option<ActionKind>,
+) -> Option<String> {
+    let pc = EntityRef::Id(r.pc?);
+    let place = r
+        .place
+        .map_or_else(|| r.location.clone(), |id| Some(r.name(id)))?;
+    let moved = perceived.iter().any(|op| {
+        let slot = match op {
+            LedgerOp::AddFact { slot, .. } => slot,
+            LedgerOp::SupersedeFact { new, .. } => &new.slot,
+            _ => return false,
+        };
+        slot.subject == pc && normalize::key(&slot.key) == "location"
+    });
+    let line = if action == Some(ActionKind::Move) && !moved {
+        NOT_MOVED_LINE
+    } else {
+        PC_PLACE_LINE
+    };
+    Some(format!("{line}{}.\n", one_line(&place)))
+}
+
 fn recent(
     r: &Retrieval<'_>,
     perceived: &[LedgerOp],
     events: &[String],
     reactions: &[Reaction],
     intent: &str,
-    verdict: Option<Verdict>,
+    turn: Option<(ActionKind, Verdict)>,
 ) -> String {
     let mut tail = format!("THIS TURN\nPlayer intent: {}\n", one_line(intent));
+    let verdict = turn.map(|(_, verdict)| verdict);
     let impossible = (verdict == Some(Verdict::Impossible)).then(|| IMPOSSIBLE_LINE.to_owned());
-    let outcome: Vec<String> = impossible
+    let mut outcome: Vec<String> = impossible
         .into_iter()
         .chain(
             perceived
@@ -362,6 +399,9 @@ fn recent(
         )
         .chain(events.iter().map(|text| format!("- {}\n", one_line(text))))
         .collect();
+    if let Some(line) = place_line(r, perceived, turn.map(|(action, _)| action)) {
+        outcome.push(line);
+    }
     if !outcome.is_empty() {
         tail.push_str("Outcome:\n");
         tail.push_str(&outcome.concat());

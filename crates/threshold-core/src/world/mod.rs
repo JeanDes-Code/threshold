@@ -11,7 +11,7 @@ mod sight;
 mod wait;
 
 pub use arrival::{
-    arrival, hidden, openly_here, pc_witnesses, with_arrival, with_witnessed_events,
+    arrival, hidden, known_places, openly_here, pc_witnesses, with_arrival, with_witnessed_events,
 };
 pub use beliefs::{Belief, beliefs, pc_knowledge, pc_open_outcomes};
 pub use clock::{MAX_EVENTS_PER_TURN, advance, written_slots};

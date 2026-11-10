@@ -3,7 +3,6 @@
 
 mod agency;
 mod boundary;
-mod moves;
 mod ops;
 mod references;
 mod settle;
@@ -18,7 +17,6 @@ use crate::{
 };
 
 pub(crate) use agency::is_involuntary_key;
-pub use moves::move_note;
 pub use ops::{Resolved, to_ops};
 pub use settle::settle;
 
@@ -27,7 +25,6 @@ pub enum CheckKind {
     Schema,
     References,
     Agency,
-    Move,
     Coincidence,
     NpcFolds,
     FactBends,
@@ -41,7 +38,6 @@ impl fmt::Display for CheckKind {
             Self::Schema => "schema",
             Self::References => "references",
             Self::Agency => "agency",
-            Self::Move => "move",
             Self::Coincidence => "coincidence",
             Self::NpcFolds => "npc folds",
             Self::FactBends => "fact bends",
@@ -168,7 +164,6 @@ pub fn validate<'a>(
     let mut errs = references::check(p, view);
     if errs.is_empty() {
         agency::check(p, view, &mut errs);
-        moves::check(p, view, &mut errs);
         shortcuts::check(p, view, &mut errs);
         boundary::check(p, view, &mut errs);
     }
@@ -185,10 +180,13 @@ pub(super) enum Origin {
     Effect,
     WinStake,
     LoseStake,
+    /// The PC's `location` that the core writes from `move_to` (ADR 0007).
+    Move,
 }
 
 /// A slot write of the proposal on an entity that exists before this Turn:
-/// non-claim facts, schedule effects, and both stakes.
+/// non-claim facts, schedule effects, both stakes, and the PC's `location`
+/// from `move_to`.
 pub(super) struct Write<'a> {
     pub subject: EntityId,
     pub key: &'a str,
@@ -197,7 +195,7 @@ pub(super) struct Write<'a> {
     pub origin: Origin,
 }
 
-pub(super) fn writes(p: &DecisionProposal) -> Vec<Write<'_>> {
+pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Write<'a>> {
     let mut out = Vec::new();
     let mut push = |subject: Handle, key, value, because, origin| {
         if let Handle::Entity(subject) = subject {
@@ -225,19 +223,21 @@ pub(super) fn writes(p: &DecisionProposal) -> Vec<Write<'_>> {
         }
     }
     if let Some(c) = &p.check {
+        for (stake, origin) in [(&c.win, Origin::WinStake), (&c.lose, Origin::LoseStake)] {
+            if let Some(stake) = stake {
+                push(stake.subject, &stake.key, &stake.value, &[], origin);
+            }
+        }
+    }
+    let moves = p.verdict != crate::domain::Verdict::Impossible;
+    if let (true, Some(pc), Some(place)) = (moves, pc(view), p.move_to.and_then(|h| view.entity(h)))
+    {
         push(
-            c.win.subject,
-            &c.win.key,
-            &c.win.value,
+            Handle::Entity(pc),
+            "location",
+            &place.name,
             &[],
-            Origin::WinStake,
-        );
-        push(
-            c.lose.subject,
-            &c.lose.key,
-            &c.lose.value,
-            &[],
-            Origin::LoseStake,
+            Origin::Move,
         );
     }
     out

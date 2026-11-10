@@ -1,9 +1,10 @@
 //! Repairs the core makes to a parsed proposal before the Commit checks
-//! (rules changed after QA, 2026-11-10). Each repair only removes a PC act
-//! or respells a place, so it never adds a voluntary act of the PC: the
-//! Agency rule holds. Every repair returns one note for the debug log.
+//! (rules changed after QA, 2026-11-10, and ADR 0007). Each repair only
+//! removes model output about the PC or respells a place, so it never adds a
+//! voluntary act of the PC: the Agency rule holds. Every repair returns one
+//! note for the debug log.
 
-use super::pc;
+use super::{pc, references::is_known_place, same_key};
 use crate::{
     domain::{DecisionProposal, EntityKind, Handle, SlotDraft},
     normalize,
@@ -15,6 +16,11 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     let mut notes = Vec::new();
     if let Some(pc) = pc(view).map(Handle::Entity) {
         drop_pc_acts(&mut p, pc, &mut notes);
+        drop_pc_location(&mut p, pc, &mut notes);
+    }
+    if let Some(place) = p.move_to.filter(|h| !is_known_place(view, *h)) {
+        p.move_to = None;
+        notes.push(format!("removed move_to {place}: not a place the PC knows"));
     }
     spell_places(&mut p, view, &mut notes);
     (p, notes)
@@ -45,6 +51,30 @@ fn drop_pc_acts(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
     }
 }
 
+/// The core writes the PC's `location` from `move_to` (ADR 0007), so a PC
+/// `location` in a fact or a stake goes.
+fn drop_pc_location(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
+    let is_pc_location = |slot: &SlotDraft| slot.subject == pc && same_key(&slot.key, "location");
+    let before = p.facts.len();
+    p.facts
+        .retain(|f| f.said_by.is_some() || !is_pc_location(&f.slot));
+    if p.facts.len() < before {
+        notes.push(format!(
+            "removed the PC's ({pc}) location fact: move_to moves the PC"
+        ));
+    }
+    if let Some(c) = p.check.as_mut() {
+        for (name, stake) in [("win", &mut c.win), ("lose", &mut c.lose)] {
+            if stake.as_ref().is_some_and(is_pc_location) {
+                *stake = None;
+                notes.push(format!(
+                    "removed the {name} stake on the PC's ({pc}) location: move_to moves the PC"
+                ));
+            }
+        }
+    }
+}
+
 /// A `location` value that names a known place, by its handle or by one of
 /// its names, becomes that place's main name. Presence and the Scene place
 /// then read it like every other location (`WorldView::present`,
@@ -52,8 +82,8 @@ fn drop_pc_acts(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
 fn spell_places(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
     let mut slots: Vec<&mut SlotDraft> = p.facts.iter_mut().map(|f| &mut f.slot).collect();
     if let Some(c) = p.check.as_mut() {
-        slots.push(&mut c.win);
-        slots.push(&mut c.lose);
+        slots.extend(c.win.as_mut());
+        slots.extend(c.lose.as_mut());
     }
     if let Some(s) = p.schedule.as_mut() {
         slots.extend(s.effects.iter_mut());

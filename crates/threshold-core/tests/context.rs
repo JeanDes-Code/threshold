@@ -904,7 +904,7 @@ fn lost_check_is_told_as_a_failure() {
         &[],
         &[],
         "I force the gate.",
-        Some(Verdict::Check),
+        Some((threshold_core::domain::ActionKind::Act, Verdict::Check)),
     );
     assert!(
         lost.recent.contains(&format!(
@@ -921,7 +921,7 @@ fn lost_check_is_told_as_a_failure() {
         &[],
         &[],
         "I force the gate.",
-        Some(Verdict::Check),
+        Some((threshold_core::domain::ActionKind::Act, Verdict::Check)),
     );
     assert!(!won.recent.contains("fails"), "{}", won.recent);
 }
@@ -938,4 +938,36 @@ fn proposal_rules_make_an_opposed_contest_a_check() {
         .unwrap_or_else(|| panic!("no contest rule: {system}"));
     assert!(line.contains("is a check"), "{line}");
     assert!(line.contains("physical or social"), "{line}");
+}
+
+/// ADR 0007: the scene lists the places the PC knows, by handle, and the
+/// per-Turn schema offers exactly those for `move_to`, with `null`. The
+/// rules describe the field in one line; the old B1 move line is gone.
+#[test]
+fn proposal_prompt_lists_the_places_for_move_to() {
+    let mut w = World::new();
+    let market = w.add_place("Market");
+    let ctx = threshold_core::context::proposal_context(&w.view, &[], "I walk to the market.");
+    assert!(
+        ctx.prompt.scene.contains(&format!(
+            "PLACES (for move_to): E{} Gate, E{market} Market",
+            w.gate
+        )),
+        "{}",
+        ctx.prompt.scene
+    );
+    assert_eq!(
+        ctx.handles.places,
+        [Handle::Entity(w.gate), Handle::Entity(market)]
+    );
+    let schema = threshold_core::proposal_schema_for(&ctx.handles);
+    assert_eq!(
+        schema.pointer("/properties/move_to/enum").unwrap(),
+        &serde_json::json!([format!("E{}", w.gate), format!("E{market}"), null])
+    );
+    let required = schema["required"].as_array().unwrap();
+    assert!(required.contains(&serde_json::json!("move_to")));
+    let system = &ctx.prompt.system;
+    assert_eq!(system.matches("move_to").count(), 1, "{system}");
+    assert!(!system.contains("A move always has this fact"), "{system}");
 }

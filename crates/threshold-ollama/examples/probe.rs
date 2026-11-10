@@ -84,6 +84,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         events: vec![],
         goals: vec![],
         new_slots: 1,
+        ..Default::default()
     });
     for (name, intent) in intents {
         let prompt = Prompt {

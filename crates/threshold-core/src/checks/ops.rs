@@ -32,14 +32,27 @@ pub fn to_ops(
     view: &WorldView,
 ) -> Resolved {
     let p = valid.proposal();
+    let success = roll.is_some_and(|r| r.success);
+    // ADR 0007: the core moves the PC to `move_to` when the verdict lets the
+    // action happen: allowed, or a Check that succeeds.
+    let lets_happen = match p.verdict {
+        Verdict::Allowed => true,
+        Verdict::Check => success,
+        Verdict::Impossible => false,
+    };
+    let moved_to = p
+        .move_to
+        .filter(|_| lets_happen)
+        .and_then(|h| view.entity(h))
+        .map(|place| place.name.clone());
     let mut b = Builder {
         p,
         view,
         ops: Vec::new(),
         promoted: HashSet::new(),
         cleared: HashSet::new(),
+        moved_to: moved_to.clone(),
     };
-    let success = roll.is_some_and(|r| r.success);
 
     b.new_npcs();
     b.promote_cited();
@@ -58,8 +71,19 @@ pub fn to_ops(
         } else {
             &check.lose
         };
-        let holders = b.holders(Seen::Present);
-        b.write(stake, FactSource::Stake, holders, Vec::new());
+        if let Some(stake) = stake {
+            let holders = b.holders(Seen::Present);
+            b.write(stake, FactSource::Stake, holders, Vec::new());
+        }
+    }
+    if let (Some(place), Some(pc)) = (&moved_to, pc(view)) {
+        let holders = b.holders(Seen::Pc);
+        let location = SlotDraft {
+            subject: Handle::Entity(pc),
+            key: "location".into(),
+            value: place.clone(),
+        };
+        b.write(&location, FactSource::Proposal, holders, Vec::new());
     }
     for fact in &p.facts {
         let holders = b.holders(fact.seen);
@@ -142,6 +166,8 @@ struct Builder<'a> {
     promoted: HashSet<u64>,
     /// Obstacles this Commit clears.
     cleared: HashSet<u64>,
+    /// The place the PC moves to in this Commit (`move_to`), if any.
+    moved_to: Option<String>,
 }
 
 impl Builder<'_> {
@@ -153,18 +179,7 @@ impl Builder<'_> {
     /// NPCs witness it.
     fn new_npcs(&mut self) {
         let pc_id = pc(self.view);
-        let moved_to = pc_id.and_then(|pc| {
-            self.p
-                .facts
-                .iter()
-                .filter(|f| f.said_by.is_none())
-                .filter(|f| {
-                    f.slot.subject == Handle::Entity(pc)
-                        && normalize::key(&f.slot.key) == "location"
-                })
-                .map(|f| normalize::value(&f.slot.value))
-                .next_back()
-        });
+        let moved_to = self.moved_to.as_deref().map(normalize::value);
         let witnesses = if moved_to.is_some() {
             pc_id
                 .map(EntityRef::Id)

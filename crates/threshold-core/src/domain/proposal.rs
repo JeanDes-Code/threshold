@@ -7,6 +7,12 @@ use super::{Handle, Stance};
 pub struct DecisionProposal {
     pub action: ActionKind,
     pub verdict: Verdict,
+    /// The known place the PC goes to, when the Intent moves the PC there;
+    /// `None` when the PC stays. The core writes the PC's `location` from it
+    /// (ADR 0007); the model never writes that fact itself. The per-Turn
+    /// schema makes it required, with the known places' handles and `null`.
+    #[serde(default)]
+    pub move_to: Option<Handle>,
     #[serde(default)]
     #[schemars(length(max = 2))]
     pub blockers: Vec<Handle>,
@@ -51,8 +57,13 @@ pub enum Verdict {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CheckDraft {
     pub against: Option<Handle>,
-    pub win: SlotDraft,
-    pub lose: SlotDraft,
+    /// The stakes. The per-Turn schema requires both; the core drops an
+    /// illegal one (a PC key the agency rule refuses), and a Check the core
+    /// builds itself has none (ADR 0007). The Roll still runs without them.
+    #[serde(default)]
+    pub win: Option<SlotDraft>,
+    #[serde(default)]
+    pub lose: Option<SlotDraft>,
     #[schemars(length(max = 3))]
     pub factors: Vec<Factor>,
 }

@@ -15,7 +15,7 @@ fn has_valid_cause(view: &WorldView, because: &[Handle]) -> bool {
 }
 
 pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
-    let writes = writes(p);
+    let writes = writes(p, view);
     coincidence(p, view, &writes, errs);
     npc_folds(p, view, errs);
     fact_bends(view, &writes, errs);
@@ -25,7 +25,8 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
 /// A proposal fact or a scheduled effect that writes the slot of an open
 /// obstacle needs a valid cause. The obstacles are the open rows plus the
 /// blockers this proposal declares. The win stake is the legal path and is
-/// not checked here.
+/// not checked here; so is the move of a Check, which happens only on a
+/// success.
 fn coincidence(
     p: &DecisionProposal,
     view: &WorldView,
@@ -50,7 +51,9 @@ fn coincidence(
             continue;
         };
         let hit = writes.iter().any(|w| {
-            w.origin != Origin::WinStake
+            let on_success = w.origin == Origin::WinStake
+                || (w.origin == Origin::Move && p.verdict == Verdict::Check);
+            !on_success
                 && w.subject == obstacle.slot.subject
                 && same_key(w.key, &obstacle.slot.key)
                 && !same(w.value, &obstacle.slot.value)

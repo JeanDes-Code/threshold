@@ -241,25 +241,21 @@ fn town_demo_offscreen_consequence() {
     });
     insult.minutes = 5;
 
-    // Turns 2-3: four days of travel, to Ostry and back.
+    // Turns 2-3: four days at the mill, then back to the hall.
     let mut away = proposal(Verdict::Allowed);
     away.action = ActionKind::Move;
-    away.facts = vec![fact(slot(e(pc), "location", "Ostry"), Seen::Pc, vec![])];
+    away.move_to = Some(e(id(&view, "Varn mill")));
     away.minutes = 3 * DAY + 12 * 60;
     let mut back = proposal(Verdict::Allowed);
     back.action = ActionKind::Move;
-    back.facts = vec![fact(
-        slot(e(pc), "location", "Varn town hall"),
-        Seen::Pc,
-        vec![],
-    )];
+    back.move_to = Some(e(id(&view, "Varn town hall")));
     back.minutes = 12 * 60;
 
     let gm = RecordedGm::new(
         vec![json(&insult), json(&away), json(&back)],
         vec![
             "Orsel smiles thinly.".into(),
-            "The road to Ostry is long.".into(),
+            "The mill wheel turns for days.".into(),
             "You are back in Varn.".into(),
             "Hessa leans close.".into(),
         ],
@@ -281,15 +277,19 @@ fn town_demo_offscreen_consequence() {
     let event = event.expect("Doul's inquiry is scheduled").id;
     assert!(!knows_reputation(&view));
 
-    let t2 = play(&mut engine, "t2", "I travel to Ostry.");
+    let t2 = play(
+        &mut engine,
+        "t2",
+        "I go to the Varn mill and work there for days.",
+    );
     let view = engine.store().snapshot(campaign).unwrap();
-    // The inquiry fired during Turn 2, while the PC was in Ostry.
+    // The inquiry fired during Turn 2, while the PC was at the mill.
     let fired = engine.store().turn_ops(t2.turn_id).unwrap();
     assert!(fired.contains(&LedgerOp::FireEvent { event_id: event }));
     assert!(view.events_scheduled.iter().all(|w| w.id != event));
     let pc_at = view.live_fact(pc, "location").unwrap().slot.value.clone();
     let doul_at = view.live_fact(doul, "location").unwrap().slot.value.clone();
-    assert_eq!(pc_at, "ostry");
+    assert_eq!(pc_at, "varn mill");
     assert_ne!(pc_at, doul_at);
     let rumor = view.live_fact(pc, "reputation").unwrap().clone();
     assert_eq!(rumor.slot.value, "under_suspicion");
@@ -499,9 +499,9 @@ fn event_text_naming_an_unknown_npc_is_dropped() {
     );
 }
 
-/// B1 (QA, 2026-11-10): a move names its destination by the place's handle;
-/// the core writes the place's name, so the Scene place and the present
-/// list change with it.
+/// ADR 0007: a move names its destination in `move_to`, by the place's
+/// handle; the core writes the place's name, so the Scene place and the
+/// present list change with it.
 #[test]
 fn moving_to_a_known_place_changes_the_scene_place_and_who_is_present() {
     let (store, campaign) = town();
@@ -521,20 +521,11 @@ fn moving_to_a_known_place_changes_the_scene_place_and_who_is_present() {
     assert!(present.contains(&orsel));
     assert_ne!(place.and_then(|(entity, _)| entity), Some(archive));
 
-    let mut silent = proposal(Verdict::Allowed);
-    silent.action = ActionKind::Move;
-    silent.minutes = 5;
-    let mut walk = silent.clone();
-    walk.facts = vec![NewFact {
-        slot: slot(e(pc), "location", &format!("E{archive}")),
-        seen: Seen::Pc,
-        said_by: None,
-        because: vec![],
-    }];
-    let gm = RecordedGm::new(
-        vec![json(&silent), json(&walk)],
-        vec!["Dust and shelves.".into()],
-    );
+    let mut walk = proposal(Verdict::Allowed);
+    walk.action = ActionKind::Move;
+    walk.minutes = 5;
+    walk.move_to = Some(e(archive));
+    let gm = RecordedGm::new(vec![json(&walk)], vec!["Dust and shelves.".into()]);
     let mut engine = Engine::new(store, Box::new(gm.clone()), Box::new(D10), vec![], campaign);
     engine
         .play_turn(

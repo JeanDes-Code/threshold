@@ -54,6 +54,16 @@ fn seed_fact(subject: &str, key: &str, value: &str) -> SeedFact {
     }
 }
 
+pub fn place(name: &str) -> SeedEntity {
+    SeedEntity {
+        name: name.into(),
+        kind: EntityKind::Place,
+        age: None,
+        other_names: vec![],
+        hidden: false,
+    }
+}
+
 fn npc(name: &str, age: u16) -> SeedEntity {
     SeedEntity {
         name: name.into(),
@@ -77,13 +87,7 @@ pub fn adventure_seed() -> AdventureSeed {
             npc("Orsel", 52),
             npc("Brann", 18),
             npc("Pip", 17),
-            SeedEntity {
-                name: "Gate".into(),
-                kind: EntityKind::Place,
-                age: None,
-                other_names: vec![],
-                hidden: false,
-            },
+            place("Gate"),
         ],
         boundaries: vec![],
         decided: vec![
@@ -216,6 +220,18 @@ impl World {
         self.view.facts.iter().map(|f| f.id).max().unwrap_or(0) + 1
     }
 
+    /// Adds a place entity, for a move to go to (`move_to`, ADR 0007).
+    pub fn add_place(&mut self, name: &str) -> u64 {
+        self.commit(vec![LedgerOp::AddEntity {
+            local: None,
+            kind: EntityKind::Place,
+            name: name.into(),
+            age: None,
+            other_names: vec![],
+        }]);
+        self.view.entity_by_name(name).unwrap().id
+    }
+
     pub fn goal_done(&mut self) {
         self.commit(vec![LedgerOp::SetGoalStatus {
             goal: self.goal,
@@ -242,6 +258,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
     DecisionProposal {
         action: ActionKind::Act,
         verdict,
+        move_to: None,
         blockers: vec![],
         check: None,
         reactions: vec![],
@@ -287,8 +304,8 @@ pub fn reaction(
 pub fn check(against: Option<Handle>, win: SlotDraft, lose: SlotDraft) -> CheckDraft {
     CheckDraft {
         against,
-        win,
-        lose,
+        win: Some(win),
+        lose: Some(lose),
         factors: vec![],
     }
 }

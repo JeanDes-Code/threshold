@@ -111,6 +111,7 @@ Handles are row ids with a prefix: `E12` entity, `F40` fact, `W3` World Event, `
 pub struct DecisionProposal {
     pub action: ActionKind,                 // talk | move | act | observe | wait
     pub verdict: Verdict,                   // allowed | impossible | check
+    #[serde(default)] pub move_to: Option<Handle>,     // E* of a known place, or null; required in the schema (section 11)
     #[serde(default)] pub blockers: Vec<Handle>,       // F*, max 2: what stands in the PC's way
     pub check: Option<CheckDraft>,                      // present iff verdict == check
     #[serde(default)] pub reactions: Vec<Reaction>,    // max 2
@@ -121,7 +122,7 @@ pub struct DecisionProposal {
     #[serde(default)] pub minutes: u32,
     #[serde(default)] pub intimate: bool,
 }
-pub struct CheckDraft { against: Option<Handle>, win: SlotDraft, lose: SlotDraft, factors: Vec<Factor> } // factors max 3
+pub struct CheckDraft { against: Option<Handle>, win: Option<SlotDraft>, lose: Option<SlotDraft>, factors: Vec<Factor> } // factors max 3; both stakes required in the schema, optional for the core (section 11)
 pub struct Factor     { fact: Handle, helps: bool }
 pub struct Reaction   { npc: Handle, stance: Stance, plan: String /* <= 12 words */, cause: Option<Cause> }
 pub enum   Cause      { Check, Fact(Handle) }
@@ -199,7 +200,7 @@ A builder implements in this order: `domain`, `store` with migrations and the re
 
 A QA pass on the live model found game bugs. These rules changed to fix them. The owner approved the prompt and check changes.
 
-- **A move writes the PC's location.** A proposal with `action: move` and verdict `allowed` must write a fact on the PC with key `location`. With verdict `check`, the win stake may write it instead, so the PC moves only on a success; the lose stake still never moves the PC. A move without it is rejected by the `move` check, with the repair note `checks::move_note`, which names the exact fact to add with the PC's handle. An `impossible` move writes nothing. The proposal prompt says the same in one line.
+- **A move writes the PC's location.** Superseded by section 11 (`move_to`). A proposal with `action: move` and verdict `allowed` must write a fact on the PC with key `location`. With verdict `check`, the win stake may write it instead, so the PC moves only on a success; the lose stake still never moves the PC. A move without it is rejected by the `move` check, with the repair note `checks::move_note`, which names the exact fact to add with the PC's handle. An `impossible` move writes nothing. The proposal prompt says the same in one line.
 - **One spelling per place.** Before the checks, a `location` value that names a known place entity, by its handle (`E7`) or by one of its names (`normalize::name`), becomes that place's main name. `WorldView::present` and the Scene place then read it like every other location.
 - **The core removes three PC shapes instead of rejecting them.** A reaction of the PC, the PC in a scheduled event's `seen_by`, and a scheduled event whose actor is the PC are removed by `checks::settle` before the checks. Each removal writes one line in the debug log (step `settle`). Removing never adds a PC act, so the Agency rule holds. Every other agency case still rejects, and `validate` still rejects these three shapes when it gets them directly.
 - **The Player reads one sentence for a failed Turn.** When both attempts are rejected, the Player reads "The GM could not settle this Turn. Try to say it another way." The check names follow only in debug mode.
@@ -207,3 +208,18 @@ A QA pass on the live model found game bugs. These rules changed to fix them. Th
 - **The PC may settle its own Open Item.** A proposal fact on the PC on key `x` passes the agency check when the PC holds a live fact on `pending_x` about the PC (ADR 0005, same date). The PC's line in the proposal prompt lists those keys after `settles:`.
 - **An opposed contest is a Check.** One proposal rule line says that a physical or social contest against an NPC, whose result is uncertain, is a Check with `against` set to that NPC. No schema change.
 - **The World Clock starts at the seed's hour.** `start.hour` (0 to 23, missing means 8) sets the clock of Day 1 through one `AdvanceClock` op in the seed Setup Turn, so a rebuild finds it again. A World Event `at` in a world file counts from that start. Old seeds and drafts without the field load.
+
+## 11. Structured proposal fields (ADR 0007, 2026-11-10)
+
+The live `play_basics` evaluation showed that the model does not follow the prompt rules of section 10 for a move, a contest or an Open Item. What the code needs is now a required, enum-typed field of the proposal, and the code writes the facts.
+
+- **`move_to`.** Required and nullable in the per-Turn schema. Its enum is the handles of the places the PC knows (`world::known_places`: every place entity the Adventure Seed does not hide) and `null`. The scene block lists them on one `PLACES (for move_to)` line. When the verdict is allowed, or a Check succeeds, `to_ops` writes the PC's `location` with the place's main name, witnessed by the PC. An impossible verdict or a lost Check moves nobody. A move with `move_to: null` commits, and the PC stays. For the Shortcut checks this write counts like a proposal fact, or like the win stake on a Check. The `move` check and `checks::move_note` are gone.
+- **The narrator is told where the PC is.** The outcome block gets one line from the Commit: `context::PC_PLACE_LINE` and the place, or `context::NOT_MOVED_LINE` and the place when the action was a move and the Commit wrote no PC `location`. No narrator rule line is added.
+- **Stakes are optional for the core.** `CheckDraft.win` and `lose` stay required in the schema. The core may drop one, and a Check with no stake still rolls; the narrator gets the result line.
+
+**The leniency rule** (one rule, applied by `checks::settle`):
+
+- An element that only *removes* model output about the PC is dropped, and one line goes to the debug log (step `settle`). These are: a reaction of the PC, the PC in a scheduled event's `seen_by`, a scheduled event whose actor is the PC, a PC `location` in a fact or a stake, and a `move_to` that is not a known place.
+- The core never *creates* a PC act, word or feeling, except the fields that come from the Player's Intent: `move_to`.
+- Every other agency case still rejects. `validate` still rejects the dropped shapes when it gets them directly. The Player reads one plain sentence for a failed Turn (section 10).
+

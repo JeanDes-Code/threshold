@@ -70,24 +70,35 @@ fn pc_sight_holds_no_hidden_world() {
 
 #[test]
 fn moment_matches_seen_present_of_snapshot_before() {
-    let w = HiddenWorld::new();
-    let ada = w.ada;
+    let mut w = HiddenWorld::new();
+    let place = |name: &str| LedgerOp::AddEntity {
+        local: None,
+        kind: threshold_core::domain::EntityKind::Place,
+        name: name.into(),
+        age: None,
+        other_names: vec![],
+    };
+    // The places the moves go to (`move_to`, ADR 0007).
+    w.commit(
+        TurnKind::Setup,
+        "",
+        "{}",
+        0,
+        vec![place("Market"), place("Gate square")],
+    );
     let mut look = proposal(Verdict::Allowed);
     look.action = ActionKind::Observe;
     look.minutes = 5;
+    let places = w.view();
     let mut walk = proposal(Verdict::Allowed);
     walk.action = ActionKind::Move;
     walk.minutes = 10;
-    walk.facts = vec![fact(slot(e(ada), "location", "market"), Seen::Pc, vec![])];
+    walk.move_to = Some(e(id_of(&places, "Market")));
     let mut arrive = proposal(Verdict::Allowed);
     arrive.new_npcs = vec![new_npc(1, "Hale", 40)];
     arrive.minutes = 5;
     let mut back = walk.clone();
-    back.facts = vec![fact(
-        slot(e(ada), "location", "gate square"),
-        Seen::Pc,
-        vec![],
-    )];
+    back.move_to = Some(e(id_of(&places, "Gate square")));
     let proposals = [&look, &walk, &arrive, &look, &back, &look]
         .into_iter()
         .map(json)

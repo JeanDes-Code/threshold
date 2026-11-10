@@ -15,8 +15,8 @@ mod narration_prompt;
 mod proposal_prompt;
 
 pub use narration_prompt::{
-    FAILED_CHECK_LINE, IMPOSSIBLE_LINE, NARRATION_RULES, guard_events, guard_plans,
-    narration_prompt, opening_prompt, perceived_by_pc,
+    FAILED_CHECK_LINE, IMPOSSIBLE_LINE, NARRATION_RULES, NOT_MOVED_LINE, PC_PLACE_LINE,
+    guard_events, guard_plans, narration_prompt, opening_prompt, perceived_by_pc,
 };
 pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, proposal_prompt};
 

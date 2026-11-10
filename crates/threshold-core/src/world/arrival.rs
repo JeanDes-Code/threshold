@@ -54,6 +54,20 @@ pub fn hidden(view: &WorldView, entity: EntityId) -> bool {
     })
 }
 
+/// The places the PC knows: every place entity that the Adventure Seed
+/// does not hide, in id order. A Decision Proposal moves the PC only to one
+/// of them (`move_to`, ADR 0007).
+pub fn known_places(view: &WorldView) -> Vec<EntityId> {
+    let mut places: Vec<EntityId> = view
+        .entities
+        .iter()
+        .filter(|e| e.kind == EntityKind::Place && !hidden(view, e.id))
+        .map(|e| e.id)
+        .collect();
+    places.sort_unstable();
+    places
+}
+
 /// A location fact a proposal (or a Correction) wrote with no PC witness:
 /// `seen = gm`. Adventure Seed and World Event presence is open by ruling.
 fn placed_unseen(fact: &Fact, pc: u64) -> bool {
