@@ -158,7 +158,7 @@ fn plain_outputs() -> Vec<Value> {
 
 #[test]
 fn empty_or_long_source_is_refused_before_any_call() {
-    assert_eq!(SOURCE_TEXT_MAX_CHARS, 60_000);
+    assert_eq!(SOURCE_TEXT_MAX_CHARS, 40_000);
     let too_long = "a".repeat(SOURCE_TEXT_MAX_CHARS + 1);
     for text in ["", "   \n\t ", too_long.as_str()] {
         let gm = gm(&[]);

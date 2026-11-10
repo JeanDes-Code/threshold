@@ -28,8 +28,11 @@ use crate::{
 };
 
 /// The longest Source Text, in characters, that a draft accepts. The seed
-/// and roster calls read the whole text, so this bounds their prompt.
-pub const SOURCE_TEXT_MAX_CHARS: usize = 60_000;
+/// and roster calls read the whole text, so this bounds their prompt: one
+/// probe measured about 3,550 prompt tokens for 15,000 characters, so
+/// 40,000 characters leave about 7,000 of the 16,384 context tokens for the
+/// answer. No text of this size has run on the live model yet.
+pub const SOURCE_TEXT_MAX_CHARS: usize = 40_000;
 
 /// Drafts a Seed Draft from a Source Text: the roster with the PC, the seed,
 /// then the PC Knowledge of each section. An empty or too long text is

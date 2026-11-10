@@ -22,8 +22,9 @@ use crate::{
 };
 
 /// The highest share of all NPC goals and secrets that may name the PC. A
-/// world above it turns around the PC (design 5). The first value is a
-/// guess; the live evaluation sets it.
+/// world above it turns around the PC (design 5). The live evaluation of
+/// 2026-11-10 measured 3% on average and 5% at most over four built worlds
+/// (`evals/reports/2026-11-world-build.md`), so this limit is a wide guard.
 pub const PC_CENTRED_MAX_SHARE: f32 = 0.5;
 
 /// The hidden state of one NPC, as the World Setup holds it.

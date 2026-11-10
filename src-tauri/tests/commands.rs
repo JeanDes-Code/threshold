@@ -871,7 +871,10 @@ fn source_text_is_checked_before_the_model() {
         .draft_from_text(&long, &mut |_| {})
         .unwrap_err()
         .to_string();
-    assert!(err.contains("60000"), "{err}");
+    assert!(
+        err.contains(&threshold_core::build::SOURCE_TEXT_MAX_CHARS.to_string()),
+        "{err}"
+    );
     assert!(rig.build.calls().is_empty());
 }
 
