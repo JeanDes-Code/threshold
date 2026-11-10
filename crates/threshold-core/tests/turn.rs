@@ -1201,3 +1201,44 @@ fn event_with_the_pc_as_actor_is_removed_not_rejected() {
     assert_eq!(snapshot(&engine, &w).events_scheduled.len(), before);
     assert!(steps(&engine, "t1").iter().any(|(s, _)| s == "settle"));
 }
+
+/// B2: the narrator gets the verdict of an impossible attempt, never the
+/// blocker's GM-only text, on the first Narration and on `renarrate`.
+#[test]
+fn impossible_attempt_is_told_as_not_happening_without_the_blocker() {
+    let w0 = World::new();
+    let mut p = proposal(Verdict::Impossible);
+    p.blockers = vec![f(w0.secret)];
+    p.minutes = 1;
+    let (mut engine, _w, gm) = setup(vec![json(&p)], vec!["You fail.", "You fail again."]);
+    let outcome = engine
+        .play_turn("t1".into(), "I fly over the gate.", &mut no_chunks())
+        .unwrap();
+    engine.renarrate(outcome.turn_id, &mut no_chunks()).unwrap();
+    let narrations = prompts(&gm, CallKind::Narrate);
+    assert_eq!(narrations.len(), 2);
+    for prompt in &narrations {
+        assert!(
+            prompt
+                .recent
+                .contains(threshold_core::context::IMPOSSIBLE_LINE),
+            "{}",
+            prompt.recent
+        );
+        for field in fields(prompt) {
+            for secret in ["gate key", "holds"] {
+                assert!(!field.contains(secret), "{field}");
+            }
+        }
+    }
+    // An allowed Turn has no such line.
+    let mut ok = proposal(Verdict::Allowed);
+    ok.minutes = 1;
+    gm.push_proposal(json(&ok));
+    gm.push_narration("You wait.".into());
+    engine
+        .play_turn("t2".into(), "I wait a moment.", &mut no_chunks())
+        .unwrap();
+    let last = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(!last.recent.contains("does not happen"), "{}", last.recent);
+}

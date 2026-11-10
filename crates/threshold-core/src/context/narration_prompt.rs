@@ -20,7 +20,7 @@ use super::{
 };
 use crate::{
     domain::{
-        EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, is_open_key,
+        EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, Verdict, is_open_key,
         is_state_key, outcome_key,
     },
     model::Prompt,
@@ -210,15 +210,25 @@ pub fn narration_prompt(
     events: &[String],
     reactions: &[Reaction],
     intent: &str,
+    verdict: Option<Verdict>,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
     Prompt {
         system: with_fragments(NARRATION_RULES, packs),
         stable: adventure_block(view_after, None),
         scene: scene(&r),
-        recent: recent(&r, perceived, events, reactions, intent),
+        recent: recent(&r, perceived, events, reactions, intent, verdict),
     }
 }
+
+/// The outcome line of an impossible attempt (changed after QA,
+/// 2026-11-10). It carries the verdict only: the blockers can be GM-only
+/// facts, so their text never reaches the narrator.
+pub const IMPOSSIBLE_LINE: &str = "- The attempt does not happen: the world prevents it. Nothing changes beyond what is listed here.\n";
+
+/// The words after a lost Check's result line.
+pub const FAILED_CHECK_LINE: &str =
+    " The attempt fails. Nothing changes beyond what is listed here.";
 
 /// The opening prompt (data shape 3.7): the narration rules with the
 /// opening lines after them, the same stable and scene blocks as a
@@ -324,6 +334,9 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
             fact_text(&claim.slot.key, &claim.text)
         ),
         LedgerOp::AddEntity { name, .. } => format!("- {} is here.\n", one_line(name)),
+        LedgerOp::RecordRoll { outcome, .. } if outcome == "lose" => {
+            format!("- The Check result: {outcome}.{FAILED_CHECK_LINE}\n")
+        }
         LedgerOp::RecordRoll { outcome, .. } => format!("- The Check result: {outcome}.\n"),
         LedgerOp::AdvanceClock { minutes } => format!("- {minutes} minutes pass.\n"),
         _ => return None,
@@ -336,11 +349,17 @@ fn recent(
     events: &[String],
     reactions: &[Reaction],
     intent: &str,
+    verdict: Option<Verdict>,
 ) -> String {
     let mut tail = format!("THIS TURN\nPlayer intent: {}\n", one_line(intent));
-    let outcome: Vec<String> = perceived
-        .iter()
-        .filter_map(|op| outcome_line(r, op, perceived))
+    let impossible = (verdict == Some(Verdict::Impossible)).then(|| IMPOSSIBLE_LINE.to_owned());
+    let outcome: Vec<String> = impossible
+        .into_iter()
+        .chain(
+            perceived
+                .iter()
+                .filter_map(|op| outcome_line(r, op, perceived)),
+        )
         .chain(events.iter().map(|text| format!("- {}\n", one_line(text))))
         .collect();
     if !outcome.is_empty() {

@@ -163,6 +163,9 @@ struct Committed<'a> {
     /// Texts of the World Events the PC witnessed.
     events: &'a [String],
     reactions: &'a [Reaction],
+    /// The proposal's verdict: the narrator tells an impossible attempt as
+    /// one that does not happen. Never the blockers (GM-only text).
+    verdict: Option<Verdict>,
 }
 
 /// The result of the steps before the Commit.
@@ -174,6 +177,7 @@ struct Planned {
     /// Texts of the World Events the PC witnessed this Turn.
     events: Vec<String>,
     minutes: u32,
+    verdict: Verdict,
 }
 
 pub const OOC_RULES: &str = "\
@@ -398,6 +402,7 @@ impl Engine {
             ops: &ops,
             events: &events,
             reactions: &reactions,
+            verdict: stored_action(&stored.record.proposal_json).map(|(_, verdict)| verdict),
         };
         let narration = self.narrate(
             &stored.record.op_id,
@@ -492,6 +497,7 @@ impl Engine {
             ops: &ops,
             events: &planned.events,
             reactions: &planned.reactions,
+            verdict: Some(planned.verdict),
         };
         let narration = self
             .narrate(
@@ -554,6 +560,7 @@ impl Engine {
             &events,
             &reactions,
             intent,
+            committed.verdict,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
@@ -709,6 +716,7 @@ impl Engine {
             reactions: resolved.reactions,
             events,
             minutes: p.minutes,
+            verdict: p.verdict,
         })
     }
 
