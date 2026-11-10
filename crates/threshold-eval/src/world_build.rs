@@ -630,11 +630,13 @@ fn tally_draft(expected: &Expected, run: &BuildRun, draft: &SeedDraft, t: &mut T
     }
     // The model's claim that the text states an age, against the list: an
     // age in the list means the text states it.
-    let stated: BTreeSet<String> = draft
-        .ages
+    let marks = &draft.age_marks;
+    let stated: BTreeSet<String> = marks
+        .pc
         .iter()
-        .filter(|(_, mark)| mark.stated)
-        .map(|(name, _)| name.clone())
+        .chain(marks.entities.iter().flatten())
+        .filter(|mark| mark.stated)
+        .map(|mark| normalize::name(&mark.name))
         .collect();
     let characters = got
         .iter()
@@ -1155,7 +1157,7 @@ fn one_run(ctx: &mut Ctx, text: &str, run: usize) -> BuildRun {
 
     // The evaluation stands in for the Player: it confirms every age.
     for line in age_lines(&draft) {
-        let _ = confirm_age(&mut draft, &line.name);
+        let _ = confirm_age(&mut draft, &line.entry());
     }
     if let Err(gaps) = approve(&mut draft) {
         let kinds: Vec<String> = gaps.iter().map(|g| label(g.kind)).collect();

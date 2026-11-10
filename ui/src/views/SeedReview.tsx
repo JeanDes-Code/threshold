@@ -17,9 +17,14 @@ import {
 import {
   SECTIONS,
   addEntry,
+  afterFlush,
   ageLabel,
   ageLineOf,
+  ageStatus,
+  ageTextMatches,
   agesLeft,
+  canApprove as approvable,
+  confirmRow,
   createSaver,
   cutSections,
   cutSentence,
@@ -91,6 +96,9 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const [cut] = useState<Cut[]>(view.cut);
   const [state, setState] = useState(view.state);
   const [pending, setPending] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  // The text of each age field, by its path, while it is not the stored age.
+  const [ageTexts, setAgeTexts] = useState<Partial<Record<string, string | null>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameErrors, setNameErrors] = useState<Partial<Record<string, string>>>({});
@@ -120,9 +128,13 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
       },
       onResult: (saved) => {
         apply(saved);
+        setSaveFailed(false);
         setError(null);
       },
-      onError: (e) => setError(`Could not save: ${errorText(e)}`),
+      onError: (e) => {
+        setSaveFailed(true);
+        setError(`Could not save: ${errorText(e)}`);
+      },
       onPending: setPending,
     }),
   );
@@ -144,15 +156,19 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   };
 
   /**
-   * Runs one core action after the store holds every edit, so the core
-   * renames or confirms what the Player sees. Returns the error text.
+   * Runs one core action. `run` gets the saver's flush: each action flushes
+   * first, so the core renames or confirms what the Player sees. Returns the
+   * error text.
    */
-  const core = async (call: () => Promise<DraftView>, then?: (v: DraftView) => void) => {
+  const core = async (
+    run: (flush: () => Promise<void>) => Promise<DraftView>,
+    then?: (v: DraftView) => void,
+  ) => {
     if (locked || !guard.enter()) return null;
     setBusy(true);
     try {
-      await saver.flush();
-      const result = await call();
+      const result = await run(() => saver.flush());
+      setSaveFailed(false);
       apply(result);
       then?.(result);
       return null;
@@ -210,14 +226,16 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
       true);
     }
     const failure = await core(
-      () => client.renameDraftEntity(draftId, change.from, change.to),
+      (flush) => afterFlush(flush, () => client.renameDraftEntity(draftId, change.entry, change.to)),
       (result) => setForm((f) => renamed(f, result, row)),
     );
     setNameErrors((e) => ({ ...e, [rowPath(row)]: failure ?? undefined }));
   };
 
-  const confirm = async (name: string) => {
-    const failure = await core(() => client.confirmAge(draftId, name));
+  const confirm = async (row: Row) => {
+    const failure = await core((flush) =>
+      confirmRow(flush, (entry) => client.confirmAge(draftId, entry), form, row),
+    );
     setError(failure);
   };
 
@@ -279,18 +297,26 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const age = (row: Row, value: number | null, onChange: (n: number | null) => void) => {
     const path = `${rowPath(row)}.age`;
     const saved = savedName(form, row);
-    const line = ageLineOf(ages, saved);
+    const line = ageLineOf(ages, form, row);
     const who = row === "pc" ? "your character" : saved || "this character";
     const label = ageLabel(line);
+    const shown = ageStatus({ text: ageTexts[path] ?? null, value, line, pending, saveFailed, busy });
     return (
       <div className="review-age">
         <label htmlFor={fieldId(path)}>Age</label>
         <div className="review-age__row">
-          <AgeInput path={path} label={`Age of ${who}`} value={value} nullable={row !== "pc"} onChange={onChange} />
+          <AgeInput
+            path={path}
+            label={`Age of ${who}`}
+            value={value}
+            nullable={row !== "pc"}
+            onChange={onChange}
+            onText={(text) => setAgeTexts((t) => ({ ...t, [path]: text }))}
+          />
           <span className={`review-tag review-tag--${line?.source ?? "edited"}`}>{label}</span>
           {value !== null && value < 18 && <span className="review-tag review-tag--warn">under 18</span>}
           <span className="review-age__end">
-            {line?.confirmed ? (
+            {shown.confirmed ? (
               <span className="review-tag review-tag--ok">
                 <span aria-hidden="true">✓ </span>confirmed
               </span>
@@ -298,8 +324,8 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
               <button
                 type="button"
                 className="play-btn play-btn--outline review-age__confirm"
-                disabled={value === null || pending || busy}
-                onClick={() => void confirm(saved)}
+                disabled={!shown.canConfirm}
+                onClick={() => void confirm(row)}
               >
                 Confirm age
               </button>
@@ -420,7 +446,14 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const placeNames = places.filter(({ e }) => e.kind === "place").map(({ e }) => e.name);
   const left = agesLeft(ages);
   const others = gaps.filter((g) => g.kind !== "age_unconfirmed").length;
-  const canApprove = !pending && !busy && !approving && gaps.length === 0 && error === null && state !== "built";
+  const ageRows: [Row, number | null][] = [
+    ["pc", seed.pc.age],
+    ...people.map(({ e, i }): [Row, number | null] => [i, e.age]),
+  ];
+  const agesShown = ageRows.every(([row, value]) =>
+    ageTextMatches(ageTexts[`${rowPath(row)}.age`] ?? null, value),
+  );
+  const canApprove = approvable({ pending, busy, approving, saveFailed, error, gaps, state, agesShown });
 
   const add = (entry: SeedEntity) => {
     update((f) => addEntry(f, entry), true);

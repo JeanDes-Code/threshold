@@ -445,8 +445,9 @@ mod world_build {
             AgeMark, BuildCheck, BuildFailure, DebugEntry, Gap, GapKind, KnownFact, SeedDraft,
             Stage,
         },
-        domain::{AdventureSeed, EffectEntry, EventEntry, FactEntry, GoalEntry, WorldSetup},
-        normalize,
+        domain::{
+            AdventureSeed, EffectEntry, EntityKind, EventEntry, FactEntry, GoalEntry, WorldSetup,
+        },
     };
     use threshold_eval::world_build::{
         BuildRun, Calls, Expected, Shown, VoiceLine, fact_recall, false_past, is_public,
@@ -902,12 +903,16 @@ done = ["owns ferry", "bought ferry"]
         // The model calls Gerrit's age stated (the list has none) and leaves
         // out Pim and Osric (the list states theirs).
         for name in ["Teodor Brandt", "Agathe Morrow", "Toll-Master"] {
+            let pc = name == draft.seed.pc.name;
             let mark = AgeMark {
+                name: name.into(),
+                kind: if pc { EntityKind::Pc } else { EntityKind::Npc },
                 drafted: None,
                 stated: true,
                 confirmed: None,
             };
-            draft.ages.insert(normalize::name(name), mark);
+            let row = draft.seed.entities.iter().position(|e| e.name == name);
+            *draft.age_marks.slot(row) = Some(mark);
         }
         draft.knowledge.push(KnownFact {
             subject: "Teodor Brandt".into(),

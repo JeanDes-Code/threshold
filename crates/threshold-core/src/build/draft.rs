@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::HashSet,
     fmt,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::BuildFailure;
 use crate::{
     context::{ADVENTURE_BLOCK_MAX_CHARS, adventure_block_chars},
-    domain::{AdventureSeed, EntityKind, OtherName, alias_key, is_open_key},
+    domain::{AdventureSeed, EntityKind, OtherName, SeedEntity, alias_key, is_open_key},
     normalize,
 };
 
@@ -34,12 +34,12 @@ pub struct SeedDraft {
     pub seed: AdventureSeed,
     /// PC Knowledge: the PC is the implied holder of each fact.
     pub knowledge: Vec<KnownFact>,
-    /// The age of each character, under `normalize::name` of its main
-    /// name: what the draft gave, and what the Player confirmed. Only
-    /// `confirm_age` writes a confirmation, so a draft file from before this
-    /// field loads with every age unconfirmed.
+    /// The age mark of each roster row: what the draft gave, and what the
+    /// Player confirmed. Only `confirm_age` writes a confirmation. A draft
+    /// file from before this field (its marks were under `ages`, keyed by
+    /// name) loads with no mark, so every age needs a new confirmation.
     #[serde(default)]
-    pub ages: BTreeMap<String, AgeMark>,
+    pub age_marks: AgeRows,
     /// The lists that the draft run cut at their cap.
     #[serde(default)]
     pub cut: Vec<Cut>,
@@ -59,7 +59,7 @@ impl SeedDraft {
             source_text,
             seed,
             knowledge: vec![],
-            ages: BTreeMap::new(),
+            age_marks: AgeRows::default(),
             cut: vec![],
             last_failure: None,
             campaign_file: None,
@@ -67,17 +67,97 @@ impl SeedDraft {
     }
 }
 
-/// The age of one character (data shape 3.8). An age is confirmed when
-/// `confirmed` holds the current age, so any change of the age removes the
-/// confirmation, whatever path changed it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The age marks of a draft, by roster row: the PC, then one slot for each
+/// row of `seed.entities`, in order. A mark counts for a row only while the
+/// row has the mark's exact main name and kind (data shape 3.8).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgeRows {
+    #[serde(default)]
+    pub pc: Option<AgeMark>,
+    /// One slot for each row of `seed.entities`; a missing slot is no mark.
+    #[serde(default)]
+    pub entities: Vec<Option<AgeMark>>,
+}
+
+impl AgeRows {
+    /// The mark in the slot of a row, whatever entry the row now holds.
+    pub fn get(&self, row: Option<usize>) -> Option<&AgeMark> {
+        match row {
+            None => self.pc.as_ref(),
+            Some(i) => self.entities.get(i).and_then(Option::as_ref),
+        }
+    }
+
+    /// The slot of a row, made when it is missing.
+    pub fn slot(&mut self, row: Option<usize>) -> &mut Option<AgeMark> {
+        match row {
+            None => &mut self.pc,
+            Some(i) => {
+                if self.entities.len() <= i {
+                    self.entities.resize(i + 1, None);
+                }
+                &mut self.entities[i]
+            }
+        }
+    }
+}
+
+/// The age of one character entry (data shape 3.8). An age is confirmed
+/// when the entry still has `name` and `kind` and its age equals
+/// `confirmed`. So a change of the age, of the exact name or of the kind
+/// removes the confirmation, whatever path changed it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgeMark {
+    /// The entry's main name, exactly as written, when the mark was made or
+    /// when `rename` renamed the entry.
+    pub name: String,
+    /// The entry's kind: `Pc` or `Npc`.
+    pub kind: EntityKind,
     /// The age the draft stage gave; `None` for an entry the Player added.
     pub drafted: Option<u16>,
     /// The model says the Source Text states the age. Information only.
     pub stated: bool,
     /// The age the Player confirmed through `confirm_age`.
     pub confirmed: Option<u16>,
+}
+
+impl AgeMark {
+    /// True while the row holds an entry with this exact main name and kind,
+    /// and that entry is a character.
+    fn fits(&self, name: &str, kind: EntityKind) -> bool {
+        is_character(kind) && self.name == name && self.kind == kind
+    }
+}
+
+/// One roster entry, as a review command names it: its row (`None` for the
+/// PC, `Some(i)` for `seed.entities[i]`), and, as a check, its exact main
+/// name and its kind. A command whose entry does not match the row changes
+/// nothing: the screen is out of date.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntryRef {
+    pub index: Option<usize>,
+    pub name: String,
+    pub kind: EntityKind,
+}
+
+impl EntryRef {
+    /// The entry of the PC with this main name.
+    pub fn pc(name: &str) -> Self {
+        Self {
+            index: None,
+            name: name.to_owned(),
+            kind: EntityKind::Pc,
+        }
+    }
+
+    /// The entry `seed.entities[index]` with this main name and kind.
+    pub fn entity(index: usize, name: &str, kind: EntityKind) -> Self {
+        Self {
+            index: Some(index),
+            name: name.to_owned(),
+            kind,
+        }
+    }
 }
 
 /// Where the current age of a character comes from. Derived, never stored.
@@ -97,8 +177,22 @@ pub enum AgeSource {
 pub struct AgeLine {
     /// The main name, as the seed writes it.
     pub name: String,
+    /// The row: `None` for the PC, `Some(i)` for `seed.entities[i]`.
+    pub index: Option<usize>,
+    pub kind: EntityKind,
     pub source: AgeSource,
     pub confirmed: bool,
+}
+
+impl AgeLine {
+    /// The entry of this line, for `confirm_age` or `rename`.
+    pub fn entry(&self) -> EntryRef {
+        EntryRef {
+            index: self.index,
+            name: self.name.clone(),
+            kind: self.kind,
+        }
+    }
 }
 
 /// A list that the draft run cut at its cap. `at` has the path form of
@@ -113,7 +207,7 @@ pub struct Cut {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewError {
-    /// No entry of the right kind has this main name.
+    /// The row holds no entry of this exact main name and kind.
     UnknownName,
     /// Another entry has this name, main or other, or it is "world".
     NameInUse,
@@ -226,7 +320,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
     if below_min(pc.age) {
         gap(GapKind::AgeBelowMin, "pc.age".into());
     }
-    if age_waits(draft, &pc.name, Some(pc.age)) {
+    if age_waits(draft, None, Some(pc.age)) {
         gap(GapKind::AgeUnconfirmed, "pc.age".into());
     }
     let pc_names: HashSet<String> = names(&pc.name, &pc.other_names)
@@ -289,7 +383,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
                 if below_min(age) {
                     gap(GapKind::AgeBelowMin, at("age"));
                 }
-                if age_waits(draft, &entity.name, Some(age)) {
+                if age_waits(draft, Some(i), Some(age)) {
                     gap(GapKind::AgeUnconfirmed, at("age"));
                 }
             }
@@ -364,11 +458,16 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
     out
 }
 
-/// Approves a draft with no gap. On a gap, returns every gap and leaves the
-/// draft as it was. A `Built` draft stays `Built`.
+/// Approves a draft with no gap. On a gap, returns every gap; an
+/// `Approved` draft goes back to `Draft`, so a file that says `approved`
+/// with an age the Player never confirmed cannot stay approved. A `Built`
+/// draft stays `Built`.
 pub fn approve(draft: &mut SeedDraft) -> Result<(), Vec<Gap>> {
     let found = gaps(draft);
     if !found.is_empty() {
+        if draft.state == DraftState::Approved {
+            draft.state = DraftState::Draft;
+        }
         return Err(found);
     }
     if draft.state == DraftState::Draft {
@@ -379,66 +478,112 @@ pub fn approve(draft: &mut SeedDraft) -> Result<(), Vec<Gap>> {
 
 /// A Player edit of the draft (the `save_draft` command): it replaces the
 /// seed and the knowledge, and returns the draft to `Draft`. It cannot
-/// confirm an age: it does not take the age marks. A mark whose character
-/// left the roster is dropped, so a name that comes back is a new entry and
-/// needs a new confirmation. The last failure and the Campaign file belong
-/// to the build of the content it replaces, so both are cleared. `cut`
-/// stays. The caller then saves.
+/// confirm an age: it does not take the age marks. It keeps the mark of a
+/// row only while the row holds a character with the mark's exact main name
+/// and kind, so a renamed entry, an entry that became a place, or a name
+/// that comes back is a new entry and needs a new confirmation.
+///
+/// Age marks follow rows by position. A save that removes exactly one row and
+/// leaves every other row as it was moves the marks of the later rows up
+/// by one. Any other change of the row count keeps the positions, so a
+/// later row whose entry changed loses its mark. The last failure and the
+/// Campaign file belong to the build of the content it replaces, so both
+/// are cleared. `cut` stays. The caller then saves.
 pub fn apply_edit(draft: &mut SeedDraft, seed: AdventureSeed, knowledge: Vec<KnownFact>) {
-    draft.seed = seed;
+    let old = std::mem::replace(&mut draft.seed, seed);
     draft.knowledge = knowledge;
-    let names: HashSet<String> = characters(&draft.seed)
-        .map(|(name, _)| normalize::name(name))
-        .collect();
-    draft.ages.retain(|name, _| names.contains(name));
+    let from = old_rows(&old.entities, &draft.seed.entities);
+    let marks = std::mem::take(&mut draft.age_marks);
+    let pc = &draft.seed.pc;
+    draft.age_marks = AgeRows {
+        pc: marks.pc.filter(|m| m.fits(&pc.name, EntityKind::Pc)),
+        entities: draft
+            .seed
+            .entities
+            .iter()
+            .zip(from)
+            .map(|(entity, from)| {
+                from.and_then(|j| marks.entities.get(j).cloned().flatten())
+                    .filter(|m| m.fits(&entity.name, entity.kind))
+            })
+            .collect(),
+    };
     edited(draft);
 }
 
-/// Confirms the current age of the character whose main name is `name`
-/// (through `normalize::name`). The only writer of `AgeMark.confirmed`.
-pub fn confirm_age(draft: &mut SeedDraft, name: &str) -> Result<(), ReviewError> {
-    let key = normalize::name(name);
-    let (_, age) = characters(&draft.seed)
-        .find(|(main, _)| !key.is_empty() && normalize::name(main) == key)
-        .ok_or(ReviewError::UnknownName)?;
+/// For each new row, the old row whose mark it may keep. A pure removal of
+/// one row shifts the later rows; any other edit keeps the positions.
+fn old_rows(old: &[SeedEntity], new: &[SeedEntity]) -> Vec<Option<usize>> {
+    if new.len() + 1 == old.len() {
+        let i = (0..new.len())
+            .find(|&k| new[k] != old[k])
+            .unwrap_or(new.len());
+        if old[..i] == new[..i] && old[i + 1..] == new[i..] {
+            return (0..new.len())
+                .map(|k| Some(if k < i { k } else { k + 1 }))
+                .collect();
+        }
+    }
+    (0..new.len())
+        .map(|k| (k < old.len()).then_some(k))
+        .collect()
+}
+
+/// Confirms the current age of one character entry. The only writer of
+/// `AgeMark.confirmed`. The entry must match its row exactly (`EntryRef`).
+pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), ReviewError> {
+    let row = resolve(&draft.seed, entry)?;
+    let (name, kind, age) = row_of(&draft.seed, row).ok_or(ReviewError::UnknownName)?;
+    if !is_character(kind) || normalize::name(name).is_empty() {
+        return Err(ReviewError::UnknownName);
+    }
     let age = age.ok_or(ReviewError::Empty)?;
-    draft.ages.entry(key).or_default().confirmed = Some(age);
+    let name = name.to_owned();
+    let slot = draft.age_marks.slot(row);
+    match slot {
+        Some(mark) if mark.fits(&name, kind) => mark.confirmed = Some(age),
+        _ => {
+            *slot = Some(AgeMark {
+                name,
+                kind,
+                drafted: None,
+                stated: false,
+                confirmed: Some(age),
+            });
+        }
+    }
     Ok(())
 }
 
-/// Renames the entry whose main name is `from` (through `normalize::name`)
-/// to `to`, in every field that names it: the main name, each `known_to`,
-/// `start.place`, `start.present`, the subject of each known, decided and
-/// proposed fact, and the key of its age mark. The old name, with the same
-/// spelling and as whole words, also changes in the text of each known fact
-/// and in `start.situation`. A name that another entry has, main or other,
-/// is refused, and the draft does not change. A change of case or accent
-/// of the same name is allowed.
-pub fn rename(draft: &mut SeedDraft, from: &str, to: &str) -> Result<(), ReviewError> {
+/// Renames one entry to `to`, in every field that names it: the main name,
+/// each `known_to`, `start.place`, `start.present`, the subject of each
+/// known, decided and proposed fact, and the name in its own age mark. A
+/// reference matches the old name through `normalize::name`. The old name,
+/// with the same spelling and as whole words, also changes in the text of
+/// each known fact and in `start.situation`. A name that another entry has,
+/// main or other, is refused, and the draft does not change. A change of
+/// case or accent of the same name is allowed. Only the mark of this very
+/// row moves to the new name.
+pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), ReviewError> {
     let to = to.trim();
-    let (from_key, to_key) = (normalize::name(from), normalize::name(to));
+    let owner = resolve(&draft.seed, entry)?;
+    let from_key = normalize::name(&entry.name);
+    let to_key = normalize::name(to);
+    if from_key.is_empty() {
+        return Err(ReviewError::UnknownName);
+    }
     if to_key.is_empty() {
         return Err(ReviewError::Empty);
     }
     let seed = &draft.seed;
-    // `None`: the PC; `Some(i)`: `entities[i]`.
-    let owner = if !from_key.is_empty() && normalize::name(&seed.pc.name) == from_key {
-        None
-    } else {
-        let found = seed
-            .entities
-            .iter()
-            .position(|e| !from_key.is_empty() && normalize::name(&e.name) == from_key);
-        Some(found.ok_or(ReviewError::UnknownName)?)
-    };
     let pc = std::iter::once((None, &seed.pc.name, &seed.pc.other_names));
     let entities = seed
         .entities
         .iter()
         .enumerate()
         .map(|(i, e)| (Some(i), &e.name, &e.other_names));
-    let taken = pc.chain(entities).any(|(entry, main, others)| {
-        let main_taken = entry != owner && normalize::name(main) == to_key;
+    let taken = pc.chain(entities).any(|(row, main, others)| {
+        let main_taken = row != owner && normalize::name(main) == to_key;
         main_taken || others.iter().any(|o| normalize::name(&o.name) == to_key)
     });
     if taken || to_key == "world" {
@@ -470,8 +615,13 @@ pub fn rename(draft: &mut SeedDraft, from: &str, to: &str) -> Result<(), ReviewE
         follow(&mut fact.subject);
         fact.text = replace_words(&fact.text, &old, to);
     }
-    if let Some(mark) = draft.ages.remove(&from_key) {
-        draft.ages.insert(to_key, mark);
+    if draft
+        .age_marks
+        .get(owner)
+        .is_some_and(|m| m.fits(&old, entry.kind))
+        && let Some(mark) = draft.age_marks.slot(owner)
+    {
+        mark.name = to.to_owned();
     }
     edited(draft);
     Ok(())
@@ -480,9 +630,8 @@ pub fn rename(draft: &mut SeedDraft, from: &str, to: &str) -> Result<(), ReviewE
 /// The age of each character, the PC first, in roster order.
 pub fn age_lines(draft: &SeedDraft) -> Vec<AgeLine> {
     characters(&draft.seed)
-        .map(|(name, age)| {
-            let mark = draft.ages.get(&normalize::name(name));
-            let source = match mark {
+        .map(|(index, name, kind, age)| {
+            let source = match mark_of(draft, index) {
                 Some(m) if m.drafted.is_some() && m.drafted == age => {
                     if m.stated {
                         AgeSource::FromText
@@ -494,8 +643,10 @@ pub fn age_lines(draft: &SeedDraft) -> Vec<AgeLine> {
             };
             AgeLine {
                 name: name.to_owned(),
+                index,
+                kind,
                 source,
-                confirmed: age_confirmed(draft, name, age),
+                confirmed: age_confirmed(draft, index, age),
             }
         })
         .collect()
@@ -509,30 +660,62 @@ fn edited(draft: &mut SeedDraft) {
     draft.campaign_file = None;
 }
 
-/// True when the Player confirmed `age` for the character `name`. A
-/// character with no name is a `Missing` gap: its age waits for the name.
-fn age_waits(draft: &SeedDraft, name: &str, age: Option<u16>) -> bool {
-    !normalize::name(name).is_empty() && !age_confirmed(draft, name, age)
+/// The row of `entry`, when the row holds an entry with that exact main
+/// name and kind.
+fn resolve(seed: &AdventureSeed, entry: &EntryRef) -> Result<Option<usize>, ReviewError> {
+    match row_of(seed, entry.index) {
+        Some((name, kind, _)) if name == entry.name && kind == entry.kind => Ok(entry.index),
+        _ => Err(ReviewError::UnknownName),
+    }
 }
 
-/// True when the Player confirmed `age` for the character `name`.
-fn age_confirmed(draft: &SeedDraft, name: &str, age: Option<u16>) -> bool {
-    age.is_some()
-        && draft
-            .ages
-            .get(&normalize::name(name))
-            .is_some_and(|m| m.confirmed == age)
+/// The main name, kind and age of a row: `None` for the PC.
+fn row_of(seed: &AdventureSeed, row: Option<usize>) -> Option<(&str, EntityKind, Option<u16>)> {
+    match row {
+        None => Some((&seed.pc.name, EntityKind::Pc, Some(seed.pc.age))),
+        Some(i) => seed
+            .entities
+            .get(i)
+            .map(|e| (e.name.as_str(), e.kind, e.age)),
+    }
 }
 
-/// The main name and age of each character, the PC first. An entry of kind
-/// `Pc` counts: it is a gap, and its age still needs a confirmation.
-fn characters(seed: &AdventureSeed) -> impl Iterator<Item = (&str, Option<u16>)> {
-    let pc = std::iter::once((seed.pc.name.as_str(), Some(seed.pc.age)));
+/// The mark of a row, while it belongs to the entry the row holds.
+fn mark_of(draft: &SeedDraft, row: Option<usize>) -> Option<&AgeMark> {
+    let (name, kind, _) = row_of(&draft.seed, row)?;
+    draft.age_marks.get(row).filter(|m| m.fits(name, kind))
+}
+
+/// True when the age of a row waits for the Player. A character with no
+/// name is a `Missing` gap: its age waits for the name.
+fn age_waits(draft: &SeedDraft, row: Option<usize>, age: Option<u16>) -> bool {
+    row_of(&draft.seed, row).is_some_and(|(name, _, _)| !normalize::name(name).is_empty())
+        && !age_confirmed(draft, row, age)
+}
+
+/// True when the Player confirmed `age` for the entry the row holds.
+fn age_confirmed(draft: &SeedDraft, row: Option<usize>, age: Option<u16>) -> bool {
+    age.is_some() && mark_of(draft, row).is_some_and(|m| m.confirmed == age)
+}
+
+/// The row, main name, kind and age of each character, the PC first. An
+/// entry of kind `Pc` counts: it is a gap, and its age still needs a
+/// confirmation.
+fn characters(
+    seed: &AdventureSeed,
+) -> impl Iterator<Item = (Option<usize>, &str, EntityKind, Option<u16>)> {
+    let pc = std::iter::once((
+        None,
+        seed.pc.name.as_str(),
+        EntityKind::Pc,
+        Some(seed.pc.age),
+    ));
     let entities = seed
         .entities
         .iter()
-        .filter(|e| is_character(e.kind))
-        .map(|e| (e.name.as_str(), e.age));
+        .enumerate()
+        .filter(|(_, e)| is_character(e.kind))
+        .map(|(i, e)| (Some(i), e.name.as_str(), e.kind, e.age));
     pc.chain(entities)
 }
 

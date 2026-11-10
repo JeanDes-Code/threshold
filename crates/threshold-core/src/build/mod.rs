@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 
 pub use checks::{centres_on_pc, names_pc};
 pub use draft::{
-    AgeLine, AgeMark, AgeSource, Cut, DraftState, Gap, GapKind, KnownFact, ReviewError, SeedDraft,
-    age_lines, apply_edit, approve, confirm_age, gaps, rename,
+    AgeLine, AgeMark, AgeRows, AgeSource, Cut, DraftState, EntryRef, Gap, GapKind, KnownFact,
+    ReviewError, SeedDraft, age_lines, apply_edit, approve, confirm_age, gaps, rename,
 };
 pub use draft_stages::{
     SOURCE_TEXT_MAX_CHARS, SOURCE_TEXT_MIN_CHARS, SourceTextProblem, check_source_text,

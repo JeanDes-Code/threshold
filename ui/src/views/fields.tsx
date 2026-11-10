@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import type { OtherName } from "../api";
-import { fieldId, removeAt, replaceAt, splitList } from "../newCampaign";
+import { fieldId, parseAge, removeAt, replaceAt, splitList } from "../newCampaign";
 
 interface TextProps {
   path: string;
@@ -89,26 +89,37 @@ interface AgeProps {
   /** Empty means "no age" (null); else an empty input keeps the last age. */
   nullable: boolean;
   onChange: (value: number | null) => void;
+  /** The text the field shows, on each change; null when it shows `value` again (on leaving it). */
+  onText?: (text: string | null) => void;
 }
 
-/** An age in whole years. The aria label names it; a visible label is the caller's. */
-export function AgeInput({ path, label, value, nullable, onChange }: AgeProps) {
+/**
+ * An age in whole years, in decimal digits only. Other text ("0x10", "1e1")
+ * changes nothing in the draft; the caller sees it through `onText`. The
+ * aria label names it; a visible label is the caller's.
+ */
+export function AgeInput({ path, label, value, nullable, onChange, onText }: AgeProps) {
   const [text, setText] = useState<string | null>(null);
+  const show = (next: string | null) => {
+    setText(next);
+    onText?.(next);
+  };
   return (
     <input
       id={fieldId(path)}
       className="number"
       inputMode="numeric"
       aria-label={label}
+      aria-invalid={text !== null && parseAge(text) === undefined ? true : undefined}
       value={text ?? (value === null ? "" : String(value))}
-      onBlur={() => setText(null)}
+      onBlur={() => show(null)}
       onChange={(e) => {
         const raw = e.target.value;
-        setText(raw);
-        const n = Number(raw.trim());
-        if (raw.trim() === "") {
+        show(raw);
+        const n = parseAge(raw);
+        if (n === null) {
           if (nullable) onChange(null);
-        } else if (Number.isInteger(n) && n >= 0 && n <= 65535) {
+        } else if (n !== undefined) {
           onChange(n);
         }
       }}

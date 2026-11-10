@@ -8,8 +8,10 @@ import type {
   BuildProgress,
   BuildStage,
   Cut,
+  DraftState,
   DraftView,
   EntityKind,
+  EntryRef,
   Gap,
   GapKind,
   KnownFact,
@@ -333,6 +335,14 @@ export function cutSections(cut: Cut, form: ReviewForm): SectionId[] {
   return [sectionOf(cut.at, form)];
 }
 
+/**
+ * Where a saved draft opens. Only an approved draft with no gap goes to the
+ * World Build: an old file can say "approved" and still wait for an age.
+ */
+export function draftScreen(view: DraftView): "review" | "build" {
+  return view.state === "approved" && view.gaps.length === 0 ? "build" : "review";
+}
+
 /** The review form of a draft as the store holds it. */
 export function formOfView(view: DraftView): ReviewForm {
   return { seed: view.seed, knowledge: view.knowledge, typed: {} };
@@ -349,6 +359,13 @@ export const rowPath = (row: Row): string => (row === "pc" ? "pc" : `entities[${
 /** The saved main name of a row. */
 export const savedName = (form: ReviewForm, row: Row): string =>
   row === "pc" ? form.seed.pc.name : (form.seed.entities[row]?.name ?? "");
+
+/** The entry of a row as the core names it: its row, its saved main name and its kind. */
+export function entryOf(form: ReviewForm, row: Row): EntryRef {
+  if (row === "pc") return { index: null, name: form.seed.pc.name, kind: "pc" };
+  const entry = form.seed.entities[row];
+  return { index: row, name: entry?.name ?? "", kind: entry?.kind ?? "npc" };
+}
 
 /** The name the field shows: what the Player is typing, else the saved name. */
 export const shownName = (form: ReviewForm, row: Row): string =>
@@ -373,7 +390,7 @@ export function dropTyped(form: ReviewForm, row: Row): ReviewForm {
  */
 export type NameChange =
   | { kind: "none" }
-  | { kind: "rename"; from: string; to: string }
+  | { kind: "rename"; entry: EntryRef; to: string }
   | { kind: "save"; to: string };
 
 export function nameChange(form: ReviewForm, row: Row): NameChange {
@@ -383,7 +400,7 @@ export function nameChange(form: ReviewForm, row: Row): NameChange {
   const to = typed.trim();
   if (to === from) return { kind: "none" };
   if (from.trim() === "") return { kind: "save", to };
-  return { kind: "rename", from, to };
+  return { kind: "rename", entry: entryOf(form, row), to };
 }
 
 /**
@@ -397,9 +414,97 @@ export function renamed(form: ReviewForm, view: DraftView, row: Row): ReviewForm
 /** True for the kinds that have an age. */
 export const isCharacter = (kind: EntityKind): boolean => kind === "npc" || kind === "pc";
 
-/** The age line of a saved name; none for a row that is not a character. */
-export function ageLineOf(ages: AgeLine[], name: string): AgeLine | undefined {
-  return ages.find((line) => line.name === name);
+/** The core's age line of a row, while it is about the entry the row holds; none for a row that is not a character. */
+export function ageLineOf(ages: AgeLine[], form: ReviewForm, row: Row): AgeLine | undefined {
+  const entry = entryOf(form, row);
+  return ages.find(
+    (line) => line.index === entry.index && line.name === entry.name && line.kind === entry.kind,
+  );
+}
+
+/**
+ * An age typed as text: whole years, in decimal digits only. `null` for an
+ * empty field; `undefined` for any other text ("0x10", "1e1", "16.5", "-3").
+ */
+export function parseAge(text: string): number | null | undefined {
+  const t = text.trim();
+  if (t === "") return null;
+  if (!/^\d{1,5}$/.test(t)) return undefined;
+  const n = Number(t);
+  return n <= 65535 ? n : undefined;
+}
+
+/** True when an age field shows the age the form holds. `text` is null while the field shows that age. */
+export const ageTextMatches = (text: string | null, value: number | null): boolean =>
+  value !== null && (text === null || text === String(value));
+
+export interface AgeField {
+  /** The text in the field; null while the field shows the stored age. */
+  text: string | null;
+  /** The age the form holds for the row. */
+  value: number | null;
+  /** The core's line for the row. */
+  line: AgeLine | undefined;
+  /** A save of the draft waits or runs. */
+  pending: boolean;
+  /** The last save of the draft failed. */
+  saveFailed: boolean;
+  /** A core action runs. */
+  busy: boolean;
+}
+
+/**
+ * What an age row shows. "confirmed" shows only while the field shows the
+ * very age the store holds and the core confirmed: it drops at once when
+ * the field changes, while a save waits, and after a failed save. "Confirm
+ * age" works only in that same settled state, so it never confirms a value
+ * the field does not show.
+ */
+export function ageStatus(f: AgeField): { confirmed: boolean; canConfirm: boolean } {
+  const settled = ageTextMatches(f.text, f.value) && !f.pending && !f.saveFailed;
+  const confirmed = settled && f.line?.confirmed === true;
+  return { confirmed, canConfirm: settled && !confirmed && !f.busy };
+}
+
+export interface ApproveState {
+  pending: boolean;
+  busy: boolean;
+  approving: boolean;
+  saveFailed: boolean;
+  /** An error the review shows. */
+  error: string | null;
+  gaps: Gap[];
+  state: DraftState;
+  /** Every age field shows the age the form holds. */
+  agesShown: boolean;
+}
+
+/** "Approve" waits for the store to hold every edit, for no gap, and for each age field to show its age. */
+export const canApprove = (a: ApproveState): boolean =>
+  !a.pending &&
+  !a.busy &&
+  !a.approving &&
+  !a.saveFailed &&
+  a.error === null &&
+  a.gaps.length === 0 &&
+  a.agesShown &&
+  a.state !== "built";
+
+/** A core action on the draft. The store first takes every pending edit, so the core acts on what the Player sees. */
+export async function afterFlush<T>(flush: () => Promise<void>, call: () => Promise<T>): Promise<T> {
+  await flush();
+  return call();
+}
+
+/** "Confirm age" on a row: the store takes every edit, then the core confirms that exact entry. */
+export function confirmRow<T>(
+  flush: () => Promise<void>,
+  confirm: (entry: EntryRef) => Promise<T>,
+  form: ReviewForm,
+  row: Row,
+): Promise<T> {
+  const entry = entryOf(form, row);
+  return afterFlush(flush, () => confirm(entry));
 }
 
 /**

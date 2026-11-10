@@ -311,19 +311,39 @@ pub const SOURCE_TEXT_MIN_CHARS: usize;            // first value 400
 - `AgeSource` is `Edited` when the current age differs from `drafted`, or when `drafted` is `None`. Else it is `FromText` when `stated`, and `Proposed` when not.
 - An old draft file has no `ages` field. It loads, and each age needs a new confirmation.
 
+**Changed after review (2026-11-10): the age mark follows the exact entry.** The first rule keyed a mark by `normalize::name` of the main name. A review found three holes. "jéan", added beside a confirmed "Jean" of the same age, took the confirmation once "Jean" was deleted. A rename named its entry by name only, so with a place and a character of one name it could move the character's mark to the place. And an old draft file that said `approved` built with no confirmation at all, because the build checked the state only. The rule is now:
+
+```rust
+pub struct AgeMark { pub name: String,             // the entry's main name, exactly as written
+                     pub kind: EntityKind,         // Pc or Npc
+                     pub drafted: Option<u16>, pub stated: bool, pub confirmed: Option<u16> }
+pub struct AgeRows { pub pc: Option<AgeMark>, pub entities: Vec<Option<AgeMark>> }   // one slot per row
+pub struct EntryRef { pub index: Option<usize> /* None: the PC */, pub name: String, pub kind: EntityKind }
+
+SeedDraft.age_marks: AgeRows                       // replaces `ages`; an old `ages` map is ignored
+pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), ReviewError>;
+pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), ReviewError>;
+```
+
+- A mark counts for a row only while the row holds a character with the mark's exact main name and kind, and its age equals `confirmed`. An age changed and set back to the confirmed value on the same entry is confirmed again.
+- `EntryRef` names one row, with its exact main name and kind as a check. `confirm_age` and `rename` refuse an entry that its row does not hold (`UnknownName`): the screen is out of date. So a rename moves only the mark of its own row.
+- `apply_edit` keeps a mark only while its row still fits it. A renamed entry, an entry that became a place, and a name that comes back are new entries. Marks follow rows by position. A save that removes exactly one row and leaves the others as they were moves the later marks up by one. Any other change of the row count keeps the positions, so a later row whose entry changed loses its mark: a delete and an add in one save leave both unconfirmed. Limit: deleting the last row and adding the same name, kind and age in its place in one save gives the same data, and the core cannot see it.
+- `approve` and `build_world` compute the gaps again. A draft with any gap is refused with its gaps, and an `Approved` draft goes back to `Draft`. `start_build` saves it back in `Draft` and returns the gaps; the UI opens the review, not the build.
+- The UI shows "confirmed", and enables "Confirm age", only while the age field shows the very age that the store holds: no waiting or failed save, and no text in the field that differs from the stored age. The age field takes decimal digits only. `newCampaign.ts` holds this rule (`ageStatus`).
+
 | Command | Arguments | Returns |
 |---|---|---|
 | `save_draft` | `draft_id`, `seed`, `knowledge` | `DraftView`, state back to `draft` |
-| `confirm_age` | `draft_id`, `name` | `DraftView` |
-| `rename_draft_entity` | `draft_id`, `from`, `to` | `DraftView`, state back to `draft` |
+| `confirm_age` | `draft_id`, `entry` (changed after review: was `name`) | `DraftView` |
+| `rename_draft_entity` | `draft_id`, `entry`, `to` (changed after review: was `from`) | `DraftView`, state back to `draft` |
 
-`DraftView` loses `ages_to_confirm` and `ages_stated`. It gains `ages: Vec<AgeLine>` and `cut: Vec<Cut>`.
+`DraftView` loses `ages_to_confirm` and `ages_stated`. It gains `ages: Vec<AgeLine>` and `cut: Vec<Cut>`. After review, `AgeLine` also carries the row (`index`) and `kind` of its entry.
 
 **Rename.** `build::rename` changes each field that names the entry: the main name, each `known_to`, `start.place`, `start.present`, the `subject` of each known, decided and proposed fact, and the key of `ages`. It also changes the old name in the text of each known fact and in `start.situation`, as whole words with the same spelling. It refuses a name that another entry has, and then changes nothing. The UI sends each name change through this command. A name changed through `save_draft` is a new entry for the core, and its age is not confirmed. That direction is the safe one.
 
 **Add a character or a place.** No new command. The UI adds one entry to `seed.entities` and calls `save_draft`. The entry has no `AgeMark`, so its age is `Edited` and not confirmed. The World Build already treats each roster NPC the same way. Test: `added_character_reaches_the_world_build`.
 
-**Source Text length.** `check_source_text` is the one check. `build::draft_from_text` and the shell both call it. Today the shell and `draft_stages.rs:46` each compare the length.
+**Source Text length.** `check_source_text` is the one check. `build::draft_from_text` and the shell both call it. Today the shell and `draft_stages.rs:46` each compare the length. Changed after review: both limits count the text without the blanks at its ends. Before, the 40,000 cap counted them, so a full text with two trailing newlines was refused.
 
 **Cut lists.** The stage runner already cuts a list at its cap (`build/stages.rs:181`) and tells no one. It now returns each cut, and the draft keeps them. `apply_edit` keeps `cut`.
 

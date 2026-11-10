@@ -64,7 +64,7 @@ fn waiting(draft: &SeedDraft) -> Vec<String> {
 /// Confirms every age, as the Player would one by one.
 fn confirm_all(draft: &mut SeedDraft) {
     for line in age_lines(draft) {
-        confirm_age(draft, &line.name).unwrap();
+        confirm_age(draft, &line.entry()).unwrap();
     }
 }
 
@@ -380,10 +380,12 @@ fn an_age_the_model_calls_stated_still_needs_the_player() {
     );
 
     // Approval waits for every confirmation, the PC's included.
-    for name in ["Tobin Reed", "Ada Venn", "Mira Holt"] {
+    let mut lines = age_lines(&draft);
+    lines.rotate_left(1);
+    for line in lines {
         assert!(approve(&mut draft).is_err());
         assert_eq!(draft.state, DraftState::Draft);
-        confirm_age(&mut draft, name).unwrap();
+        confirm_age(&mut draft, &line.entry()).unwrap();
     }
     assert_eq!(unconfirmed(&draft), Vec::<String>::new());
     assert_eq!(approve(&mut draft), Ok(()));
@@ -1070,6 +1072,24 @@ fn short_source_text_is_refused_before_any_call() {
     let gm = gm(&[]);
     run(&at_limit, &gm).result.unwrap_err();
     assert_eq!(gm.calls().len(), 1);
+}
+
+/// Both limits count the text without the blanks at its ends.
+#[test]
+fn source_text_limits_count_the_trimmed_text() {
+    let chars = |n: usize| "é".repeat(n);
+    let too_short = Err(SourceTextProblem::TooShort { min: 400 });
+    let too_long = Err(SourceTextProblem::TooLong { max: 40_000 });
+    assert_eq!(check_source_text(&chars(399)), too_short);
+    assert_eq!(check_source_text(&chars(400)), Ok(()));
+    assert_eq!(check_source_text(&chars(40_000)), Ok(()));
+    assert_eq!(check_source_text(&chars(40_001)), too_long);
+    // Two trailing newlines do not push a full text over the limit.
+    assert_eq!(check_source_text(&format!("{}\n\n", chars(40_000))), Ok(()));
+    assert_eq!(
+        check_source_text(&format!("  {}  ", chars(40_001))),
+        too_long
+    );
 }
 
 #[test]

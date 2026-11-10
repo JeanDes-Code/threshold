@@ -12,8 +12,8 @@ use serde::Serialize;
 use threshold_core::{
     build::{
         self, AgeLine, BuildCheck, BuildFailure, Control, Cut, DebugEntry, DraftState, DraftStore,
-        DraftStoreError, Gap, KnownFact, Progress, ReviewError, SeedDraft, SourceTextProblem,
-        Stage,
+        DraftStoreError, EntryRef, Gap, KnownFact, Progress, ReviewError, SeedDraft,
+        SourceTextProblem, Stage,
     },
     domain::AdventureSeed,
     setup::{SetupError, create_campaign_file},
@@ -206,10 +206,11 @@ impl Drafts {
         })
     }
 
-    /// The Player confirms the current age of one character, by main name.
-    pub fn confirm_age(&self, draft_id: &str, name: &str) -> Result<DraftView, AppError> {
+    /// The Player confirms the current age of one character entry: its row,
+    /// with its exact main name and kind as a check.
+    pub fn confirm_age(&self, draft_id: &str, entry: &EntryRef) -> Result<DraftView, AppError> {
         self.change(draft_id, |draft| {
-            build::confirm_age(draft, name).map_err(|e| failed(confirm_sentence(e, name)))
+            build::confirm_age(draft, entry).map_err(|e| failed(confirm_sentence(e, &entry.name)))
         })
     }
 
@@ -218,20 +219,24 @@ impl Drafts {
     pub fn rename_draft_entity(
         &self,
         draft_id: &str,
-        from: &str,
+        entry: &EntryRef,
         to: &str,
     ) -> Result<DraftView, AppError> {
         self.change(draft_id, |draft| {
-            build::rename(draft, from, to).map_err(|e| failed(rename_sentence(e, from, to)))
+            build::rename(draft, entry, to).map_err(|e| failed(rename_sentence(e, &entry.name, to)))
         })
     }
 
-    /// Approves a draft with no gap; on a gap, returns every gap.
+    /// Approves a draft with no gap. On a gap, returns every gap; an
+    /// `Approved` draft is saved back in `Draft`.
     pub fn approve_draft(&self, draft_id: &str) -> Result<DraftView, AppError> {
         let store = lock(&self.store);
         self.refuse_under_build(draft_id)?;
         let mut draft = store.load(draft_id).map_err(draft_error)?;
-        build::approve(&mut draft).map_err(AppError::Gaps)?;
+        if let Err(gaps) = build::approve(&mut draft) {
+            store.save(&draft).map_err(draft_error)?;
+            return Err(AppError::Gaps(gaps));
+        }
         store.save(&draft).map_err(draft_error)?;
         Ok(DraftView::of(draft))
     }
@@ -239,18 +244,30 @@ impl Drafts {
     /// Builds the world of an approved draft, writes its Campaign file and
     /// opens it. A failed or cancelled build writes no file; the draft stays
     /// `Approved` with `last_failure` set, so a retry needs no new review.
+    ///
+    /// The state alone is not enough: a draft with a gap (an old file that
+    /// says `approved` with no age confirmation) is refused with its gaps,
+    /// before any model call, and saved back in `Draft`.
     pub fn start_build(
         &self,
         draft_id: &str,
         on_progress: &mut dyn FnMut(Progress),
     ) -> Result<CampaignSummary, AppError> {
         let _slot = self.start_job(Job::Build(draft_id.to_owned()))?;
-        let draft = lock(&self.store).load(draft_id).map_err(draft_error)?;
-        match draft.state {
-            DraftState::Approved => {}
-            DraftState::Draft => return Err(failed("the draft is not approved")),
-            DraftState::Built => return Err(failed("the draft is already built")),
-        }
+        let draft = {
+            let store = lock(&self.store);
+            let mut draft = store.load(draft_id).map_err(draft_error)?;
+            match draft.state {
+                DraftState::Approved => {}
+                DraftState::Draft => return Err(failed("the draft is not approved")),
+                DraftState::Built => return Err(failed("the draft is already built")),
+            }
+            if let Err(gaps) = build::approve(&mut draft) {
+                store.save(&draft).map_err(draft_error)?;
+                return Err(AppError::Gaps(gaps));
+            }
+            draft
+        };
         lock(&self.store)
             .clear_debug(draft_id)
             .map_err(draft_error)?;

@@ -9,6 +9,7 @@ use serde::Deserialize;
 use super::{
     BuildCheck, BuildFailure, Control, DraftState, SeedDraft, Stage,
     checks::{self, FactBook, Member, NpcItem, Roster, fact_entry, location},
+    draft::gaps,
     stages::{Staged, essential, report, run_stage, sections},
     world_prompts::{events_call, hidden_call, npc_call, start_call},
 };
@@ -50,12 +51,17 @@ pub struct Placement {
 /// each NPC, World Events and the start state. It calls the model through
 /// `gm` only and writes nothing. A failed check drops an optional item, or
 /// fails the build when the item is essential.
+///
+/// The state alone is not enough: a draft with any gap now (an old file
+/// that says `approved` with no age confirmation) fails as `NotApproved`
+/// before any call. The caller runs `approve` to get the gaps and to put
+/// the draft back to `Draft`.
 pub fn build_world(
     draft: &SeedDraft,
     gm: &dyn Gm,
     ctl: &mut Control,
 ) -> Result<WorldSetup, BuildFailure> {
-    if draft.state != DraftState::Approved {
+    if draft.state != DraftState::Approved || !gaps(draft).is_empty() {
         return Err(fail(Stage::HiddenFacts, BuildCheck::NotApproved));
     }
     let roster = Roster::of(&draft.seed);

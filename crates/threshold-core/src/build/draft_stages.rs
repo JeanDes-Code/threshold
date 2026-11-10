@@ -5,13 +5,14 @@
 //! stage that names a roster entry is an `enum` of roster names in its
 //! schema.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AgeMark, BuildCheck, BuildFailure, Control, Cut, DraftState, KnownFact, SeedDraft, Stage,
+    AgeMark, AgeRows, BuildCheck, BuildFailure, Control, Cut, DraftState, KnownFact, SeedDraft,
+    Stage,
     draft::new_draft_id,
     stages::{
         CapAt, Need, Problem, StageCall, Step, essential, name_field, name_list, report, run_stage,
@@ -50,16 +51,16 @@ pub enum SourceTextProblem {
 }
 
 /// The one length check of a Source Text. `draft_from_text` and the shell
-/// both call it.
+/// both call it. Both limits count the text without the blanks at its ends.
 pub fn check_source_text(text: &str) -> Result<(), SourceTextProblem> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
+    let chars = text.trim().chars().count();
+    if chars == 0 {
         Err(SourceTextProblem::Empty)
-    } else if trimmed.chars().count() < SOURCE_TEXT_MIN_CHARS {
+    } else if chars < SOURCE_TEXT_MIN_CHARS {
         Err(SourceTextProblem::TooShort {
             min: SOURCE_TEXT_MIN_CHARS,
         })
-    } else if text.chars().count() > SOURCE_TEXT_MAX_CHARS {
+    } else if chars > SOURCE_TEXT_MAX_CHARS {
         Err(SourceTextProblem::TooLong {
             max: SOURCE_TEXT_MAX_CHARS,
         })
@@ -692,17 +693,19 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
     // Every age waits for the Player: the hard limit on intimate scenes
     // reads it, so it never rests on the model's word. What the model says
     // about the text is kept as information only.
-    let mut ages = BTreeMap::new();
-    let mut mark = |name: &str, age: u16, stated: bool| {
-        let drafted = Some(age);
-        let mark = AgeMark {
-            drafted,
+    let mark = |name: &str, kind: EntityKind, age: u16, stated: bool| {
+        Some(AgeMark {
+            name: name.to_owned(),
+            kind,
+            drafted: Some(age),
             stated,
             confirmed: None,
-        };
-        ages.insert(normalize::name(name), mark);
+        })
     };
-    mark(pc, roster.pc.age, roster.pc.age_stated);
+    let mut ages = AgeRows {
+        pc: mark(pc, EntityKind::Pc, roster.pc.age, roster.pc.age_stated),
+        entities: vec![],
+    };
     let others = |list: Vec<NameOut>| -> Vec<OtherName> {
         list.into_iter()
             .map(|o| known_to_pc(o, pc, &pc_names))
@@ -710,7 +713,10 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
     };
     let mut entities = vec![];
     for character in roster.characters {
-        mark(&character.name, character.age, character.age_stated);
+        let npc = EntityKind::Npc;
+        let stated = character.age_stated;
+        ages.entities
+            .push(mark(&character.name, npc, character.age, stated));
         entities.push(SeedEntity {
             other_names: others(character.other_names),
             name: character.name,
@@ -720,6 +726,7 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
         });
     }
     for other in roster.others {
+        ages.entities.push(None);
         entities.push(SeedEntity {
             other_names: others(other.other_names),
             name: other.name,
@@ -765,7 +772,7 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
                 .collect(),
         },
         knowledge: vec![],
-        ages,
+        age_marks: ages,
         cut: vec![],
         last_failure: None,
         campaign_file: None,

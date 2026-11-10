@@ -106,7 +106,7 @@ fn draft_of(seed: AdventureSeed, knowledge: Vec<KnownFact>) -> SeedDraft {
     draft.knowledge = knowledge;
     // The Player confirms every age.
     for line in age_lines(&draft) {
-        confirm_age(&mut draft, &line.name).unwrap();
+        confirm_age(&mut draft, &line.entry()).unwrap();
     }
     approve(&mut draft).unwrap();
     assert_eq!(draft.state, DraftState::Approved);
@@ -409,6 +409,33 @@ fn build_needs_an_approved_draft() {
         assert_eq!(run.result.unwrap_err(), not_approved);
         assert!(run.gm.calls().is_empty());
     }
+}
+
+/// A draft file from before the age marks says `approved` and holds no
+/// confirmation. The state alone must not let it build.
+#[test]
+fn approved_draft_with_a_gap_does_not_build() {
+    let mut legacy = draft();
+    legacy.age_marks = Default::default();
+    assert_eq!(legacy.state, DraftState::Approved);
+    let run = run(&legacy, &plain());
+    assert_eq!(
+        run.result.unwrap_err(),
+        BuildFailure {
+            stage: Stage::HiddenFacts,
+            check: BuildCheck::NotApproved,
+        }
+    );
+    assert!(run.gm.calls().is_empty());
+
+    // `approve` sees the gaps and puts the draft back to `Draft`.
+    let found = approve(&mut legacy).unwrap_err();
+    assert!(
+        found
+            .iter()
+            .any(|g| g.kind == threshold_core::build::GapKind::AgeUnconfirmed)
+    );
+    assert_eq!(legacy.state, DraftState::Draft);
 }
 
 #[test]
@@ -1080,17 +1107,18 @@ fn essential_item_fails_the_build() {
         }
     );
 
-    // A start place that is not a place fails before any call.
+    // A start place that is not a place is a gap: it fails before any call.
     let mut draft = draft();
     draft.seed.start.place = "Harbour Council".into();
     let run3 = run(&draft, &plain());
     assert_eq!(
         run3.result.unwrap_err(),
         BuildFailure {
-            stage: Stage::StartState,
-            check: BuildCheck::Kinds
+            stage: Stage::HiddenFacts,
+            check: BuildCheck::NotApproved
         }
     );
+    assert!(run3.gm.calls().is_empty());
     assert!(run3.gm.calls().is_empty());
 }
 
@@ -1289,8 +1317,9 @@ fn an_npc_with_no_surviving_goal_fails_completeness() {
 
 #[test]
 fn a_slot_conflict_in_an_approved_draft_fails_the_build() {
-    // `approve` refuses each of these drafts (`SlotConflict`); a draft
-    // approved by hand still never reaches `setup` with two facts on a slot.
+    // `approve` refuses each of these drafts (`SlotConflict`). A draft
+    // approved by hand fails too: `build_world` checks the gaps again before
+    // any call, so it never reaches `setup` with two facts on a slot.
     let decided = threshold_core::domain::SeedFact {
         subject: "Tobin Reed".into(),
         key: "role".into(),
@@ -1306,12 +1335,10 @@ fn a_slot_conflict_in_an_approved_draft_fails_the_build() {
                 known("Tobin Reed", "role", "harbour master", false),
                 retired,
             ],
-            BuildCheck::SettledFacts,
         ),
         (
             vec![decided],
             vec![known("Tobin Reed", "role", "harbour master", false)],
-            BuildCheck::SettledFacts,
         ),
         (
             vec![],
@@ -1319,10 +1346,9 @@ fn a_slot_conflict_in_an_approved_draft_fails_the_build() {
                 known("Tobin Reed", "role", "harbour master", false),
                 known("Tobin Reed", "role", "harbour pilot", true),
             ],
-            BuildCheck::OpenItems,
         ),
     ];
-    for (decided, knowledge, check) in cases {
+    for (decided, knowledge) in cases {
         let mut seed = seed();
         seed.decided = decided;
         let mut draft = SeedDraft::new(source(), seed);
@@ -1338,7 +1364,7 @@ fn a_slot_conflict_in_an_approved_draft_fails_the_build() {
             run.result.unwrap_err(),
             BuildFailure {
                 stage: Stage::HiddenFacts,
-                check
+                check: BuildCheck::NotApproved
             }
         );
         assert!(run.gm.calls().is_empty());

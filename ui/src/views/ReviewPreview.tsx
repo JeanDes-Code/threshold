@@ -25,10 +25,12 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
         isCharacter(e.kind) ? [[`entities[${i}].age`, e.name, e.age]] : [],
       ),
     ];
-    const ages: AgeLine[] = rows.map(([, name, age]) => {
+    const ages: AgeLine[] = rows.map(([at, name, age]) => {
       const mark = drafted[name];
       const source = !mark || mark.age !== age ? "edited" : mark.stated ? "from_text" : "proposed";
-      return { name, source, confirmed: age !== null && confirmed[name] === age };
+      const index = at === "pc.age" ? null : Number(/\d+/.exec(at)?.[0]);
+      const kind = index === null ? "pc" : (view.seed.entities[index]?.kind ?? "npc");
+      return { name, index, kind, source, confirmed: age !== null && confirmed[name] === age };
     });
     const names = new Set(view.seed.entities.map((e) => e.name));
     const others = otherGaps.filter(
@@ -49,12 +51,12 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
       view = { ...view, seed, knowledge, state: "draft" };
       return later(refresh());
     },
-    confirmAge: (_, name) => {
+    confirmAge: (_, { name }) => {
       const age = name === view.seed.pc.name ? view.seed.pc.age : view.seed.entities.find((e) => e.name === name)?.age;
       if (age !== null && age !== undefined) confirmed[name] = age;
       return later(refresh());
     },
-    renameDraftEntity: (_, from, to) => {
+    renameDraftEntity: (_, { name: from }, to) => {
       const taken = [view.seed.pc.name, ...view.seed.entities.map((e) => e.name)].some(
         (n) => n !== from && n.toLowerCase() === to.trim().toLowerCase(),
       );

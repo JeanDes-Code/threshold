@@ -21,8 +21,8 @@ use threshold_app::{
 };
 use threshold_core::{
     Gm, GmError, Prompt, RecordedGm,
-    build::{AgeSource, BuildCheck, BuildFailure, DraftState, GapKind, Progress, Stage},
-    domain::Handle,
+    build::{AgeSource, BuildCheck, BuildFailure, DraftState, EntryRef, GapKind, Progress, Stage},
+    domain::{EntityKind, Handle},
     rules::D10,
     store::{Store, TurnKind},
     turn::Engine,
@@ -479,7 +479,10 @@ impl Rig {
     fn confirm_all(&self, view: &DraftView) -> DraftView {
         let mut last = view.clone();
         for line in &view.ages {
-            last = self.drafts.confirm_age(&view.draft_id, &line.name).unwrap();
+            last = self
+                .drafts
+                .confirm_age(&view.draft_id, &line.entry())
+                .unwrap();
         }
         last
     }
@@ -933,10 +936,11 @@ fn one_build_at_a_time() {
         .save_draft(&id, view.seed, view.knowledge)
         .unwrap_err();
     assert!(err.to_string().contains("being built"), "{err}");
-    assert!(rig.drafts.confirm_age(&id, "Ada Venn").is_err());
+    let ada = EntryRef::entity(1, "Ada Venn", EntityKind::Npc);
+    assert!(rig.drafts.confirm_age(&id, &ada).is_err());
     assert!(
         rig.drafts
-            .rename_draft_entity(&id, "Ada Venn", "Ada Marsh")
+            .rename_draft_entity(&id, &ada, "Ada Marsh")
             .is_err()
     );
     assert!(rig.drafts.delete_draft(&id).is_err());
@@ -1217,7 +1221,8 @@ fn confirm_age_confirms_one_name() {
         .unwrap();
     let id = view.draft_id.clone();
 
-    let after = rig.drafts.confirm_age(&id, "Tobin Reed").unwrap();
+    let tobin = EntryRef::entity(0, "Tobin Reed", EntityKind::Npc);
+    let after = rig.drafts.confirm_age(&id, &tobin).unwrap();
     let confirmed: Vec<(&str, bool)> = after
         .ages
         .iter()
@@ -1244,7 +1249,7 @@ fn confirm_age_confirms_one_name() {
     // An unknown name is refused with a plain sentence, and nothing changes.
     let err = rig
         .drafts
-        .confirm_age(&id, "Nobody")
+        .confirm_age(&id, &EntryRef::entity(0, "Nobody", EntityKind::Npc))
         .unwrap_err()
         .to_string();
     assert!(err.contains("Nobody"), "{err}");
@@ -1257,7 +1262,11 @@ fn rename_draft_entity_follows_every_reference() {
     let id = rig.approved_draft();
     let view = rig
         .drafts
-        .rename_draft_entity(&id, "Tobin Reed", "Tobin Marsh")
+        .rename_draft_entity(
+            &id,
+            &EntryRef::entity(0, "Tobin Reed", EntityKind::Npc),
+            "Tobin Marsh",
+        )
         .unwrap();
     // A rename is an edit: the draft goes back to review, with no new gap.
     assert_eq!(view.state, DraftState::Draft);
@@ -1272,7 +1281,11 @@ fn rename_draft_entity_follows_every_reference() {
 
     let err = rig
         .drafts
-        .rename_draft_entity(&id, "Tobin Marsh", "ada venn")
+        .rename_draft_entity(
+            &id,
+            &EntryRef::entity(0, "Tobin Marsh", EntityKind::Npc),
+            "ada venn",
+        )
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -1280,4 +1293,102 @@ fn rename_draft_entity_follows_every_reference() {
         "Another entry already uses the name “ada venn”. Choose another name."
     );
     assert_eq!(rig.drafts.get_draft(&id).unwrap().seed, view.seed);
+}
+
+/// A draft file from before the age marks: `approved`, with the marks of the
+/// first version (keyed by name) and none of the current form.
+fn make_legacy(rig: &Rig, id: &str) {
+    let path = rig.dir.path().join("drafts").join(format!("{id}.json"));
+    let mut json: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let fields = json.as_object_mut().unwrap();
+    assert_eq!(fields["state"], json!("approved"));
+    fields.remove("age_marks");
+    fields.insert(
+        "ages".into(),
+        json!({"mira holt": {"drafted": 31, "stated": true, "confirmed": 31}}),
+    );
+    std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+}
+
+#[test]
+fn start_build_refuses_an_approved_legacy_draft_with_gaps() {
+    let rig = Rig::new();
+    let id = rig.approved_draft();
+    make_legacy(&rig, &id);
+    let calls = rig.build.calls().len();
+
+    match rig.drafts.start_build(&id, &mut |_| {}) {
+        Err(AppError::Gaps(gaps)) => {
+            let ages: Vec<&str> = gaps
+                .iter()
+                .filter(|g| g.kind == GapKind::AgeUnconfirmed)
+                .map(|g| g.at.as_str())
+                .collect();
+            assert_eq!(ages, ["pc.age", "entities[0].age", "entities[1].age"]);
+        }
+        other => panic!("{other:?}"),
+    }
+    // No model call, no Campaign file, and the draft is back in review.
+    assert_eq!(rig.build.calls().len(), calls);
+    assert!(rig.campaign_files().is_empty());
+    let view = rig.drafts.get_draft(&id).unwrap();
+    assert_eq!(view.state, DraftState::Draft);
+    assert!(view.ages.iter().all(|l| !l.confirmed));
+
+    // Once the Player confirms every age again, it approves and builds.
+    rig.confirm_all(&view);
+    rig.drafts.approve_draft(&id).unwrap();
+    rig.push(&build_outputs());
+    assert!(rig.drafts.start_build(&id, &mut |_| {}).is_ok());
+}
+
+#[test]
+fn approve_draft_puts_an_approved_legacy_draft_back_to_draft() {
+    let rig = Rig::new();
+    let id = rig.approved_draft();
+    make_legacy(&rig, &id);
+    assert!(matches!(
+        rig.drafts.approve_draft(&id),
+        Err(AppError::Gaps(_))
+    ));
+    assert_eq!(rig.drafts.get_draft(&id).unwrap().state, DraftState::Draft);
+}
+
+#[test]
+fn rename_draft_entity_moves_no_mark_to_another_kind() {
+    // A place and a character share a name: the rename names its row and
+    // kind, so the character keeps its own confirmation.
+    let rig = Rig::new();
+    rig.push(&draft_outputs());
+    let view = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap();
+    let id = view.draft_id.clone();
+    let mut seed = view.seed.clone();
+    let place = seed
+        .entities
+        .iter()
+        .position(|e| e.kind == EntityKind::Place)
+        .unwrap();
+    seed.entities[place].name = "Ada Venn".into();
+    let view = rig
+        .drafts
+        .save_draft(&id, seed, view.knowledge.clone())
+        .unwrap();
+    let view = rig.confirm_all(&view);
+    assert!(view.ages[2].confirmed);
+
+    let renamed = rig
+        .drafts
+        .rename_draft_entity(
+            &id,
+            &EntryRef::entity(place, "Ada Venn", EntityKind::Place),
+            "Venn Rock",
+        )
+        .unwrap();
+    assert_eq!(renamed.seed.entities[place].name, "Venn Rock");
+    assert_eq!(renamed.seed.entities[1].name, "Ada Venn");
+    assert_eq!(renamed.ages[2].name, "Ada Venn");
+    assert!(renamed.ages[2].confirmed);
 }

@@ -1,14 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AdventureSeed, AgeLine, DraftView, GapKind } from "./api";
+import type { AdventureSeed, AgeLine, DraftView, EntryRef, GapKind } from "./api";
 import {
   CANCEL_NOTE,
   DOCUMENT_MAX_BYTES,
   readDocument,
   addEntry,
+  afterFlush,
   ageLabel,
   ageLineOf,
+  ageStatus,
+  ageTextMatches,
   agesLeft,
+  canApprove,
+  confirmRow,
   createSaver,
+  draftScreen,
+  entryOf,
+  parseAge,
   cutSections,
   cutSentence,
   failureText,
@@ -272,11 +280,13 @@ describe("review sections", () => {
 });
 
 describe("ages", () => {
-  const line = (name: string, source: AgeLine["source"], confirmed = false): AgeLine => ({
-    name,
-    source,
-    confirmed,
-  });
+  const line = (
+    name: string,
+    source: AgeLine["source"],
+    confirmed = false,
+    index: number | null = null,
+    kind: AgeLine["kind"] = index === null ? "pc" : "npc",
+  ): AgeLine => ({ name, index, kind, source, confirmed });
 
   it("an age label says edited by you only for an edited age", () => {
     expect(ageLabel(line("Teodor Brandt", "from_text"))).toBe("from the text");
@@ -289,16 +299,134 @@ describe("ages", () => {
     expect(ageLabel(undefined)).toBe("edited by you");
   });
 
-  it("reads each line by the saved name, and counts the ages left", () => {
+  it("reads each line by its row, saved name and kind, and counts the ages left", () => {
     const ages = [
       line("Teodor Brandt", "from_text", true),
-      line("Agathe Morrow", "edited"),
-      line("Sefa Lind", "proposed"),
+      line("Agathe Morrow", "edited", false, 0),
+      line("Sefa Lind", "proposed", false, 1),
     ];
-    expect(ageLineOf(ages, "Agathe Morrow")?.source).toBe("edited");
+    const f = form();
+    expect(ageLineOf(ages, f, 0)?.source).toBe("edited");
+    expect(ageLineOf(ages, f, "pc")?.confirmed).toBe(true);
     // No name matching of its own: the UI reads the core's lines as they are.
-    expect(ageLineOf(ages, "agathe morrow")).toBeUndefined();
+    const lower = { ...f, seed: { ...f.seed, entities: replaceAt(f.seed.entities, 0, { name: "agathe morrow" }) } };
+    expect(ageLineOf(ages, lower, 0)).toBeUndefined();
+    // A line of another row, or of another kind, is not this row's.
+    const moved = [line("Agathe Morrow", "edited", true, 1)];
+    expect(ageLineOf(moved, f, 0)).toBeUndefined();
+    const placed = [line("Agathe Morrow", "edited", true, 0, "place")];
+    expect(ageLineOf(placed, f, 0)).toBeUndefined();
     expect(agesLeft(ages)).toBe(2);
+  });
+
+  it("reads decimal digits only", () => {
+    expect(parseAge("16")).toBe(16);
+    expect(parseAge(" 40 ")).toBe(40);
+    expect(parseAge("")).toBeNull();
+    expect(parseAge("   ")).toBeNull();
+    for (const text of ["0x10", "1e1", "16.0", "16.5", "-3", "+16", "1_0", "١٦", "16a", "65536"]) {
+      expect(parseAge(text), text).toBeUndefined();
+    }
+    expect(parseAge("65535")).toBe(65535);
+  });
+
+  it("shows confirmed only while the field shows the confirmed, saved age", () => {
+    const confirmed = line("Agathe Morrow", "edited", true, 0);
+    const settled = { text: null, value: 67, line: confirmed, pending: false, saveFailed: false, busy: false };
+    expect(ageStatus(settled)).toEqual({ confirmed: true, canConfirm: false });
+    // The field changes: the label drops at once, before any save.
+    expect(ageStatus({ ...settled, text: "6" })).toEqual({ confirmed: false, canConfirm: false });
+    // Text the form never took ("0x43" is 67 in hex) is not the age.
+    expect(ageStatus({ ...settled, text: "0x43" })).toEqual({ confirmed: false, canConfirm: false });
+    expect(ageStatus({ ...settled, text: "067" }).confirmed).toBe(false);
+    // The same text as the age is fine.
+    expect(ageStatus({ ...settled, text: "67" }).confirmed).toBe(true);
+    // A waiting or failed save: neither the label nor the button.
+    expect(ageStatus({ ...settled, pending: true })).toEqual({ confirmed: false, canConfirm: false });
+    expect(ageStatus({ ...settled, saveFailed: true })).toEqual({ confirmed: false, canConfirm: false });
+  });
+
+  it("lets the Player confirm only an age the field shows and the store holds", () => {
+    const open = line("Sefa Lind", "proposed", false, 1);
+    const settled = { text: null, value: 16, line: open, pending: false, saveFailed: false, busy: false };
+    expect(ageStatus(settled)).toEqual({ confirmed: false, canConfirm: true });
+    expect(ageStatus({ ...settled, text: "0x10" }).canConfirm).toBe(false);
+    expect(ageStatus({ ...settled, text: "17" }).canConfirm).toBe(false);
+    expect(ageStatus({ ...settled, pending: true }).canConfirm).toBe(false);
+    expect(ageStatus({ ...settled, saveFailed: true }).canConfirm).toBe(false);
+    expect(ageStatus({ ...settled, busy: true }).canConfirm).toBe(false);
+    expect(ageStatus({ ...settled, value: null }).canConfirm).toBe(false);
+    // No line yet (a row the core has not seen): the button works once saved.
+    expect(ageStatus({ ...settled, line: undefined }).canConfirm).toBe(true);
+    expect(ageTextMatches(null, null)).toBe(false);
+  });
+});
+
+describe("review actions", () => {
+  it("confirm flushes the saver, then sends the row's saved name and kind", async () => {
+    const calls: unknown[] = [];
+    const flush = () => {
+      calls.push("flush");
+      return Promise.resolve();
+    };
+    const confirm = (entry: EntryRef) => {
+      calls.push(entry);
+      return Promise.resolve("done");
+    };
+    // A typed name is not the entry: the core gets the saved one.
+    const f = typeName(form(), 1, "Sefa Marsh");
+    await expect(confirmRow(flush, confirm, f, 1)).resolves.toBe("done");
+    await confirmRow(flush, confirm, f, "pc");
+    expect(calls).toEqual([
+      "flush",
+      { index: 1, name: "Sefa Lind", kind: "npc" },
+      "flush",
+      { index: null, name: "Teodor Brandt", kind: "pc" },
+    ]);
+  });
+
+  it("a failed flush sends nothing", async () => {
+    const confirm = vi.fn(() => Promise.resolve("done"));
+    const flush = () => Promise.reject(new Error("disk full"));
+    await expect(confirmRow(flush, confirm, form(), 0)).rejects.toThrow("disk full");
+    await expect(afterFlush(flush, confirm)).rejects.toThrow("disk full");
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("the entry of a row is its index, saved name and kind", () => {
+    const f = form();
+    expect(entryOf(f, "pc")).toEqual({ index: null, name: "Teodor Brandt", kind: "pc" });
+    expect(entryOf(f, 2)).toEqual({ index: 2, name: "", kind: "place" });
+  });
+
+  it("approve waits for every save, no gap, and every age field showing its age", () => {
+    const ready = {
+      pending: false,
+      busy: false,
+      approving: false,
+      saveFailed: false,
+      error: null,
+      gaps: [],
+      state: "draft" as const,
+      agesShown: true,
+    };
+    expect(canApprove(ready)).toBe(true);
+    expect(canApprove({ ...ready, pending: true })).toBe(false);
+    expect(canApprove({ ...ready, busy: true })).toBe(false);
+    expect(canApprove({ ...ready, approving: true })).toBe(false);
+    expect(canApprove({ ...ready, saveFailed: true })).toBe(false);
+    expect(canApprove({ ...ready, error: "Could not save" })).toBe(false);
+    expect(canApprove({ ...ready, gaps: [{ kind: "age_unconfirmed", at: "pc.age" }] })).toBe(false);
+    expect(canApprove({ ...ready, agesShown: false })).toBe(false);
+    expect(canApprove({ ...ready, state: "built" })).toBe(false);
+  });
+
+  it("an approved draft with a gap opens in the review, not the build", () => {
+    const approved = { ...view(form()), state: "approved" as const };
+    expect(draftScreen(approved)).toBe("build");
+    expect(draftScreen({ ...approved, gaps: [{ kind: "age_unconfirmed", at: "pc.age" }] })).toBe("review");
+    expect(draftScreen({ ...approved, state: "draft" })).toBe("review");
+    expect(draftScreen({ ...approved, state: "built" })).toBe("review");
   });
 });
 
@@ -312,7 +440,11 @@ describe("names", () => {
       expect(saveArgs(f).seed.entities[0]?.name).toBe("Agathe Morrow");
       expect(saveArgs(f)).not.toHaveProperty("typed");
     }
-    expect(nameChange(f, 0)).toEqual({ kind: "rename", from: "Agathe Morrow", to: "Aggie Morrow" });
+    expect(nameChange(f, 0)).toEqual({
+      kind: "rename",
+      entry: { index: 0, name: "Agathe Morrow", kind: "npc" },
+      to: "Aggie Morrow",
+    });
 
     // The core renames every reference; the form takes the store's seed.
     const seed = {

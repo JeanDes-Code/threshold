@@ -348,12 +348,26 @@ export interface BuildFailure {
 /** Where a character's current age comes from. The core derives it. */
 export type AgeSource = "from_text" | "proposed" | "edited";
 
+/**
+ * One roster entry as a review command names it: its row (`null` for the
+ * PC, else the index in `seed.entities`), with its exact main name and kind
+ * as a check. The core refuses an entry that its row does not hold.
+ */
+export interface EntryRef {
+  index: number | null;
+  name: string;
+  kind: EntityKind;
+}
+
 /** One character's age as the core sees it: the PC first, then the roster order. */
 export interface AgeLine {
   /** The main name, as the seed writes it. */
   name: string;
+  /** The row: `null` for the PC, else the index in `seed.entities`. */
+  index: number | null;
+  kind: EntityKind;
   source: AgeSource;
-  /** The Player confirmed this very age through `confirm_age`. */
+  /** The Player confirmed this very age, for this very entry, through `confirm_age`. */
   confirmed: boolean;
 }
 
@@ -507,12 +521,12 @@ export function createApi(invoke: Invoke) {
     /** Saves an edit. It never confirms an age, and never renames: see the next two. */
     saveDraft: (draftId: string, seed: AdventureSeed, knowledge: KnownFact[]) =>
       invoke<DraftView>("save_draft", { draft_id: draftId, seed, knowledge }),
-    /** The core confirms the current age of one character, by main name. */
-    confirmAge: (draftId: string, name: string) =>
-      invoke<DraftView>("confirm_age", { draft_id: draftId, name }),
+    /** The core confirms the current age of one character entry. */
+    confirmAge: (draftId: string, entry: EntryRef) =>
+      invoke<DraftView>("confirm_age", { draft_id: draftId, entry }),
     /** Renames one entry in every field of the draft that names it. */
-    renameDraftEntity: (draftId: string, from: string, to: string) =>
-      invoke<DraftView>("rename_draft_entity", { draft_id: draftId, from, to }),
+    renameDraftEntity: (draftId: string, entry: EntryRef, to: string) =>
+      invoke<DraftView>("rename_draft_entity", { draft_id: draftId, entry, to }),
     /** Approves the draft, or returns its gaps. Any other error rejects. */
     approveDraft: async (draftId: string): Promise<Approval> => {
       try {

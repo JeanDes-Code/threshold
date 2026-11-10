@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   errorText,
+  gapsFromError,
   parseBuildProgress,
   type BuildProgress,
   type CampaignSummary,
@@ -8,7 +9,7 @@ import {
   type DraftState,
   type DraftView,
 } from "../api";
-import { CANCEL_NOTE, failureText, progressText, readDocument } from "../newCampaign";
+import { CANCEL_NOTE, draftScreen, failureText, progressText, readDocument } from "../newCampaign";
 import { api, useEvent } from "../tauri";
 import SeedReview from "./SeedReview";
 import SetupSteps from "./SetupSteps";
@@ -39,8 +40,7 @@ const STATES: Record<DraftState, string> = {
   built: "built",
 };
 
-const screenOf = (view: DraftView): Screen =>
-  view.state === "approved" ? { kind: "build", view } : { kind: "review", view };
+const screenOf = (view: DraftView): Screen => ({ kind: draftScreen(view), view });
 
 /** A new Campaign from a document: Source Text, review, World Build. */
 export default function NewCampaign({ onOpened, locked, initialDraft = null, onJob, debug = false }: Props) {
@@ -109,7 +109,15 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
 
   const build = (view: DraftView) =>
     run("build", async () => {
-      const summary = await api.startBuild(view.draft_id);
+      let summary: CampaignSummary;
+      try {
+        summary = await api.startBuild(view.draft_id);
+      } catch (e) {
+        // The core found a gap (an old draft file): back to the review.
+        if (!gapsFromError(e)) throw e;
+        go({ kind: "review", view: await api.getDraft(view.draft_id) });
+        return;
+      }
       go({ kind: "source" });
       onOpened(summary);
     });

@@ -4,9 +4,9 @@ use std::{fs, path::PathBuf};
 
 use threshold_core::{
     build::{
-        AgeLine, AgeMark, AgeSource, BuildCheck, BuildFailure, DebugEntry, DraftLine, DraftState,
-        DraftStore, Gap, GapKind, KnownFact, ReviewError, SeedDraft, Stage, age_lines, apply_edit,
-        approve, confirm_age, gaps, rename,
+        AgeLine, AgeMark, AgeRows, AgeSource, BuildCheck, BuildFailure, DebugEntry, DraftLine,
+        DraftState, DraftStore, EntryRef, Gap, GapKind, KnownFact, ReviewError, SeedDraft, Stage,
+        age_lines, apply_edit, approve, confirm_age, gaps, rename,
     },
     context::ADVENTURE_BLOCK_MAX_CHARS,
     domain::{AdventureSeed, EntityKind, OtherName, PcSeed, SeedEntity, SeedFact, StartSeed},
@@ -70,7 +70,45 @@ fn known(subject: &str, key: &str, value: &str) -> KnownFact {
 /// one. A character with no age stays as it is.
 fn confirm_all(draft: &mut SeedDraft) {
     for line in age_lines(draft) {
-        let _ = confirm_age(draft, &line.name);
+        let _ = confirm_age(draft, &line.entry());
+    }
+}
+
+/// The entry whose saved main name is `name`: the PC, or the first roster
+/// row with that exact name.
+fn entry(draft: &SeedDraft, name: &str) -> EntryRef {
+    if draft.seed.pc.name == name {
+        return EntryRef::pc(name);
+    }
+    let i = draft
+        .seed
+        .entities
+        .iter()
+        .position(|e| e.name == name)
+        .unwrap_or_else(|| panic!("no entry {name}"));
+    EntryRef::entity(i, name, draft.seed.entities[i].kind)
+}
+
+/// The Player confirms the age of the entry called `name`.
+fn confirm(draft: &mut SeedDraft, name: &str) -> Result<(), ReviewError> {
+    let entry = entry(draft, name);
+    confirm_age(draft, &entry)
+}
+
+/// The Player renames the entry called `from`.
+fn rename_named(draft: &mut SeedDraft, from: &str, to: &str) -> Result<(), ReviewError> {
+    let entry = entry(draft, from);
+    rename(draft, &entry, to)
+}
+
+/// A mark the draft stage made, not yet confirmed.
+fn drafted(name: &str, kind: EntityKind, age: u16, stated: bool) -> AgeMark {
+    AgeMark {
+        name: name.into(),
+        kind,
+        drafted: Some(age),
+        stated,
+        confirmed: None,
     }
 }
 
@@ -118,14 +156,10 @@ fn unconfirmed_draft() -> SeedDraft {
         known("Jean", "job", "ferryman"),
         known("Jay", "debt", "ten"),
     ];
-    for (name, age, stated) in [("Wren", 29, true), ("Jean", 40, false)] {
-        let mark = AgeMark {
-            drafted: Some(age),
-            stated,
-            confirmed: None,
-        };
-        draft.ages.insert(name.to_lowercase(), mark);
-    }
+    draft.age_marks = AgeRows {
+        pc: Some(drafted("Wren", EntityKind::Pc, 29, true)),
+        entities: vec![Some(drafted("Jean", EntityKind::Npc, 40, false)), None],
+    };
     draft
 }
 
@@ -223,17 +257,13 @@ fn gaps_name_each_problem() {
 
     // DuplicateName: one normal name twice, counting other names and
     // accents; the same other name twice on one entity; the reserved "world".
-    // Two characters with one normal name share one age mark, so the second
-    // age cannot be confirmed until one of them is renamed.
+    // Each row has its own age mark, so both ages can be confirmed.
     assert_eq!(
         gaps_after(|d| d
             .seed
             .entities
             .push(entity("JÉAN", EntityKind::Npc, Some(30)))),
-        vec![
-            gap(GapKind::DuplicateName, "entities[2].name"),
-            gap(GapKind::AgeUnconfirmed, "entities[2].age"),
-        ]
+        vec![gap(GapKind::DuplicateName, "entities[2].name")]
     );
     assert_eq!(
         gaps_after(|d| {
@@ -408,7 +438,7 @@ fn any_save_returns_the_draft_to_draft_state() {
     let mut seed = draft.seed.clone();
     seed.premise = "A ferry crossing at dawn".into();
     let knowledge = draft.knowledge.clone();
-    let ages = draft.ages.clone();
+    let ages = draft.age_marks.clone();
     apply_edit(&mut draft, seed, knowledge);
     store.save(&draft).unwrap();
 
@@ -416,7 +446,7 @@ fn any_save_returns_the_draft_to_draft_state() {
     assert_eq!(loaded.state, DraftState::Draft);
     assert_eq!(loaded.seed.premise, "A ferry crossing at dawn");
     // An edit that leaves the ages alone leaves their confirmations alone.
-    assert_eq!(loaded.ages, ages);
+    assert_eq!(loaded.age_marks, ages);
     assert_eq!(gaps(&loaded), vec![]);
     assert_eq!(loaded.last_failure, None);
 }
@@ -593,7 +623,10 @@ fn rename_updates_every_reference_and_adds_no_gap() {
     assert_eq!(before, vec![gap(GapKind::Missing, "premise")]);
     assert!(line(&draft, "Mira Holt").confirmed);
 
-    assert_eq!(rename(&mut draft, "Mira Holt", " Mira Vance "), Ok(()));
+    assert_eq!(
+        rename_named(&mut draft, "Mira Holt", " Mira Vance "),
+        Ok(())
+    );
     let seed = &draft.seed;
     assert_eq!(seed.entities[2].name, "Mira Vance");
     assert_eq!(seed.pc.other_names[0].known_to, ["Wren", "Mira Vance"]);
@@ -609,14 +642,14 @@ fn rename_updates_every_reference_and_adds_no_gap() {
         seed.start.situation,
         "Mira Vance waits at the Old Mill; Mira Vance's dog sleeps."
     );
-    assert!(draft.ages.contains_key("mira vance"));
-    assert!(!draft.ages.contains_key("mira holt"));
+    let mark = draft.age_marks.entities[2].as_ref().unwrap();
+    assert_eq!(mark.name, "Mira Vance");
     // Her age stays confirmed, and no gap is new.
     assert!(line(&draft, "Mira Vance").confirmed);
     assert_eq!(gaps(&draft), before);
 
     // A place: the start follows, and so do the texts.
-    assert_eq!(rename(&mut draft, "Old Mill", "Grey Mill"), Ok(()));
+    assert_eq!(rename_named(&mut draft, "Old Mill", "Grey Mill"), Ok(()));
     assert_eq!(draft.seed.entities[3].name, "Grey Mill");
     assert_eq!(draft.seed.start.place, "Grey Mill");
     assert_eq!(
@@ -626,7 +659,7 @@ fn rename_updates_every_reference_and_adds_no_gap() {
     assert_eq!(gaps(&draft), before);
 
     // The PC too.
-    assert_eq!(rename(&mut draft, "Wren", "Wren Ashby"), Ok(()));
+    assert_eq!(rename_named(&mut draft, "Wren", "Wren Ashby"), Ok(()));
     assert_eq!(draft.seed.pc.name, "Wren Ashby");
     assert_eq!(draft.seed.pc.other_names[0].known_to[0], "Wren Ashby");
     assert!(line(&draft, "Wren Ashby").confirmed);
@@ -641,7 +674,7 @@ fn rename_returns_an_approved_draft_to_draft() {
         stage: Stage::NpcState,
         check: BuildCheck::Agency,
     });
-    rename(&mut draft, "Jean", "Jean Marsh").unwrap();
+    rename_named(&mut draft, "Jean", "Jean Marsh").unwrap();
     assert_eq!(draft.state, DraftState::Draft);
     assert_eq!(draft.last_failure, None);
 }
@@ -649,22 +682,37 @@ fn rename_returns_an_approved_draft_to_draft() {
 #[test]
 fn rename_refuses_a_name_in_use_and_changes_nothing() {
     let draft = mira_draft();
-    let refused = |from: &str, to: &str| {
+    let refused = |from: EntryRef, to: &str| {
         let mut changed = draft.clone();
-        let result = rename(&mut changed, from, to);
-        assert_eq!(changed, draft, "{from} -> {to}");
+        let result = rename(&mut changed, &from, to);
+        assert_eq!(changed, draft, "{from:?} -> {to}");
         result
     };
+    let named = |name: &str| entry(&draft, name);
     // Another main name, in any spelling; another entry's other name; the
     // PC's name; the reserved "world".
-    assert_eq!(refused("Mira Holt", "JEAN"), Err(ReviewError::NameInUse));
-    assert_eq!(refused("Mira Holt", "jay"), Err(ReviewError::NameInUse));
-    assert_eq!(refused("Jean", "Wren"), Err(ReviewError::NameInUse));
-    assert_eq!(refused("Old Mill", "World"), Err(ReviewError::NameInUse));
-    // An empty name, and a name no entry has.
-    assert_eq!(refused("Mira Holt", "  "), Err(ReviewError::Empty));
-    assert_eq!(refused("Nobody", "Somebody"), Err(ReviewError::UnknownName));
-    assert_eq!(refused("", "Somebody"), Err(ReviewError::UnknownName));
+    let in_use = Err(ReviewError::NameInUse);
+    assert_eq!(refused(named("Mira Holt"), "JEAN"), in_use);
+    assert_eq!(refused(named("Mira Holt"), "jay"), in_use);
+    assert_eq!(refused(named("Jean"), "Wren"), in_use);
+    assert_eq!(refused(named("Old Mill"), "World"), in_use);
+    // An empty name.
+    assert_eq!(refused(named("Mira Holt"), "  "), Err(ReviewError::Empty));
+    // An entry its row does not hold: no name, another name, another
+    // spelling, another kind, another row.
+    let unknown = Err(ReviewError::UnknownName);
+    let npc = EntityKind::Npc;
+    for from in [
+        EntryRef::entity(0, "Nobody", npc),
+        EntryRef::entity(0, "", npc),
+        EntryRef::pc(""),
+        EntryRef::entity(2, "mira holt", npc),
+        EntryRef::entity(2, "Mira Holt", EntityKind::Place),
+        EntryRef::entity(0, "Mira Holt", npc),
+        EntryRef::entity(9, "Mira Holt", npc),
+    ] {
+        assert_eq!(refused(from, "Somebody"), unknown);
+    }
 }
 
 #[test]
@@ -679,7 +727,7 @@ fn rename_changes_whole_words_only() {
         ..known("Rose", "gift", "a box")
     });
     draft.seed.start.situation = "Rose, Roses and ROSE.".into();
-    rename(&mut draft, "Rose", "Iris").unwrap();
+    rename_named(&mut draft, "Rose", "Iris").unwrap();
     assert_eq!(
         draft.knowledge[2].text,
         "Iris gave Roseanne a rosewood box (Iris's own)."
@@ -696,7 +744,7 @@ fn rename_to_the_same_name_in_other_case_is_allowed() {
         .entities
         .push(entity("chloé", EntityKind::Npc, Some(25)));
     confirm_all(&mut draft);
-    assert_eq!(rename(&mut draft, "chloé", "Chloé"), Ok(()));
+    assert_eq!(rename_named(&mut draft, "chloé", "Chloé"), Ok(()));
     assert_eq!(draft.seed.entities[2].name, "Chloé");
     assert!(line(&draft, "Chloé").confirmed);
     assert_eq!(gaps(&draft), vec![]);
@@ -732,11 +780,11 @@ fn edited_age_is_labelled_edited() {
 #[test]
 fn approval_needs_every_age_confirmed_through_the_core() {
     let mut draft = unconfirmed_draft();
-    let marks = draft.ages.clone();
+    let marks = draft.age_marks.clone();
     // No input of `apply_edit` writes a confirmation.
     let (seed, knowledge) = (draft.seed.clone(), draft.knowledge.clone());
     apply_edit(&mut draft, seed, knowledge);
-    assert_eq!(draft.ages, marks);
+    assert_eq!(draft.age_marks, marks);
 
     let unconfirmed = |d: &SeedDraft| -> Vec<String> {
         gaps(d)
@@ -747,12 +795,17 @@ fn approval_needs_every_age_confirmed_through_the_core() {
     };
     assert_eq!(unconfirmed(&draft), ["pc.age", "entities[0].age"]);
     assert!(approve(&mut draft).is_err());
-    assert_eq!(confirm_age(&mut draft, "Wren"), Ok(()));
+    assert_eq!(confirm(&mut draft, "Wren"), Ok(()));
     assert_eq!(unconfirmed(&draft), ["entities[0].age"]);
     assert!(approve(&mut draft).is_err());
     assert_eq!(draft.state, DraftState::Draft);
-    // A name matches as the core matches names.
-    assert_eq!(confirm_age(&mut draft, "JEAN"), Ok(()));
+    // The entry must match its row exactly: another spelling is refused.
+    let npc = EntityKind::Npc;
+    assert_eq!(
+        confirm_age(&mut draft, &EntryRef::entity(0, "JEAN", npc)),
+        Err(ReviewError::UnknownName)
+    );
+    assert_eq!(confirm(&mut draft, "Jean"), Ok(()));
     assert_eq!(approve(&mut draft), Ok(()));
     assert_eq!(draft.state, DraftState::Approved);
 
@@ -765,7 +818,7 @@ fn approval_needs_every_age_confirmed_through_the_core() {
     assert_eq!(unconfirmed(&draft), ["entities[0].age"]);
     assert!(!line(&draft, "Jean").confirmed);
     assert!(approve(&mut draft).is_err());
-    confirm_age(&mut draft, "Jean").unwrap();
+    confirm(&mut draft, "Jean").unwrap();
     assert_eq!(approve(&mut draft), Ok(()));
 }
 
@@ -793,15 +846,24 @@ fn confirm_age_refuses_an_unknown_name() {
         .entities
         .push(entity("Kit", EntityKind::Npc, None));
     let before = draft.clone();
-    for name in ["Nobody", "The landing stage", "Jay", ""] {
+    let npc = EntityKind::Npc;
+    for entry in [
+        EntryRef::entity(0, "Nobody", npc),
+        EntryRef::entity(1, "The landing stage", EntityKind::Place),
+        EntryRef::pc("Jay"),
+        EntryRef::pc(""),
+        EntryRef::entity(1, "Jean", npc),
+        EntryRef::entity(0, "Jean", EntityKind::Place),
+        EntryRef::entity(0, "Jean", EntityKind::Pc),
+    ] {
         assert_eq!(
-            confirm_age(&mut draft, name),
+            confirm_age(&mut draft, &entry),
             Err(ReviewError::UnknownName),
-            "{name}"
+            "{entry:?}"
         );
     }
     // A character with no age has no age to confirm.
-    assert_eq!(confirm_age(&mut draft, "Kit"), Err(ReviewError::Empty));
+    assert_eq!(confirm(&mut draft, "Kit"), Err(ReviewError::Empty));
     assert_eq!(draft, before);
 }
 
@@ -812,8 +874,13 @@ fn old_draft_file_without_ages_loads_unconfirmed() {
     let draft = valid_draft();
     let mut json = serde_json::to_value(&draft).unwrap();
     let fields = json.as_object_mut().unwrap();
-    fields.remove("ages");
+    fields.remove("age_marks");
     fields.remove("cut");
+    // The marks of the first version were keyed by name. They are ignored.
+    fields.insert(
+        "ages".into(),
+        serde_json::json!({"wren": {"drafted": 29, "stated": true, "confirmed": 29}}),
+    );
     fields.insert("ages_to_confirm".into(), serde_json::json!([]));
     fields.insert("ages_stated".into(), serde_json::json!(["Wren"]));
     fs::create_dir_all(&dir.0).unwrap();
@@ -824,7 +891,7 @@ fn old_draft_file_without_ages_loads_unconfirmed() {
     .unwrap();
 
     let loaded = store.load(&draft.id).unwrap();
-    assert!(loaded.ages.is_empty());
+    assert_eq!(loaded.age_marks, AgeRows::default());
     assert!(loaded.cut.is_empty());
     assert_eq!(
         gaps(&loaded),
@@ -838,4 +905,160 @@ fn old_draft_file_without_ages_loads_unconfirmed() {
             .iter()
             .all(|l| l.source == AgeSource::Edited)
     );
+}
+
+// ---- Review: an age mark follows its exact entry ----------------------------
+
+/// Saves `seed` as the Player's edit, with the knowledge unchanged.
+fn save(draft: &mut SeedDraft, seed: AdventureSeed) {
+    let knowledge = draft.knowledge.clone();
+    apply_edit(draft, seed, knowledge);
+}
+
+fn confirmed(draft: &SeedDraft, name: &str) -> bool {
+    line(draft, name).confirmed
+}
+
+#[test]
+fn an_accented_twin_does_not_take_a_confirmation() {
+    // "jéan" is added beside the confirmed "Jean", then "Jean" is deleted.
+    let mut draft = valid_draft();
+    assert!(confirmed(&draft, "Jean"));
+    let mut seed = draft.seed.clone();
+    seed.entities
+        .push(entity("jéan", EntityKind::Npc, Some(40)));
+    save(&mut draft, seed.clone());
+    assert!(!confirmed(&draft, "jéan"));
+    seed.entities.remove(0);
+    save(&mut draft, seed);
+    assert!(!confirmed(&draft, "jéan"));
+    assert!(gaps(&draft).contains(&gap(GapKind::AgeUnconfirmed, "entities[1].age")));
+
+    // The same in one row: "Jean" spelt "jéan" is a new entry.
+    let mut draft = valid_draft();
+    let mut seed = draft.seed.clone();
+    seed.entities[0].name = "jéan".into();
+    save(&mut draft, seed);
+    assert!(!confirmed(&draft, "jéan"));
+}
+
+#[test]
+fn a_name_deleted_and_added_again_in_one_save_is_unconfirmed() {
+    let mut draft = valid_draft();
+    draft
+        .seed
+        .entities
+        .push(entity("Mara", EntityKind::Npc, Some(30)));
+    confirm_all(&mut draft);
+    assert!(confirmed(&draft, "Jean") && confirmed(&draft, "Mara"));
+
+    // Jean leaves row 0 and comes back at the end, with the same age.
+    let mut seed = draft.seed.clone();
+    let jean = seed.entities.remove(0);
+    seed.entities.push(jean);
+    save(&mut draft, seed);
+    assert!(!confirmed(&draft, "Jean"));
+    // Mara moved too, in the same save: the safe side, a new confirmation.
+    assert!(!confirmed(&draft, "Mara"));
+}
+
+#[test]
+fn removing_one_row_keeps_the_marks_of_the_others() {
+    let mut draft = valid_draft();
+    draft
+        .seed
+        .entities
+        .push(entity("Mara", EntityKind::Npc, Some(30)));
+    confirm_all(&mut draft);
+    let mut seed = draft.seed.clone();
+    seed.entities.remove(0);
+    save(&mut draft, seed);
+    assert!(confirmed(&draft, "Mara"));
+    assert_eq!(draft.age_marks.entities.len(), 2);
+    assert_eq!(
+        draft.age_marks.entities[1]
+            .as_ref()
+            .map(|m| m.name.as_str()),
+        Some("Mara")
+    );
+}
+
+#[test]
+fn an_entry_that_becomes_a_place_and_a_character_again_is_unconfirmed() {
+    let mut draft = valid_draft();
+    let mut seed = draft.seed.clone();
+    seed.entities[0].kind = EntityKind::Place;
+    seed.entities[0].age = None;
+    save(&mut draft, seed.clone());
+    // The prune keeps no mark for an entry that became a place.
+    assert_eq!(draft.age_marks.entities[0], None);
+
+    seed.entities[0].kind = EntityKind::Npc;
+    seed.entities[0].age = Some(40);
+    save(&mut draft, seed);
+    assert!(!confirmed(&draft, "Jean"));
+    assert_eq!(line(&draft, "Jean").source, AgeSource::Edited);
+}
+
+#[test]
+fn an_age_set_back_to_the_confirmed_value_is_confirmed_again() {
+    let mut draft = valid_draft();
+    let mut seed = draft.seed.clone();
+    seed.entities[0].age = Some(41);
+    save(&mut draft, seed.clone());
+    assert!(!confirmed(&draft, "Jean"));
+    seed.entities[0].age = Some(40);
+    save(&mut draft, seed);
+    assert!(confirmed(&draft, "Jean"));
+    assert_eq!(gaps(&draft), vec![]);
+}
+
+#[test]
+fn a_mark_counts_only_for_its_exact_name_and_kind() {
+    // A mark in the slot of a row whose entry is another one does not count.
+    let mut draft = valid_draft();
+    let mark = draft.age_marks.entities[0].clone().unwrap();
+    assert_eq!(mark.confirmed, Some(40));
+    for (name, kind) in [
+        ("JEAN", EntityKind::Npc),
+        ("Jean ", EntityKind::Npc),
+        ("Jean", EntityKind::Pc),
+    ] {
+        draft.seed.entities[0].name = name.into();
+        draft.seed.entities[0].kind = kind;
+        assert!(
+            gaps(&draft).contains(&gap(GapKind::AgeUnconfirmed, "entities[0].age")),
+            "{name} {kind:?}"
+        );
+    }
+}
+
+#[test]
+fn rename_moves_only_the_mark_of_its_own_row() {
+    // A place and a character share the name "Ash".
+    let mut draft = valid_draft();
+    let seed = &mut draft.seed;
+    seed.entities.push(entity("Ash", EntityKind::Place, None));
+    seed.entities.push(entity("Ash", EntityKind::Npc, Some(30)));
+    confirm_all(&mut draft);
+    assert!(confirmed(&draft, "Ash"));
+
+    let place = EntryRef::entity(2, "Ash", EntityKind::Place);
+    assert_eq!(rename(&mut draft, &place, "Ash Hill"), Ok(()));
+    assert_eq!(draft.seed.entities[2].name, "Ash Hill");
+    assert_eq!(draft.seed.entities[3].name, "Ash");
+    assert_eq!(draft.age_marks.entities[2], None);
+    assert_eq!(
+        draft.age_marks.entities[3]
+            .as_ref()
+            .map(|m| m.name.as_str()),
+        Some("Ash")
+    );
+    assert!(confirmed(&draft, "Ash"));
+
+    // The character: its own mark follows it.
+    let npc = EntryRef::entity(3, "Ash", EntityKind::Npc);
+    assert_eq!(rename(&mut draft, &npc, "Ash Reed"), Ok(()));
+    assert!(confirmed(&draft, "Ash Reed"));
+    assert_eq!(draft.seed.entities[2].name, "Ash Hill");
 }
