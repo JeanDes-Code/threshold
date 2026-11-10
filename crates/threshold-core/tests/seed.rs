@@ -234,6 +234,29 @@ text = "Hessa plans a trip."
 }
 
 #[test]
+fn open_entry_with_a_hand_written_prefix_is_refused() {
+    for key in ["pending_trip", "Pending trip"] {
+        let (mut store, campaign) = campaign(&town_seed());
+        let before = store.snapshot(campaign).unwrap();
+        let setup = world(&format!(
+            r#"
+[[facts]]
+subject = "Hessa"
+key = "{key}"
+value = "the market"
+text = "Hessa plans a trip."
+open = true
+"#
+        ));
+
+        let result = commit_world(&mut store, campaign, &setup);
+
+        assert!(matches!(result, Err(SetupError::Invalid(_))), "{result:?}");
+        assert_eq!(store.snapshot(campaign).unwrap(), before);
+    }
+}
+
+#[test]
 fn settled_known_fact_is_held_by_the_pc() {
     let (mut store, campaign) = campaign(&town_seed());
     let setup = world(

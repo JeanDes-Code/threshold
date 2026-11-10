@@ -18,8 +18,8 @@ use super::{
 };
 use crate::{
     domain::{
-        EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, is_open_key,
-        is_state_key,
+        EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, OPEN_KEY_PREFIX, Reaction,
+        is_open_key, is_state_key,
     },
     model::Prompt,
     normalize,
@@ -132,7 +132,8 @@ pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
 }
 
 /// The words of every live fact the PC holds no Belief about, on a key that
-/// is not a state key or that is an open key: its key and its value. An open
+/// is not a state key or that is an open key: its key (an open key without
+/// its prefix, `key_term`) and its value. An open
 /// key is a state key only so that its fact stays replaceable; a plan the PC
 /// does not know stays a secret. Entity names are public, so a key or value
 /// that is an entity name is left out.
@@ -152,9 +153,15 @@ fn secret_terms(view: &WorldView) -> Vec<Vec<String>> {
                 normalize::value(&f.slot.value),
             ))
         })
-        .flat_map(|f| [words(&f.slot.key), words(&f.slot.value)])
+        .flat_map(|f| [words(key_term(&f.slot.key)), words(&f.slot.value)])
         .filter(|term| !term.is_empty() && !names.contains(term))
         .collect()
+}
+
+/// The part of a key that names the secret. An open key names it without
+/// `OPEN_KEY_PREFIX`: a plan says "arrest", not "pending arrest".
+fn key_term(key: &str) -> &str {
+    key.strip_prefix(OPEN_KEY_PREFIX).unwrap_or(key)
 }
 
 /// True when `text` contains one of `terms` as whole words.

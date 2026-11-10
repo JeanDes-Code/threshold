@@ -756,3 +756,39 @@ fn gm_only_open_fact_stays_a_secret_to_the_narrator() {
         assert!(!field.contains("arrest"), "{field}");
     }
 }
+
+/// The key term of an open fact is the key without `pending_`. Here the
+/// value is an entity name, so the key term alone keeps the plan out.
+#[test]
+fn plan_naming_an_open_key_without_its_prefix_is_dropped() {
+    let mut w = World::new();
+    let (ada, orsel) = (w.ada, w.orsel);
+    play_turn(
+        &mut w,
+        "turn-plot",
+        "I wait.",
+        "",
+        vec![add_fact(
+            orsel,
+            "pending_arrest",
+            "Ada",
+            "Orsel plans to arrest Ada.",
+            vec![],
+        )],
+    );
+    assert!(w.view.live_fact(orsel, "pending_arrest").is_some());
+    assert!(
+        w.view
+            .entities
+            .iter()
+            .any(|e| e.id == ada && e.name == "Ada")
+    );
+    let reactions = vec![Reaction {
+        npc: Handle::Entity(orsel),
+        stance: Stance::Resist,
+        plan: "arrest Ada at dawn".into(),
+        cause: None,
+    }];
+    let guarded = guard_plans(&w.view, &reactions);
+    assert!(guarded[0].plan.is_empty(), "{guarded:?}");
+}

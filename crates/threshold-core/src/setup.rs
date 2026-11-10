@@ -75,16 +75,18 @@ pub fn commit_world(
 
     let mut ops = Vec::new();
     // ADR 0005: an open entry commits on the `pending_` key, so its outcome
-    // slot stays empty. A settled entry may not use that prefix.
+    // slot stays empty. Only `open` adds that prefix: a key never carries it
+    // by hand, open or settled.
     for f in &world.facts {
         let key = normalize::key(&f.key);
-        let key = if f.open {
-            format!("{OPEN_KEY_PREFIX}{key}")
-        } else if is_open_key(&key) {
+        if is_open_key(&key) {
             return Err(SetupError::Invalid(format!(
-                "{key} of {} starts with {OPEN_KEY_PREFIX}, but the entry is not open",
+                "{key} of {} starts with {OPEN_KEY_PREFIX}; write the key without it and set open",
                 f.subject
             )));
+        }
+        let key = if f.open {
+            format!("{OPEN_KEY_PREFIX}{key}")
         } else {
             key
         };
