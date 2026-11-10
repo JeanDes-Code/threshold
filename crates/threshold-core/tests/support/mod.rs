@@ -220,7 +220,8 @@ impl World {
         self.view.facts.iter().map(|f| f.id).max().unwrap_or(0) + 1
     }
 
-    /// Adds a place entity, for a move to go to (`move_to`, ADR 0007).
+    /// Adds a place entity the PC can name, for a move to go to (`move_to`,
+    /// ADR 0007): the PC holds one fact about it.
     pub fn add_place(&mut self, name: &str) -> u64 {
         self.commit(vec![LedgerOp::AddEntity {
             local: None,
@@ -229,7 +230,10 @@ impl World {
             age: None,
             other_names: vec![],
         }]);
-        self.view.entity_by_name(name).unwrap().id
+        let id = self.view.entity_by_name(name).unwrap().id;
+        let ada = self.ada;
+        self.commit(vec![add_fact(id, "kind", "square", vec![ada])]);
+        id
     }
 
     pub fn goal_done(&mut self) {
@@ -270,6 +274,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         schedule: None,
         minutes: 0,
         intimate: false,
+        facts_on_win: false,
     }
 }
 

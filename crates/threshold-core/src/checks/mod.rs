@@ -239,8 +239,8 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
     // impossible verdict writes neither. On a Check they apply on a success
     // only, like the win stake (`to_ops`).
     let happens = p.verdict != crate::domain::Verdict::Impossible;
-    if let (true, Some(pc), Some(place)) =
-        (happens, pc(view), p.move_to.and_then(|h| view.entity(h)))
+    let moves = happens && p.action == crate::domain::ActionKind::Move;
+    if let (true, Some(pc), Some(place)) = (moves, pc(view), p.move_to.and_then(|h| view.entity(h)))
     {
         push(
             Handle::Entity(pc),

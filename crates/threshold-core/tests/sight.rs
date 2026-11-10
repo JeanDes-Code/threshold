@@ -84,10 +84,31 @@ fn moment_matches_seen_present_of_snapshot_before() {
         0,
         vec![place("Market"), place("Gate square")],
     );
+    // The PC can name both places (C7: `move_to` takes only those).
+    let places = w.view();
+    let ada = w.ada;
+    let known = |name: &str| LedgerOp::AddFact {
+        slot: threshold_core::domain::Slot {
+            subject: threshold_core::domain::EntityRef::Id(id_of(&places, name)),
+            key: "kind".into(),
+            value: "square".into(),
+        },
+        text: format!("{name} is a square."),
+        canon: threshold_core::domain::Canon::Established,
+        source: threshold_core::domain::FactSource::Proposal,
+        seen_by: vec![threshold_core::domain::EntityRef::Id(ada)],
+        causes: vec![],
+    };
+    w.commit(
+        TurnKind::Setup,
+        "",
+        "{}",
+        0,
+        vec![known("Market"), known("Gate square")],
+    );
     let mut look = proposal(Verdict::Allowed);
     look.action = ActionKind::Observe;
     look.minutes = 5;
-    let places = w.view();
     let mut walk = proposal(Verdict::Allowed);
     walk.action = ActionKind::Move;
     walk.minutes = 10;

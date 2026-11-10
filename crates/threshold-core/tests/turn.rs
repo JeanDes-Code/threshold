@@ -491,7 +491,10 @@ fn narrator_gets_only_reactions_of_seen_npcs() {
     assert_eq!(reactions, p.reactions);
     let stored_proposal: DecisionProposal =
         serde_json::from_value(record["proposal"].clone()).unwrap();
-    assert_eq!(stored_proposal, p);
+    // C9: a talk with no minutes takes the Ruleset default.
+    let mut expected = p.clone();
+    expected.minutes = threshold_core::rules::TALK_DEFAULT_MIN;
+    assert_eq!(stored_proposal, expected);
 }
 
 /// Ruling 4: at setup and on arrival, the PC sees who openly stands there,
@@ -557,7 +560,9 @@ fn arrival_shows_open_npcs_and_keeps_hidden_out() {
         .iter()
         .find(|k| k.holder == ada && k.fact_id == Some(pip_location))
         .expect("the PC witnessed Pip's location on arrival");
-    assert_eq!((pip_known.learned_at, pip_known.arrives_at), (10, 10));
+    // C9: the look with no minutes takes the act default, then the walk 10.
+    let at = u64::from(threshold_core::rules::ACT_DEFAULT_MIN) + 10;
+    assert_eq!((pip_known.learned_at, pip_known.arrives_at), (at, at));
 }
 
 /// Ruling 5: in one Scene, with no present entity's fact changed, the
@@ -1391,5 +1396,76 @@ fn a_cut_proposal_logs_why_the_model_stopped() {
         first.1.ends_with("[generation stopped: length]"),
         "{}",
         first.1
+    );
+}
+
+// --- Time after review (C9) ---------------------------------------------------
+
+/// The minutes one Turn of `p` moves the clock, from the fixture's start.
+fn minutes_of(p: &DecisionProposal) -> u64 {
+    let (mut engine, w, _gm) = setup(vec![json(p)], vec!["It happens."]);
+    let before = snapshot(&engine, &w).clock_min;
+    engine
+        .play_turn("t1".into(), "I do it.", &mut no_chunks())
+        .unwrap();
+    snapshot(&engine, &w).clock_min - before
+}
+
+/// The model leaves out `minutes` on most Turns. With 0, the core uses a
+/// fixed default by action from the Ruleset module.
+#[test]
+fn a_turn_without_minutes_takes_the_default_of_its_action() {
+    use threshold_core::rules::{ACT_DEFAULT_MIN, MOVE_DEFAULT_MIN, TALK_DEFAULT_MIN};
+    assert_eq!(
+        (TALK_DEFAULT_MIN, ACT_DEFAULT_MIN, MOVE_DEFAULT_MIN),
+        (5, 10, 15)
+    );
+    for (action, minutes) in [
+        (ActionKind::Talk, 5),
+        (ActionKind::Act, 10),
+        (ActionKind::Move, 15),
+    ] {
+        let mut p = proposal(Verdict::Allowed);
+        p.action = action;
+        p.minutes = 0;
+        assert_eq!(minutes_of(&p), minutes, "{action:?}");
+    }
+    // A stated duration stays.
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Talk;
+    p.minutes = 3;
+    assert_eq!(minutes_of(&p), 3);
+}
+
+/// A contested `wait` is an act, never the engine-owned wait that runs the
+/// clock forward to the next event.
+#[test]
+fn a_contested_wait_is_an_act() {
+    let mut p = proposal(Verdict::Check);
+    p.action = ActionKind::Wait;
+    p.contested = true;
+    p.minutes = 0;
+    p.check = Some(check(
+        Some(e(World::new().brann)),
+        slot(e(World::new().brann), "mood", "beaten"),
+        slot(e(World::new().brann), "mood", "smug"),
+    ));
+    let (mut engine, w, _gm) = setup(vec![json(&p)], vec!["You stare him down."]);
+    let before = snapshot(&engine, &w).clock_min;
+    engine
+        .play_turn("t1".into(), "I outwait Brann.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(
+        snapshot(&engine, &w).clock_min - before,
+        u64::from(threshold_core::rules::ACT_DEFAULT_MIN)
+    );
+    let stored = engine
+        .store()
+        .turn_by_campaign_op(w.campaign, &"t1".to_owned())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        stored_action(&stored.record.proposal_json),
+        Some((ActionKind::Act, Verdict::Check))
     );
 }

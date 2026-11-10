@@ -5,8 +5,9 @@ use std::collections::HashSet;
 use super::{handle_ceiling, pc};
 use crate::{
     domain::{
-        Canon, Cause, ClaimDraft, DecisionProposal, Effect, EntityKind, EntityRef, FactDraft,
-        FactSource, Handle, Knowing, LedgerOp, Reaction, Seen, Slot, SlotDraft, Trigger, Verdict,
+        ActionKind, Canon, Cause, ClaimDraft, DecisionProposal, Effect, EntityKind, EntityRef,
+        FactDraft, FactSource, Handle, Knowing, LedgerOp, NewFact, Reaction, Seen, Slot, SlotDraft,
+        Trigger, Verdict,
     },
     normalize,
     rules::RollResult,
@@ -40,9 +41,11 @@ pub fn to_ops(
         Verdict::Check => success,
         Verdict::Impossible => false,
     };
+    // `move_to` moves the PC only with the move action (changed after
+    // review); `settle` drops it otherwise.
     let moved_to = p
         .move_to
-        .filter(|_| lets_happen)
+        .filter(|_| lets_happen && p.action == ActionKind::Move)
         .and_then(|h| view.entity(h))
         .map(|place| place.name.clone());
     let mut b = Builder {
@@ -103,7 +106,14 @@ pub fn to_ops(
         };
         b.write(&location, FactSource::Proposal, holders, Vec::new());
     }
-    for fact in &p.facts {
+    // The facts of a proposal whose Check the core built were written for a
+    // success: they apply on a won Roll only (changed after review).
+    let facts: &[NewFact] = if p.facts_on_win && !success {
+        &[]
+    } else {
+        &p.facts
+    };
+    for fact in facts {
         let holders = b.holders(fact.seen);
         if let Some(speaker) = fact.said_by {
             b.ops.push(LedgerOp::AddClaim {
@@ -299,13 +309,13 @@ impl Builder<'_> {
         })
     }
 
-    /// Each blocker opens an obstacle when the verdict is check, unless it is
-    /// already open or a write of this Commit changes its slot. An
-    /// impossible verdict opens none (ADR 0007): the act does not happen,
-    /// and an obstacle it left would make the coincidence check reject a
-    /// later, legal act on the same slot.
+    /// Each blocker opens an obstacle when the verdict is impossible or check,
+    /// unless it is already open or a write of this Commit changes its slot.
+    /// A fact about the PC itself never gets here: `settle` drops it (ADR
+    /// 0007, changed after review: an impossible verdict opens its real
+    /// blockers again).
     fn open_blockers(&mut self) {
-        if self.p.verdict != Verdict::Check {
+        if !matches!(self.p.verdict, Verdict::Impossible | Verdict::Check) {
             return;
         }
         let mut opened = HashSet::new();

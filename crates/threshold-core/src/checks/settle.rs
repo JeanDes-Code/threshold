@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
-    domain::{DecisionProposal, EntityKind, Handle, SlotDraft},
+    domain::{ActionKind, DecisionProposal, EntityKind, Handle, SlotDraft},
     normalize,
     store::WorldView,
     world,
@@ -26,6 +26,13 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     if let Some(place) = p.move_to.filter(|h| !is_known_place(view, *h)) {
         p.move_to = None;
         notes.push(format!("removed move_to {place}: not a place the PC knows"));
+    }
+    if let Some(place) = p.move_to.filter(|_| p.action != ActionKind::Move) {
+        p.move_to = None;
+        notes.push(format!(
+            "removed move_to {place}: the action is {:?}, not move",
+            p.action
+        ));
     }
     settle_closes(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);

@@ -1459,14 +1459,32 @@ fn contested_act_without_a_check_gets_a_note_then_a_default_check() {
 
 // --- Blockers (ADR 0007) -------------------------------------------------------
 
+/// Changed after review: an impossible verdict opens its real blockers
+/// again, as before the bug pass. Only the PC's own identity facts are
+/// never blockers (`a_fact_about_the_pc_itself_is_never_a_blocker`). A
+/// GM-only obstacle that an impossible act left must still need a cause.
 #[test]
-fn an_impossible_verdict_opens_no_obstacle_and_a_check_does() {
+fn an_impossible_verdict_and_a_check_open_their_real_blockers() {
     let mut w = World::new();
-    let before = w.view.obstacles_open.len();
     let mut p = proposal(Verdict::Impossible);
     p.blockers = vec![f(w.gate_material)];
     apply(&mut w, &p, None);
-    assert_eq!(w.view.obstacles_open.len(), before);
+    assert!(
+        w.view
+            .obstacles_open
+            .iter()
+            .any(|o| o.fact_id == w.gate_material)
+    );
+    // The next Turn cannot change that slot with no cause.
+    let mut next = proposal(Verdict::Allowed);
+    next.facts = vec![fact(
+        slot(e(w.gate), "material", "wood"),
+        Seen::Present,
+        vec![],
+    )];
+    rejected(validate(&next, &w.view), CheckKind::Coincidence);
+
+    let mut w = World::new();
 
     let mut p = proposal(Verdict::Check);
     p.blockers = vec![f(w.gate_material)];
@@ -1698,4 +1716,82 @@ fn a_proposal_closes_at_most_two_items() {
     assert!(!validator.is_valid(&json));
     json["closes"].as_array_mut().unwrap().pop();
     assert!(validator.is_valid(&json), "{:?}", validator.validate(&json));
+}
+
+// --- move_to and the default Check after review (ADR 0007) -------------------
+
+/// Restored non-move case (C5): `move_to` moves the PC only with the move
+/// action. `settle` drops it otherwise, and `to_ops` ignores it.
+#[test]
+fn pc_move_sets_location_only_for_move_action() {
+    use threshold_core::domain::ActionKind;
+    for action in [ActionKind::Talk, ActionKind::Act, ActionKind::Observe] {
+        let mut w = World::new();
+        let mut p = proposal(Verdict::Allowed);
+        p.action = action;
+        p.move_to = Some(e(w.gate));
+        let (settled, notes) = settle(p.clone(), &w.view);
+        assert_eq!(settled.move_to, None, "{action:?}");
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("move_to"), "{notes:?}");
+        // Even unsettled, the Commit does not move the PC.
+        apply(&mut w, &p, None);
+        assert_eq!(
+            w.view.live_fact(w.ada, "location").unwrap().slot.value,
+            "gate square",
+            "{action:?}"
+        );
+    }
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.move_to = Some(e(w.gate));
+    let (settled, notes) = settle(p, &w.view);
+    assert_eq!(settled.move_to, Some(e(w.gate)));
+    assert!(notes.is_empty(), "{notes:?}");
+    apply(&mut w, &settled, None);
+    assert_eq!(
+        w.view.live_fact(w.ada, "location").unwrap().slot.value,
+        "gate"
+    );
+}
+
+/// C8: when the core builds the default Check, the proposal's facts were
+/// written for a success: they commit on a won Roll only.
+#[test]
+fn facts_of_a_default_check_apply_on_a_win_only() {
+    use threshold_core::checks::default_check;
+    for (success, applied) in [(false, false), (true, true)] {
+        let mut w = World::new();
+        let mut p = proposal(Verdict::Allowed);
+        p.contested = true;
+        p.reactions = vec![reaction(e(w.brann), Stance::Resist, None)];
+        p.facts = vec![fact(
+            slot(e(w.brann), "mood", "beaten"),
+            Seen::Present,
+            vec![],
+        )];
+        assert!(default_check(&mut p, &w.view).is_some());
+        apply(&mut w, &p, Some(roll(success)));
+        assert_eq!(
+            w.view.live_fact(w.brann, "mood").is_some(),
+            applied,
+            "success {success}"
+        );
+    }
+    // A Check the model wrote keeps its facts on a lost Roll, as before.
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Check);
+    p.check = Some(check(
+        None,
+        slot(e(w.orsel), "mood", "impressed"),
+        slot(e(w.ada), "fatigue", "winded"),
+    ));
+    p.facts = vec![fact(
+        slot(e(w.brann), "mood", "watchful"),
+        Seen::Present,
+        vec![],
+    )];
+    apply(&mut w, &p, Some(roll(false)));
+    assert!(w.view.live_fact(w.brann, "mood").is_some());
 }

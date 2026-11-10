@@ -36,7 +36,8 @@ pub fn contest_note(p: &DecisionProposal) -> Option<Rejection> {
 /// core builds one and returns the note for the debug log. The default
 /// Check opposes the NPC whose reaction has the lowest stance (none when
 /// no NPC reacts). It has no stakes and no factors, so the Ruleset gives
-/// its normal difficulty, and the narrator gets only the result.
+/// its normal difficulty, and the narrator gets only the result. The
+/// proposal's facts then apply on a won Roll only.
 pub fn default_check(p: &mut DecisionProposal, view: &WorldView) -> Option<String> {
     if !lacks_check(p) {
         return None;
@@ -49,6 +50,9 @@ pub fn default_check(p: &mut DecisionProposal, view: &WorldView) -> Option<Strin
         .min_by_key(|r| r.stance)
         .map(|r| r.npc);
     p.verdict = Verdict::Check;
+    // The facts were written for an act that simply happens: with the Roll
+    // they apply on a win only (`to_ops`).
+    p.facts_on_win = true;
     p.check = Some(CheckDraft {
         against,
         win: None,
@@ -57,10 +61,12 @@ pub fn default_check(p: &mut DecisionProposal, view: &WorldView) -> Option<Strin
     });
     Some(match against {
         Some(npc) => {
-            format!("built a default Check against {npc}: the act is contested and has no check")
+            format!(
+                "built a default Check against {npc}: the act is contested and has no check; its facts apply on a win only"
+            )
         }
         None => {
-            "built a default Check against nobody: the act is contested and has no check".into()
+            "built a default Check against nobody: the act is contested and has no check; its facts apply on a win only".into()
         }
     })
 }

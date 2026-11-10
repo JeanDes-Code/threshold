@@ -510,6 +510,19 @@ pub fn tagged<'a>(view: &'a WorldView, tag: &str) -> impl Iterator<Item = &'a En
     })
 }
 
+/// The entities the PC can name (data shape 3.5), from the state `view`
+/// and the standing story Turns. The one copy of that rule outside
+/// `pc_sight`: `world::known_places` reads it for places (ADR 0007, changed
+/// after review).
+pub fn pc_can_name(view: &WorldView, standing: &[&StoredTurn]) -> HashSet<EntityId> {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return HashSet::new();
+    };
+    let rows = view.knowledge.iter().filter(|r| r.holder == pc.id);
+    let now = held(view, rows, view.clock_min);
+    named(view, pc.id, &now, standing)
+}
+
 /// The entities the PC can name (data shape 3.5): the PC; an Adventure Seed
 /// entry that is not hidden; an entity the PC holds a Belief about that is
 /// not a witnessed `location`; an entity whose main name is in the Narration

@@ -54,14 +54,17 @@ pub fn hidden(view: &WorldView, entity: EntityId) -> bool {
     })
 }
 
-/// The places the PC knows: every place entity that the Adventure Seed
-/// does not hide, in id order. A Decision Proposal moves the PC only to one
-/// of them (`move_to`, ADR 0007).
+/// The places the PC knows: every place entity the PC can name, by the
+/// rule of the Player screens (`world::pc_can_name`), in id order. The
+/// standing Turns are the view's recent ones. A Decision Proposal moves
+/// the PC only to one of them (`move_to`, ADR 0007, changed after review).
 pub fn known_places(view: &WorldView) -> Vec<EntityId> {
+    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
+    let named = super::sight::pc_can_name(view, &standing);
     let mut places: Vec<EntityId> = view
         .entities
         .iter()
-        .filter(|e| e.kind == EntityKind::Place && !hidden(view, e.id))
+        .filter(|e| e.kind == EntityKind::Place && named.contains(&e.id))
         .map(|e| e.id)
         .collect();
     places.sort_unstable();

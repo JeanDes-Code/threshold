@@ -630,7 +630,7 @@ impl Engine {
             let retry = attempt == "propose_retry";
             let parsed = match parse(&raw) {
                 Ok(p) => {
-                    let (mut p, mut notes) = checks::settle(engine_wait(p, view), view);
+                    let (mut p, mut notes) = checks::settle(engine_time(p, view), view);
                     // A contested act with no Check: one repair note on the
                     // first attempt, a default Check on the retry (ADR 0007).
                     if retry {
@@ -817,12 +817,19 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
     serde_json::from_str(raw.trim()).map_err(|e| schema_error(format!("invalid JSON: {e}")))
 }
 
-/// The engine owns the length of a wait (`world::wait_minutes`), so the
-/// model cannot freeze the World Clock with `minutes: 0`. It runs before the
-/// Commit checks, so they see the final minutes.
-fn engine_wait(mut p: DecisionProposal, view: &WorldView) -> DecisionProposal {
+/// The engine owns the time of a Turn, so the model cannot freeze the World
+/// Clock with `minutes: 0`. A wait takes `world::wait_minutes`. A contested
+/// wait is an act, never that engine-owned wait. Any other Turn with no
+/// minutes takes the Ruleset default of its action (`rules::default_minutes`).
+/// It runs before the Commit checks, so they see the final minutes.
+fn engine_time(mut p: DecisionProposal, view: &WorldView) -> DecisionProposal {
+    if p.action == ActionKind::Wait && p.contested {
+        p.action = ActionKind::Act;
+    }
     if p.action == ActionKind::Wait {
         p.minutes = world::wait_minutes(view, p.minutes);
+    } else if p.minutes == 0 {
+        p.minutes = crate::rules::default_minutes(p.action);
     }
     p
 }

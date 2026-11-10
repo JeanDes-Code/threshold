@@ -45,6 +45,12 @@ pub struct DecisionProposal {
     pub minutes: u32,
     #[serde(default)]
     pub intimate: bool,
+    /// Set by the core only, never by the model: the core built this
+    /// proposal's Check (`checks::default_check`), so its `facts`, written
+    /// for an act that simply happens, apply on a won Roll only (ADR 0007,
+    /// changed after review). Not in the schema and not parsed.
+    #[serde(skip)]
+    pub facts_on_win: bool,
 }
 
 /// The most `closes` items one proposal may hold (ADR 0007, changed after

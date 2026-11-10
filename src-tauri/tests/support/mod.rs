@@ -35,6 +35,7 @@ pub fn base() -> DecisionProposal {
         schedule: None,
         minutes: 0,
         intimate: false,
+        facts_on_win: false,
     }
 }
 

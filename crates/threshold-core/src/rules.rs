@@ -2,7 +2,31 @@ use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::{domain::CheckDraft, store::WorldView};
+use crate::{
+    domain::{ActionKind, CheckDraft},
+    store::WorldView,
+};
+
+/// The game minutes a talk takes when the proposal states none.
+pub const TALK_DEFAULT_MIN: u32 = 5;
+
+/// The game minutes an act (or an observe) takes when the proposal states
+/// none.
+pub const ACT_DEFAULT_MIN: u32 = 10;
+
+/// The game minutes a move takes when the proposal states none.
+pub const MOVE_DEFAULT_MIN: u32 = 15;
+
+/// The minutes a Turn of `action` takes when the model leaves `minutes` out
+/// or sends 0. A wait is not here: the engine owns its length
+/// (`world::wait_minutes`).
+pub fn default_minutes(action: ActionKind) -> u32 {
+    match action {
+        ActionKind::Talk => TALK_DEFAULT_MIN,
+        ActionKind::Move => MOVE_DEFAULT_MIN,
+        ActionKind::Act | ActionKind::Observe | ActionKind::Wait => ACT_DEFAULT_MIN,
+    }
+}
 
 pub trait Ruleset {
     fn difficulty(&self, check: &CheckDraft, view: &WorldView) -> u8;

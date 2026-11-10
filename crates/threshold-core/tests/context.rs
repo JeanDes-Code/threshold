@@ -991,3 +991,40 @@ fn proposal_prompt_describes_closes_in_one_line() {
     assert!(!all.contains("settles:"), "{all}");
     assert!(!all.contains("write x only"), "{all}");
 }
+
+/// C7: the places for `move_to` are the place entities the PC can name,
+/// by the same rule as the Player screens (`world::pc_can_name`). A place
+/// that is no Adventure Seed entry, that the PC holds no Belief about and
+/// that no Narration names, is in neither the enum nor the prompt.
+#[test]
+fn a_place_the_pc_cannot_name_is_no_move_target() {
+    let mut w = World::new();
+    w.commit(vec![threshold_core::domain::LedgerOp::AddEntity {
+        local: None,
+        kind: threshold_core::domain::EntityKind::Place,
+        name: "Smugglers Cove".into(),
+        age: None,
+        other_names: vec![],
+    }]);
+    let cove = w.view.entity_by_name("Smugglers Cove").unwrap().id;
+    let ctx = threshold_core::context::proposal_context(&w.view, &[], "I go to the cove.");
+    assert!(!ctx.handles.places.contains(&Handle::Entity(cove)));
+    assert!(
+        !ctx.prompt.scene.contains("Smugglers Cove"),
+        "{}",
+        ctx.prompt.scene
+    );
+    let schema = threshold_core::proposal_schema_for(&ctx.handles);
+    let places = schema.pointer("/properties/move_to/enum").unwrap();
+    assert!(
+        !places
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(format!("E{cove}"))),
+        "{places}"
+    );
+    assert!(!threshold_core::world::known_places(&w.view).contains(&cove));
+    let nameable = threshold_core::world::pc_can_name(&w.view, &[]);
+    assert!(!nameable.contains(&cove));
+    assert!(nameable.contains(&w.gate));
+}
