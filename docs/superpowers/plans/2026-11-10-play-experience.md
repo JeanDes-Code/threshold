@@ -353,7 +353,7 @@ No new behaviour.
   - `player.rs::delete_note_removes_its_pin`.
   - `view.rs::pin_follows_the_correction_and_lost_target_hides` (Review Focus 5): a Pin and a Note on an Act of a Turn that `correct_last` reverts show on the Correction Turn; a Pin on a Belief the Correction removed is not in `pinned`, and its Note is in `notes` with `about` unresolved.
   - `api.test.ts › note commands send their arguments`, and `session.test.ts` already covers the reload after a note command.
-- [ ] **Step 2: Run, expect FAIL. Step 3: Implement** the UI: a Note field in the Journal's Notes part and on each entity card; a pin toggle on each Scene, Act, fact line, card and Note; the panel's Pinned card. **Step 4: Run the gate, expect PASS.**
+- [ ] **Step 2: Run, expect FAIL. Step 3: Implement** the UI: a Note field in the Journal's Notes part and on each entity card; a "Note" button in the Play screen's action bar that opens a quick Note field (a free Note, or about the current Scene), asked by the owner on 2026-11-10; a pin toggle on each Scene, Act, fact line, card and Note; the panel's Pinned card. **Step 4: Run the gate, expect PASS.**
 - [ ] **Step 5: Commit** `feat: Player Notes and Pins, outside the world`.
 
 **Done when:** the gate is green and the marker test passes.
