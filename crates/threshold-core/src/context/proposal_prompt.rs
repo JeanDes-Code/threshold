@@ -35,6 +35,7 @@ LATER ACTIONS
 - An NPC who is insulted, threatened or wronged, and who would hit back later rather than now, gets a schedule.
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
+- A move writes exactly one fact: subject = the PC, key = location, value = the destination place (its name as listed, never a handle). On a check, the win stake writes it instead.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.

@@ -2,7 +2,8 @@
 //!
 //! `turn` is the only module that follows time order. A play Turn runs:
 //! duplicate `op_id` check, Intent check, proposal prompt, `Gm::propose`,
-//! parse, shape check, engine-owned wait, Commit checks (one shared retry
+//! parse, shape check, engine-owned wait, the core's repairs
+//! (`checks::settle`), Commit checks (one shared retry
 //! with the errors in `recent`), Roll, `to_ops`, World Clock, perception on arrival, one Commit,
 //! then the streamed Narration and `set_narration`. Validation, `to_ops` and
 //! the World Clock all read the snapshot taken before the Turn, so a fact a
@@ -614,7 +615,16 @@ impl Engine {
             let raw = raw?;
 
             let step = Instant::now();
-            let parsed = parse(&raw).map(|p| engine_wait(p, view));
+            let parsed = match parse(&raw) {
+                Ok(p) => {
+                    let (p, notes) = checks::settle(engine_wait(p, view), view);
+                    if !notes.is_empty() {
+                        self.log(op_id, "settle", &Prompt::default(), &notes.join("\n"), step)?;
+                    }
+                    Ok(p)
+                }
+                Err(errs) => Err(errs),
+            };
             let checked = parsed
                 .as_ref()
                 .map_err(Clone::clone)

@@ -194,3 +194,12 @@ A builder implements in this order: `domain`, `store` with migrations and the re
 - **Voice for NPCs created in play:** `NewNpc` carries a one-line `voice` seed (about 25 tokens), which becomes the NPC's Voice Card. No extra model call. A richer card can come later, between Scenes. Without the seed, new NPCs would bring back the "every NPC sounds the same" breaker.
 - **Persistent facts:** kept as written. Only an earlier-scheduled World Event or a Correction changes one, which matches the glossary.
 - **Proposal token cap:** no cut order yet. The first plan task measures proposal size and validity on the live model; the cut order follows from that data.
+
+## 10. Changed after QA (2026-11-10)
+
+A QA pass on the live model found game bugs. These rules changed to fix them. The owner approved the prompt and check changes.
+
+- **A move writes the PC's location.** A proposal with `action: move` and verdict `allowed` must write a fact on the PC with key `location`. With verdict `check`, the win stake may write it instead, so the PC moves only on a success; the lose stake still never moves the PC. A move without it is rejected by the `move` check, with the repair note `checks::MOVE_NOTE`. An `impossible` move writes nothing. The proposal prompt says the same in one line.
+- **One spelling per place.** Before the checks, a `location` value that names a known place entity, by its handle (`E7`) or by one of its names (`normalize::name`), becomes that place's main name. `WorldView::present` and the Scene place then read it like every other location.
+- **The core removes three PC shapes instead of rejecting them.** A reaction of the PC, the PC in a scheduled event's `seen_by`, and a scheduled event whose actor is the PC are removed by `checks::settle` before the checks. Each removal writes one line in the debug log (step `settle`). Removing never adds a PC act, so the Agency rule holds. Every other agency case still rejects, and `validate` still rejects these three shapes when it gets them directly.
+- **The Player reads one sentence for a failed Turn.** When both attempts are rejected, the Player reads "The GM could not settle this Turn. Try to say it another way." The check names follow only in debug mode.

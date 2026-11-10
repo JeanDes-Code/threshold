@@ -328,17 +328,19 @@ impl Session {
         text: &str,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
+        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let played = open.engine.play_turn(op_id, text, on_chunk);
-        committed(&open.engine, played)
+        committed(&open.engine, played, debug)
     }
 
     /// Begin: the Opening Turn of the open Campaign. A second call returns
     /// the stored Turn.
     pub fn begin(&mut self, on_chunk: &mut dyn FnMut(&str)) -> Result<TurnSummary, AppError> {
+        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let played = open.engine.begin(on_chunk);
-        committed(&open.engine, played)
+        committed(&open.engine, played, debug)
     }
 
     pub fn correct_last(
@@ -348,16 +350,18 @@ impl Session {
         why: &str,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
+        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let played = open.engine.correct_last(op_id, clarified, why, on_chunk);
-        committed(&open.engine, played)
+        committed(&open.engine, played, debug)
     }
 
     pub fn ask_ooc(&mut self, text: &str) -> Result<String, AppError> {
+        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         open.engine
             .ooc(format!("ooc-{}", clock_nanos()), text)
-            .map_err(|e| player_error(&e))
+            .map_err(|e| player_error(&e, debug))
     }
 
     pub fn renarrate(
@@ -365,10 +369,11 @@ impl Session {
         turn_id: u64,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, AppError> {
+        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         open.engine
             .renarrate(turn_id, on_chunk)
-            .map_err(|e| player_error(&e))
+            .map_err(|e| player_error(&e, debug))
     }
 
     /// The open campaign as the PC knows it: the only input of a view.
@@ -543,6 +548,7 @@ fn campaign_card(path: &Path) -> CampaignCard {
 fn committed(
     engine: &Engine,
     played: Result<TurnOutcome, TurnError>,
+    debug: bool,
 ) -> Result<TurnSummary, AppError> {
     match played {
         Ok(outcome) => Ok(turn_summary(outcome)),
@@ -560,7 +566,7 @@ fn committed(
                 total_ms: 0,
             })
         }
-        Err(e) => Err(player_error(&e)),
+        Err(e) => Err(player_error(&e, debug)),
     }
 }
 
@@ -575,12 +581,16 @@ fn model_error(e: &GmError) -> String {
     }
 }
 
+/// The Player's text for a Turn the checks rejected twice: one plain
+/// sentence, no check name (changed after QA, 2026-11-10).
+pub const TURN_NOT_SETTLED: &str = "The GM could not settle this Turn. Try to say it another way.";
+
 /// The text of a Turn error that the Player may see. Rejection reasons and
 /// model or store messages can quote GM-only facts (a Persistent key, a
-/// model's echo), so only the check kind gets through. A handle would reveal
-/// that a hidden fact exists, and its id. The full reasons stay in the debug
-/// log.
-pub fn player_error(e: &TurnError) -> AppError {
+/// model's echo), so a rejection shows `TURN_NOT_SETTLED` only; in debug
+/// mode the check kinds follow it. A handle would reveal that a hidden fact
+/// exists, and its id. The full reasons stay in the debug log.
+pub fn player_error(e: &TurnError, debug: bool) -> AppError {
     let text = match e {
         TurnError::EmptyIntent
         | TurnError::IntentTooLong
@@ -592,11 +602,14 @@ pub fn player_error(e: &TurnError) -> AppError {
             model_error(error)
         ),
         TurnError::Rejected(errs) => {
-            let mut text = String::from("the proposal was rejected twice:");
-            for r in errs {
-                text.push_str(&format!("\n- {}", r.check));
+            let mut text = String::from(TURN_NOT_SETTLED);
+            if debug {
+                text.push_str("\nRejected twice by:");
+                for r in errs {
+                    text.push_str(&format!("\n- {}", r.check));
+                }
+                text.push_str("\n(details in the debug view)");
             }
-            text.push_str("\n(details in the debug view)");
             text
         }
         TurnError::Store(_) => {

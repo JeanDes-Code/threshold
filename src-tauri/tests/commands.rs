@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use support::{allowed, entity, narration, session, town, town_dir, with_fact};
 use threshold_app::{
     drafts::{DraftView, Drafts},
-    session::{AppError, Session},
+    session::{AppError, Session, TURN_NOT_SETTLED},
 };
 use threshold_core::{
     Gm, GmError, Prompt, RecordedGm,
@@ -284,6 +284,18 @@ fn rejected_turn_error_hides_gm_only_facts() {
         .submit_intent("op-1".into(), "I accuse Orsel.", &mut |_| {})
         .unwrap_err()
         .to_string();
+    // Outside debug mode: one plain sentence, no check name.
+    assert_eq!(err, TURN_NOT_SETTLED);
+    // In debug mode the check kinds follow it, and still no secret.
+    s.set_debug(true);
+    let bend = with_fact(orsel, "skims", "nothing at all", None);
+    gm.push_proposal(bend.clone());
+    gm.push_proposal(bend);
+    let err = s
+        .submit_intent("op-2".into(), "I accuse Orsel.", &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert!(err.starts_with(TURN_NOT_SETTLED), "{err}");
     assert!(err.contains("fact bends"), "{err}");
     for secret in ["skims", "grain tithe"] {
         assert!(!err.contains(secret), "{err}");

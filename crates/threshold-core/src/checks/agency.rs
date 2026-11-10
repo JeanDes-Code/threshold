@@ -41,9 +41,12 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
     }
     // Every slot write on the PC: facts, both stakes and schedule effects.
     for w in writes(p).iter().filter(|w| Handle::Entity(w.subject) == pc) {
-        // The Player's Intent chose the move, so a move Turn may set where the PC is.
-        let chosen_move =
-            w.origin == Origin::Fact && p.action == ActionKind::Move && same_key(w.key, "location");
+        // The Player's Intent chose the move, so a move Turn may set where the
+        // PC is: in a fact, or in the win stake of its Check (changed after
+        // QA, 2026-11-10). The lose stake never moves the PC.
+        let chosen_move = matches!(w.origin, Origin::Fact | Origin::WinStake)
+            && p.action == ActionKind::Move
+            && same_key(w.key, "location");
         if !is_involuntary_key(w.key) && !chosen_move {
             err(&format!(
                 "a write on the PC may only set {} (or location on a move Turn); got {}",

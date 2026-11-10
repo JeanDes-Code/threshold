@@ -3,8 +3,10 @@
 
 mod agency;
 mod boundary;
+mod moves;
 mod ops;
 mod references;
+mod settle;
 mod shortcuts;
 
 use std::fmt;
@@ -16,13 +18,16 @@ use crate::{
 };
 
 pub(crate) use agency::is_involuntary_key;
+pub use moves::MOVE_NOTE;
 pub use ops::{Resolved, to_ops};
+pub use settle::settle;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckKind {
     Schema,
     References,
     Agency,
+    Move,
     Coincidence,
     NpcFolds,
     FactBends,
@@ -36,6 +41,7 @@ impl fmt::Display for CheckKind {
             Self::Schema => "schema",
             Self::References => "references",
             Self::Agency => "agency",
+            Self::Move => "move",
             Self::Coincidence => "coincidence",
             Self::NpcFolds => "npc folds",
             Self::FactBends => "fact bends",
@@ -162,6 +168,7 @@ pub fn validate<'a>(
     let mut errs = references::check(p, view);
     if errs.is_empty() {
         agency::check(p, view, &mut errs);
+        moves::check(p, view, &mut errs);
         shortcuts::check(p, view, &mut errs);
         boundary::check(p, view, &mut errs);
     }

@@ -493,3 +493,64 @@ fn event_text_naming_an_unknown_npc_is_dropped() {
         texts[..1]
     );
 }
+
+/// B1 (QA, 2026-11-10): a move names its destination by the place's handle;
+/// the core writes the place's name, so the Scene place and the present
+/// list change with it.
+#[test]
+fn moving_to_a_known_place_changes_the_scene_place_and_who_is_present() {
+    let (store, campaign) = town();
+    let view = store.snapshot(campaign).unwrap();
+    let (pc, orsel, archive) = (
+        id(&view, "Wren"),
+        id(&view, "Orsel"),
+        id(&view, "Tithe archive"),
+    );
+    let sight_place = |store: &Store| {
+        let view = store.snapshot(campaign).unwrap();
+        let turns = store.turns(campaign).unwrap();
+        let sight = threshold_core::world::pc_sight(&view, &turns, &Default::default()).unwrap();
+        (sight.place.clone(), sight.present.clone())
+    };
+    let (place, present) = sight_place(&store);
+    assert!(present.contains(&orsel));
+    assert_ne!(place.and_then(|(entity, _)| entity), Some(archive));
+
+    let mut silent = proposal(Verdict::Allowed);
+    silent.action = ActionKind::Move;
+    silent.minutes = 5;
+    let mut walk = silent.clone();
+    walk.facts = vec![NewFact {
+        slot: slot(e(pc), "location", &format!("E{archive}")),
+        seen: Seen::Pc,
+        said_by: None,
+        because: vec![],
+    }];
+    let gm = RecordedGm::new(
+        vec![json(&silent), json(&walk)],
+        vec!["Dust and shelves.".into()],
+    );
+    let mut engine = Engine::new(store, Box::new(gm.clone()), Box::new(D10), vec![], campaign);
+    engine
+        .play_turn(
+            "t1".into(),
+            "I leave the hall and go to the tithe archive.",
+            &mut |_: &str| {},
+        )
+        .unwrap();
+    let (place, present) = sight_place(engine.store());
+    assert_eq!(place.and_then(|(entity, _)| entity), Some(archive));
+    assert_eq!(present, [pc]);
+    // The narrator gets the new place too.
+    let narration = gm
+        .calls()
+        .into_iter()
+        .find(|c| c.kind == CallKind::Narrate)
+        .unwrap();
+    assert!(
+        narration.prompt.scene.contains("Place: tithe archive")
+            || narration.prompt.scene.contains("Place: Tithe archive"),
+        "{}",
+        narration.prompt.scene
+    );
+}

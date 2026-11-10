@@ -1061,3 +1061,143 @@ fn turn_makes_the_same_model_calls() {
         [CallKind::Narrate, CallKind::Propose, CallKind::Narrate]
     );
 }
+
+// --- QA, 2026-11-10 -----------------------------------------------------------
+
+fn steps(engine: &Engine, op_id: &str) -> Vec<(String, String)> {
+    engine
+        .store()
+        .debug_log(op_id)
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.step, e.raw))
+        .collect()
+}
+
+/// B1: "I leave and go to the tavern" came back as a move with no fact. The
+/// check rejects it with a repair note, and the retry writes the location.
+#[test]
+fn move_without_location_is_repaired_on_the_retry() {
+    let w0 = World::new();
+    let mut silent = proposal(Verdict::Allowed);
+    silent.action = ActionKind::Move;
+    silent.minutes = 10;
+    let mut moved = silent.clone();
+    moved.facts = vec![fact(
+        slot(e(w0.ada), "location", "tavern"),
+        Seen::Pc,
+        vec![],
+    )];
+    let (mut engine, w, gm) = setup(vec![json(&silent), json(&moved)], vec!["You walk in."]);
+    engine
+        .play_turn("t1".into(), "I go to the tavern.", &mut no_chunks())
+        .unwrap();
+    let retry = &prompts(&gm, CallKind::Propose)[1];
+    assert!(
+        retry.recent.contains(&format!(
+            "move E{}: {}",
+            w.ada,
+            threshold_core::checks::MOVE_NOTE
+        )),
+        "{}",
+        retry.recent
+    );
+    let view = snapshot(&engine, &w);
+    assert_eq!(
+        view.live_fact(w.ada, "location").unwrap().slot.value,
+        "tavern"
+    );
+    assert!(!view.present().contains(&w.orsel));
+}
+
+#[test]
+fn move_without_location_twice_fails_the_turn() {
+    let mut silent = proposal(Verdict::Allowed);
+    silent.action = ActionKind::Move;
+    let (mut engine, w, _gm) = setup(vec![json(&silent), json(&silent)], vec!["never"]);
+    let before = snapshot(&engine, &w);
+    let result = engine.play_turn("t1".into(), "I go to the tavern.", &mut no_chunks());
+    let Err(TurnError::Rejected(errs)) = result else {
+        panic!("expected Rejected, got {result:?}");
+    };
+    assert!(errs.iter().any(|r| r.check == CheckKind::Move), "{errs:?}");
+    assert_eq!(snapshot(&engine, &w), before);
+}
+
+/// B4: a PC reaction, the PC in an event's seen_by, and an event whose
+/// actor is the PC are removed, not rejected. The debug log records it.
+#[test]
+fn pc_reaction_and_pc_witness_are_removed_not_rejected() {
+    let w0 = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Talk;
+    p.reactions = vec![
+        Reaction {
+            npc: e(w0.ada),
+            stance: Stance::Comply,
+            plan: "agrees".into(),
+            cause: None,
+        },
+        Reaction {
+            npc: e(w0.brann),
+            stance: Stance::Neutral,
+            plan: "shrugs".into(),
+            cause: None,
+        },
+    ];
+    p.schedule = Some(threshold_core::domain::EventDraft {
+        in_minutes: 60,
+        actor: e(w0.brann),
+        goal: None,
+        text: "Brann fetches the smith".into(),
+        effects: vec![],
+        seen_by: vec![e(w0.ada)],
+    });
+    p.minutes = 2;
+    let (mut engine, w, gm) = setup(vec![json(&p)], vec!["Brann shrugs."]);
+    engine
+        .play_turn("t1".into(), "I ask Brann for help.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
+    let view = snapshot(&engine, &w);
+    let event = view
+        .events_scheduled
+        .iter()
+        .find(|ev| ev.text == "Brann fetches the smith")
+        .expect("the event stays");
+    assert!(event.seen_by.is_empty());
+    let log = steps(&engine, "t1");
+    let settle = log
+        .iter()
+        .find(|(step, _)| step == "settle")
+        .expect("a settle row");
+    assert!(settle.1.contains("reaction of the PC"), "{}", settle.1);
+    assert!(settle.1.contains("seen_by"), "{}", settle.1);
+    let stored = engine.store().turn_by_campaign_op(w.campaign, &"t1".into());
+    let record = stored.unwrap().unwrap().record.proposal_json;
+    assert!(
+        !record.contains(&format!("\"npc\":\"E{}\"", w.ada)),
+        "{record}"
+    );
+}
+
+#[test]
+fn event_with_the_pc_as_actor_is_removed_not_rejected() {
+    let w0 = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.schedule = Some(threshold_core::domain::EventDraft {
+        in_minutes: 60,
+        actor: e(w0.ada),
+        goal: None,
+        text: "Ada returns".into(),
+        effects: vec![],
+        seen_by: vec![],
+    });
+    let (mut engine, w, _gm) = setup(vec![json(&p)], vec!["Time passes."]);
+    let before = snapshot(&engine, &w).events_scheduled.len();
+    engine
+        .play_turn("t1".into(), "I plan to come back.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(snapshot(&engine, &w).events_scheduled.len(), before);
+    assert!(steps(&engine, "t1").iter().any(|(s, _)| s == "settle"));
+}
