@@ -42,3 +42,7 @@ The rule above did not work on the live model: in `play_basics`, 0 of 4 acceptan
 ## Changed after review (2026-11-10)
 
 `outcome` is no longer free text: it is one of `accepted`, `refused`, `done`, `failed`, `dropped`, and the core builds the outcome fact's text from the Open Item's own text (ADR 0007). The outcome fact is Established, so play can change it; `closes` applies only when the verdict lets the action happen.
+
+## Changed after a live evaluation (2026-11-11): `open_items`
+
+`closes` was an optional list, so the model had no way to say that the Intent touched an item and left it open. On "I ask Orsel for more time", it closed the item in 4 of 4 runs. `closes` is now `open_items`: one required status per item the PC holds, with `open` among the values (ADR 0007). Only a status other than `open` closes the item. Every other rule above stays.

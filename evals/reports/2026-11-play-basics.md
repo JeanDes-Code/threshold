@@ -98,8 +98,48 @@ The two "truncated" proposals of attempt 2 were not cut. The model writes newlin
 - One fixture, one phrasing per step and 4 runs: the counts are small. A move or a contest that commits counts as a success even when its Narration disagrees; only the impossible act and the unknown-place move have a judge.
 
 
-## Attempt 4: not run (2026-11-10)
+## Attempt 4: the review fixes (2026-11-11)
 
-The scenario now has two negative steps per run (an Intent that asks for more time on the open item, and one that asks about the Varn mill without going there), a move counts only at the asked place, and the report gives the share of committed Turns that move the World Clock. The code is the commit that adds this section.
+- Code: commit cdefde8. The scenario has two negative steps per run: an Intent that asks for more time on the open item, and one that asks about the Varn mill without going there. A move counts only at the asked place.
+- Command: `threshold-eval --scenario play_basics --runs 4 --raw-log <file outside the repository>`, 4 runs of 8 Turns, on a free machine.
 
-No live numbers yet. Before the run, the machine was busy: ComfyUI held about 3.9 GB of the 12 GB GPU, 4 GB of RAM was free, and the zram swap was 25.4 of 30.5 GB full. A run then measures the machine, not the model. Run `threshold-eval --scenario play_basics --runs 4` on a free machine, with `gemma4:26b-a4b-it-qat` preloaded.
+| Measure | Result |
+|---|---|
+| Moves that reached the asked place | 7 / 8 |
+| False closes on the negative step | 4 / 4 |
+| False moves on the negative step | 0 / 4 |
+| Turns with a clock advance | 32 / 32 |
+| Impossible acts told as a failure (judge) | 4 / 4 |
+| Contests with a Roll | 4 / 4 |
+| Pending items closed | 0 / 4 |
+| Unknown-place moves that left the PC in place | 4 / 4 |
+| Turns failed | 0 / 32 |
+| Turns that needed the retry | 7 / 32 |
+| Turn time | p50 8.4 s, p90 11.9 s, max 13.7 s |
+
+Finding: on "I ask Orsel for more time", the model closed the item in every run (`refused` 3 times, `accepted` once). The real acceptance one step later then had nothing to close. The optional `closes` list had no value for "the item stays open". The contest spent its retry in every run on "verdict is check but check is missing".
+
+## Attempt 5: `open_items` and the default Check on the first attempt (2026-11-11)
+
+- Code: commits 1b61692 and 7adfadf (ADR 0007, last section). Each Open Item the PC holds gets a required status, with `open` among the values. A contested act with verdict `check` and no Check gets the default Check at once.
+- Same command, same machine, 4 runs of 8 Turns.
+
+| Measure | Attempt 4 | Attempt 5 |
+|---|---|---|
+| Moves that reached the asked place | 7 / 8 | 8 / 8 |
+| False closes on the negative step | 4 / 4 | 0 / 4 |
+| False moves on the negative step | 0 / 4 | 0 / 4 |
+| Turns with a clock advance | 32 / 32 | 32 / 32 |
+| Impossible acts told as a failure (judge) | 4 / 4 | 4 / 4 |
+| Contests with a Roll | 4 / 4 | 4 / 4 |
+| Pending items closed | 0 / 4 | 4 / 4 |
+| Unknown-place moves that left the PC in place | 4 / 4 | 4 / 4 |
+| Turns failed | 0 / 32 | 0 / 32 |
+| Turns that needed the retry | 7 / 32 | 1 / 32 |
+| Turn time | p50 8.4 s, p90 11.9 s, max 13.7 s | p50 7.9 s, p90 9.9 s, max 10.2 s |
+
+Limits:
+
+- The raw log shows the status `done` more often than `accepted` on "I tell Orsel yes: I will copy the tithe roll". The item closes, but the outcome word says the copy is done when it is only promised. The report does not count the outcome word.
+- A default Check has no stakes, so a won or lost arm-wrestle changes no slot unless the proposal's facts do.
+- One fixture, one phrasing per step and 4 runs: the counts are small.
