@@ -229,11 +229,7 @@ fn run_raw(draft: &SeedDraft, outputs: Vec<String>, cancel_after: Option<usize>)
     let result = {
         let mut on_progress = |p| progress.push(p);
         let mut on_log = |e| log.push(e);
-        let mut ctl = Control {
-            progress: &mut on_progress,
-            cancelled: &cancelled,
-            log: &mut on_log,
-        };
+        let mut ctl = Control::new(&mut on_progress, &cancelled, &mut on_log);
         build_world(draft, &gm, &mut ctl)
     };
     Run {
@@ -465,7 +461,14 @@ fn progress_and_log_name_stages_and_counts_only() {
         .progress
         .iter()
         .map(|p| {
-            let Progress { stage, done, total } = *p;
+            let Progress {
+                stage,
+                done,
+                total,
+                attempt: _,
+                attempts: _,
+                retry_after_timeout: _,
+            } = *p;
             (stage, done, total)
         })
         .collect();

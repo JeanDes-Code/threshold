@@ -34,6 +34,8 @@ import {
   renamed,
   replaceAt,
   progressText,
+  slowLine,
+  elapsedText,
   saveArgs,
   sectionOf,
   shownName,
@@ -752,7 +754,36 @@ describe("readDocument", () => {
 
 describe("CANCEL_NOTE", () => {
   it("says when a cancel takes effect", () => {
-    expect(CANCEL_NOTE).toBe("Cancel takes effect after the current step.");
+    // Changed after review: a cancel stops the running model call (C14).
+    expect(CANCEL_NOTE).toBe("Cancel stops the current model call.");
+  });
+});
+
+describe("a slow model (C13)", () => {
+  const p = { stage: "hidden_facts", done: 0, total: 8, attempt: 1, attempts: 3, retry_after_timeout: false };
+  it("says nothing on a first attempt", () => {
+    expect(slowLine(p)).toBeNull();
+  });
+  it("says plainly that the model is slow after a timeout", () => {
+    expect(slowLine({ ...p, attempt: 2, retry_after_timeout: true })).toBe(
+      "The model is slow or not answering. Attempt 2 of 3.",
+    );
+  });
+  it("shows the elapsed time of the stage", () => {
+    expect(elapsedText(0)).toBe("0 s");
+    expect(elapsedText(45_900)).toBe("45 s");
+    expect(elapsedText(9 * 60_000 + 5_000)).toBe("9 min 05 s");
+  });
+});
+
+describe("cancel and timeout failures (C15)", () => {
+  it("says the Player cancelled, and a timeout says what to check", () => {
+    expect(failureText({ stage: "hidden_facts", check: "cancelled" })).toBe(
+      "The last build stopped at “Preparing the world”: you cancelled it.",
+    );
+    expect(failureText({ stage: "hidden_facts", check: "model_timeout" })).toBe(
+      "The last build stopped at “Preparing the world”: the model did not answer in time. Check that no other program is using the machine's memory, then retry.",
+    );
   });
 });
 

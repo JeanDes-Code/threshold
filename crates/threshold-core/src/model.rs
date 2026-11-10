@@ -21,6 +21,8 @@ pub enum GmError {
     /// The server answered, then reported an error in the body (a
     /// mid-stream `{"error": ...}` line, for example).
     Aborted(String),
+    /// The caller cancelled the call before it ended.
+    Cancelled,
 }
 
 impl fmt::Display for GmError {
@@ -32,6 +34,7 @@ impl fmt::Display for GmError {
                 write!(f, "game model returned HTTP {status}: {message}")
             }
             Self::Aborted(message) => write!(f, "game model stopped: {message}"),
+            Self::Cancelled => f.write_str("game model call cancelled"),
         }
     }
 }

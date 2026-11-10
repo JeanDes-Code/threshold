@@ -47,8 +47,8 @@ const STAGES: Record<BuildStage, string> = {
 /** The largest document file the screen reads, in bytes: 1 MB. The core takes 40,000 characters. */
 export const DOCUMENT_MAX_BYTES = 1024 * 1024;
 
-/** Shown next to "Cancel": a cancel waits for the model call that runs. */
-export const CANCEL_NOTE = "Cancel takes effect after the current step.";
+/** Shown next to "Cancel": a cancel stops the model call that runs (changed after review). */
+export const CANCEL_NOTE = "Cancel stops the current model call.";
 
 export type DocumentRead = { ok: true; text: string } | { ok: false; message: string };
 
@@ -72,13 +72,30 @@ export function stageLabel(stage: string): string {
 }
 
 /** "Preparing characters, 4 of 9". */
-export function progressText(p: BuildProgress): string {
+export function progressText(p: Pick<BuildProgress, "stage" | "done" | "total">): string {
   const label = stageLabel(p.stage);
   return p.total > 0 ? `${label}, ${p.done} of ${p.total}` : label;
 }
 
+/** After a timeout, one plain line: the model is slow, and which attempt runs. Names and counts only. */
+export function slowLine(p: BuildProgress): string | null {
+  return p.retry_after_timeout
+    ? `The model is slow or not answering. Attempt ${p.attempt} of ${p.attempts}.`
+    : null;
+}
+
+/** "45 s", "9 min 05 s": how long the current stage has run. */
+export function elapsedText(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const min = Math.floor(s / 60);
+  const sec = s % 60;
+  return min === 0 ? `${sec} s` : `${min} min ${String(sec).padStart(2, "0")} s`;
+}
+
 const CHECKS: Record<string, string> = {
   model: "the model call failed",
+  model_timeout:
+    "the model did not answer in time. Check that no other program is using the machine's memory, then retry",
   schema: "the model answer did not fit its form",
   references: "a reference check failed",
   one_pc: "the one-PC check failed",
@@ -90,7 +107,7 @@ const CHECKS: Record<string, string> = {
   open_items: "an open items check failed",
   world_autonomy: "a world autonomy check failed",
   secrecy: "a secrecy check failed",
-  cancelled: "it was cancelled",
+  cancelled: "you cancelled it",
   not_approved: "the draft is not approved",
 };
 

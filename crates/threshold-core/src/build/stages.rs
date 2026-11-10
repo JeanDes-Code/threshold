@@ -21,7 +21,7 @@ use crate::model::{Gm, GmError, Prompt};
 /// How many times a call that timed out is sent again, with the same
 /// prompt, before the stage fails as `Model`. About one live call in ten
 /// times out. Any other model error fails the stage at once.
-pub(crate) const TIMEOUT_RETRIES: usize = 2;
+pub const TIMEOUT_RETRIES: usize = 2;
 
 /// The model timeout of draft and build calls, in seconds, that the app and
 /// the evaluation set. They are much slower than a Turn: one spike call took
@@ -278,11 +278,21 @@ pub(crate) fn essential<T, I>(
 /// Reports how far `stage` is.
 pub(crate) fn report(ctl: &mut Control, stage: Stage, done: usize, total: usize) {
     let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
-    (ctl.progress)(Progress {
-        stage,
-        done: count(done),
-        total: count(total),
-    });
+    let progress = Progress::of(stage, count(done), count(total));
+    ctl.last = Some(progress);
+    (ctl.progress)(progress);
+}
+
+/// Reports the retry of a call that timed out: the last count, with the
+/// attempt that starts now.
+fn report_retry(ctl: &mut Control, stage: Stage, attempt: usize) {
+    let last = ctl.last.filter(|p| p.stage == stage);
+    let progress = Progress {
+        attempt: u32::try_from(attempt).unwrap_or(u32::MAX),
+        retry_after_timeout: true,
+        ..last.unwrap_or_else(|| Progress::of(stage, 0, 0))
+    };
+    (ctl.progress)(progress);
 }
 
 /// The JSON schema of a stage output, closed: each object takes only the
@@ -417,12 +427,26 @@ where
             },
             ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         });
+        // A model error after a cancel is the cancel: the Player stopped it
+        // (changed after review).
+        if answer.is_err() && (ctl.cancelled)() {
+            return Err(fail(BuildCheck::Cancelled));
+        }
         match answer {
-            Err(GmError::Timeout) if retries < TIMEOUT_RETRIES => retries += 1,
+            Err(GmError::Timeout) if retries < TIMEOUT_RETRIES => {
+                retries += 1;
+                report_retry(ctl, call.stage, retries + 1);
+            }
             answer => break answer,
         }
     };
-    let raw = answer.map_err(|_| fail(BuildCheck::Model))?;
+    let raw = answer.map_err(|e| {
+        fail(match e {
+            GmError::Timeout => BuildCheck::ModelTimeout,
+            GmError::Cancelled => BuildCheck::Cancelled,
+            _ => BuildCheck::Model,
+        })
+    })?;
     if raw.len() > RAW_ANSWER_MAX_BYTES {
         return Ok(Attempt {
             output: None,
@@ -724,11 +748,7 @@ mod tests {
         let result = {
             let mut progress = |_| {};
             let mut log = |e: DebugEntry| steps.push(e.step);
-            let mut ctl = Control {
-                progress: &mut progress,
-                cancelled: &|| false,
-                log: &mut log,
-            };
+            let mut ctl = Control::new(&mut progress, &|| false, &mut log);
             run_stage(gm, &mut ctl, "draft-1", &call(need), check_items)
         };
         (result, steps)
@@ -765,8 +785,62 @@ mod tests {
         );
     }
 
+    /// C13 (review, 2026-11-10): a retry after a timeout reports the last
+    /// count again, with the attempt that starts and the retry mark.
     #[test]
-    fn a_third_timeout_fails_the_stage_as_model() {
+    fn a_timeout_retry_reports_its_attempt() {
+        let gm = ScriptedGm::new(vec![
+            Err(GmError::Timeout),
+            Err(GmError::Timeout),
+            ok("[1]"),
+        ]);
+        let mut seen = vec![];
+        let mut progress = |p: Progress| seen.push(p);
+        let mut log = |_| {};
+        let mut ctl = Control::new(&mut progress, &|| false, &mut log);
+        report(&mut ctl, Stage::HiddenFacts, 0, 1);
+        run_stage(&gm, &mut ctl, "d", &call(Need::Essential), check_items).unwrap();
+        let shown: Vec<(u32, u32, u32, u32, bool)> = seen
+            .iter()
+            .map(|p| {
+                (
+                    p.done,
+                    p.total,
+                    p.attempt,
+                    p.attempts,
+                    p.retry_after_timeout,
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [(0, 1, 1, 3, false), (0, 1, 2, 3, true), (0, 1, 3, 3, true)]
+        );
+    }
+
+    /// C15: a model error that comes after a cancel is the cancel.
+    #[test]
+    fn a_model_error_after_a_cancel_is_the_cancel() {
+        for error in [
+            GmError::Cancelled,
+            GmError::Timeout,
+            GmError::Unreachable("closed".into()),
+        ] {
+            let gm = ScriptedGm::new(vec![Err(error), ok("[1]")]);
+            let calls = std::cell::Cell::new(0);
+            let mut progress = |_| {};
+            let mut log = |_| calls.set(calls.get() + 1);
+            let cancelled = || calls.get() > 0;
+            let mut ctl = Control::new(&mut progress, &cancelled, &mut log);
+            let result = run_stage(&gm, &mut ctl, "d", &call(Need::Essential), check_items);
+            assert_eq!(result.err().map(|f| f.check), Some(BuildCheck::Cancelled));
+        }
+    }
+
+    /// C15: three timeouts fail the stage as a timeout, not as a plain
+    /// model failure (changed after review: it was `Model`).
+    #[test]
+    fn a_third_timeout_fails_the_stage_as_a_timeout() {
         let gm = ScriptedGm::new(vec![
             Err(GmError::Timeout),
             Err(GmError::Timeout),
@@ -778,7 +852,7 @@ mod tests {
             result.err(),
             Some(BuildFailure {
                 stage: Stage::HiddenFacts,
-                check: BuildCheck::Model
+                check: BuildCheck::ModelTimeout
             })
         );
         assert_eq!(steps.len(), 3);
@@ -815,11 +889,8 @@ mod tests {
         let calls = std::cell::Cell::new(0);
         let mut progress = |_| {};
         let mut log = |_| calls.set(calls.get() + 1);
-        let mut ctl = Control {
-            progress: &mut progress,
-            cancelled: &|| calls.get() > 0,
-            log: &mut log,
-        };
+        let cancelled = || calls.get() > 0;
+        let mut ctl = Control::new(&mut progress, &cancelled, &mut log);
         let result = run_stage(&gm, &mut ctl, "d", &call(Need::Essential), check_items);
         assert_eq!(result.err().map(|f| f.check), Some(BuildCheck::Cancelled));
         assert_eq!(gm.left(), 1);
@@ -860,11 +931,7 @@ mod tests {
         let result = {
             let mut progress = |_| {};
             let mut log = |e: DebugEntry| steps.push(e.step);
-            let mut ctl = Control {
-                progress: &mut progress,
-                cancelled: &|| false,
-                log: &mut log,
-            };
+            let mut ctl = Control::new(&mut progress, &|| false, &mut log);
             let call = StageCall {
                 schema: schema_of::<Capped>(),
                 ..call(need)

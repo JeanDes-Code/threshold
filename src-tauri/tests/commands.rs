@@ -984,7 +984,7 @@ fn cancel_build_stops_draft_and_build() {
         .draft_from_text(&doc_source(), &mut |_| {})
         .unwrap_err()
         .to_string();
-    assert_eq!(err, "The draft stopped at the seed step: it was cancelled.");
+    assert_eq!(err, "The draft stopped at the seed step: you cancelled it.");
     assert_eq!(rig.build.calls().len(), 1);
     assert!(rig.drafts.list_drafts().unwrap().is_empty());
     let left: Vec<_> = std::fs::read_dir(rig.dir.path().join("drafts"))
@@ -1008,7 +1008,7 @@ fn cancel_build_stops_draft_and_build() {
         .to_string();
     assert_eq!(
         err,
-        "The world build stopped at the hidden facts step: it was cancelled."
+        "The world build stopped at the hidden facts step: you cancelled it."
     );
     let view = rig.drafts.get_draft(&id).unwrap();
     assert_eq!(view.state, DraftState::Approved);
@@ -1057,7 +1057,7 @@ fn a_cancel_during_the_last_call_writes_no_campaign() {
     assert_eq!(rig.build.calls().len() - before, last);
     assert_eq!(
         err,
-        "The world build stopped at the campaign file step: it was cancelled."
+        "The world build stopped at the campaign file step: you cancelled it."
     );
     let view = rig.drafts.get_draft(&id).unwrap();
     assert_eq!(view.state, DraftState::Approved);

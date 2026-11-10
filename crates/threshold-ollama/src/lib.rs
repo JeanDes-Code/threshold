@@ -2,9 +2,17 @@ use std::{
     error::Error,
     fmt,
     io::{self, BufRead, BufReader},
-    sync::Mutex,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, RecvTimeoutError},
+    },
+    thread,
     time::Duration,
 };
+
+/// How often a cancellable call checks its cancel flag.
+const CANCEL_POLL: Duration = Duration::from_millis(100);
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -70,6 +78,9 @@ pub struct OllamaGm {
     config: OllamaConfig,
     agent: Agent,
     last_metrics: Mutex<Option<CallMetrics>>,
+    /// When set, `propose` returns `GmError::Cancelled` as soon as the flag
+    /// is up, without waiting for the HTTP timeout.
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl OllamaGm {
@@ -81,7 +92,19 @@ impl OllamaGm {
             config,
             agent,
             last_metrics: Mutex::new(None),
+            cancel: None,
         }
+    }
+
+    /// A model whose `propose` calls stop at once when `cancel` is up
+    /// (changed after review: a Cancel of a draft or a build waited for the
+    /// HTTP timeout). The request runs on its own thread; the caller polls
+    /// the flag every `CANCEL_POLL` and leaves the request behind on a
+    /// cancel. That thread ends when the server answers or times out.
+    #[must_use]
+    pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(cancel);
+        self
     }
 
     pub fn warm_up(&self) -> Result<(), GmError> {
@@ -105,12 +128,56 @@ impl OllamaGm {
             .clone()
     }
 
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.config.base_url.trim_end_matches('/'), path)
+    }
+
     fn post(&self, path: &str, body: &Value) -> Result<Response, GmError> {
-        let url = format!("{}{}", self.config.base_url.trim_end_matches('/'), path);
         self.agent
-            .post(&url)
+            .post(&self.url(path))
             .send_json(body)
             .map_err(map_ureq_error)
+    }
+
+    /// Posts `body` and reads the whole answer, with its status. With a
+    /// cancel flag, the request runs on its own thread and a cancel returns
+    /// at once.
+    fn post_text(&self, path: &str, body: &Value) -> Result<(u16, String), GmError> {
+        let read = |response: Response| {
+            let status = response.status();
+            response
+                .into_string()
+                .map(|raw| (status, raw))
+                .map_err(map_io_error)
+        };
+        let Some(cancel) = &self.cancel else {
+            return read(self.post(path, body)?);
+        };
+        if cancel.load(Ordering::SeqCst) {
+            return Err(GmError::Cancelled);
+        }
+        let (agent, url, body) = (self.agent.clone(), self.url(path), body.clone());
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let result = agent
+                .post(&url)
+                .send_json(body)
+                .map_err(map_ureq_error)
+                .and_then(read);
+            let _ = sender.send(result);
+        });
+        loop {
+            if cancel.load(Ordering::SeqCst) {
+                return Err(GmError::Cancelled);
+            }
+            match receiver.recv_timeout(CANCEL_POLL) {
+                Ok(result) => return result,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(GmError::Unreachable("the model call stopped".into()));
+                }
+            }
+        }
     }
 
     fn chat_body(&self, prompt: &Prompt, stream: bool, schema: Option<&Value>) -> Value {
@@ -165,9 +232,7 @@ impl Gm for OllamaGm {
     fn propose(&self, prompt: &Prompt, schema: &Value) -> Result<String, GmError> {
         self.clear_metrics();
         let body = self.chat_body(prompt, false, Some(schema));
-        let response = self.post("/api/chat", &body)?;
-        let status = response.status();
-        let raw = response.into_string().map_err(map_io_error)?;
+        let (status, raw) = self.post_text("/api/chat", &body)?;
         let parsed = parse_chat(&raw, status)?;
         self.record_metrics(&parsed);
         Ok(parsed.message.content)

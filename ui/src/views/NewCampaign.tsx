@@ -9,7 +9,15 @@ import {
   type DraftState,
   type DraftView,
 } from "../api";
-import { CANCEL_NOTE, draftScreen, failureText, progressText, readDocument } from "../newCampaign";
+import {
+  CANCEL_NOTE,
+  draftScreen,
+  elapsedText,
+  failureText,
+  progressText,
+  readDocument,
+  slowLine,
+} from "../newCampaign";
 import { api, useEvent } from "../tauri";
 import SeedReview from "./SeedReview";
 import SetupSteps from "./SetupSteps";
@@ -71,9 +79,20 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
     );
   }, []);
 
+  // When the current stage started, and a clock that ticks while a job runs.
+  const [stageStart, setStageStart] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!job) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [job]);
+
   useEvent<unknown>("build_progress", (payload) => {
     const p = parseBuildProgress(payload);
-    if (p && job) setProgress(p);
+    if (!p || !job) return;
+    if (p.stage !== progress?.stage) setStageStart(Date.now());
+    setProgress(p);
   });
 
   const go = (next: Screen) => {
@@ -87,6 +106,8 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
     setJob(kind);
     onJob?.(true);
     setProgress(null);
+    setStageStart(Date.now());
+    setNow(Date.now());
     setCancelling(false);
     setError(null);
     try {
@@ -166,14 +187,21 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
     }
   };
 
+  const slow = progress ? slowLine(progress) : null;
   const running = (
-    <div className="row">
-      <span className="progress">{progress ? progressText(progress) : "Starting…"}</span>
-      <button disabled={cancelling} onClick={() => void cancel()}>
-        {cancelling ? "Cancelling…" : "Cancel"}
-      </button>
-      <span className="muted">{CANCEL_NOTE}</span>
-    </div>
+    <>
+      <div className="row">
+        <span className="progress">
+          {progress ? progressText(progress) : "Starting…"}
+          <span className="muted"> · {elapsedText(now - stageStart)}</span>
+        </span>
+        <button disabled={cancelling} onClick={() => void cancel()}>
+          {cancelling ? "Cancelling…" : "Cancel"}
+        </button>
+        <span className="muted">{CANCEL_NOTE}</span>
+      </div>
+      {slow && <p className="error">{slow}</p>}
+    </>
   );
 
   if (screen.kind === "review") {

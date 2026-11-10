@@ -255,7 +255,23 @@ describe("parseBuildProgress", () => {
       stage: "npc_state",
       done: 4,
       total: 9,
+      attempt: 1,
+      attempts: 1,
+      retry_after_timeout: false,
     });
+  });
+
+  it("reads the attempt of a retry after a timeout (C13)", () => {
+    expect(
+      parseBuildProgress({
+        stage: "hidden_facts",
+        done: 0,
+        total: 8,
+        attempt: 2,
+        attempts: 3,
+        retry_after_timeout: true,
+      }),
+    ).toEqual({ stage: "hidden_facts", done: 0, total: 8, attempt: 2, attempts: 3, retry_after_timeout: true });
   });
 
   it("keeps an unknown stage name", () => {

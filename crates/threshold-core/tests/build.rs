@@ -30,11 +30,7 @@ fn run_until(text: &str, gm: &RecordedGm, cancelled: &dyn Fn() -> bool) -> Run {
     let result = {
         let mut on_progress = |p| progress.push(p);
         let mut on_log = |e| log.push(e);
-        let mut ctl = Control {
-            progress: &mut on_progress,
-            cancelled,
-            log: &mut on_log,
-        };
+        let mut ctl = Control::new(&mut on_progress, cancelled, &mut on_log);
         draft_from_text(text, gm, &mut ctl)
     };
     Run {
@@ -476,7 +472,14 @@ fn progress_reports_stage_and_counts_only() {
         .iter()
         .map(|p| {
             // Exhaustive: a new field on `Progress` breaks this line.
-            let Progress { stage, done, total } = *p;
+            let Progress {
+                stage,
+                done,
+                total,
+                attempt: _,
+                attempts: _,
+                retry_after_timeout: _,
+            } = *p;
             (stage, done, total)
         })
         .collect();
@@ -1212,11 +1215,7 @@ fn added_character_reaches_the_world_build() {
     let gm_build = gm(&outputs);
     let mut progress = |_| {};
     let mut log = |_| {};
-    let mut ctl = Control {
-        progress: &mut progress,
-        cancelled: &|| false,
-        log: &mut log,
-    };
+    let mut ctl = Control::new(&mut progress, &|| false, &mut log);
     let world = build_world(&draft, &gm_build, &mut ctl).unwrap();
     let calls = gm_build.calls();
     let named: Vec<_> = calls

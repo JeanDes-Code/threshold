@@ -113,6 +113,18 @@ impl Drafts {
         session: Arc<Mutex<Session>>,
         make_gm: MakeGm,
     ) -> Result<Self, AppError> {
+        Self::with_cancel(data_dir, session, make_gm, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// `new`, with the cancel flag that `cancel_build` raises. A model that
+    /// reads the same flag stops its running call at once (changed after
+    /// review): give `make_gm` a clone of it.
+    pub fn with_cancel(
+        data_dir: &Path,
+        session: Arc<Mutex<Session>>,
+        make_gm: MakeGm,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<Self, AppError> {
         let store = DraftStore::open(&data_dir.join("drafts")).map_err(failed)?;
         let (debug, campaigns_dir) = {
             let s = lock(&session);
@@ -123,7 +135,7 @@ impl Drafts {
             session,
             make_gm: Arc::new(make_gm),
             job: Arc::new(Mutex::new(None)),
-            cancel: Arc::new(AtomicBool::new(false)),
+            cancel,
             debug,
             campaigns_dir,
         })
@@ -150,11 +162,7 @@ impl Drafts {
                 logged_to = Some(entry.op_id);
             };
             let cancelled = || self.cancelled();
-            let mut ctl = Control {
-                progress: on_progress,
-                cancelled: &cancelled,
-                log: &mut log,
-            };
+            let mut ctl = Control::new(on_progress, &cancelled, &mut log);
             build::draft_from_text(text, gm.as_ref(), &mut ctl)
         };
         match drafted {
@@ -275,11 +283,7 @@ impl Drafts {
         let built = {
             let mut log = |entry: DebugEntry| self.append_debug(&entry);
             let cancelled = || self.cancelled();
-            let mut ctl = Control {
-                progress: &mut *on_progress,
-                cancelled: &cancelled,
-                log: &mut log,
-            };
+            let mut ctl = Control::new(&mut *on_progress, &cancelled, &mut log);
             build::build_world(&draft, gm.as_ref(), &mut ctl)
         };
         let world = built.map_err(|failure| self.build_failed(draft_id, failure))?;
@@ -293,20 +297,12 @@ impl Drafts {
             return Err(self.build_failed(draft_id, failure));
         }
 
-        on_progress(Progress {
-            stage: Stage::Commit,
-            done: 0,
-            total: 1,
-        });
+        on_progress(Progress::of(Stage::Commit, 0, 1));
         let path = new_campaign_path(&self.campaigns_dir)
             .map_err(|_| self.build_failed(draft_id, commit_failure(None)))?;
         create_campaign_file(&path, &draft.seed, &world, clock_nanos())
             .map_err(|e| self.build_failed(draft_id, commit_failure(Some(&e))))?;
-        on_progress(Progress {
-            stage: Stage::Commit,
-            done: 1,
-            total: 1,
-        });
+        on_progress(Progress::of(Stage::Commit, 1, 1));
         self.update(draft_id, |d| {
             d.state = DraftState::Built;
             d.campaign_file = Some(path.display().to_string());
@@ -489,6 +485,9 @@ fn job_error(failure: BuildFailure) -> AppError {
     };
     let check = match failure.check {
         BuildCheck::Model => "the model call failed",
+        BuildCheck::ModelTimeout => {
+            "the model did not answer in time. Check that no other program is using the machine's memory, then retry"
+        }
         BuildCheck::Schema => "the model answer did not fit its form",
         BuildCheck::References => "a reference check failed",
         BuildCheck::OnePc => "the one-PC check failed",
@@ -500,7 +499,7 @@ fn job_error(failure: BuildFailure) -> AppError {
         BuildCheck::OpenItems => "an open items check failed",
         BuildCheck::WorldAutonomy => "a world autonomy check failed",
         BuildCheck::Secrecy => "a secrecy check failed",
-        BuildCheck::Cancelled => "it was cancelled",
+        BuildCheck::Cancelled => "you cancelled it",
         BuildCheck::NotApproved => "the draft is not approved",
     };
     AppError::Failed(format!("{job} stopped at {step}: {check}."))

@@ -214,6 +214,11 @@ pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt;   // c
 
 One new event: `build_progress { stage, done, total }`. `draft_from_text` and `start_build` emit it. `begin` reuses `narration_chunk` (with `op_id` `__begin__`), `turn_committed` and `turn_failed`. A failure is the command error: the stage name and the check name, nothing else. `save_draft` replaces the whole document. `cancel_build` also stops a running draft.
 
+*Changed after review (2026-11-10).* QA saw "Preparing the world, 0 of 8" for 9 minutes over three timeouts, and a Cancel that took about 2.5 minutes.
+- `build_progress` is `{ stage, done, total, attempt, attempts, retry_after_timeout }`: the attempt of the running model call (1 to `attempts`, which is `TIMEOUT_RETRIES + 1`), and whether it is a retry after a timeout. The stage runner reports the last count again at each retry. Names and counts only, no model text. The screen shows the elapsed time of the current stage and, after a timeout, "The model is slow or not answering. Attempt 2 of 3."
+- `cancel_build` stops the running model call at once: the build model reads the same cancel flag (`OllamaGm::with_cancel`), runs its request on its own thread and returns `GmError::Cancelled` within about 100 ms. The request it leaves behind ends when the server answers or times out.
+- A model error that comes after a cancel fails the stage as `cancelled`; the message says "you cancelled it". Three timeouts fail the stage as `model_timeout`, whose message says that the model did not answer in time and asks the Player to check that no other program is using the machine's memory.
+
 ### 3.9 Debug records (I)
 
 The `debug_log` table is inside the Campaign file. That file does not exist during a build or after a failed one. So `Control.log` appends each call to `drafts/<id>.debug.jsonl`: `DebugEntry { op_id: draft id, step: stage and item, prompt, raw, ms }`. A new run of the same stage group replaces the file. `get_build_debug` is the only reader. `delete_draft` removes the file.

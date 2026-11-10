@@ -647,6 +647,7 @@ fn model_error(e: &GmError) -> String {
         GmError::Timeout => "the game model request timed out".into(),
         GmError::BadStatus(status, _) => format!("the game model returned HTTP {status}"),
         GmError::Aborted(_) => "the game model stopped with an error".into(),
+        GmError::Cancelled => "the game model call was cancelled".into(),
     }
 }
 

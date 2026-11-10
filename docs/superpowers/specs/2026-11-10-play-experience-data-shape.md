@@ -193,7 +193,7 @@ Changed and new commands. Every other command stays as it is.
 | `get_play_view` | none | `PlayView` | view |
 | `get_journal` | none | `JournalView` (new form) | view |
 | `get_entity_card` | `entity_id` | `EntityCard`, or an error for an entity the PC does not know | view |
-| `get_character` | none | `CharacterView` | view, unchanged |
+| `get_character` | none | `CharacterView` | view; *changed after review (2026-11-10):* it gains `state`, the state lines of `YouCard`, and the screen uses the cards of the Play screen |
 | `add_note` | `body`, `about: Option<Target>` | `Note` | new state (3.7) |
 | `edit_note` | `note_id`, `body` | `Note` | new state |
 | `delete_note` | `note_id` | nothing | new state |

@@ -266,3 +266,55 @@ fn silent_server_times_out() {
     assert!(started.elapsed() < Duration::from_secs(3));
     server.join().unwrap();
 }
+
+/// C14 (review, 2026-11-10): a cancel aborts the running call at once. It
+/// no longer waits for the HTTP timeout of a silent model.
+#[test]
+fn cancel_aborts_a_call_to_a_silent_server_promptly() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        // Hold the connection open, never answer.
+        thread::sleep(Duration::from_secs(3));
+        drop(stream);
+    });
+    let cancel = Arc::new(AtomicBool::new(false));
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url: format!("http://{address}"),
+        timeout_s: 30,
+        ..OllamaConfig::default()
+    })
+    .with_cancel(cancel.clone());
+    let flag = cancel.clone();
+    let canceller = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(300));
+        flag.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    let result = gm.propose(&prompt(), &proposal_schema());
+    assert_eq!(result, Err(GmError::Cancelled));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    canceller.join().unwrap();
+    server.join().unwrap();
+    // A cleared flag lets the next call run.
+    cancel.store(false, Ordering::SeqCst);
+    let (base_url, _requests, handle) = serve_response(
+        json!({"message": {"role": "assistant", "content": "{}"}, "done": true}).to_string(),
+    );
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url,
+        ..OllamaConfig::default()
+    })
+    .with_cancel(cancel);
+    assert_eq!(gm.propose(&prompt(), &proposal_schema()), Ok("{}".into()));
+    handle.join().unwrap();
+}

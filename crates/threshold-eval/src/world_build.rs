@@ -1136,11 +1136,7 @@ fn one_run(ctx: &mut Ctx, text: &str, run: usize) -> BuildRun {
         let mut progress =
             |p: Progress| log(&format!("{tag} {} {}/{}", label(p.stage), p.done, p.total));
         let mut record = |e: DebugEntry| entries.push(e);
-        let mut ctl = Control {
-            progress: &mut progress,
-            cancelled: &|| false,
-            log: &mut record,
-        };
+        let mut ctl = Control::new(&mut progress, &|| false, &mut record);
         draft_from_text(text, gm.as_ref(), &mut ctl)
     };
     out.draft_calls = Calls::of(&entries);
@@ -1174,11 +1170,7 @@ fn one_run(ctx: &mut Ctx, text: &str, run: usize) -> BuildRun {
         let mut progress =
             |p: Progress| log(&format!("{tag} {} {}/{}", label(p.stage), p.done, p.total));
         let mut record = |e: DebugEntry| entries.push(e);
-        let mut ctl = Control {
-            progress: &mut progress,
-            cancelled: &|| false,
-            log: &mut record,
-        };
+        let mut ctl = Control::new(&mut progress, &|| false, &mut record);
         build_world(&draft, gm.as_ref(), &mut ctl)
     };
     out.build_calls = Calls::of(&entries);

@@ -427,10 +427,14 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     );
     app.manage(DebugFlag(session.debug_flag()));
     let session = Arc::new(Mutex::new(session));
-    let drafts = Drafts::new(
+    // A Cancel stops the running draft or build call at once.
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
+    let drafts = Drafts::with_cancel(
         &data_dir,
         session.clone(),
-        Box::new(move || Box::new(OllamaGm::new(build_config.clone()))),
+        Box::new(move || Box::new(OllamaGm::new(build_config.clone()).with_cancel(flag.clone()))),
+        cancel,
     )?;
     app.manage(drafts);
     app.manage(Shared(session));

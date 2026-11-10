@@ -48,6 +48,8 @@ export interface CharacterView {
   concept: string;
   clock_min: number;
   facts: CharacterFact[];
+  /** The state lines of the "You" card: condition, carrying, mood… */
+  state: StateLine[];
 }
 
 /** One thing the PC knows about itself. */
@@ -400,11 +402,18 @@ export interface DraftLine {
   state: DraftState;
 }
 
-/** The `build_progress` event. `stage` stays a string: a newer shell may add one. */
+/**
+ * The `build_progress` event. `stage` stays a string: a newer shell may add
+ * one. `attempt` of `attempts` counts the tries of the running model call;
+ * `retry_after_timeout` is true when the call before it timed out.
+ */
 export interface BuildProgress {
   stage: string;
   done: number;
   total: number;
+  attempt: number;
+  attempts: number;
+  retry_after_timeout: boolean;
 }
 
 export type Approval = { ok: true; draft: DraftView } | { ok: false; gaps: Gap[] };
@@ -576,11 +585,19 @@ export function gapsFromError(e: unknown): Gap[] | null {
 /** A `build_progress` payload, or null when it has not that shape. */
 export function parseBuildProgress(payload: unknown): BuildProgress | null {
   if (!isRecord(payload)) return null;
-  const { stage, done, total } = payload;
+  const { stage, done, total, attempt, attempts, retry_after_timeout } = payload;
   if (typeof stage !== "string" || typeof done !== "number" || typeof total !== "number") {
     return null;
   }
-  return { stage, done, total };
+  const count = (n: unknown) => (typeof n === "number" && n >= 1 ? n : 1);
+  return {
+    stage,
+    done,
+    total,
+    attempt: count(attempt),
+    attempts: count(attempts),
+    retry_after_timeout: retry_after_timeout === true,
+  };
 }
 
 export type Api = ReturnType<typeof createApi>;

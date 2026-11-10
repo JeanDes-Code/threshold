@@ -46,6 +46,8 @@ pub enum Stage {
 #[serde(rename_all = "snake_case")]
 pub enum BuildCheck {
     Model,
+    /// The model did not answer in time, on every attempt.
+    ModelTimeout,
     Schema,
     References,
     OnePc,
@@ -69,12 +71,33 @@ pub struct BuildFailure {
     pub check: BuildCheck,
 }
 
-/// How far a stage is: a stage name and two counts, nothing else.
+/// How far a stage is: a stage name and counts, nothing else. `attempt`
+/// is the attempt of the running model call, from 1 to `attempts`;
+/// `retry_after_timeout` is true when that call is sent again because the
+/// one before it timed out (changed after review: the screen tells the
+/// Player that the model is slow).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
     pub stage: Stage,
     pub done: u32,
     pub total: u32,
+    pub attempt: u32,
+    pub attempts: u32,
+    pub retry_after_timeout: bool,
+}
+
+impl Progress {
+    /// A count of a stage, on the first attempt of its call.
+    pub fn of(stage: Stage, done: u32, total: u32) -> Self {
+        Self {
+            stage,
+            done,
+            total,
+            attempt: 1,
+            attempts: stages::TIMEOUT_RETRIES as u32 + 1,
+            retry_after_timeout: false,
+        }
+    }
 }
 
 /// What a draft or a build reports to, and asks, its caller.
@@ -82,6 +105,24 @@ pub struct Control<'a> {
     pub progress: &'a mut dyn FnMut(Progress),
     pub cancelled: &'a dyn Fn() -> bool,
     pub log: &'a mut dyn FnMut(DebugEntry),
+    /// The last progress reported: a retry after a timeout reports it again
+    /// with its attempt.
+    last: Option<Progress>,
+}
+
+impl<'a> Control<'a> {
+    pub fn new(
+        progress: &'a mut dyn FnMut(Progress),
+        cancelled: &'a dyn Fn() -> bool,
+        log: &'a mut dyn FnMut(DebugEntry),
+    ) -> Self {
+        Self {
+            progress,
+            cancelled,
+            log,
+            last: None,
+        }
+    }
 }
 
 /// One model call of a draft or a build, for the debug view only. `op_id`

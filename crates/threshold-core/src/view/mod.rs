@@ -24,6 +24,9 @@ pub struct CharacterView {
     pub concept: String,
     pub clock_min: u64,
     pub facts: Vec<CharacterFact>,
+    /// The state lines of the Play screen's "You" card (`YouCard::state`):
+    /// the Character screen shows them too (changed after review).
+    pub state: Vec<StateLine>,
 }
 
 /// One thing the PC knows about itself.
@@ -50,7 +53,27 @@ pub fn character_view(sight: &PcSight) -> CharacterView {
         concept: sight.concept.clone(),
         clock_min: sight.clock_min,
         facts,
+        state: state_lines(sight),
     }
+}
+
+/// The PC's Beliefs about itself on `STATE_KEYS`, `location` left out, in
+/// that order. The "You" card and the Character screen share them.
+fn state_lines(sight: &PcSight) -> Vec<StateLine> {
+    STATE_KEYS
+        .iter()
+        .filter(|key| **key != "location")
+        .filter_map(|key| {
+            sight
+                .beliefs
+                .iter()
+                .find(|b| b.subject == sight.pc && b.key == *key)
+        })
+        .map(|b| StateLine {
+            key: b.key.clone(),
+            value: b.value.clone(),
+        })
+        .collect()
 }
 
 /// The Play screen: the story, and the side panel as the PC knows it now.
@@ -221,20 +244,7 @@ pub fn play_view(sight: &PcSight, marks: &Marks) -> PlayView {
         you: YouCard {
             name: sight.pc_name.clone(),
             concept: sight.concept.clone(),
-            state: STATE_KEYS
-                .iter()
-                .filter(|key| **key != "location")
-                .filter_map(|key| {
-                    sight
-                        .beliefs
-                        .iter()
-                        .find(|b| b.subject == sight.pc && b.key == *key)
-                })
-                .map(|b| StateLine {
-                    key: b.key.clone(),
-                    value: b.value.clone(),
-                })
-                .collect(),
+            state: state_lines(sight),
         },
         open: open_lines(sight),
         pinned: pin_lines(sight, marks),
