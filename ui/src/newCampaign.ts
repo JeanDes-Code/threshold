@@ -411,6 +411,32 @@ export function renamed(form: ReviewForm, view: DraftView, row: Row): ReviewForm
   return { ...dropTyped(form, row), seed: view.seed, knowledge: view.knowledge };
 }
 
+/**
+ * The form after a store answer: each known `age` fact takes the value and
+ * the sentence the store holds, since the core rewrites them when an age
+ * changes or is confirmed (review, 2026-11-10). Only rows that still hold
+ * the same subject and key change; every other field stays the Player's.
+ */
+export function withStoredAges(form: ReviewForm, saved: DraftView): ReviewForm {
+  const isAge = (key: string) => key.trim().toLowerCase() === "age";
+  let changed = false;
+  const knowledge = form.knowledge.map((fact, i) => {
+    const stored = saved.knowledge[i];
+    if (
+      !stored ||
+      !isAge(fact.key) ||
+      stored.subject !== fact.subject ||
+      stored.key !== fact.key ||
+      (stored.value === fact.value && stored.text === fact.text)
+    ) {
+      return fact;
+    }
+    changed = true;
+    return { ...fact, value: stored.value, text: stored.text };
+  });
+  return changed ? { ...form, knowledge } : form;
+}
+
 /** True for the kinds that have an age. */
 export const isCharacter = (kind: EntityKind): boolean => kind === "npc" || kind === "pc";
 

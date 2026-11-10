@@ -1143,3 +1143,42 @@ fn renaming_an_entry_rewrites_its_known_age_fact() {
         ("40", "Joan is 40 years old.")
     );
 }
+
+/// C11 (review, 2026-11-10): an edit rewrites the known age facts of a row
+/// only when that row's age changed, or when its age is confirmed. An edit
+/// of another field never puts an unconfirmed age over an age fact that
+/// the Source Text states.
+#[test]
+fn an_edit_rewrites_only_the_age_facts_of_a_changed_row() {
+    let mut draft = with_stale_age_facts();
+    // Jean's entry says 40, unconfirmed; the text's fact says 39.
+    let mut seed = draft.seed.clone();
+    seed.premise = "A ferry crossing in the fog".into();
+    let knowledge = draft.knowledge.clone();
+    apply_edit(&mut draft, seed, knowledge);
+    let fact = age_fact(&draft, "Jean");
+    assert_eq!(
+        (fact.value.as_str(), fact.text.as_str()),
+        ("39", "Jean is forty.")
+    );
+    // The PC's age is unchanged too: its fact stays.
+    let fact = age_fact(&draft, "Jay");
+    assert_eq!(fact.value, "28");
+    // Once the age is confirmed, a stale fact sent back by an edit follows it.
+    confirm(&mut draft, "Jean").unwrap();
+    let mut knowledge = draft.knowledge.clone();
+    for f in knowledge
+        .iter_mut()
+        .filter(|f| f.subject == "Jean" && f.key == "age")
+    {
+        f.value = "39".into();
+        f.text = "Jean is forty.".into();
+    }
+    let seed = draft.seed.clone();
+    apply_edit(&mut draft, seed, knowledge);
+    let fact = age_fact(&draft, "Jean");
+    assert_eq!(
+        (fact.value.as_str(), fact.text.as_str()),
+        ("40", "Jean is 40 years old.")
+    );
+}

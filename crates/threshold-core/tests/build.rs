@@ -1252,3 +1252,62 @@ fn the_seed_stage_reads_the_start_hour() {
         assert!(prompt.contains("hour: the hour of the day"), "{prompt}");
     }
 }
+
+/// C12 (review, 2026-11-10): one known sentence shows once. QA saw "Agathe
+/// Morrow and Sefa Lind know that Wick is Teodor." twice, once per subject.
+/// The draft keeps the first fact whose sentence, normalized, is the same.
+#[test]
+fn a_known_sentence_shows_once_in_the_draft() {
+    let shared = |subject: &str, key: &str| {
+        json!({
+            "subject": subject,
+            "key": key,
+            "value": "knows the Keeper is Mira",
+            "text": "Tobin Reed and Ada Venn know that the Keeper is Mira.",
+            "open": false,
+            "pc_knows": true
+        })
+    };
+    let mut outputs = plain_outputs();
+    outputs[2] = knowledge(&[
+        shared("Tobin Reed", "knows_keeper"),
+        shared("Ada Venn", "knows_keeper"),
+        fact("Tobin Reed", "role", "boatman", false, true),
+    ]);
+    // The same sentence again in a later section, spelled with other case
+    // and spaces, about the same subject on another key.
+    let mut again = shared("Tobin Reed", "secret");
+    again["text"] = json!("tobin reed and  Ada Venn know that the keeper is Mira.");
+    outputs[3] = knowledge(&[again]);
+    let gm = gm(&outputs);
+    let draft = run(&source(), &gm).result.unwrap();
+    let texts: Vec<&str> = draft.knowledge.iter().map(|f| f.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            "Tobin Reed and Ada Venn know that the Keeper is Mira.",
+            "Tobin Reed: role is boatman."
+        ]
+    );
+}
+
+/// C12: the knowledge prompt says that a statement about the document
+/// itself is not a fact.
+#[test]
+fn the_knowledge_prompt_rules_out_the_document_itself() {
+    let gm = gm(&plain_outputs());
+    run(&source(), &gm).result.unwrap();
+    let calls = gm.calls();
+    let knowledge = calls
+        .iter()
+        .find(|c| c.prompt.recent.contains("SECTION 1 OF"))
+        .unwrap();
+    assert!(
+        knowledge
+            .prompt
+            .system
+            .contains("A statement about the document itself is not a fact"),
+        "{}",
+        knowledge.prompt.system
+    );
+}

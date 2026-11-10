@@ -47,6 +47,7 @@ import {
   sectionOf,
   shownName,
   typeName,
+  withStoredAges,
   type ReviewForm,
   type Row,
   type SectionId,
@@ -129,6 +130,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
       },
       onResult: (saved) => {
         apply(saved);
+        setForm((f) => withStoredAges(f, saved));
         setSaveFailed(false);
         setError(null);
       },
@@ -234,8 +236,9 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   };
 
   const confirm = async (row: Row) => {
-    const failure = await core((flush) =>
-      confirmRow(flush, (entry) => client.confirmAge(draftId, entry), form, row),
+    const failure = await core(
+      (flush) => confirmRow(flush, (entry) => client.confirmAge(draftId, entry), form, row),
+      (result) => setForm((f) => withStoredAges(f, result)),
     );
     setError(failure);
   };

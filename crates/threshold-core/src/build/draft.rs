@@ -493,6 +493,7 @@ pub fn apply_edit(draft: &mut SeedDraft, seed: AdventureSeed, knowledge: Vec<Kno
     let old = std::mem::replace(&mut draft.seed, seed);
     draft.knowledge = knowledge;
     let from = old_rows(&old.entities, &draft.seed.entities);
+    let from_rows = from.clone();
     let marks = std::mem::take(&mut draft.age_marks);
     let pc = &draft.seed.pc;
     draft.age_marks = AgeRows {
@@ -508,9 +509,29 @@ pub fn apply_edit(draft: &mut SeedDraft, seed: AdventureSeed, knowledge: Vec<Kno
             })
             .collect(),
     };
-    let rows: Vec<Option<usize>> = characters(&draft.seed).map(|(row, ..)| row).collect();
-    for row in rows {
-        set_age_facts(draft, row, false);
+    // Only a row whose age changed in this edit, or whose age the Player
+    // confirmed, rewrites its age facts (changed after review): an edit of
+    // another field never puts an unconfirmed age over an age fact that
+    // the Source Text states.
+    let pc_changed = old.pc.age != draft.seed.pc.age || old.pc.name != draft.seed.pc.name;
+    let rows: Vec<(Option<usize>, bool)> = characters(&draft.seed)
+        .map(|(row, name, kind, age)| {
+            let changed = match row {
+                None => pc_changed,
+                Some(k) => from_rows[k]
+                    .and_then(|j| old.entities.get(j))
+                    .is_none_or(|was| was.age != age || was.name != name || was.kind != kind),
+            };
+            (row, changed)
+        })
+        .collect();
+    for (row, changed) in rows {
+        let age = row_of(&draft.seed, row).and_then(|(_, _, age)| age);
+        if changed {
+            set_age_facts(draft, row, true);
+        } else if age_confirmed(draft, row, age) {
+            set_age_facts(draft, row, false);
+        }
     }
     edited(draft);
 }

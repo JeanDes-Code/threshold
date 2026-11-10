@@ -40,6 +40,7 @@ import {
   splitList,
   stageLabel,
   typeName,
+  withStoredAges,
   type ReviewForm,
 } from "./newCampaign";
 
@@ -752,5 +753,28 @@ describe("readDocument", () => {
 describe("CANCEL_NOTE", () => {
   it("says when a cancel takes effect", () => {
     expect(CANCEL_NOTE).toBe("Cancel takes effect after the current step.");
+  });
+});
+
+describe("age facts after a store answer", () => {
+  it("the form takes the age sentence the store rewrote, and nothing else", () => {
+    // C11 (review): QA set Agathe's age to 68 and pressed Confirm age; the
+    // screen still read "Agathe Morrow is 67 years old."
+    const held = form();
+    held.knowledge = [
+      ...held.knowledge,
+      { subject: "Agathe Morrow", key: "age", value: "67", text: "Agathe Morrow is 67 years old.", open: false },
+    ];
+    held.seed.entities = replaceAt(held.seed.entities, 0, { age: 68 });
+    const stored = view({
+      ...held,
+      knowledge: replaceAt(held.knowledge, 2, { value: "68", text: "Agathe Morrow is 68 years old." }),
+    });
+    const after = withStoredAges(held, stored);
+    expect(after.knowledge[2]).toMatchObject({ value: "68", text: "Agathe Morrow is 68 years old." });
+    expect(after.knowledge.slice(0, 2)).toEqual(held.knowledge.slice(0, 2));
+    // A row that changed under the Player's hands keeps the Player's text.
+    const moved = view({ ...held, knowledge: held.knowledge.slice(1) });
+    expect(withStoredAges(held, moved)).toBe(held);
   });
 });

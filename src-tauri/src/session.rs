@@ -266,8 +266,10 @@ impl Session {
     /// "Remove from list" (QA, 2026-11-10): moves the file of the card
     /// `card_id` into `archive_dir`, never deletes it. `card_id` is a card's
     /// own id as `list_campaigns` gives it, never a path: only a file the
-    /// list shows can move. The open Campaign cannot. Its SQLite side
-    /// files move with it. Returns the new path.
+    /// list shows can move, and only one the list reports with a problem
+    /// (changed after review: the shell enforces it, not the UI). The open
+    /// Campaign cannot. Its SQLite side files move with it; a side file
+    /// that cannot move is reported. Returns the new path.
     pub fn remove_campaign(&mut self, card_id: &str) -> Result<PathBuf, AppError> {
         let card = self
             .list_campaigns()
@@ -277,6 +279,11 @@ impl Session {
         let from = PathBuf::from(&card.db_path);
         if self.open.as_ref().is_some_and(|o| o.db_path == from) {
             return Err(failed("close this Campaign before you remove it"));
+        }
+        if card.problem.is_none() {
+            return Err(failed(
+                "this Campaign opens, so it stays in the list: only a file that cannot open can be removed",
+            ));
         }
         let archive = self.archive_dir();
         fs::create_dir_all(&archive).map_err(failed)?;
@@ -291,11 +298,21 @@ impl Session {
             n += 1;
         }
         fs::rename(&from, &to).map_err(failed)?;
+        let mut stuck = Vec::new();
         for side in ["-wal", "-shm", "-journal"] {
             let file = PathBuf::from(format!("{}{side}", from.display()));
-            if file.exists() {
-                let _ = fs::rename(&file, PathBuf::from(format!("{}{side}", to.display())));
+            if file.exists()
+                && let Err(e) = fs::rename(&file, PathBuf::from(format!("{}{side}", to.display())))
+            {
+                stuck.push(format!("{} ({e})", file.display()));
             }
+        }
+        if !stuck.is_empty() {
+            return Err(failed(format!(
+                "the Campaign file moved to {}, but these side files did not: {}",
+                to.display(),
+                stuck.join(", ")
+            )));
         }
         Ok(to)
     }

@@ -182,3 +182,48 @@ fn remove_from_list_moves_the_file_to_the_archive() {
     let left: Vec<String> = s.list_campaigns().into_iter().map(|c| c.id).collect();
     assert_eq!(left, [open_id]);
 }
+
+/// C10: the shell, not the UI, decides what may move. A Campaign file that
+/// opens (its card has no problem) is never archived, even when it is not
+/// the open one.
+#[test]
+fn a_campaign_that_opens_cannot_be_archived() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let first = s.summary().unwrap().db_path;
+    town(&mut s);
+    let open = s.summary().unwrap().db_path;
+    assert_ne!(first, open);
+    let card = s
+        .list_campaigns()
+        .into_iter()
+        .find(|c| c.db_path == first)
+        .unwrap();
+    assert!(card.problem.is_none());
+    let err = s.remove_campaign(&card.id).unwrap_err();
+    assert!(err.to_string().contains("opens"), "{err}");
+    assert!(Path::new(&first).exists());
+    assert!(!dir.path().join("archive").exists());
+}
+
+/// C10: a side file that cannot move is reported, not ignored.
+#[test]
+fn a_side_file_that_cannot_move_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let s = &mut session(dir.path(), &gm);
+    let campaigns = dir.path().join("campaigns");
+    std::fs::create_dir_all(&campaigns).unwrap();
+    let old = campaigns.join("campaign-old.sqlite");
+    std::fs::write(&old, b"not a database").unwrap();
+    std::fs::write(campaigns.join("campaign-old.sqlite-wal"), b"wal").unwrap();
+    // The archive already holds a non-empty folder where the side file
+    // would go, so its rename fails.
+    let blocked = dir.path().join("archive").join("campaign-old.sqlite-wal");
+    std::fs::create_dir_all(&blocked).unwrap();
+    std::fs::write(blocked.join("keep"), b"x").unwrap();
+    let err = s.remove_campaign("campaign-old.sqlite").unwrap_err();
+    assert!(err.to_string().contains("-wal"), "{err}");
+}

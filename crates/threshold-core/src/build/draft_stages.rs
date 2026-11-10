@@ -124,6 +124,17 @@ pub fn draft_from_text(
                     continue;
                 }
                 let fact = known_fact(&names, fact);
+                // One sentence shows once (changed after review): a fact
+                // whose sentence, normalized, an earlier kept fact already
+                // states, about any subject, adds nothing the Player reads.
+                let sentence = normalize::value(&fact.text);
+                if draft
+                    .knowledge
+                    .iter()
+                    .any(|k| normalize::value(&k.text) == sentence)
+                {
+                    continue;
+                }
                 let slot = (normalize::name(&fact.subject), fact.key.clone(), fact.open);
                 match slots.iter().position(|s| *s == slot) {
                     None => {
@@ -408,6 +419,7 @@ Rules:
 - key: a short English word in snake_case, such as role, location, owner, occupation. value: a few words. text: one sentence that states the fact, in the story language.
 - open: true when the item is planned, proposed, promised or pending, so it has not happened. false when the text says that it happened or that it is true.
 - pc_knows: true when the PC knows the fact. false for the private feeling of another character, a hidden cause, or anything the PC has not seen or been told.
+- A statement about the document itself is not a fact: where the text stops, what it covers, who wrote it. Extract only facts about the story world.
 - Mature content becomes neutral facts. Do not remove it and do not refuse.";
 
 fn roster_call(text: &str) -> StageCall {

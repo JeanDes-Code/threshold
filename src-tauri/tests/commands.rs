@@ -1404,3 +1404,54 @@ fn rename_draft_entity_moves_no_mark_to_another_kind() {
     assert_eq!(renamed.ages[2].name, "Ada Venn");
     assert!(renamed.ages[2].confirmed);
 }
+
+/// C11 (review, 2026-11-10): the live review flow. The screen holds the
+/// knowledge it first got; the Player sets Tobin's age from 58 to 59 (one
+/// `save_draft` with that knowledge), presses Confirm age, then edits
+/// another field (one more `save_draft` with the same old knowledge). Each
+/// view the shell returns, and the store, read the new age in the known
+/// fact.
+#[test]
+fn an_age_edit_then_confirm_reaches_the_known_fact() {
+    let rig = Rig::new();
+    let mut outputs = draft_outputs();
+    outputs[2]["facts"].as_array_mut().unwrap().push(json!({
+        "subject": "Tobin Reed",
+        "key": "age",
+        "value": "58",
+        "text": "Tobin Reed is 58 years old.",
+        "open": false,
+        "pc_knows": true
+    }));
+    rig.push(&outputs);
+    let view = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap();
+    let id = view.draft_id.clone();
+    let tobin_fact = |v: &DraftView| {
+        v.knowledge
+            .iter()
+            .find(|f| f.subject == "Tobin Reed" && f.key == "age")
+            .map(|f| (f.value.clone(), f.text.clone()))
+            .unwrap()
+    };
+    assert_eq!(tobin_fact(&view).0, "58");
+    let held = view.knowledge.clone();
+
+    let mut seed = view.seed.clone();
+    seed.entities[0].age = Some(59);
+    let saved = rig.drafts.save_draft(&id, seed, held.clone()).unwrap();
+    let new = ("59".to_owned(), "Tobin Reed is 59 years old.".to_owned());
+    assert_eq!(tobin_fact(&saved), new);
+
+    let tobin = EntryRef::entity(0, "Tobin Reed", EntityKind::Npc);
+    let confirmed = rig.drafts.confirm_age(&id, &tobin).unwrap();
+    assert_eq!(tobin_fact(&confirmed), new);
+
+    let mut seed = confirmed.seed.clone();
+    seed.premise = "A lighthouse keeper faces the long storm season.".into();
+    let later = rig.drafts.save_draft(&id, seed, held).unwrap();
+    assert_eq!(tobin_fact(&later), new);
+    assert_eq!(tobin_fact(&rig.drafts.get_draft(&id).unwrap()), new);
+}
