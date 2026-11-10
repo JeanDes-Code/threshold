@@ -112,7 +112,15 @@ pub struct CharacterView {
     pub name: String,
     pub concept: String,
     pub clock_min: u64,
-    pub facts: Vec<String>,
+    pub facts: Vec<CharacterFact>,
+}
+
+/// One thing the PC knows about itself.
+#[derive(Clone, Debug, Serialize)]
+pub struct CharacterFact {
+    pub text: String,
+    /// An open item (ADR 0005): planned or pending, not done.
+    pub open: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -394,7 +402,10 @@ impl Session {
         let facts = pc_knowledge(&view)
             .into_iter()
             .filter(|b| b.subject == pc.id)
-            .map(|b| b.text)
+            .map(|b| CharacterFact {
+                open: is_open_key(&b.key),
+                text: b.text,
+            })
             .collect();
         Ok(CharacterView {
             name: pc.name.clone(),
@@ -720,6 +731,15 @@ impl Drafts {
             build::build_world(&draft, gm.as_ref(), &mut ctl)
         };
         let world = built.map_err(|failure| self.build_failed(draft_id, failure))?;
+        // A cancel that came during the last model call still stops the
+        // build: no Campaign file is written after it.
+        if self.cancelled() {
+            let failure = BuildFailure {
+                stage: Stage::Commit,
+                check: BuildCheck::Cancelled,
+            };
+            return Err(self.build_failed(draft_id, failure));
+        }
 
         on_progress(Progress {
             stage: Stage::Commit,

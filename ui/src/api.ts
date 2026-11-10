@@ -42,7 +42,14 @@ export interface CharacterView {
   name: string;
   concept: string;
   clock_min: number;
-  facts: string[];
+  facts: CharacterFact[];
+}
+
+/** One thing the PC knows about itself. */
+export interface CharacterFact {
+  text: string;
+  /** An open item: planned or pending, not done. */
+  open: boolean;
 }
 
 export interface JournalEntry {

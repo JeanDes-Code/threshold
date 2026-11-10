@@ -13,9 +13,10 @@ mod world_stages;
 
 use serde::{Deserialize, Serialize};
 
-pub use checks::names_pc;
+pub use checks::{centres_on_pc, names_pc};
 pub use draft::{DraftState, Gap, GapKind, KnownFact, SeedDraft, apply_edit, approve, gaps};
 pub use draft_stages::{SOURCE_TEXT_MAX_CHARS, draft_from_text};
+pub use stages::BUILD_TIMEOUT_S;
 pub use store::{DraftLine, DraftStore, DraftStoreError};
 pub use world_stages::{NpcState, PC_CENTRED_MAX_SHARE, Placement, build_world};
 

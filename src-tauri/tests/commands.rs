@@ -141,7 +141,7 @@ fn journal_hides_gm_only_facts() {
 
     let character = s.get_character().unwrap();
     assert_eq!(character.name, "Wren");
-    assert!(character.facts.iter().all(|t| !t.contains("skims")));
+    assert!(character.facts.iter().all(|f| !f.text.contains("skims")));
 }
 
 #[test]
@@ -158,6 +158,14 @@ value = "the market"
 text = "Hessa plans a shopping trip to the market."
 known_by = ["Wren"]
 open = true
+
+[[facts]]
+subject = "Wren"
+key = "audience"
+value = "the magistrate"
+text = "Wren has an audience with the magistrate next week."
+known_by = ["Wren"]
+open = true
 "#,
     )
     .unwrap();
@@ -165,6 +173,22 @@ open = true
     let mut s = session(dir.path(), &gm);
     s.new_campaign(&town_dir().join("adventure-seed.toml"), &world, 11)
         .unwrap();
+
+    // The Character view marks an open item about the PC as the Journal does.
+    let character = s.get_character().unwrap();
+    let audience = character
+        .facts
+        .iter()
+        .find(|f| f.text.contains("audience"))
+        .expect("the PC knows its open item");
+    assert!(audience.open);
+    assert!(
+        character
+            .facts
+            .iter()
+            .filter(|f| !f.text.contains("audience"))
+            .all(|f| !f.open)
+    );
 
     let journal = s.get_journal().unwrap();
     let trip = journal
@@ -177,7 +201,7 @@ open = true
         journal
             .observations
             .iter()
-            .filter(|e| !e.text.contains("shopping trip"))
+            .filter(|e| !e.text.contains("shopping trip") && !e.text.contains("audience"))
             .all(|e| !e.open)
     );
 }
@@ -1005,6 +1029,46 @@ fn cancel_build_stops_draft_and_build() {
             .unwrap()
             .needs_begin
     );
+}
+
+#[test]
+fn a_cancel_during_the_last_call_writes_no_campaign() {
+    let rig = Rig::new();
+    let id = rig.approved_draft();
+    let before = rig.build.calls().len();
+    let outputs = build_outputs();
+    let last = outputs.len();
+    rig.push(&outputs);
+    let drafts = rig.drafts.clone();
+    let calls = Arc::new(Mutex::new(0));
+    rig.set_hook(Some(Arc::new(move || {
+        let mut n = calls.lock().unwrap();
+        *n += 1;
+        if *n == last {
+            drafts.cancel_build();
+        }
+    })));
+
+    let err = rig
+        .drafts
+        .start_build(&id, &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert_eq!(rig.build.calls().len() - before, last);
+    assert_eq!(
+        err,
+        "The world build stopped at the campaign file step: it was cancelled."
+    );
+    let view = rig.drafts.get_draft(&id).unwrap();
+    assert_eq!(view.state, DraftState::Approved);
+    assert_eq!(
+        view.last_failure,
+        Some(BuildFailure {
+            stage: Stage::Commit,
+            check: BuildCheck::Cancelled
+        })
+    );
+    assert!(rig.campaign_files().is_empty());
 }
 
 #[test]

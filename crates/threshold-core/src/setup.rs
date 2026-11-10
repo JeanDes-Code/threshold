@@ -14,8 +14,8 @@ use std::{
 
 use crate::{
     domain::{
-        AdventureSeed, Canon, Effect, EntityRef, FactSource, LedgerOp, OPEN_KEY_PREFIX, Slot,
-        Trigger, WorldSetup, is_open_key,
+        AdventureSeed, Canon, Effect, EntityKind, EntityRef, FactSource, LedgerOp, OPEN_KEY_PREFIX,
+        Slot, Trigger, WorldSetup, is_open_key,
     },
     normalize,
     store::{CampaignId, CommitError, Store, StoreError, TurnKind, TurnRecord},
@@ -73,11 +73,26 @@ pub fn commit_world(
             .collect::<Result<Vec<_>, _>>()
     };
 
+    let pc = view
+        .entities
+        .iter()
+        .find(|e| e.kind == EntityKind::Pc)
+        .map(|e| e.id);
     let mut ops = Vec::new();
     // ADR 0005: an open entry commits on the `pending_` key, so its outcome
     // slot stays empty. Only `open` adds that prefix: a key never carries it
     // by hand, open or settled.
     for f in &world.facts {
+        let seen_by = ids(&f.known_by)?;
+        // Only what the PC holds is fixed for play. A hidden fact or a
+        // secret (a feeling, a plan) must stay open to change when the PC
+        // acts on it, so it is Established. The store keeps a state key and
+        // an open key Established in any case.
+        let canon = if pc.is_some_and(|pc| seen_by.contains(&EntityRef::Id(pc))) {
+            Canon::Persistent
+        } else {
+            Canon::Established
+        };
         let key = normalize::key(&f.key);
         if is_open_key(&key) {
             return Err(SetupError::Invalid(format!(
@@ -97,9 +112,9 @@ pub fn commit_world(
                 value: normalize::value(&f.value),
             },
             text: f.text.clone(),
-            canon: Canon::Persistent,
+            canon,
             source: FactSource::AdventureSeed,
-            seen_by: ids(&f.known_by)?,
+            seen_by,
             causes: vec![],
         });
     }
@@ -144,6 +159,13 @@ pub fn commit_world(
     for ev in &world.events {
         let mut effects = Vec::new();
         for e in &ev.effects {
+            if is_open_key(&e.key) {
+                return Err(SetupError::Invalid(format!(
+                    "an event effect on {} writes {}; only an open entry writes an open key",
+                    e.subject,
+                    normalize::key(&e.key)
+                )));
+            }
             effects.push(Effect::SetFact {
                 slot: Slot {
                     subject: EntityRef::Id(id(&e.subject)?),

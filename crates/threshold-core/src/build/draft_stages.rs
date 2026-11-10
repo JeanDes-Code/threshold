@@ -462,7 +462,7 @@ fn kind_word(kind: EntityKind) -> &'static str {
 
 /// Schema, OnePc and References on the roster. Every problem is
 /// essential: the roster is.
-fn check_roster(out: &RosterOut) -> Vec<Problem<usize>> {
+fn check_roster(out: &RosterOut) -> Vec<Problem<()>> {
     let mut problems = vec![];
     let mut problem = |check, note: String| problems.push(Problem::essential(check, note));
     let pc_names = pc_names(&out.pc);
@@ -512,8 +512,8 @@ fn check_roster(out: &RosterOut) -> Vec<Problem<usize>> {
 /// Schema, References and Kinds on the seed. The schema allows only roster
 /// names for the start; these checks guard a model that ignores it. Every
 /// problem is essential: the seed is.
-fn check_seed(roster: &RosterOut, out: &SeedOut) -> Vec<Problem<usize>> {
-    let mut problems: Vec<Problem<usize>> = [
+fn check_seed(roster: &RosterOut, out: &SeedOut) -> Vec<Problem<()>> {
+    let mut problems: Vec<Problem<()>> = [
         (&out.premise, "premise"),
         (&out.story_language, "story_language"),
     ]

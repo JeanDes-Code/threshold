@@ -444,9 +444,47 @@ mod world_build {
         domain::{AdventureSeed, EffectEntry, EventEntry, FactEntry, GoalEntry, WorldSetup},
     };
     use threshold_eval::world_build::{
-        BuildRun, Calls, Expected, Shown, VoiceLine, fact_recall, false_past, open_recall,
-        pc_centred, roster_recall, secrets_of, section,
+        BuildRun, Calls, Expected, Shown, VoiceLine, fact_recall, false_past, is_public,
+        open_recall, pc_centred, roster_recall, secrets_of, section,
     };
+
+    #[test]
+    fn only_a_file_under_fixtures_is_public() {
+        let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("public-rule");
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["fixtures/chronicle", "notes", "fixtures-old"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for file in [
+            "fixtures/chronicle/source.md",
+            "notes/private.md",
+            "fixtures-old/source.md",
+            "top.md",
+        ] {
+            std::fs::write(root.join(file), "text").unwrap();
+        }
+        assert!(is_public(&root, &root.join("fixtures/chronicle/source.md")));
+        // A file of the repository outside `fixtures/` is private, a
+        // gitignored file included.
+        assert!(!is_public(&root, &root.join("notes/private.md")));
+        assert!(!is_public(&root, &root.join("top.md")));
+        assert!(!is_public(&root, &root.join("fixtures-old/source.md")));
+        // A path that only walks through `fixtures/` is read canonically.
+        assert!(!is_public(
+            &root,
+            &root.join("fixtures/../notes/private.md")
+        ));
+        // A missing file, or one outside the repository, is private.
+        assert!(!is_public(&root, &root.join("fixtures/missing.md")));
+        assert!(!is_public(&root.join("notes"), &root.join("top.md")));
+        #[cfg(unix)]
+        {
+            let link = root.join("fixtures/link.md");
+            std::os::unix::fs::symlink(root.join("notes/private.md"), &link).unwrap();
+            assert!(!is_public(&root, &link));
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     const EXPECTED: &str = r#"
 pc_name = "Teodor Brandt"
@@ -796,6 +834,27 @@ done = ["owns ferry", "bought ferry"]
         // An other name of another entry counts too.
         let roster = ["Odile Quast", "Teo"];
         assert_eq!(pc_centred(&names, &roster, &world.goals, &secrets), (4, 6));
+
+        // A goal against the PC and a secret about the PC count, whatever
+        // their text says.
+        let goals = vec![
+            GoalEntry {
+                against: Some("Wick".into()),
+                ..goal("Gerrit Vane", "Ruin him.")
+            },
+            GoalEntry {
+                against: Some("Agathe Morrow".into()),
+                ..goal("Osric Fell", "Ruin her.")
+            },
+        ];
+        let secrets = vec![fact(
+            "Teodor Brandt",
+            "debt",
+            "clay",
+            "A debt in clay.",
+            false,
+        )];
+        assert_eq!(pc_centred(&names, &[], &goals, &secrets), (2, 3));
     }
 
     #[test]
@@ -826,7 +885,7 @@ done = ["owns ferry", "bought ferry"]
         let report = section(&expected(), &[run], &fixture(), 1);
         assert!(
             report.contains(
-                "- PC-centred share (NPC goals and secrets that name the PC): 1 of 2 (50%)"
+                "- PC-centred share (NPC goals and secrets that centre on the PC): 1 of 2 (50%)"
             ),
             "{report}"
         );
@@ -991,7 +1050,7 @@ done = ["owns ferry", "bought ferry"]
             "| run | draft | gaps | build | roster | settled found (draft / world) | false past (draft / world) | open kept (draft / world) | PC-centred | events (with effect) | draft calls (repairs, retries) | build calls (repairs, retries) | draft time | build time |",
             "| 1 | ok | 0 | ok | 8 of 9 | 1 of 2 / 1 of 2 | 0 of 2 / 1 of 2 | 0 of 2 / 0 of 2 | 1 of 2 | 2 (1) | 5 (1, 1) | 14 (2, 0) | 90.0 s | 150.0 s |",
             "| 2 | ok | 2 | not approvable | 8 of 9 | 1 of 2 / - | 0 of 2 / - | 0 of 2 / - | - | - | - | - | 80.0 s | n/a |",
-            "- PC-centred share (NPC goals and secrets that name the PC): 1 of 2 (50%) over 1 built worlds; highest world 50%; the build's limit is 50%",
+            "- PC-centred share (NPC goals and secrets that centre on the PC): 1 of 2 (50%) over 1 built worlds; highest world 50%; the build's limit is 50%",
             "- World Events: 2 over 1 built worlds; with at least one effect: 1",
             "- Voice distance: matched 1 / 2 judged sample lines (50%), chance 25%; judge errors 1",
             "- Draft time p50 / max: 80.0 s / 90.0 s",

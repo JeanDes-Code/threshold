@@ -114,10 +114,12 @@ pub fn is_open_key(key: &str) -> bool;                             // is_state_k
 - `FactEntry.open = true` makes `setup` write the key `pending_<key>`. A settled entry with that prefix is refused.
 - An open key is a state key. So the fact is never Persistent, and a later Turn can replace it.
 - The outcome slot stays empty. So no check reads the plan as done.
-- `context` puts the marker `(open, not done)` before the text of an open fact, in one function. The proposal prompt also shows the key. `JournalEntry` gains `open: bool`.
+- `context` puts the marker `(open, not done)` before the text of an open fact, in one function. The proposal prompt also shows the key. `JournalEntry` gains `open: bool`, and so does each fact of the `CharacterView` (`CharacterFact { text, open }`).
 - Possible does not fit. A cited Possible fact becomes Established (`checks/ops.rs:218`). A Possible fact that the PC witnesses becomes Established (`store/project.rs:497`). Each is the false past that the design forbids.
 
 A settled PC Knowledge fact commits as a `decided` fact does, with the PC as holder. The drafted flow leaves `decided` and `proposed` empty.
+
+`commit_world` commits a `FactEntry` as Persistent only when the PC is among its holders. A hidden fact or a secret (a private feeling, a plan) commits as Established, so a play Turn can change it when the PC acts on it. State keys and open keys stay Established as before.
 
 ### 3.5 Seed Draft and draft store (E)
 

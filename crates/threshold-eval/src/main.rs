@@ -12,17 +12,15 @@
 //! - `--memory-turns <n>`: overrides the memory scenario's Turn count.
 //! - `--source <path>`, `--expected <path>`: the world_build scenario's
 //!   Source Text and expected list, instead of the scenario file's. A file
-//!   outside the repository makes its report section print counts only.
+//!   outside the repository's `fixtures/` makes its report section print
+//!   counts only.
 //! - `--out <path>` (default `evals/reports/<date>.md`).
 
 use std::{fs, path::PathBuf, process::ExitCode};
 
-use threshold_core::Gm;
+use threshold_core::{Gm, build::BUILD_TIMEOUT_S};
 use threshold_eval::{Config, GmJudge, SCENARIOS, find_root, run, today};
 use threshold_ollama::{OllamaConfig, OllamaGm};
-
-/// The model timeout of drafts and World Builds, as the app sets it.
-const BUILD_TIMEOUT_S: u64 = 600;
 
 fn main() -> ExitCode {
     match real_main() {

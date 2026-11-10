@@ -7,8 +7,9 @@
 //! failures. The metrics are plain functions of a draft and a World Setup,
 //! so tests check them with hand-made data and no model.
 //!
-//! A Source Text outside the repository is private: its report section
-//! prints counts only, never a name, a fact or a Voice Card line.
+//! A Source Text or an expected list outside `fixtures/` is private, even
+//! inside the repository: its report section prints counts only, never a
+//! name, a fact or a Voice Card line. Reports are committed.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -22,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use threshold_core::{
     build::{
         BuildFailure, Control, DebugEntry, Gap, PC_CENTRED_MAX_SHARE, Progress, SeedDraft, approve,
-        build_world, draft_from_text, names_pc,
+        build_world, centres_on_pc, draft_from_text,
     },
     domain::{AdventureSeed, EntityKind, FactEntry, GoalEntry, OtherName, WorldSetup, is_adult},
     normalize,
@@ -423,29 +424,35 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// How many of `goals` and `secrets` name the PC, and how many there are.
-/// The build's own rule, `build::names_pc`: a text names the PC when it
-/// holds, as whole words, a full name of the PC, or the first word of its
-/// main name when no name of `roster` holds that word. `pcs` gives the PC's
-/// names as (main name, other names); a text that names one of them names
-/// the PC. `roster` holds the main and other names of every other drafted
-/// entry, as the WorldAutonomy check passes them (`roster_names`).
+/// How many of `goals` and `secrets` centre on the PC, and how many there
+/// are. The build's own rule, `build::centres_on_pc`: an item centres on the
+/// PC when its goal is against the PC, when its secret is about the PC, or
+/// when its text holds, as whole words, a full name of the PC, or the first
+/// word of its main name when no name of `roster` holds that word. `pcs`
+/// gives the PC's names as (main name, other names); an item that centres
+/// on one of them centres on the PC. `roster` holds the main and other
+/// names of every other drafted entry, as the WorldAutonomy check passes
+/// them (`roster_names`).
 pub fn pc_centred(
     pcs: &[(String, Vec<String>)],
     roster: &[&str],
     goals: &[GoalEntry],
     secrets: &[FactEntry],
 ) -> (usize, usize) {
-    let named = |text: &str| {
+    let centred = |text: &str, target: Option<&str>| {
         pcs.iter()
-            .any(|(main, others)| names_pc(main, others, roster, text))
+            .any(|(main, others)| centres_on_pc(main, others, roster, text, target))
     };
     goals
         .iter()
-        .map(|g| g.text.as_str())
-        .chain(secrets.iter().map(|s| s.text.as_str()))
-        .fold((0, 0), |(naming, total), text| {
-            (naming + usize::from(named(text)), total + 1)
+        .map(|g| (g.text.as_str(), g.against.as_deref()))
+        .chain(
+            secrets
+                .iter()
+                .map(|s| (s.text.as_str(), Some(s.subject.as_str()))),
+        )
+        .fold((0, 0), |(naming, total), (text, target)| {
+            (naming + usize::from(centred(text, target)), total + 1)
         })
 }
 
@@ -486,10 +493,10 @@ fn failure_label(failure: &BuildFailure) -> String {
 
 /// What the section may show of its source.
 pub enum Shown {
-    /// A file of the repository: names, missed items and three Voice Card
+    /// A file under `fixtures/`: names, missed items and three Voice Card
     /// lines may be printed.
     Fixture { source: String, expected: String },
-    /// A file outside the repository: counts only.
+    /// A file outside `fixtures/`: counts only.
     Private,
 }
 
@@ -793,13 +800,13 @@ pub fn section(
         Shown::Private => {
             let _ = write!(
                 out,
-                "Source Text: a private file outside the repository ({source_chars} characters). Counts only: this section prints no name, no fact and no Voice Card line."
+                "Source Text: a private file outside the repository's fixtures ({source_chars} characters). Counts only: this section prints no name, no fact and no Voice Card line."
             );
         }
     }
     let _ = writeln!(
         out,
-        " Each run drafts a Seed Draft, confirms every age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a fact with the same subject (through the main and other names) holds every word of one of the item's phrases in its key, value and text. The draft lines score the known facts of each draft; the world lines score the facts of each built world (known facts included) and cover only the runs that built one. Fact recall and open recall use the item's `about` phrase. False past counts the open items for which a settled fact (`open = false`) holds one of the item's `done` phrases: words that only a completed event would hold, so a settled fact about the plan itself does not count. An open item for which no such phrase exists is not scored for false past, and the false past lines leave it out of both terms. A paraphrase does not match, so every fact line is a lower bound. The run confirms every age, as the Player must, so a proposed minor shows only on the line of characters drafted under 18. Wrong age_stated claims compare the model's claim that the text states an age (information only: it never skips a confirmation) with the list, for each drafted character found in it: an age in the list means the text states it. PC-centred share: the NPC goals and secrets whose text names the PC by one of its full names, or by the first word of its main name when no other drafted entry has that word in a name, as whole words (the build's own rule, `build::names_pc`, with the drafted roster); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
+        " Each run drafts a Seed Draft, confirms every age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a fact with the same subject (through the main and other names) holds every word of one of the item's phrases in its key, value and text. The draft lines score the known facts of each draft; the world lines score the facts of each built world (known facts included) and cover only the runs that built one. Fact recall and open recall use the item's `about` phrase. False past counts the open items for which a settled fact (`open = false`) holds one of the item's `done` phrases: words that only a completed event would hold, so a settled fact about the plan itself does not count. An open item for which no such phrase exists is not scored for false past, and the false past lines leave it out of both terms. A paraphrase does not match, so every fact line is a lower bound. The run confirms every age, as the Player must, so a proposed minor shows only on the line of characters drafted under 18. Wrong age_stated claims compare the model's claim that the text states an age (information only: it never skips a confirmation) with the list, for each drafted character found in it: an age in the list means the text states it. PC-centred share: the NPC goals against the PC, the secrets about the PC, and the goals and secrets whose text names the PC by one of its full names, or by the first word of its main name when no other drafted entry has that word in a name, as whole words (the build's own rule, `build::centres_on_pc`, with the drafted roster); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
     );
 
     let n = runs.len();
@@ -924,7 +931,7 @@ pub fn section(
     }
     let _ = writeln!(
         out,
-        "- PC-centred share (NPC goals and secrets that name the PC): {naming} of {items} ({}) over {built} built worlds; highest world {}; the build's limit is {:.0}%",
+        "- PC-centred share (NPC goals and secrets that centre on the PC): {naming} of {items} ({}) over {built} built worlds; highest world {}; the build's limit is {:.0}%",
         pct(naming, items),
         highest.map_or_else(|| "n/a".to_owned(), |h| format!("{:.0}%", h * 100.0)),
         PC_CENTRED_MAX_SHARE * 100.0
@@ -1069,7 +1076,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         .expected
         .clone()
         .unwrap_or_else(|| root.join(&sc.expected));
-    let private = outside(root, &source) || outside(root, &list);
+    let private = !is_public(root, &source) || !is_public(root, &list);
     let text = fs::read_to_string(&source).map_err(|e| format!("{}: {e}", source.display()))?;
     let expected = Expected::load(&list)?;
 
@@ -1094,11 +1101,17 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     Ok(section(&expected, &runs, &shown, text.chars().count()))
 }
 
-/// True when `path` is not inside the repository `root`.
-fn outside(root: &Path, path: &Path) -> bool {
-    match (fs::canonicalize(root), fs::canonicalize(path)) {
-        (Ok(root), Ok(path)) => !path.starts_with(root),
-        _ => !path.starts_with(root),
+/// True when `path`, read canonically, is under `<root>/fixtures/`: the
+/// invented files that the public repository holds. Any other file is
+/// private, a gitignored file of the repository included, and so is a
+/// path that cannot be read.
+pub fn is_public(root: &Path, path: &Path) -> bool {
+    match (
+        fs::canonicalize(root.join("fixtures")),
+        fs::canonicalize(path),
+    ) {
+        (Ok(fixtures), Ok(path)) => path.starts_with(fixtures),
+        _ => false,
     }
 }
 

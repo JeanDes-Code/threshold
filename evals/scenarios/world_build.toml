@@ -1,11 +1,12 @@
 # The World Build on the invented fixture chronicle (design section 8). Each
-# run drafts a Seed Draft from the Source Text, confirms every proposed age,
+# run drafts a Seed Draft from the Source Text, confirms every age,
 # approves the draft when no gap is left, and builds the hidden world. The
 # report scores the draft and the world against the hand-made list.
 #
-# To measure a private document without committing it, pass files outside
-# the repository on the command line:
+# To measure a private document without committing it, pass its files on
+# the command line:
 #   threshold-eval --scenario world_build --source <path> --expected <path>
-# The report then prints counts only.
+# A file outside the repository's fixtures/ folder is private: the report
+# then prints counts only.
 source = "fixtures/chronicle/source.md"
 expected = "fixtures/chronicle/expected.toml"

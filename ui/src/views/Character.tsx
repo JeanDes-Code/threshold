@@ -23,8 +23,15 @@ export default function Character({ revision }: { revision: number }) {
         <p className="muted">Nothing yet.</p>
       ) : (
         <ul>
-          {view.facts.map((f) => (
-            <li key={f}>{f}</li>
+          {view.facts.map((f, i) => (
+            <li key={i}>
+              {f.text}
+              {f.open && (
+                <span className="mark" title="Planned or pending: not done yet">
+                  open
+                </span>
+              )}
+            </li>
           ))}
         </ul>
       )}

@@ -5,6 +5,9 @@
 //! and on a problem sends one repair call that carries the check names and
 //! notes that code wrote. After the repair, an optional item that still
 //! fails is dropped; an essential part that still fails fails the stage.
+//! The runner applies in code the list and text caps that a stage schema
+//! declares: a list is cut to its cap, a text above its cap is a `Schema`
+//! problem of its item.
 
 use std::{ops::Range, time::Instant};
 
@@ -19,6 +22,17 @@ use crate::model::{Gm, GmError, Prompt};
 /// prompt, before the stage fails as `Model`. About one live call in ten
 /// times out. Any other model error fails the stage at once.
 pub(crate) const TIMEOUT_RETRIES: usize = 2;
+
+/// The model timeout of draft and build calls, in seconds, that the app and
+/// the evaluation set. They are much slower than a Turn: one spike call took
+/// 117 s. A timeout is retried `TIMEOUT_RETRIES` times, so one stalled call
+/// waits 12 minutes at most, and a Cancel waits for the running call.
+pub const BUILD_TIMEOUT_S: u64 = 240;
+
+/// The longest raw answer, in bytes, that a stage reads. The schema caps
+/// every list and text, but only the model server reads it; a longer answer
+/// fails as `Schema` before it is parsed.
+pub(crate) const RAW_ANSWER_MAX_BYTES: usize = 200_000;
 
 /// A section shorter than this, in characters, merges into the next one.
 pub(crate) const SECTION_MIN_CHARS: usize = 400;
@@ -75,6 +89,123 @@ impl<I> Problem<I> {
     }
 }
 
+/// One step of a path into a stage output: a field name or a list index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    Field(String),
+    Index(usize),
+}
+
+/// The item of a stage output that a problem at a path drops. `None`: the
+/// path is in an essential part, so the problem is essential.
+pub(crate) trait StageItem: Sized {
+    fn at(path: &[Step]) -> Option<Self>;
+}
+
+/// A stage with no optional item: every problem is essential.
+impl StageItem for () {
+    fn at(_: &[Step]) -> Option<Self> {
+        None
+    }
+}
+
+/// A stage whose items are the entries of its one top-level list, by
+/// index: `facts[3].text` is item 3.
+impl StageItem for usize {
+    fn at(path: &[Step]) -> Option<Self> {
+        match path {
+            [Step::Field(_), Step::Index(i), ..] => Some(*i),
+            _ => None,
+        }
+    }
+}
+
+/// A path as a note shows it: `facts[3].text`.
+fn show(path: &[Step]) -> String {
+    let mut out = String::new();
+    for step in path {
+        match step {
+            Step::Field(name) if out.is_empty() => out.push_str(name),
+            Step::Field(name) => out.push_str(&format!(".{name}")),
+            Step::Index(i) => out.push_str(&format!("[{i}]")),
+        }
+    }
+    out
+}
+
+/// Applies the caps that `schema` declares to `value`, as the model server
+/// does when it reads the schema; serde ignores them. A list above its
+/// `maxItems` is cut to that length. Each text above its `maxLength`, in
+/// characters, is returned with its path and its cap.
+fn apply_caps(schema: &Value, value: &mut Value) -> Vec<(Vec<Step>, u64)> {
+    let mut long = vec![];
+    walk_caps(schema, schema, value, &mut vec![], &mut long);
+    long
+}
+
+fn walk_caps(
+    root: &Value,
+    node: &Value,
+    value: &mut Value,
+    path: &mut Vec<Step>,
+    long: &mut Vec<(Vec<Step>, u64)>,
+) {
+    if let Some(def) = node
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|r| r.strip_prefix('#'))
+        .and_then(|pointer| root.pointer(pointer))
+    {
+        walk_caps(root, def, value, path, long);
+    }
+    for key in ["anyOf", "oneOf", "allOf"] {
+        for branch in node
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            walk_caps(root, branch, value, path, long);
+        }
+    }
+    match value {
+        Value::String(text) => {
+            if let Some(max) = node.get("maxLength").and_then(Value::as_u64)
+                && text.chars().count() as u64 > max
+            {
+                long.push((path.clone(), max));
+            }
+        }
+        Value::Array(list) => {
+            if let Some(max) = node.get("maxItems").and_then(Value::as_u64) {
+                list.truncate(usize::try_from(max).unwrap_or(usize::MAX));
+            }
+            if let Some(items) = node.get("items").filter(|i| i.is_object()) {
+                for (i, item) in list.iter_mut().enumerate() {
+                    path.push(Step::Index(i));
+                    walk_caps(root, items, item, path, long);
+                    path.pop();
+                }
+            }
+        }
+        Value::Object(fields) => {
+            for (name, sub) in node
+                .get("properties")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(field) = fields.get_mut(name) {
+                    path.push(Step::Field(name.clone()));
+                    walk_caps(root, sub, field, path, long);
+                    path.pop();
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// A stage output that passed, and the optional items to drop from it.
 pub(crate) struct Staged<T, I> {
     pub output: T,
@@ -94,6 +225,7 @@ pub(crate) fn run_stage<T, I>(
 ) -> Result<Option<Staged<T, I>>, BuildFailure>
 where
     T: DeserializeOwned,
+    I: StageItem,
 {
     let first = attempt(gm, ctl, op_id, call, &call.prompt, &call.step, &check)?;
     if first.problems.is_empty() {
@@ -246,6 +378,7 @@ fn attempt<T, I>(
 ) -> Result<Attempt<T, I>, BuildFailure>
 where
     T: DeserializeOwned,
+    I: StageItem,
 {
     let fail = |check| BuildFailure {
         stage: call.stage,
@@ -278,12 +411,42 @@ where
         }
     };
     let raw = answer.map_err(|_| fail(BuildCheck::Model))?;
-    Ok(match serde_json::from_str::<T>(&raw) {
-        Ok(output) => Attempt {
-            problems: check(&output),
-            output: Some(output),
-        },
-        Err(_) => Attempt {
+    if raw.len() > RAW_ANSWER_MAX_BYTES {
+        return Ok(Attempt {
+            output: None,
+            problems: vec![Problem::essential(
+                BuildCheck::Schema,
+                "the answer is far longer than the schema allows",
+            )],
+        });
+    }
+    let parsed = serde_json::from_str::<Value>(&raw)
+        .ok()
+        .and_then(|mut value| {
+            let long = apply_caps(&call.schema, &mut value);
+            serde_json::from_value::<T>(value)
+                .ok()
+                .map(|out| (out, long))
+        });
+    Ok(match parsed {
+        Some((output, long)) => {
+            let mut problems: Vec<Problem<I>> = long
+                .into_iter()
+                .map(|(path, max)| {
+                    let note = format!("{} is longer than {max} characters", show(&path));
+                    match I::at(&path) {
+                        Some(item) => Problem::optional(BuildCheck::Schema, item, note),
+                        None => Problem::essential(BuildCheck::Schema, note),
+                    }
+                })
+                .collect();
+            problems.extend(check(&output));
+            Attempt {
+                problems,
+                output: Some(output),
+            }
+        }
+        None => Attempt {
             output: None,
             problems: vec![Problem::essential(
                 BuildCheck::Schema,
@@ -560,6 +723,14 @@ mod tests {
     }
 
     #[test]
+    fn one_stalled_call_waits_twelve_minutes_at_most() {
+        // Two retries of a call that times out each time: three timeouts.
+        assert_eq!(BUILD_TIMEOUT_S, 240);
+        assert_eq!(TIMEOUT_RETRIES, 2);
+        assert_eq!(BUILD_TIMEOUT_S * (TIMEOUT_RETRIES as u64 + 1), 12 * 60);
+    }
+
+    #[test]
     fn a_timeout_is_retried_twice_with_the_same_prompt() {
         let gm = ScriptedGm::new(vec![
             Err(GmError::Timeout),
@@ -646,6 +817,131 @@ mod tests {
         assert_eq!(staged.output.items, vec![1, 1, 7]);
         assert_eq!(staged.drop, vec![2]);
         assert_eq!(steps.len(), 2);
+    }
+
+    #[derive(serde::Deserialize, JsonSchema)]
+    struct Capped {
+        #[schemars(length(max = 12))]
+        title: String,
+        #[schemars(length(max = 2))]
+        notes: Vec<Line>,
+    }
+
+    #[derive(serde::Deserialize, JsonSchema)]
+    struct Line {
+        #[schemars(length(max = 5))]
+        text: String,
+        #[schemars(length(max = 1), inner(length(max = 3)))]
+        tags: Vec<String>,
+    }
+
+    type CappedOutcome = Result<Option<Staged<Capped, usize>>, BuildFailure>;
+
+    /// Runs one call whose schema is `Capped`'s, with no check of its own;
+    /// each note is an optional item.
+    fn run_capped(gm: &ScriptedGm, need: Need) -> (CappedOutcome, Vec<String>) {
+        let mut steps = vec![];
+        let result = {
+            let mut progress = |_| {};
+            let mut log = |e: DebugEntry| steps.push(e.step);
+            let mut ctl = Control {
+                progress: &mut progress,
+                cancelled: &|| false,
+                log: &mut log,
+            };
+            let call = StageCall {
+                schema: schema_of::<Capped>(),
+                ..call(need)
+            };
+            run_stage(gm, &mut ctl, "draft-1", &call, |_: &Capped| {
+                Vec::<Problem<usize>>::new()
+            })
+        };
+        (result, steps)
+    }
+
+    fn capped(title: &str, notes: &[(&str, &[&str])]) -> Result<String, GmError> {
+        let notes: Vec<Value> = notes
+            .iter()
+            .map(|(text, tags)| json!({"text": text, "tags": tags}))
+            .collect();
+        Ok(json!({"title": title, "notes": notes}).to_string())
+    }
+
+    #[test]
+    fn a_list_above_its_cap_is_cut_to_the_cap() {
+        let gm = ScriptedGm::new(vec![capped(
+            "Harbour",
+            &[("a", &["x", "y"]), ("b", &[]), ("c", &[]), ("d", &[])],
+        )]);
+        let (result, steps) = run_capped(&gm, Need::Essential);
+        let staged = result.unwrap().unwrap();
+        assert_eq!(staged.output.title, "Harbour");
+        let texts: Vec<&str> = staged
+            .output
+            .notes
+            .iter()
+            .map(|n| n.text.as_str())
+            .collect();
+        assert_eq!(texts, ["a", "b"]);
+        assert_eq!(staged.output.notes[0].tags, ["x"]);
+        assert!(staged.drop.is_empty());
+        // Cutting a list needs no repair.
+        assert_eq!(steps.len(), 1);
+    }
+
+    #[test]
+    fn a_text_above_its_cap_drops_its_optional_item() {
+        let answer = || capped("Harbour", &[("a", &[]), ("far too long", &[]), ("c", &[])]);
+        let gm = ScriptedGm::new(vec![answer(), answer()]);
+        let (result, steps) = run_capped(&gm, Need::Optional);
+        let staged = result.unwrap().unwrap();
+        assert_eq!(staged.drop, vec![1]);
+        assert_eq!(steps, ["hidden_facts 1/1", "hidden_facts 1/1 repair"]);
+
+        // A list item's text counts for its item too; the cap counts
+        // characters, not bytes.
+        let gm = ScriptedGm::new(vec![
+            capped("Harbour", &[("ééééé", &["long"])]),
+            capped("Harbour", &[("ééééé", &["long"])]),
+        ]);
+        let staged = run_capped(&gm, Need::Optional).0.unwrap().unwrap();
+        assert_eq!(staged.drop, vec![0]);
+
+        // A text above its cap outside any item fails an essential call.
+        let answer = || capped("A title far above twelve", &[]);
+        let gm = ScriptedGm::new(vec![answer(), answer()]);
+        let (result, _) = run_capped(&gm, Need::Essential);
+        assert_eq!(
+            result.err(),
+            Some(BuildFailure {
+                stage: Stage::HiddenFacts,
+                check: BuildCheck::Schema
+            })
+        );
+    }
+
+    #[test]
+    fn an_answer_above_the_size_limit_fails_as_schema() {
+        assert_eq!(RAW_ANSWER_MAX_BYTES, 200_000);
+        let body = json!({"title": "Harbour", "notes": []}).to_string();
+        // Valid JSON, padded with spaces past the limit.
+        let huge = format!("{body}{}", " ".repeat(RAW_ANSWER_MAX_BYTES));
+        let gm = ScriptedGm::new(vec![Ok(huge.clone()), Ok(huge)]);
+        let (result, steps) = run_capped(&gm, Need::Essential);
+        assert_eq!(
+            result.err(),
+            Some(BuildFailure {
+                stage: Stage::HiddenFacts,
+                check: BuildCheck::Schema
+            })
+        );
+        assert_eq!(steps.len(), 2);
+
+        // At the limit, the answer is read.
+        let at_limit = format!("{body}{}", " ".repeat(RAW_ANSWER_MAX_BYTES - body.len()));
+        let gm = ScriptedGm::new(vec![Ok(at_limit)]);
+        assert!(run_capped(&gm, Need::Essential).0.unwrap().is_some());
     }
 
     #[test]

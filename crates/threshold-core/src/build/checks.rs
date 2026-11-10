@@ -9,12 +9,12 @@ use std::{collections::HashSet, sync::LazyLock};
 use super::{
     BuildCheck,
     draft_stages::open_key,
-    stages::Problem,
+    stages::{Problem, StageItem, Step},
     world_stages::{EventsOut, FactOut, GoalOut, HiddenOut, NpcOut, NpcState, StartOut},
 };
 use crate::{
     checks::{PC_INVOLUNTARY_KEYS, is_involuntary_key},
-    domain::{AdventureSeed, EntityKind, FactEntry, OtherName},
+    domain::{AdventureSeed, EntityKind, FactEntry, OtherName, is_open_key},
     normalize,
 };
 
@@ -111,6 +111,36 @@ impl Roster {
     pub fn names_pc(&self, text: &str) -> bool {
         holds(&self.pc_terms, text)
     }
+
+    /// True when a goal or a secret centres on the PC: see `centres_on_pc`.
+    pub fn centres_on_pc(&self, text: &str, target: Option<&str>) -> bool {
+        let pc = self.pc();
+        self.names_pc(text) || target.is_some_and(|t| is_pc_name(&pc.main, &pc.others, t))
+    }
+}
+
+/// True when a goal or a secret of an NPC centres on the PC whose main name
+/// is `main`: its text names the PC (`names_pc`), or its `target` is a name
+/// of the PC after `normalize::name`. The target is a goal's `against` or a
+/// secret's subject, so "Ruin him" against the PC counts. The WorldAutonomy
+/// check and the evaluation count PC-centred goals and secrets with it.
+pub fn centres_on_pc(
+    main: &str,
+    others: &[String],
+    roster: &[&str],
+    text: &str,
+    target: Option<&str>,
+) -> bool {
+    names_pc(main, others, roster, text) || target.is_some_and(|t| is_pc_name(main, others, t))
+}
+
+/// True when `name` is the main name or an other name of the PC.
+fn is_pc_name(main: &str, others: &[String], name: &str) -> bool {
+    let name = normalize::name(name);
+    !name.is_empty()
+        && std::iter::once(main)
+            .chain(others.iter().map(String::as_str))
+            .any(|n| normalize::name(n) == name)
 }
 
 /// True when `text` names the PC whose main name is `main`: it holds, as
@@ -523,6 +553,27 @@ pub(super) enum NpcItem {
     Secret,
 }
 
+/// The item a problem at a path of an NpcState answer drops. A text of the
+/// Voice Card is essential.
+impl StageItem for NpcItem {
+    fn at(path: &[Step]) -> Option<Self> {
+        let field = |step: &Step, name: &str| matches!(step, Step::Field(f) if f == name);
+        match path {
+            [goals, Step::Index(i), against, ..]
+                if field(goals, "goals") && field(against, "against") =>
+            {
+                Some(Self::Against(*i))
+            }
+            [goals, Step::Index(i), ..] if field(goals, "goals") => Some(Self::Goal(*i)),
+            [attitudes, Step::Index(i), ..] if field(attitudes, "attitudes") => {
+                Some(Self::Attitude(*i))
+            }
+            [secret, ..] if field(secret, "secret") => Some(Self::Secret),
+            _ => None,
+        }
+    }
+}
+
 /// The most goals an NPC keeps.
 const MAX_GOALS: usize = 3;
 /// The fewest sample lines of a Voice Card.
@@ -618,19 +669,28 @@ pub(super) fn npc_state(
     problems
 }
 
-/// How many goals and secrets of `state` name the PC, and how many it has.
+/// How many goals and secrets of `state` centre on the PC
+/// (`centres_on_pc`), and how many it has.
 pub(super) fn pc_centred(roster: &Roster, state: &NpcState) -> (usize, usize) {
-    let texts = state
+    let items = state
         .goals
         .iter()
-        .map(|g| g.text.as_str())
-        .chain(state.secret.iter().map(|s| s.text.as_str()));
-    texts.fold((0, 0), |(naming, total), text| {
-        (naming + usize::from(roster.names_pc(text)), total + 1)
+        .map(|g| (g.text.as_str(), g.against.as_deref()))
+        .chain(
+            state
+                .secret
+                .iter()
+                .map(|s| (s.text.as_str(), Some(s.subject.as_str()))),
+        );
+    items.fold((0, 0), |(naming, total), (text, target)| {
+        (
+            naming + usize::from(roster.centres_on_pc(text, target)),
+            total + 1,
+        )
     })
 }
 
-/// The share of all NPC goals and secrets that name the PC.
+/// The share of all NPC goals and secrets that centre on the PC.
 pub(super) fn pc_centred_share(roster: &Roster, states: &[NpcState]) -> f32 {
     let (naming, total) = states
         .iter()
@@ -643,18 +703,18 @@ pub(super) fn pc_centred_share(roster: &Roster, states: &[NpcState]) -> f32 {
     }
 }
 
-/// The items of `state` that name the PC, for a WorldAutonomy repair.
+/// The items of `state` that centre on the PC, for a WorldAutonomy repair.
 pub(super) fn pc_centred_items(roster: &Roster, state: &NpcState) -> Vec<String> {
     let goals = state
         .goals
         .iter()
         .enumerate()
-        .filter(|(_, g)| roster.names_pc(&g.text))
+        .filter(|(_, g)| roster.centres_on_pc(&g.text, g.against.as_deref()))
         .map(|(i, _)| Note::item("goals", i).path());
     let secret = state
         .secret
         .iter()
-        .filter(|s| roster.names_pc(&s.text))
+        .filter(|s| roster.centres_on_pc(&s.text, Some(&s.subject)))
         .map(|_| Note::part("secret").path());
     goals.chain(secret).collect()
 }
@@ -741,6 +801,14 @@ pub(super) fn world_events(roster: &Roster, out: &EventsOut) -> Vec<Problem<usiz
                 push(
                     BuildCheck::Schema,
                     at().says("needs a subject, a key and a value"),
+                );
+            }
+            // ADR 0005: only `setup` writes an open item, from `open`.
+            if is_open_key(&effect.key) {
+                push(
+                    BuildCheck::OpenItems,
+                    at().field("key")
+                        .says("starts with pending_; an event never writes an open item"),
                 );
             }
             match roster.find(&effect.subject) {

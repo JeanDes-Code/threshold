@@ -160,7 +160,7 @@ Deterministic code:
 | Completeness | Every NPC has at least one goal and a Voice Card with at least two sample lines. |
 | Agency | No event effect and no fact sets a voluntary act, word, feeling or motive of the PC. |
 | Settled facts | No generated fact contradicts a settled fact on the same subject and key. |
-| World autonomy | At most a set share of NPC goals and secrets name the PC. The builder proposes the number and tests it on the fixture. |
+| World autonomy | At most a set share of NPC goals and secrets centre on the PC: the text names the PC, the goal is against the PC, or the secret is about the PC. The builder proposes the number and tests it on the fixture. |
 | Secrecy | The PC never holds a secret or a hidden fact. No command that the UI can call returns one outside the debug view. |
 
 ### 6.6 Begin
@@ -193,7 +193,7 @@ Evaluation, measured against the live model, on a fixture chronicle that is inve
 - **roster recall**: named characters found, against a hand-made list;
 - **fact recall**: facts found, against a hand-made list;
 - **false past**: generated facts that state an open item as done;
-- **PC-centred share**: NPC goals and secrets that name the PC;
+- **PC-centred share**: NPC goals and secrets that centre on the PC (named in the text, a goal against the PC, a secret about the PC);
 - **voice distance**: the blind voice judge that exists, on the generated Voice Cards;
 - **build time**: p50 and max.
 

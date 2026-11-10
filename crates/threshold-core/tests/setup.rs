@@ -6,8 +6,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod support;
+
+use support::{e, fact, proposal, slot};
 use threshold_core::{
-    domain::{AdventureSeed, FactSource, WorldSetup},
+    checks::{CheckKind, validate},
+    domain::{AdventureSeed, Canon, FactSource, Seen, Verdict, WorldSetup},
     fixture::load_adventure_seed,
     setup::{SetupError, WORLD_OP_ID, commit_world, create_campaign_file},
     store::{CampaignId, Store, WorldView},
@@ -108,6 +112,94 @@ open = true
     let plan = view.live_fact(doul, "pending_plan").unwrap();
     assert!(plan.seen_by.is_empty());
     assert!(view.knowledge.iter().all(|k| k.fact_id != Some(plan.id)));
+}
+
+#[test]
+fn only_a_fact_the_pc_holds_commits_as_persistent() {
+    let (mut store, campaign) = campaign(&town_seed());
+    let setup = world(
+        r#"
+[[facts]]
+subject = "Orsel"
+key = "ledger_place"
+value = "under the archive floor"
+text = "Orsel hides the true tithe ledger under the archive floor."
+known_by = ["Hessa"]
+
+[[facts]]
+subject = "Doul"
+key = "plan"
+value = "search the scribe's room"
+text = "Doul plans to search the scribe's room."
+
+[[facts]]
+subject = "Hessa"
+key = "trade"
+value = "archivist"
+text = "Hessa keeps the tithe archive."
+known_by = ["Wren", "Hessa"]
+
+[[facts]]
+subject = "Tobin"
+key = "errand"
+value = "fetch the seal"
+text = "Tobin will fetch the seal."
+known_by = ["Wren"]
+open = true
+"#,
+    );
+    commit_world(&mut store, campaign, &setup).unwrap();
+
+    let view = store.snapshot(campaign).unwrap();
+    let canon = |name: &str, key: &str| view.live_fact(id(&view, name), key).unwrap().canon;
+    // A hidden fact and a secret stay open to change in play.
+    assert_eq!(canon("Orsel", "ledger_place"), Canon::Established);
+    assert_eq!(canon("Doul", "plan"), Canon::Established);
+    // A settled fact the PC knows is Persistent; an open item never is.
+    assert_eq!(canon("Hessa", "trade"), Canon::Persistent);
+    assert_eq!(canon("Tobin", "pending_errand"), Canon::Established);
+
+    // The PC talks Doul out of his plan: the play write is no bend.
+    let doul = id(&view, "Doul");
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(
+        slot(e(doul), "plan", "leave the scribe alone"),
+        Seen::Pc,
+        vec![],
+    )];
+    if let Err(errs) = validate(&p, &view) {
+        panic!("{errs:?}");
+    }
+    // A settled fact the PC knows still cannot bend.
+    let hessa = id(&view, "Hessa");
+    p.facts = vec![fact(slot(e(hessa), "trade", "baker"), Seen::Pc, vec![])];
+    let errs = validate(&p, &view).unwrap_err();
+    assert!(
+        errs.iter().any(|r| r.check == CheckKind::FactBends),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn an_event_effect_on_an_open_key_is_refused() {
+    let (mut store, campaign) = campaign(&town_seed());
+    let before = store.snapshot(campaign).unwrap();
+    let setup = world(
+        r#"
+[[events]]
+at = 60
+actor = "Doul"
+text = "Doul files a motion."
+
+[[events.effects]]
+subject = "Doul"
+key = "pending_motion"
+value = "filed"
+"#,
+    );
+    let result = commit_world(&mut store, campaign, &setup);
+    assert!(matches!(result, Err(SetupError::Invalid(_))), "{result:?}");
+    assert_eq!(store.snapshot(campaign).unwrap(), before);
 }
 
 #[test]

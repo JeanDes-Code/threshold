@@ -514,6 +514,40 @@ fn each_call_sees_what_it_needs() {
 }
 
 #[test]
+fn every_world_call_sees_the_content_boundaries() {
+    let mut seed = seed();
+    seed.boundaries = vec!["No harm comes to an animal.".into()];
+    seed.themes = vec!["duty".into(), "the sea".into()];
+    seed.min_age = Some(21);
+    let draft = draft_of(seed, vec![]);
+    let run = run(&draft, &plain());
+    run.world();
+    let calls = run.gm.calls();
+    let stages: Vec<&str> = run.log.iter().map(|e| e.step.as_str()).collect();
+    assert_eq!(calls.len(), 6, "{stages:?}");
+    for (call, step) in calls.iter().zip(&stages) {
+        let recent = &call.prompt.recent;
+        assert!(
+            recent.contains("- No harm comes to an animal."),
+            "{step}: {recent}"
+        );
+        assert!(
+            recent.contains("Nothing you write may break a boundary."),
+            "{step}: {recent}"
+        );
+        assert!(
+            recent.contains("Every character is at least 21 years old."),
+            "{step}: {recent}"
+        );
+        assert!(recent.contains("duty, the sea"), "{step}: {recent}");
+    }
+    // Hidden facts, NPC state, World Events and start state: four stages.
+    for stage in ["hidden_facts", "npc_state", "world_events", "start_state"] {
+        assert!(stages.iter().any(|s| s.starts_with(stage)), "{stages:?}");
+    }
+}
+
+#[test]
 fn the_start_state_is_the_latest_location() {
     let draft = draft_of(
         seed(),
@@ -906,6 +940,84 @@ fn world_autonomy_trap() {
 }
 
 #[test]
+fn a_goal_against_the_pc_or_a_secret_about_the_pc_counts_for_world_autonomy() {
+    // No text names the PC. A goal against the PC and a secret about the PC
+    // (under an other name) centre on the PC all the same.
+    let against = json!({"text": "Ruin him.", "against": "Mira Holt"});
+    let about_pc = json!({
+        "subject": "the Keeper",
+        "key": "reputation",
+        "value": "a thief",
+        "text": "The harbour calls that one a thief.",
+        "open": false
+    });
+    let fails = |tobin: Value, ada: Value| {
+        let mut outputs = plain();
+        outputs[2] = tobin.clone();
+        outputs[3] = ada.clone();
+        outputs.insert(4, tobin);
+        outputs.insert(5, ada);
+        let run = run(&draft(), &outputs);
+        assert_eq!(
+            run.result.unwrap_err(),
+            BuildFailure {
+                stage: Stage::NpcState,
+                check: BuildCheck::WorldAutonomy
+            }
+        );
+        run.gm.calls()[4].prompt.recent.clone()
+    };
+
+    // Goals against the PC alone: four of six items.
+    let two_against = |name: &str| {
+        let mut out = npc_out(name);
+        out["goals"] = json!([against, against]);
+        out
+    };
+    let again = fails(two_against("Tobin Reed"), two_against("Ada Venn"));
+    assert!(
+        again.contains("goals[0]") && again.contains("goals[1]"),
+        "{again}"
+    );
+
+    // One goal against the PC and one secret about the PC each: four of
+    // four items. The goals alone would be two of four, at the limit.
+    let one_each = |name: &str| {
+        let mut out = npc_out(name);
+        out["goals"] = json!([against]);
+        out["secret"] = about_pc.clone();
+        out
+    };
+    let again = fails(one_each("Tobin Reed"), one_each("Ada Venn"));
+    assert!(again.contains("secret"), "{again}");
+}
+
+#[test]
+fn a_goal_above_its_cap_is_dropped_and_a_long_list_is_cut() {
+    let mut npc = npc_out("Tobin Reed");
+    npc["goals"] = json!([
+        {"text": "W".repeat(161), "against": null},
+        {"text": "Tobin Reed wants a quiet winter.", "against": null}
+    ]);
+    // Six samples: the schema allows four.
+    npc["voice_card"]["samples"] = json!(["One.", "Two.", "Three.", "Four.", "Five.", "Six."]);
+    let mut outputs = plain();
+    outputs[2] = npc.clone();
+    outputs.insert(3, npc);
+    let world = run(&draft(), &outputs).world();
+    assert_eq!(
+        goals_of(&world, "Tobin Reed"),
+        [("Tobin Reed wants a quiet winter.", None)]
+    );
+    let card = world
+        .voice_cards
+        .iter()
+        .find(|c| c.npc == "Tobin Reed")
+        .unwrap();
+    assert_eq!(card.samples, ["One.", "Two.", "Three.", "Four."]);
+}
+
+#[test]
 fn optional_item_is_dropped_and_the_build_goes_on() {
     let mut bad_npc = npc_out("Tobin Reed");
     bad_npc["secret"]["subject"] = json!("Nobody Known");
@@ -982,20 +1094,12 @@ fn essential_item_fails_the_build() {
 fn event_rules() {
     let mut long = ev(60, "Tobin Reed", &[], &[]);
     long["text"] = json!("x".repeat(81));
+    // Six events, the schema's cap. Three effects are above the cap of two:
+    // the list is cut to two and the event stays.
     let bad_events = events(&[
         ev(5, "Tobin Reed", &[], &[]),
         ev(20_161, "Tobin Reed", &[], &[]),
         ev(60, "Tobin Reed", &[], &["Tobin Reed"]),
-        ev(
-            60,
-            "Tobin Reed",
-            &[
-                ("Ada Venn", "a", "1"),
-                ("Ada Venn", "b", "2"),
-                ("Ada Venn", "c", "3"),
-            ],
-            &[],
-        ),
         long,
         ev(
             10,
@@ -1003,11 +1107,58 @@ fn event_rules() {
             &[("Gull Point", "lamp", "dark")],
             &["Tobin Reed"],
         ),
-        ev(20_160, "Ada Venn", &[], &[]),
+        ev(
+            20_160,
+            "Ada Venn",
+            &[
+                ("Ada Venn", "a", "1"),
+                ("Ada Venn", "b", "2"),
+                ("Ada Venn", "c", "3"),
+            ],
+            &[],
+        ),
     ]);
     let world = run(&draft(), &trapped(4, bad_events)).world();
     let at: Vec<u64> = world.events.iter().map(|e| e.at).collect();
     assert_eq!(at, [10, 20_160]);
+    let keys: Vec<&str> = world.events[1]
+        .effects
+        .iter()
+        .map(|e| e.key.as_str())
+        .collect();
+    assert_eq!(keys, ["a", "b"]);
+}
+
+#[test]
+fn an_event_effect_never_writes_an_open_key() {
+    // An open item is written by `setup` alone (ADR 0005): an effect on a
+    // `pending_` key drops its event after the repair.
+    let trap = events(&[
+        ev(
+            30,
+            "Tobin Reed",
+            &[("Harbour Council", "pending_vote", "new pier")],
+            &[],
+        ),
+        ev(
+            60,
+            "Tobin Reed",
+            &[("Harbour Council", "vote", "new pier")],
+            &[],
+        ),
+    ]);
+    let run = run(&draft(), &trapped(4, trap));
+    let repair = run
+        .gm
+        .calls()
+        .iter()
+        .map(|c| c.prompt.recent.clone())
+        .find(|r| r.contains("YOUR LAST ANSWER FAILED"))
+        .unwrap();
+    assert!(repair.contains("events[0].effects[0].key"), "{repair}");
+    let world = run.world();
+    let at: Vec<u64> = world.events.iter().map(|e| e.at).collect();
+    assert_eq!(at, [60]);
 }
 
 #[test]

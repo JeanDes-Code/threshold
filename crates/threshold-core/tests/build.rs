@@ -355,6 +355,28 @@ fn an_age_the_model_calls_stated_still_needs_the_player() {
 }
 
 #[test]
+fn a_roster_text_above_its_cap_fails_the_roster() {
+    // A roster entry is essential: a name above its cap is never dropped
+    // in silence, and the roster fails after one repair.
+    let mut roster = roster_out();
+    roster["characters"][1]["name"] = json!("A".repeat(61));
+    let gm = gm(&[roster.clone(), roster]);
+    let run = run(&source(), &gm);
+    assert_eq!(
+        run.result.unwrap_err(),
+        BuildFailure {
+            stage: Stage::DraftRoster,
+            check: BuildCheck::Schema
+        }
+    );
+    let repair = &gm.calls()[1].prompt.recent;
+    assert!(
+        repair.contains("characters[1].name is longer than 60 characters"),
+        "{repair}"
+    );
+}
+
+#[test]
 fn draft_keeps_hidden_causes_out() {
     let gm = gm(&[
         roster_out(),

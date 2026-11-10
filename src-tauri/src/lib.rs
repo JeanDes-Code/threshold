@@ -22,16 +22,12 @@ use session::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
-    build::{KnownFact, Progress},
+    build::{BUILD_TIMEOUT_S, KnownFact, Progress},
     domain::AdventureSeed,
     rules::RollResult,
     turn::BEGIN_OP_ID,
 };
 use threshold_ollama::OllamaGm;
-
-/// The model timeout of draft and build calls, in seconds. They are much
-/// slower than a Turn: one spike call took 117 s.
-const BUILD_TIMEOUT_S: u64 = 600;
 
 /// The session every command shares.
 struct Shared(Arc<Mutex<Session>>);

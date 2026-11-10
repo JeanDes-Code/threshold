@@ -64,8 +64,24 @@ fn with_pc_keys(base: &str) -> String {
     )
 }
 
-/// The premise, the story language and the roster.
+/// The premise, the story language, the Content Boundaries the Player set
+/// (boundaries, the `min_age` line, themes) and the roster. Every World
+/// Build call reads it: nobody reads the hidden world, so each call must
+/// hold the boundaries itself.
 fn context(draft: &SeedDraft, roster: &Roster) -> String {
+    let seed = &draft.seed;
+    let mut limits: Vec<String> = seed.boundaries.iter().map(|b| format!("- {b}")).collect();
+    if limits.is_empty() {
+        limits.push("- none beyond the rules".into());
+    }
+    if let Some(min_age) = seed.min_age {
+        limits.push(format!("Every character is at least {min_age} years old."));
+    }
+    let themes = if seed.themes.is_empty() {
+        "none".to_owned()
+    } else {
+        seed.themes.join(", ")
+    };
     let lines: Vec<String> = roster
         .members()
         .iter()
@@ -88,9 +104,10 @@ fn context(draft: &SeedDraft, roster: &Roster) -> String {
         })
         .collect();
     format!(
-        "PREMISE\n{}\n\nSTORY LANGUAGE\n{}\n\nROSTER\n{}",
-        draft.seed.premise,
-        draft.seed.story_language,
+        "PREMISE\n{}\n\nSTORY LANGUAGE\n{}\n\nCONTENT BOUNDARIES\nNothing you write may break a boundary.\n{}\n\nTHEMES\n{themes}\n\nROSTER\n{}",
+        seed.premise,
+        seed.story_language,
+        limits.join("\n"),
         lines.join("\n")
     )
 }

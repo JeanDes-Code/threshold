@@ -72,7 +72,7 @@ pub struct Config {
     /// Overrides the memory scenario's `total_turns`.
     pub memory_turns: Option<usize>,
     /// Override the world_build scenario's Source Text and expected list.
-    /// A file outside `root` makes the report print counts only.
+    /// A file outside `<root>/fixtures/` makes the report print counts only.
     pub source: Option<PathBuf>,
     pub expected: Option<PathBuf>,
 }
