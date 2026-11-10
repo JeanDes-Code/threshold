@@ -112,6 +112,22 @@ _Avoid_: Plot hole, cheat, railroading
 A removable set of data that extends what the GM may portray: prompt fragments, extra Adventure Seed options, model hints. It holds no code and cannot override a Content Boundary.
 _Avoid_: Mod, module, plugin, DLC
 
+**Journal**:
+The Player's record of the Campaign. The app writes it from PC Knowledge and from Narration the Player has read.
+_Avoid_: Log, history, quest log
+
+**Note**:
+Text the Player writes in the Journal. It is never part of the world and never reaches a prompt.
+_Avoid_: Memo, comment
+
+**Pin**:
+The Player's mark that keeps a Journal entry or a Note in view during play.
+_Avoid_: Favourite, bookmark
+
+**Open Item**:
+A plan or pending matter that is not done yet, stored as an Established fact on a pending key (ADR 0005). A Lead is something the PC could pursue; an Open Item is something expected to happen or to be done.
+_Avoid_: Quest, task, todo
+
 ## Resolution
 
 **Ruleset**:
