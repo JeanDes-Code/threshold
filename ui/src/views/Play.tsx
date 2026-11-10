@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import {
+  BEGIN_OP_ID,
   committedLine,
   errorText,
   rollText,
@@ -125,7 +126,12 @@ export default function Play({ campaign, lines, onLine, onNarration, onRefresh, 
     }
   };
 
+  // "Begin": the GM narrates the opening scene, as the Opening Turn.
+  const begin = () => play({ opId: BEGIN_OP_ID, result: api.begin() }, "opening", "");
+
   const last = lines.at(-1);
+  const needsBegin =
+    campaign.needs_begin && !lines.some((l) => l.kind === "opening" || l.kind === "play");
 
   return (
     <section>
@@ -134,11 +140,14 @@ export default function Play({ campaign, lines, onLine, onNarration, onRefresh, 
       </p>
       {lines.map((line) => (
         <article key={line.turn_id} className={line.reverted ? "turn reverted" : "turn"}>
-          <div className="intent">
-            {line.kind === "correction" ? "Correction: " : "> "}
-            {line.intent}
-            {line.reverted && <span className="tag"> (reverted by a Correction)</span>}
-          </div>
+          {/* An Opening Turn has no Intent: only its Narration shows. */}
+          {line.kind !== "opening" && (
+            <div className="intent">
+              {line.kind === "correction" ? "Correction: " : "> "}
+              {line.intent}
+              {line.reverted && <span className="tag"> (reverted by a Correction)</span>}
+            </div>
+          )}
           {line.roll && <Roll roll={line.roll} />}
           {line.narration !== null ? (
             <div className="narration">{line.narration}</div>
@@ -170,41 +179,52 @@ export default function Play({ campaign, lines, onLine, onNarration, onRefresh, 
         </div>
       )}
 
-      <label htmlFor="intent">What does {campaign.pc_name} do?</label>
-      <textarea
-        id="intent"
-        rows={3}
-        value={intent}
-        disabled={busy}
-        onChange={(e) => setIntent(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-      />
-      <div className="row">
-        <button disabled={busy || !intent.trim()} onClick={() => void submit()}>
-          Play
-        </button>
-        <button disabled={busy || !last || last.kind !== "play"} onClick={() => setFixing((f) => !f)}>
-          Correct last Turn…
-        </button>
-      </div>
-
-      {fixing && (
-        <div>
-          <label htmlFor="clarified">What you meant</label>
-          <input id="clarified" value={clarified} onChange={(e) => setClarified(e.target.value)} />
-          <label htmlFor="why">Why the last Turn was wrong</label>
-          <input id="why" value={why} onChange={(e) => setWhy(e.target.value)} />
+      {needsBegin ? (
+        <div className="row">
+          <button disabled={busy} onClick={() => void begin()}>
+            Begin
+          </button>
+          <span className="muted">The GM sets the opening scene.</span>
+        </div>
+      ) : (
+        <>
+          <label htmlFor="intent">What does {campaign.pc_name} do?</label>
+          <textarea
+            id="intent"
+            rows={3}
+            value={intent}
+            disabled={busy}
+            onChange={(e) => setIntent(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+          />
           <div className="row">
-            <button disabled={busy || !clarified.trim() || !why.trim()} onClick={() => void correct()}>
-              Apply Correction
+            <button disabled={busy || !intent.trim()} onClick={() => void submit()}>
+              Play
+            </button>
+            <button disabled={busy || !last || last.kind !== "play"} onClick={() => setFixing((f) => !f)}>
+              Correct last Turn…
             </button>
           </div>
-        </div>
+
+          {fixing && (
+            <div>
+              <label htmlFor="clarified">What you meant</label>
+              <input id="clarified" value={clarified} onChange={(e) => setClarified(e.target.value)} />
+              <label htmlFor="why">Why the last Turn was wrong</label>
+              <input id="why" value={why} onChange={(e) => setWhy(e.target.value)} />
+              <div className="row">
+                <button disabled={busy || !clarified.trim() || !why.trim()} onClick={() => void correct()}>
+                  Apply Correction
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <h2>Out of character</h2>

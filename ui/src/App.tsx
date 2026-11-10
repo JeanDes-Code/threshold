@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { errorText, type CampaignSummary, type Defaults, type TurnLine } from "./api";
+import { errorText, type CampaignSummary, type TurnLine } from "./api";
 import { api, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
 import Debug from "./views/Debug";
 import Journal from "./views/Journal";
+import NewCampaign from "./views/NewCampaign";
 import Play from "./views/Play";
 
 type Tab = "play" | "character" | "journal" | "debug";
@@ -66,47 +67,56 @@ export default function App() {
         <span className="status">Model: {model}</span>
       </nav>
       {appError && <p className="error page">{appError}</p>}
-      {showSetup && <Setup onOpened={opened} locked={turnBusy} />}
-      {campaign && (
-        <>
-          <div className="tabs">
-            {(["play", "character", "journal"] as const).map((t) => (
+      {/* Hidden, not unmounted: a running draft or build keeps its screen. */}
+      <div hidden={!showSetup}>
+        <Setup onOpened={opened} locked={turnBusy} shown={showSetup} />
+      </div>
+      {(campaign || debug) && (
+        <div className="tabs">
+          {campaign &&
+            (["play", "character", "journal"] as const).map((t) => (
               <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
                 {t[0]?.toUpperCase() + t.slice(1)}
               </button>
             ))}
-            {debug && (
-              <button aria-pressed={tab === "debug"} onClick={() => setTab("debug")}>
-                Debug
-              </button>
-            )}
-          </div>
-          <main>
-            {tab === "play" && (
-              <Play
-                key={campaign.db_path}
-                campaign={campaign}
-                onBusy={setTurnBusy}
-                lines={lines}
-                onLine={(line) => setLines((all) => [...all, line])}
-                onRefresh={() => {
-                  api.summary().then(
-                    (summary) => setLines(summary.turns),
-                    (e: unknown) => setAppError(`Could not reload the Turns: ${errorText(e)}`),
-                  );
-                }}
-                onNarration={(turnId, narration) =>
-                  setLines((all) =>
-                    all.map((l) => (l.turn_id === turnId ? { ...l, narration } : l)),
-                  )
-                }
-              />
-            )}
-            {tab === "character" && <Character revision={lines.length} />}
-            {tab === "journal" && <Journal revision={lines.length} />}
-            {tab === "debug" && debug && <Debug lines={lines} />}
-          </main>
-        </>
+          {debug && (
+            <button aria-pressed={tab === "debug"} onClick={() => setTab("debug")}>
+              Debug
+            </button>
+          )}
+        </div>
+      )}
+      {/* The debug view works without a Campaign: a failed World Build has none. */}
+      {tab === "debug" && debug && (
+        <main>
+          <Debug lines={lines} />
+        </main>
+      )}
+      {campaign && tab !== "debug" && (
+        <main>
+          {tab === "play" && (
+            <Play
+              key={campaign.db_path}
+              campaign={campaign}
+              onBusy={setTurnBusy}
+              lines={lines}
+              onLine={(line) => setLines((all) => [...all, line])}
+              onRefresh={() => {
+                api.summary().then(
+                  (summary) => setLines(summary.turns),
+                  (e: unknown) => setAppError(`Could not reload the Turns: ${errorText(e)}`),
+                );
+              }}
+              onNarration={(turnId, narration) =>
+                setLines((all) =>
+                  all.map((l) => (l.turn_id === turnId ? { ...l, narration } : l)),
+                )
+              }
+            />
+          )}
+          {tab === "character" && <Character revision={lines.length} />}
+          {tab === "journal" && <Journal revision={lines.length} />}
+        </main>
       )}
     </>
   );
@@ -116,12 +126,12 @@ interface SetupProps {
   onOpened: (summary: CampaignSummary) => void;
   /** True while a Turn runs: no campaign may open then. */
   locked: boolean;
+  /** The screen stays mounted while hidden; each showing lists the files again. */
+  shown: boolean;
 }
 
-function Setup({ onOpened, locked }: SetupProps) {
-  const [defaults, setDefaults] = useState<Defaults | null>(null);
-  const [seedPath, setSeedPath] = useState("");
-  const [worldPath, setWorldPath] = useState("");
+function Setup({ onOpened, locked, shown }: SetupProps) {
+  const [dataDir, setDataDir] = useState<string | null>(null);
   const [dbPath, setDbPath] = useState("");
   const [files, setFiles] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -129,23 +139,24 @@ function Setup({ onOpened, locked }: SetupProps) {
 
   useEffect(() => {
     api.defaults().then(
-      (d) => {
-        setDefaults(d);
-        setSeedPath(d.seed_path);
-        setWorldPath(d.world_path);
-      },
-      (e: unknown) => setError(`Could not read the default paths: ${errorText(e)}`),
-    );
-    api.listCampaigns().then(setFiles, (e: unknown) =>
-      setError(`Could not list campaign files: ${errorText(e)}`),
+      (d) => setDataDir(d.data_dir),
+      (e: unknown) => setError(`Could not read the data folder: ${errorText(e)}`),
     );
   }, []);
 
-  const run = async (call: () => Promise<CampaignSummary>) => {
+  // A Campaign that a World Build made since the last look is listed too.
+  useEffect(() => {
+    if (!shown) return;
+    api.listCampaigns().then(setFiles, (e: unknown) =>
+      setError(`Could not list campaign files: ${errorText(e)}`),
+    );
+  }, [shown]);
+
+  const open = async () => {
     setBusy(true);
     setError(null);
     try {
-      onOpened(await call());
+      onOpened(await api.openCampaign(dbPath));
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -155,28 +166,13 @@ function Setup({ onOpened, locked }: SetupProps) {
 
   return (
     <main>
-      <h2>New campaign</h2>
-      <label htmlFor="seed">Adventure Seed file</label>
-      <input id="seed" value={seedPath} onChange={(e) => setSeedPath(e.target.value)} />
-      <label htmlFor="world">World file</label>
-      <input id="world" value={worldPath} onChange={(e) => setWorldPath(e.target.value)} />
-      <div className="row">
-        <button
-          disabled={busy || locked}
-          onClick={() => void run(() => api.newCampaign(seedPath, worldPath))}
-        >
-          New campaign
-        </button>
-      </div>
+      <NewCampaign onOpened={onOpened} locked={locked} />
 
       <h2>Open campaign</h2>
       <label htmlFor="db">Campaign file</label>
       <input id="db" value={dbPath} onChange={(e) => setDbPath(e.target.value)} />
       <div className="row">
-        <button
-          disabled={busy || locked || !dbPath}
-          onClick={() => void run(() => api.openCampaign(dbPath))}
-        >
+        <button disabled={busy || locked || !dbPath} onClick={() => void open()}>
           Open
         </button>
       </div>
@@ -191,7 +187,7 @@ function Setup({ onOpened, locked }: SetupProps) {
           ))}
         </ul>
       )}
-      {defaults && <p className="muted">Data and config (threshold.toml): {defaults.data_dir}</p>}
+      {dataDir && <p className="muted">Data and config (threshold.toml): {dataDir}</p>}
       {locked && <p className="muted">A Turn is running; wait for it to finish.</p>}
       {error && <p className="error">{error}</p>}
     </main>

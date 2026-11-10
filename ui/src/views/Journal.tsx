@@ -35,6 +35,11 @@ function Entries({ entries }: { entries: JournalEntry[] }) {
       {entries.map((e, i) => (
         <li key={i}>
           {e.text}
+          {e.open && (
+            <span className="mark" title="Planned or pending: not done yet">
+              open
+            </span>
+          )}
           {e.source && <span className="muted"> (said by {e.source})</span>}
         </li>
       ))}

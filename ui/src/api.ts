@@ -25,6 +25,8 @@ export interface CampaignSummary {
   pc_name: string;
   premise: string;
   turns: TurnLine[];
+  /** No Opening Turn and no play Turn yet: "Begin" is still due. */
+  needs_begin: boolean;
 }
 
 /** A committed Turn. `narration` is null when the narration failed after the Commit. */
@@ -78,6 +80,141 @@ export interface Defaults {
   world_path: string;
   data_dir: string;
 }
+
+export type EntityKind = "pc" | "npc" | "faction" | "place" | "item";
+
+export interface OtherName {
+  name: string;
+  /** The characters who know that this name names the same entity. */
+  known_to: string[];
+}
+
+export interface PcSeed {
+  name: string;
+  age: number;
+  other_names: OtherName[];
+  concept: string;
+}
+
+export interface SeedEntity {
+  name: string;
+  kind: EntityKind;
+  /** A character's age in years; null for anything else. */
+  age: number | null;
+  other_names: OtherName[];
+  hidden: boolean;
+}
+
+export interface SeedFact {
+  subject: string;
+  key: string;
+  value: string;
+  text: string;
+}
+
+export interface StartSeed {
+  place: string;
+  present: string[];
+  situation: string;
+  when: string;
+}
+
+export type OpenMode = "delegated" | "discover" | "to_agree";
+
+export interface OpenDetail {
+  text: string;
+  mode: OpenMode;
+}
+
+export interface AdventureSeed {
+  premise: string;
+  pc: PcSeed;
+  entities: SeedEntity[];
+  boundaries: string[];
+  decided: SeedFact[];
+  proposed: SeedFact[];
+  story_language: string;
+  themes: string[];
+  gm_agreement: string;
+  resolution: string;
+  min_age: number | null;
+  start: StartSeed;
+  open_details: OpenDetail[];
+}
+
+/** A fact the PC knows. `open`: planned or pending, not done. */
+export interface KnownFact {
+  subject: string;
+  key: string;
+  value: string;
+  text: string;
+  open: boolean;
+}
+
+export type GapKind =
+  | "missing"
+  | "age_missing"
+  | "age_unconfirmed"
+  | "age_below_min"
+  | "unknown_name"
+  | "duplicate_name"
+  | "pc_in_roster"
+  | "wrong_kind"
+  | "seed_block_too_long"
+  | "slot_conflict";
+
+/** One thing to fix before approval. `at` locates the field (see `Gap` in Rust). */
+export interface Gap {
+  kind: GapKind;
+  at: string;
+}
+
+export type DraftState = "draft" | "approved" | "built";
+
+/** A stage of a draft or a World Build, as the shell names it. */
+export type BuildStage =
+  | "draft_roster"
+  | "draft_seed"
+  | "draft_knowledge"
+  | "hidden_facts"
+  | "npc_state"
+  | "world_events"
+  | "start_state"
+  | "commit";
+
+/** Why a build stopped: names only, never model text. */
+export interface BuildFailure {
+  stage: string;
+  check: string;
+}
+
+export interface DraftView {
+  draft_id: string;
+  state: DraftState;
+  seed: AdventureSeed;
+  knowledge: KnownFact[];
+  ages_to_confirm: string[];
+  gaps: Gap[];
+  last_failure: BuildFailure | null;
+}
+
+export interface DraftLine {
+  draft_id: string;
+  title: string;
+  state: DraftState;
+}
+
+/** The `build_progress` event. `stage` stays a string: a newer shell may add one. */
+export interface BuildProgress {
+  stage: string;
+  done: number;
+  total: number;
+}
+
+export type Approval = { ok: true; draft: DraftView } | { ok: false; gaps: Gap[] };
+
+/** The op_id of the Opening Turn's narration chunks. */
+export const BEGIN_OP_ID = "__begin__";
 
 export interface NarrationChunk {
   op_id: string;
@@ -162,8 +299,6 @@ export function createApi(invoke: Invoke) {
     summary: () => invoke<CampaignSummary>("campaign_summary"),
     modelStatus: () => invoke<string>("model_status"),
     listCampaigns: () => invoke<string[]>("list_campaigns"),
-    newCampaign: (seedPath: string, worldPath: string) =>
-      invoke<CampaignSummary>("new_campaign", { seed_path: seedPath, world_path: worldPath }),
     openCampaign: (dbPath: string) => invoke<CampaignSummary>("open_campaign", { db_path: dbPath }),
     askOoc: (text: string) => invoke<string>("ask_ooc", { text }),
     renarrate: (turnId: number) => invoke<string>("renarrate", { turn_id: turnId }),
@@ -171,7 +306,67 @@ export function createApi(invoke: Invoke) {
     getJournal: () => invoke<JournalView>("get_journal"),
     setDebug: (on: boolean) => invoke<boolean>("set_debug", { on }),
     getDebug: (turnId: number) => invoke<DebugView>("get_debug", { turn_id: turnId }),
+    draftFromText: (text: string) => invoke<DraftView>("draft_from_text", { text }),
+    listDrafts: () => invoke<DraftLine[]>("list_drafts"),
+    getDraft: (draftId: string) => invoke<DraftView>("get_draft", { draft_id: draftId }),
+    saveDraft: (
+      draftId: string,
+      seed: AdventureSeed,
+      knowledge: KnownFact[],
+      agesToConfirm: string[],
+    ) =>
+      invoke<DraftView>("save_draft", {
+        draft_id: draftId,
+        seed,
+        knowledge,
+        ages_to_confirm: agesToConfirm,
+      }),
+    /** Approves the draft, or returns its gaps. Any other error rejects. */
+    approveDraft: async (draftId: string): Promise<Approval> => {
+      try {
+        return { ok: true, draft: await invoke<DraftView>("approve_draft", { draft_id: draftId }) };
+      } catch (e) {
+        const gaps = gapsFromError(e);
+        if (gaps) return { ok: false, gaps };
+        throw e;
+      }
+    },
+    /** Builds the world; resolves with the opened Campaign. */
+    startBuild: (draftId: string) => invoke<CampaignSummary>("start_build", { draft_id: draftId }),
+    /** Asks the running draft or build to stop. It may still finish. */
+    cancelBuild: () => invoke<null>("cancel_build"),
+    begin: () => invoke<TurnSummary>("begin"),
+    deleteDraft: (draftId: string) => invoke<null>("delete_draft", { draft_id: draftId }),
+    /** Reveals the hidden world: debug mode only. */
+    getBuildDebug: (draftId: string) =>
+      invoke<DebugLine[]>("get_build_debug", { draft_id: draftId }),
   };
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null;
+
+/** The gaps of an `approve_draft` error, or null for any other error. */
+export function gapsFromError(e: unknown): Gap[] | null {
+  if (!Array.isArray(e)) return null;
+  const gaps: Gap[] = [];
+  for (const item of e as unknown[]) {
+    if (!isRecord(item) || typeof item.kind !== "string" || typeof item.at !== "string") {
+      return null;
+    }
+    gaps.push({ kind: item.kind as GapKind, at: item.at });
+  }
+  return gaps;
+}
+
+/** A `build_progress` payload, or null when it has not that shape. */
+export function parseBuildProgress(payload: unknown): BuildProgress | null {
+  if (!isRecord(payload)) return null;
+  const { stage, done, total } = payload;
+  if (typeof stage !== "string" || typeof done !== "number" || typeof total !== "number") {
+    return null;
+  }
+  return { stage, done, total };
 }
 
 export type Api = ReturnType<typeof createApi>;

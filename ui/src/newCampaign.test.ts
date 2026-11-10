@@ -1,0 +1,296 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AdventureSeed } from "./api";
+import {
+  confirmAge,
+  createSaver,
+  failureText,
+  fieldId,
+  focusTarget,
+  gapSentence,
+  needsConfirm,
+  parseAt,
+  removeAt,
+  renameInAges,
+  replaceAt,
+  progressText,
+  splitList,
+  stageLabel,
+  type ReviewForm,
+} from "./newCampaign";
+
+function form(): ReviewForm {
+  const seed: AdventureSeed = {
+    premise: "A ferryman carries letters.",
+    pc: {
+      name: "Teodor Brandt",
+      age: 34,
+      other_names: [{ name: "Wick", known_to: ["Agathe Morrow"] }],
+      concept: "A careful ferryman.",
+    },
+    entities: [
+      { name: "Agathe Morrow", kind: "npc", age: 67, other_names: [], hidden: false },
+      { name: "Sefa Lind", kind: "npc", age: 16, other_names: [], hidden: false },
+      { name: "", kind: "place", age: null, other_names: [], hidden: false },
+    ],
+    boundaries: [],
+    decided: [],
+    proposed: [],
+    story_language: "English",
+    themes: [],
+    gm_agreement: "",
+    resolution: "",
+    min_age: null,
+    start: { place: "Ostley Crossing", present: ["Pim Quast"], situation: "", when: "" },
+    open_details: [],
+  };
+  return {
+    seed,
+    knowledge: [
+      { subject: "Agathe Morrow", key: "trade", value: "innkeeper", text: "Agathe runs the inn.", open: false },
+    ],
+    ages_to_confirm: ["Sefa Lind"],
+  };
+}
+
+describe("stageLabel", () => {
+  it("names each stage in plain words", () => {
+    expect(stageLabel("draft_roster")).toBe("Reading the characters");
+    expect(stageLabel("draft_seed")).toBe("Reading the story");
+    expect(stageLabel("draft_knowledge")).toBe("Reading what your character knows");
+    expect(stageLabel("hidden_facts")).toBe("Preparing the world");
+    expect(stageLabel("npc_state")).toBe("Preparing characters");
+    expect(stageLabel("world_events")).toBe("Preparing events");
+    expect(stageLabel("start_state")).toBe("Preparing the start");
+    expect(stageLabel("commit")).toBe("Saving the campaign");
+  });
+
+  it("falls back to a neutral label for an unknown stage", () => {
+    expect(stageLabel("something_new")).toBe("Working");
+    expect(stageLabel("")).toBe("Working");
+    expect(stageLabel("toString")).toBe("Working");
+  });
+});
+
+describe("progressText", () => {
+  it("gives the stage and the count", () => {
+    expect(progressText({ stage: "npc_state", done: 4, total: 9 })).toBe(
+      "Preparing characters, 4 of 9",
+    );
+  });
+
+  it("drops the count when there is none", () => {
+    expect(progressText({ stage: "commit", done: 0, total: 0 })).toBe("Saving the campaign");
+  });
+});
+
+describe("failureText", () => {
+  it("names the stage and the check", () => {
+    expect(failureText({ stage: "npc_state", check: "completeness" })).toBe(
+      "The last build stopped at “Preparing characters”: a completeness check failed.",
+    );
+    expect(failureText({ stage: "start_state", check: "new_check" })).toBe(
+      "The last build stopped at “Preparing the start”: new check.",
+    );
+  });
+});
+
+describe("parseAt", () => {
+  it("splits a locator into names and indexes", () => {
+    expect(parseAt("premise")).toEqual(["premise"]);
+    expect(parseAt("pc.age")).toEqual(["pc", "age"]);
+    expect(parseAt("entities[3].other_names[1].known_to[0]")).toEqual([
+      "entities",
+      3,
+      "other_names",
+      1,
+      "known_to",
+      0,
+    ]);
+    expect(parseAt("knowledge[5]")).toEqual(["knowledge", 5]);
+  });
+});
+
+describe("focusTarget", () => {
+  it("points at the input that holds the field", () => {
+    expect(focusTarget("pc.name")).toBe("pc.name");
+    expect(focusTarget("entities[3].age")).toBe("entities[3].age");
+    expect(focusTarget("entities[0].other_names[1]")).toBe("entities[0].other_names[1].name");
+    expect(focusTarget("pc.other_names[0].known_to[2]")).toBe("pc.other_names[0].known_to");
+    expect(focusTarget("start.present[2]")).toBe("start.present");
+    expect(focusTarget("knowledge[4]")).toBe("knowledge[4].text");
+    expect(focusTarget("seed")).toBe("premise");
+  });
+
+  it("makes a usable element id", () => {
+    expect(fieldId("entities[3].age")).toBe("f-entities-3--age");
+    expect(fieldId(focusTarget("pc.name"))).toBe("f-pc-name");
+  });
+});
+
+describe("gapSentence", () => {
+  const sentence = (kind: string, at: string) =>
+    gapSentence({ kind: kind as never, at }, form());
+
+  it("names the field in plain words", () => {
+    expect(sentence("missing", "premise")).toBe("The premise is empty.");
+    expect(sentence("age_unconfirmed", "entities[1].age")).toBe(
+      "The age of Sefa Lind is a guess: confirm it or change it.",
+    );
+    expect(sentence("age_unconfirmed", "pc.age")).toBe(
+      "Your character's age is a guess: confirm it or change it.",
+    );
+    expect(sentence("missing", "entities[2].name")).toBe("The name of entry 3 is empty.");
+    expect(sentence("unknown_name", "start.present[0]")).toBe(
+      "“Pim Quast” in “who is present” does not match a name of the right kind.",
+    );
+    expect(sentence("unknown_name", "pc.other_names[0].known_to[0]")).toBe(
+      "“Agathe Morrow” in who knows “Wick” does not match a name of the right kind.",
+    );
+    expect(sentence("slot_conflict", "knowledge[0]")).toBe(
+      "Known fact 1 repeats another fact on the same thing.",
+    );
+    expect(sentence("missing", "knowledge[0].key")).toBe("The key of known fact 1 is empty.");
+    expect(sentence("seed_block_too_long", "seed")).toBe("The seed is too long: shorten some text.");
+    expect(sentence("age_below_min", "entities[1].age")).toBe(
+      "The age of Sefa Lind is below the minimum age.",
+    );
+  });
+
+  it("keeps an unknown locator as it is", () => {
+    expect(sentence("missing", "decided[0].subject")).toBe("Decided fact 1 (subject) is empty.");
+    expect(sentence("missing", "weird.path")).toBe("weird.path is empty.");
+  });
+
+  it("has a sentence for an unknown kind", () => {
+    expect(sentence("new_kind", "premise")).toBe("The premise needs a fix.");
+  });
+});
+
+describe("ages to confirm", () => {
+  it("matches names as the core does", () => {
+    expect(needsConfirm("Sefa Lind", ["sefa lind."])).toBe(true);
+    expect(needsConfirm("Chloé", ["CHLOE"])).toBe(true);
+    expect(needsConfirm("The Copper Kettle", ["copper kettle"])).toBe(true);
+    expect(needsConfirm("Agathe Morrow", ["Sefa Lind"])).toBe(false);
+  });
+
+  it("a rename keeps the age unconfirmed", () => {
+    expect(renameInAges("Sefa Lind", "Sefa Linde", ["Pim", "sefa lind"])).toEqual([
+      "Pim",
+      "Sefa Linde",
+    ]);
+    expect(renameInAges("Agathe", "Agatha", ["Pim"])).toEqual(["Pim"]);
+  });
+
+  it("confirming removes every matching name", () => {
+    expect(confirmAge("Sefa Lind", ["Sefa Lind", "Pim", "sefa  lind"])).toEqual(["Pim"]);
+  });
+});
+
+describe("list edits", () => {
+  it("patch or drop one item and leave the list as it was", () => {
+    const list = [{ a: 1 }, { a: 2 }];
+    expect(replaceAt(list, 1, { a: 5 })).toEqual([{ a: 1 }, { a: 5 }]);
+    expect(removeAt(list, 0)).toEqual([{ a: 2 }]);
+    expect(list).toEqual([{ a: 1 }, { a: 2 }]);
+  });
+});
+
+describe("splitList", () => {
+  it("splits, trims and drops empty items", () => {
+    expect(splitList("Agathe Morrow, Sefa Lind,, ", ",")).toEqual(["Agathe Morrow", "Sefa Lind"]);
+    expect(splitList("one\n\ntwo, three\n", "\n")).toEqual(["one", "two, three"]);
+  });
+});
+
+describe("createSaver", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function setup() {
+    const sent: string[] = [];
+    const finish: (() => void)[] = [];
+    const results: string[] = [];
+    const pending: boolean[] = [];
+    const saver = createSaver<string, string>({
+      delayMs: 600,
+      save: (form) => {
+        sent.push(form);
+        return new Promise((resolve) => finish.push(() => resolve(`saved ${form}`)));
+      },
+      onResult: (r) => results.push(r),
+      onError: () => undefined,
+      onPending: (on) => pending.push(on),
+    });
+    return { saver, sent, finish, results, pending };
+  }
+
+  it("waits for typing to pause", () => {
+    const { saver, sent, pending } = setup();
+    saver.edit("a");
+    vi.advanceTimersByTime(300);
+    saver.edit("ab");
+    vi.advanceTimersByTime(599);
+    expect(sent).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(sent).toEqual(["ab"]);
+    expect(pending).toEqual([true]);
+  });
+
+  it("sends at once when asked", () => {
+    const { saver, sent } = setup();
+    saver.edit("a", true);
+    expect(sent).toEqual(["a"]);
+  });
+
+  it("runs one save at a time and sends only the latest form", async () => {
+    const { saver, sent, finish, results, pending } = setup();
+    saver.edit("a", true);
+    saver.edit("ab", true);
+    saver.edit("abc", true);
+    expect(sent).toEqual(["a"]);
+    finish[0]?.();
+    await vi.runAllTimersAsync();
+    expect(sent).toEqual(["a", "abc"]);
+    expect(results).toEqual([]);
+    finish[1]?.();
+    await vi.runAllTimersAsync();
+    expect(results).toEqual(["saved abc"]);
+    expect(pending).toEqual([true, false]);
+  });
+
+  it("stays pending while a newer edit waits for its timer", async () => {
+    const { saver, finish, results, pending } = setup();
+    saver.edit("a", true);
+    saver.edit("ab");
+    finish[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(results).toEqual([]);
+    expect(pending).toEqual([true]);
+  });
+
+  it("start() after stop() reports again", async () => {
+    const { saver, finish, results } = setup();
+    saver.stop();
+    saver.start();
+    saver.edit("a", true);
+    finish[0]?.();
+    await vi.runAllTimersAsync();
+    expect(results).toEqual(["saved a"]);
+  });
+
+  it("stop() still saves the last edit, and reports nothing", async () => {
+    const { saver, sent, finish, results } = setup();
+    saver.edit("a");
+    saver.stop();
+    expect(sent).toEqual(["a"]);
+    finish[0]?.();
+    await vi.runAllTimersAsync();
+    expect(results).toEqual([]);
+  });
+});

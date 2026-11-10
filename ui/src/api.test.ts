@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { committedLine, createApi, createTurnClient, type Invoke, type TurnSummary } from "./api";
+import {
+  committedLine,
+  createApi,
+  createTurnClient,
+  gapsFromError,
+  parseBuildProgress,
+  type AdventureSeed,
+  type Invoke,
+  type TurnSummary,
+} from "./api";
 
 interface Call {
   cmd: string;
@@ -144,5 +153,104 @@ describe("createApi", () => {
     };
     await createApi(invoke).summary();
     expect(calls).toEqual(["campaign_summary"]);
+  });
+});
+
+describe("approveDraft", () => {
+  const draft = { draft_id: "draft-1", state: "approved", gaps: [] };
+
+  it("returns the approved draft", async () => {
+    const calls: Call[] = [];
+    const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(draft as T);
+    };
+    const result = await createApi(invoke).approveDraft("draft-1");
+    expect(calls).toEqual([{ cmd: "approve_draft", args: { draft_id: "draft-1" } }]);
+    expect(result).toEqual({ ok: true, draft });
+  });
+
+  it("maps a gap error to a typed list", async () => {
+    const gaps = [
+      { kind: "age_unconfirmed", at: "entities[3].age" },
+      { kind: "missing", at: "start.place" },
+    ];
+    const invoke: Invoke = () => Promise.reject(gaps);
+    const result = await createApi(invoke).approveDraft("draft-1");
+    expect(result).toEqual({ ok: false, gaps });
+  });
+
+  it("rethrows any other error", async () => {
+    const invoke: Invoke = () => Promise.reject("no such draft");
+    await expect(createApi(invoke).approveDraft("draft-1")).rejects.toBe("no such draft");
+  });
+});
+
+describe("gapsFromError", () => {
+  it("reads a list of gaps", () => {
+    expect(gapsFromError([{ kind: "missing", at: "premise" }])).toEqual([
+      { kind: "missing", at: "premise" },
+    ]);
+  });
+
+  it("is null for a text error or a malformed list", () => {
+    expect(gapsFromError("the draft is not approved")).toBeNull();
+    expect(gapsFromError(new Error("boom"))).toBeNull();
+    expect(gapsFromError([{ kind: "missing" }])).toBeNull();
+    expect(gapsFromError([{ kind: 3, at: "premise" }])).toBeNull();
+  });
+});
+
+describe("parseBuildProgress", () => {
+  it("parses a progress payload", () => {
+    expect(parseBuildProgress({ stage: "npc_state", done: 4, total: 9 })).toEqual({
+      stage: "npc_state",
+      done: 4,
+      total: 9,
+    });
+  });
+
+  it("keeps an unknown stage name", () => {
+    expect(parseBuildProgress({ stage: "new_stage", done: 0, total: 1 })?.stage).toBe(
+      "new_stage",
+    );
+  });
+
+  it("is null for a malformed payload", () => {
+    expect(parseBuildProgress(null)).toBeNull();
+    expect(parseBuildProgress("npc_state")).toBeNull();
+    expect(parseBuildProgress({ stage: "npc_state", done: "4", total: 9 })).toBeNull();
+    expect(parseBuildProgress({ done: 4, total: 9 })).toBeNull();
+  });
+});
+
+describe("draft commands", () => {
+  it("send the argument names of the shell", async () => {
+    const calls: Call[] = [];
+    const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return Promise.resolve(undefined as T);
+    };
+    const api = createApi(invoke);
+    const seed = { premise: "p" } as unknown as AdventureSeed;
+    await api.draftFromText("text");
+    await api.saveDraft("draft-1", seed, [], ["Sefa Lind"]);
+    await api.startBuild("draft-1");
+    await api.cancelBuild();
+    await api.begin();
+    await api.deleteDraft("draft-1");
+    await api.getBuildDebug("draft-1");
+    expect(calls).toEqual([
+      { cmd: "draft_from_text", args: { text: "text" } },
+      {
+        cmd: "save_draft",
+        args: { draft_id: "draft-1", seed, knowledge: [], ages_to_confirm: ["Sefa Lind"] },
+      },
+      { cmd: "start_build", args: { draft_id: "draft-1" } },
+      { cmd: "cancel_build", args: undefined },
+      { cmd: "begin", args: undefined },
+      { cmd: "delete_draft", args: { draft_id: "draft-1" } },
+      { cmd: "get_build_debug", args: { draft_id: "draft-1" } },
+    ]);
   });
 });

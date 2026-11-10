@@ -29,7 +29,7 @@ body { margin: 0; background: var(--bg); }
 .menu .spacer { flex: 1; }
 .menu .status { color: var(--muted); font-size: 13px; }
 .tabs { display: flex; gap: 4px; padding: 8px 16px 0; }
-.tabs button[aria-pressed="true"] { font-weight: 700; border-bottom: 2px solid var(--accent); }
+button[aria-pressed="true"] { font-weight: 700; border-bottom: 2px solid var(--accent); }
 main { padding: 16px; max-width: 900px; }
 button { font: inherit; padding: 4px 10px; cursor: pointer; }
 input, textarea { font: inherit; padding: 4px 6px; width: 100%; color: var(--fg); background: var(--bg); border: 1px solid var(--line); }
@@ -54,3 +54,35 @@ h2 { font-size: 17px; margin: 16px 0 6px; }
 .toggle { display: flex; gap: 6px; align-items: center; margin: 0; color: var(--fg); font-size: 15px; }
 .toggle input { width: auto; }
 .page { padding: 0 16px; }
+/* A plain box with an arrow: the native GTK select is unreadable in dark mode. */
+select {
+  font: inherit; padding: 4px 22px 4px 6px; color: var(--fg); background-color: var(--bg); border: 1px solid var(--line);
+  appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+/* A focused field never hides under the sticky Approve bar. */
+html { scroll-padding-bottom: 64px; }
+input.file { width: auto; border: none; padding-left: 0; }
+input.number { width: 5em; }
+.row > input, .row > textarea { flex: 1; }
+.row > input.file, .row > input.number { flex: none; }
+.row.small input { font-size: 13px; }
+.grow { flex: 1; }
+.progress { font-weight: 600; }
+.ok { color: var(--ok); }
+.mark { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.mark.warn { color: var(--bad); border-color: var(--bad); }
+.age { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.gap { border-left: 3px solid var(--bad); padding: 6px 10px; margin: 8px 0; }
+.gap p { margin: 4px 0; }
+.list { list-style: none; padding: 0; }
+.list > li { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.others .row { margin-top: 4px; }
+.scroll { overflow-x: auto; }
+table.roster { width: 100%; border-collapse: collapse; }
+table.roster th, table.roster td { text-align: left; vertical-align: top; padding: 4px; border-bottom: 1px solid var(--line); }
+table.roster td:first-child { min-width: 11em; }
+table.roster th { color: var(--muted); font-size: 13px; font-weight: 400; }
+.review-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 8px 0; }
+.review-bar .error { flex: 1; }
