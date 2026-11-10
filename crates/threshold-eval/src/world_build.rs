@@ -408,7 +408,7 @@ pub fn pc_centred(
 ) -> (usize, usize) {
     let named = |text: &str| {
         pcs.iter()
-            .any(|(main, others)| names_pc(main, others, text))
+            .any(|(main, others)| names_pc(main, others, &[], text))
     };
     goals
         .iter()

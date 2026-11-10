@@ -35,6 +35,8 @@ pub(super) struct Member {
 pub(super) struct Roster {
     members: Vec<Member>,
     names: Vec<(String, usize)>,
+    /// The word sequences that name the PC (`pc_terms`), built once.
+    pc_terms: Vec<Vec<String>>,
 }
 
 impl Roster {
@@ -66,7 +68,17 @@ impl Roster {
             })
             .filter(|(n, _)| !n.is_empty())
             .collect();
-        Self { members, names }
+        let rest: Vec<&str> = members[1..]
+            .iter()
+            .flat_map(|m| std::iter::once(&m.main).chain(&m.others))
+            .map(String::as_str)
+            .collect();
+        let pc_terms = pc_terms(&members[0].main, &members[0].others, &rest);
+        Self {
+            members,
+            names,
+            pc_terms,
+        }
     }
 
     pub fn find(&self, name: &str) -> Option<&Member> {
@@ -97,26 +109,43 @@ impl Roster {
 
     /// True when `text` names the PC: see `names_pc`.
     pub fn names_pc(&self, text: &str) -> bool {
-        let pc = self.pc();
-        names_pc(&pc.main, &pc.others, text)
+        holds(&self.pc_terms, text)
     }
 }
 
 /// True when `text` names the PC whose main name is `main`: it holds, as
 /// whole words after `normalize::name`, the full main name, a full name of
 /// `others`, or the first word of the main name ("Teodor" names "Teodor
-/// Brandt"). A possessive "'s" still names the PC; a longer or hyphenated
-/// word does not ("Theodora", "Teodor-Brandtson"). The WorldAutonomy check
-/// and the evaluation count PC-centred goals and secrets with it.
-pub fn names_pc(main: &str, others: &[String], text: &str) -> bool {
-    let said = words(text);
+/// Brandt"). The first word counts alone only when no name of `roster` (the
+/// main and other names of every other entity) holds it as a whole word:
+/// with an NPC "Teodor Vane", "Teodor" no longer points at the PC. A
+/// possessive "'s" still names the PC; a longer or hyphenated word does not
+/// ("Theodora", "Teodor-Brandtson"). The WorldAutonomy check and the
+/// evaluation count PC-centred goals and secrets with it.
+pub fn names_pc(main: &str, others: &[String], roster: &[&str], text: &str) -> bool {
+    holds(&pc_terms(main, others, roster), text)
+}
+
+/// The word sequences that name the PC: see `names_pc`.
+fn pc_terms(main: &str, others: &[String], roster: &[&str]) -> Vec<Vec<String>> {
     let main = words(main);
-    let first = main.first().map(|w| vec![w.clone()]);
+    let first = main
+        .first()
+        .filter(|first| !roster.iter().any(|name| words(name).contains(first)))
+        .map(|first| vec![first.clone()]);
     std::iter::once(main.clone())
         .chain(others.iter().map(|n| words(n)))
         .chain(first)
-        .filter(|name| !name.is_empty())
-        .any(|name| said.windows(name.len()).any(|w| w == name.as_slice()))
+        .filter(|term| !term.is_empty())
+        .collect()
+}
+
+/// True when `text` holds one of `terms` as whole words.
+fn holds(terms: &[Vec<String>], text: &str) -> bool {
+    let said = words(text);
+    terms
+        .iter()
+        .any(|term| said.windows(term.len()).any(|w| w == term.as_slice()))
 }
 
 /// The whole words of `text` after `normalize::name`. A word holds letters,

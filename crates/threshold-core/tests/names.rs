@@ -88,7 +88,9 @@ fn normalize_name_ignores_edge_punctuation() {
 #[test]
 fn first_name_alone_names_the_pc() {
     let others = ["Wick".to_owned()];
-    let named = |text: &str| names_pc("Teodor Brandt", &others, text);
+    // No other roster name holds "Teodor".
+    let roster = ["Gerrit Vane", "the Toll-Master", "Ostley Crossing"];
+    let named = |text: &str| names_pc("Teodor Brandt", &others, &roster, text);
     assert!(named("Teodor owes her money"));
     assert!(named("She wants Teodor Brandt to sell."));
     assert!(named("Make Wick carry the winter post."));
@@ -101,4 +103,45 @@ fn first_name_alone_names_the_pc() {
     assert!(!named("A wicker basket."));
     // Only the first word of the main name counts alone, not the last.
     assert!(!named("Old Brandt left the village."));
+}
+
+#[test]
+fn a_shared_first_name_does_not_name_the_pc() {
+    let others = ["Wick".to_owned()];
+    // Teodor Vane is another roster entry: "Teodor" alone no longer points
+    // at the PC, but a full name of the PC still does.
+    let roster = ["Teodor Vane", "Gerrit Vane"];
+    let named = |text: &str| names_pc("Teodor Brandt", &others, &roster, text);
+    assert!(!named("Teodor Vane keeps a second ledger."));
+    assert!(!named("Teodor keeps a second ledger."));
+    assert!(named("Teodor Brandt owes Teodor Vane money."));
+    assert!(named("Make Wick carry the winter post."));
+
+    // An other name of another entry counts too.
+    let roster = ["Gerrit Vane", "Old Teodor"];
+    assert!(!names_pc(
+        "Teodor Brandt",
+        &[],
+        &roster,
+        "Teodor owes her money"
+    ));
+
+    // With no other Teodor, the first word alone names the PC.
+    let roster = ["Gerrit Vane", "Teodora Sall"];
+    assert!(names_pc(
+        "Teodor Brandt",
+        &[],
+        &roster,
+        "Teodor owes her money"
+    ));
+
+    // A one-word main name is the full name: unchanged.
+    let roster = ["Wick Holt"];
+    assert!(names_pc(
+        "Wick",
+        &[],
+        &roster,
+        "Make Wick carry the winter post."
+    ));
+    assert!(!names_pc("Wick", &[], &roster, "A wicker basket."));
 }

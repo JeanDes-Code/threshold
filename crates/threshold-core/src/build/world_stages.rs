@@ -326,9 +326,9 @@ fn world_events(
         .collect())
 }
 
-/// One call, when an NPC is absent at the start. The call is essential; a
-/// placement that fails its repair is dropped, and that NPC's place stays
-/// unknown.
+/// One call, when an NPC is absent at the start and a place other than the
+/// start place exists. The call is essential; a placement that fails its
+/// repair is dropped, and that NPC's place stays unknown.
 fn start_state(
     draft: &SeedDraft,
     gm: &dyn Gm,
@@ -348,11 +348,19 @@ fn start_state(
         .npcs()
         .filter(|m| !present.contains(&m.main.as_str()))
         .collect();
-    if absent.is_empty() {
+    // An absent NPC is never at the start place.
+    let start = roster.main(&draft.seed.start.place);
+    let places: Vec<&str> = roster
+        .members()
+        .iter()
+        .filter(|m| m.kind == EntityKind::Place && m.main != start)
+        .map(|m| m.main.as_str())
+        .collect();
+    if absent.is_empty() || places.is_empty() {
         return Ok(vec![]);
     }
     report(ctl, Stage::StartState, 0, 1);
-    let call = start_call(draft, roster, book, &present, &absent);
+    let call = start_call(draft, roster, book, &present, &absent, &places);
     let staged = run_stage(gm, ctl, &draft.id, &call, |out| {
         checks::start_state(roster, book, &draft.seed.start.place, out)
     })?;

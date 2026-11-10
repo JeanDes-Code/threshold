@@ -855,3 +855,35 @@ fn a_live_shaped_answer_with_a_start_place_phrase_still_drafts() {
     draft.ages_to_confirm.clear();
     assert_eq!(gaps(&draft), vec![]);
 }
+
+#[test]
+fn the_seed_prompt_shows_other_names_of_places_and_characters() {
+    let mut roster = roster_out();
+    roster["characters"][0]["other_names"] =
+        json!([{"name": "the Harbour Master", "known_to": []}]);
+    roster["others"][0]["other_names"] = json!([{"name": "the Point", "known_to": []}]);
+    let mut outputs = plain_outputs();
+    outputs[0] = roster;
+    let gm = gm(&outputs);
+    run(&source(), &gm).result.unwrap();
+    let call = &gm.calls()[1];
+    let recent = &call.prompt.recent;
+    assert!(
+        recent.contains("- Tobin Reed; also called the Harbour Master\n"),
+        "{recent}"
+    );
+    assert!(recent.contains("- Ada Venn\n"), "{recent}");
+    assert!(
+        recent.contains("- Gull Point; also called the Point\n"),
+        "{recent}"
+    );
+    // The enums still hold main names only.
+    assert_eq!(
+        names_at(&call.schema, &["start", "place"]),
+        vec!["Gull Point", "Tide Hall"]
+    );
+    assert_eq!(
+        names_at(&call.schema, &["start", "present", "[]"]),
+        vec!["Tobin Reed", "Ada Venn"]
+    );
+}

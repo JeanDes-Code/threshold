@@ -332,15 +332,25 @@ fn roster_call(text: &str) -> StageCall {
 fn seed_call(text: &str, roster: &RosterOut) -> StageCall {
     let places = roster.names_of(EntityKind::Place);
     let characters = roster.names_of(EntityKind::Npc);
-    let list = |names: &[&str]| {
-        if names.is_empty() {
+    // One line per entry, with its other names, as `knowledge_call` writes
+    // them; the enums hold main names only.
+    let list = |kind: EntityKind| {
+        let lines: Vec<String> = roster
+            .entries()
+            .filter(|(_, k, _)| *k == kind)
+            .map(|(name, _, others)| {
+                let mut line = format!("- {name}");
+                if !others.is_empty() {
+                    let others: Vec<&str> = others.iter().map(|o| o.name.as_str()).collect();
+                    line.push_str(&format!("; also called {}", others.join(", ")));
+                }
+                line
+            })
+            .collect();
+        if lines.is_empty() {
             "none".to_owned()
         } else {
-            names
-                .iter()
-                .map(|n| format!("- {n}"))
-                .collect::<Vec<_>>()
-                .join("\n")
+            lines.join("\n")
         }
     };
     let others: Vec<&str> = roster
@@ -374,8 +384,8 @@ fn seed_call(text: &str, roster: &RosterOut) -> StageCall {
                 } else {
                     others.join(", ")
                 },
-                list(&places),
-                list(&characters),
+                list(EntityKind::Place),
+                list(EntityKind::Npc),
             ),
             ..Prompt::default()
         },

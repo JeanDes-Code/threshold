@@ -33,7 +33,7 @@ Rules:
 - Give this NPC their own life, one that does not turn around the PC: their work, their family, their money, their fears, their other relations. Many NPCs care little about the PC. Name the PC in at most one goal or in the secret, and only when the WORLD FACTS give a reason.
 - goals: one to three things this NPC wants now, each in one sentence. against: the ROSTER name of the character the goal works against, or null.
 - secret: one thing this NPC hides, plausible and not melodramatic, as a fact. subject: a name from the ROSTER, often the NPC. key: a short English word in snake_case. value: a few words. text: one sentence. open: true when it is planned or pending, not done. It must be new: never restate a WORLD FACT. null when the NPC hides nothing.
-- attitudes: how this NPC feels toward other characters from the ROSTER, the PC included, from -5 (hostile) to 5 (devoted).
+- attitudes: how this NPC feels toward other characters or groups from the ROSTER, the PC included, from -5 (hostile) to 5 (devoted).
 - voice_card: speech habits, typical words, and two to four short sample lines. Make this voice clearly different from every voice under VOICES ALREADY WRITTEN.
 - Write every text in the story language.";
 
@@ -223,15 +223,22 @@ pub(super) fn npc_call(
             voices.join("\n")
         },
     );
-    // Attitudes and goals point at another character or at the PC.
-    let toward = names(roster, |m| {
+    // A goal works against another character or the PC. An attitude points
+    // at another character, the PC or a group; never a place or an item.
+    let against = names(roster, |m| {
         matches!(m.kind, EntityKind::Pc | EntityKind::Npc) && m.main != npc.main
+    });
+    let toward = names(roster, |m| {
+        matches!(
+            m.kind,
+            EntityKind::Pc | EntityKind::Npc | EntityKind::Faction
+        ) && m.main != npc.main
     });
     let mut schema = schema_of::<NpcOut>();
     name_field(
         &mut schema,
         "/$defs/GoalOut/properties/against",
-        &toward,
+        &against,
         true,
     );
     name_field(
@@ -313,14 +320,16 @@ pub(super) fn events_call(
     }
 }
 
+/// `places`: the places an absent NPC may be at, never the start place.
 pub(super) fn start_call(
     draft: &SeedDraft,
     roster: &Roster,
     book: &FactBook,
     present: &[&str],
     absent: &[&Member],
+    places: &[&str],
 ) -> StageCall {
-    let list = |names: Vec<&str>| {
+    let list = |names: &[&str]| {
         if names.is_empty() {
             "none".into()
         } else {
@@ -331,7 +340,6 @@ pub(super) fn start_call(
                 .join("\n")
         }
     };
-    let places = names(roster, |m| m.kind == EntityKind::Place);
     let absent: Vec<&str> = absent.iter().map(|m| m.main.as_str()).collect();
     let mut schema = schema_of::<StartOut>();
     name_field(
@@ -343,7 +351,7 @@ pub(super) fn start_call(
     name_field(
         &mut schema,
         "/$defs/PlacementOut/properties/place",
-        &places,
+        places,
         false,
     );
     StageCall {
@@ -360,7 +368,7 @@ pub(super) fn start_call(
                 } else {
                     present.join(", ")
                 },
-                list(absent),
+                list(&absent),
                 list(places),
                 fact_lines(book.facts(), true),
             ),

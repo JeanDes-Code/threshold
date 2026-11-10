@@ -1280,11 +1280,12 @@ fn every_name_field_of_each_world_stage_is_an_enum() {
         );
     }
 
-    // Tobin Reed's state: never toward Tobin Reed himself.
+    // Tobin Reed's state: never toward Tobin Reed himself. An attitude may
+    // target a group, never a place.
     let npc = &calls[2].schema;
     assert_eq!(
         names_at(npc, &["attitudes", "[]", "to"]),
-        vec!["Mira Holt", "Ada Venn"]
+        vec!["Mira Holt", "Ada Venn", "Harbour Council"]
     );
     assert_eq!(
         names_at(npc, &["goals", "[]", "against"]),
@@ -1293,7 +1294,7 @@ fn every_name_field_of_each_world_stage_is_an_enum() {
     assert_eq!(names_at(npc, &["secret", "subject"]), ALL);
     assert_eq!(
         names_at(&calls[3].schema, &["attitudes", "[]", "to"]),
-        vec!["Mira Holt", "Tobin Reed"]
+        vec!["Mira Holt", "Tobin Reed", "Harbour Council"]
     );
 
     let events = &calls[4].schema;
@@ -1304,7 +1305,8 @@ fn every_name_field_of_each_world_stage_is_an_enum() {
         ALL
     );
 
-    // Tobin Reed is present at the start, so only Ada Venn is placed.
+    // Tobin Reed is present at the start, so only Ada Venn is placed, and
+    // never at the start place, Gull Point.
     let start = &calls[5].schema;
     assert_eq!(
         names_at(start, &["placements", "[]", "npc"]),
@@ -1312,7 +1314,7 @@ fn every_name_field_of_each_world_stage_is_an_enum() {
     );
     assert_eq!(
         names_at(start, &["placements", "[]", "place"]),
-        vec!["Gull Point", "Tide Hall"]
+        vec!["Tide Hall"]
     );
 }
 
@@ -1326,4 +1328,66 @@ fn hidden_fact_holders_cannot_be_the_pc_by_schema() {
             assert!(!holders.contains(&pc), "{holders:?}");
         }
     }
+}
+
+#[test]
+fn an_attitude_toward_a_group_is_built_and_committed() {
+    let draft = draft();
+    let mut outputs = plain();
+    outputs[2]["attitudes"] = json!([{"to": "Harbour Council", "attitude": -2}]);
+    let run = run(&draft, &outputs);
+    let world = run.world();
+    assert_eq!(world.attitudes.len(), 1);
+    assert_eq!(world.attitudes[0].from, "Tobin Reed");
+    assert_eq!(world.attitudes[0].to, "Harbour Council");
+    assert_eq!(world.attitudes[0].attitude, -2);
+
+    let dir = TempDir::new("group-attitude");
+    let path = dir.0.join("campaign-1.sqlite");
+    create_campaign_file(&path, &draft.seed, &world, 7).unwrap();
+    let store = Store::open_existing(&path).unwrap();
+    let view = store.snapshot(store.campaigns().unwrap()[0]).unwrap();
+    let id = |name: &str| view.entity_by_name(name).unwrap().id;
+    let attitude = view
+        .attitudes
+        .iter()
+        .find(|a| a.from == id("Tobin Reed") && a.to == id("Harbour Council"))
+        .expect("the attitude toward the group is committed");
+    assert_eq!(attitude.attitude, -2);
+}
+
+#[test]
+fn with_no_place_but_the_start_place_the_start_state_is_not_called() {
+    let mut seed = seed();
+    seed.entities.retain(|e| e.name != "Tide Hall");
+    let draft = draft_of(seed, vec![]);
+    let run = run(&draft, &plain()[..5]);
+    let world = run.world();
+    // Hidden facts, two NPC states, events: no StartState call, and the
+    // absent NPC gets no placement.
+    assert_eq!(run.gm.calls().len(), 5);
+    assert!(!run.log.iter().any(|e| e.step.starts_with("start_state")));
+    assert!(facts_on(&world, "Ada Venn", "location").is_empty());
+    assert_eq!(facts_on(&world, "Tobin Reed", "location").len(), 1);
+}
+
+#[test]
+fn a_shared_first_name_does_not_trigger_world_autonomy() {
+    // Ada Venn is now Mira Venn: she shares the PC's first name, Mira.
+    let mut seed = seed();
+    seed.entities[1].name = "Mira Venn".into();
+    let draft = draft_of(seed, vec![]);
+    let outputs: Vec<Value> = plain()
+        .iter()
+        .map(|o| serde_json::from_str(&o.to_string().replace("Ada Venn", "Mira Venn")).unwrap())
+        .collect();
+    let mut outputs = outputs;
+    // Three of the four goals and secrets name Mira Venn; none names the PC.
+    outputs[2]["goals"] = json!([{"text": "Help Mira Venn mend the nets.", "against": null}]);
+    let run = run(&draft, &outputs);
+    let world = run.world();
+    // No WorldAutonomy call: six calls, as in a plain build.
+    assert_eq!(run.gm.calls().len(), 6);
+    assert!(!run.log.iter().any(|e| e.step.contains("autonomy")));
+    assert_eq!(world.goals.len(), 2);
 }
