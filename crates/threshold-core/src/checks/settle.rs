@@ -4,11 +4,14 @@
 //! voluntary act of the PC: the Agency rule holds. Every repair returns one
 //! note for the debug log.
 
-use super::{pc, references::is_known_place, same_key};
+use std::collections::HashSet;
+
+use super::{closed, pc, references::is_known_place, same_key};
 use crate::{
     domain::{DecisionProposal, EntityKind, Handle, SlotDraft},
     normalize,
     store::WorldView,
+    world,
 };
 
 /// The proposal after the repairs, and one note per repair.
@@ -22,6 +25,7 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
         p.move_to = None;
         notes.push(format!("removed move_to {place}: not a place the PC knows"));
     }
+    settle_closes(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
 }
@@ -48,6 +52,41 @@ fn drop_pc_acts(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
         notes.push(format!(
             "removed the PC ({pc}) from the scheduled event's seen_by"
         ));
+    }
+}
+
+/// A `closes` item that names no Open Item the PC holds, or names one a
+/// second time, goes. So does a fact on the outcome slot of an item that
+/// `closes` names: the core writes that slot itself (ADR 0007).
+fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
+    let held = world::pc_open_items(view);
+    let mut seen = HashSet::new();
+    p.closes.retain(|close| {
+        let known = held
+            .iter()
+            .any(|(subject, key)| world::open_item_ref(*subject, key) == close.item);
+        let keep = known && seen.insert(close.item.clone());
+        if !keep {
+            notes.push(format!(
+                "removed closes {}: not an open item the PC holds, or named twice",
+                close.item
+            ));
+        }
+        keep
+    });
+    let slots: Vec<(Handle, String)> = closed(p, view)
+        .into_iter()
+        .map(|(subject, key, _)| (Handle::Entity(subject), key.to_owned()))
+        .collect();
+    let before = p.facts.len();
+    p.facts.retain(|f| {
+        f.said_by.is_some()
+            || !slots
+                .iter()
+                .any(|(subject, key)| f.slot.subject == *subject && same_key(&f.slot.key, key))
+    });
+    if p.facts.len() < before {
+        notes.push("removed a fact on the outcome of an item in closes: closes writes it".into());
     }
 }
 

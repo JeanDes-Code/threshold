@@ -191,6 +191,29 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
     {
         err(Some(place), "move_to: not a place the PC knows".into());
     }
+    let held = crate::world::pc_open_items(view);
+    let mut named = HashSet::new();
+    for close in &p.closes {
+        if !held
+            .iter()
+            .any(|(subject, key)| crate::world::open_item_ref(*subject, key) == close.item)
+        {
+            err(
+                None,
+                format!("closes: {} is not an open item the PC holds", close.item),
+            );
+        } else if !named.insert(close.item.as_str()) {
+            err(None, format!("closes names {} twice", close.item));
+        }
+    }
+    for (subject, key, _) in super::closed(p, view) {
+        if written.contains(&(Handle::Entity(subject), normalize::key(key))) {
+            err(
+                Some(Handle::Entity(subject)),
+                format!("a fact and closes both write the slot {key}"),
+            );
+        }
+    }
 
     if let Err(shape) = crate::validate_shape(p) {
         errs.push(Rejection::new(CheckKind::Schema, None, shape.to_string()));

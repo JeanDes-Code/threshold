@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{ClockMin, EntityId, EntityKind, Key, Knowing, Value, outcome_key};
+use crate::domain::{
+    ClockMin, EntityId, EntityKind, Key, Knowing, Value, is_open_key, outcome_key,
+};
 use crate::store::{Knowledge, WorldView};
 
 /// What a holder takes to be true about one slot. A Belief can be false: a
@@ -92,21 +94,30 @@ pub fn pc_knowledge(view: &WorldView) -> Vec<Belief> {
         .unwrap_or_default()
 }
 
-/// The outcome keys of the Open Items the PC holds about the PC: for each
-/// live fact on the PC on a `pending_x` key that the PC believes, `x`. A
-/// Turn whose Intent settles the item may write `x` on the PC, which closes
-/// it (ADR 0005, changed after QA, 2026-11-10). Sorted, no duplicates.
-pub fn pc_open_outcomes(view: &WorldView) -> Vec<String> {
+/// The Open Items the PC holds that are still open, as `(subject, open
+/// key)`: each live fact on a `pending_x` key that the PC believes, whose
+/// outcome slot `x` has no live fact yet. A Turn whose Intent settles one
+/// names it in `closes`, and the core writes its outcome (ADR 0005, ADR
+/// 0007). Sorted, no duplicates.
+pub fn pc_open_items(view: &WorldView) -> Vec<(EntityId, Key)> {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return Vec::new();
     };
-    let mut keys: Vec<String> = beliefs(view, pc.id)
+    let mut items: Vec<(EntityId, Key)> = beliefs(view, pc.id)
         .into_iter()
-        .filter(|b| b.subject == pc.id && view.live_fact(pc.id, &b.key).is_some())
-        .filter_map(|b| outcome_key(&b.key).map(str::to_owned))
-        .filter(|k| !k.is_empty())
+        .filter(|b| is_open_key(&b.key) && view.live_fact(b.subject, &b.key).is_some())
+        .filter(|b| {
+            outcome_key(&b.key).is_some_and(|outcome| view.live_fact(b.subject, outcome).is_none())
+        })
+        .map(|b| (b.subject, b.key))
         .collect();
-    keys.sort();
-    keys.dedup();
-    keys
+    items.sort();
+    items.dedup();
+    items
+}
+
+/// How the proposal prompt and the `closes` enum name an Open Item: the
+/// subject's handle, a space, and the open key, as a fact line shows them.
+pub fn open_item_ref(subject: EntityId, key: &str) -> String {
+    format!("E{subject} {key}")
 }

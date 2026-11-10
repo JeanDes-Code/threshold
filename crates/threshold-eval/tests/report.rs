@@ -1357,11 +1357,6 @@ fn play_basics_counts_each_step() {
     let view = store.snapshot(campaign).unwrap();
     let id = |name: &str| view.entity_by_name(name).unwrap().id;
     let (wren, doul, hall) = (id("Wren"), id("Doul"), id("Varn town hall"));
-    let fact = |key: &str, value: &str| {
-        format!(
-            r#"{{"slot":{{"subject":"E{wren}","key":"{key}","value":"{value}"}},"seen":"pc","said_by":null,"because":[]}}"#
-        )
-    };
     let contest = format!(
         r#"{{"action":"act","verdict":"check","check":{{"against":"E{doul}","win":{{"subject":"E{doul}","key":"mood","value":"beaten"}},"lose":{{"subject":"E{wren}","key":"fatigue","value":"sore_arm"}},"factors":[]}},"schedule":null,"minutes":5}}"#
     );
@@ -1369,8 +1364,7 @@ fn play_basics_counts_each_step() {
         r#"{"action":"act","verdict":"impossible","check":null,"schedule":null,"minutes":1}"#
             .to_owned();
     let accept = format!(
-        r#"{{"action":"talk","verdict":"allowed","check":null,"schedule":null,"minutes":2,"facts":[{}]}}"#,
-        fact("copy_tithe_roll", "accepted")
+        r#"{{"action":"talk","verdict":"allowed","closes":[{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}}],"check":null,"schedule":null,"minutes":2}}"#
     );
     let mill = id("Varn mill");
     let away = format!(

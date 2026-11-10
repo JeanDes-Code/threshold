@@ -9,9 +9,7 @@ use support::{hidden::*, *};
 use threshold_core::{
     RecordedGm,
     context::seen_present,
-    domain::{
-        ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Seen, Verdict,
-    },
+    domain::{ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Verdict},
     normalize,
     store::{TurnId, TurnKind},
     world::{Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, unnameable_names},
@@ -868,9 +866,9 @@ fn a_streamed_narration_never_shows_an_unknown_tag() {
     assert_eq!(gm.calls().len(), 4);
 }
 
-/// B3 (QA, 2026-11-10): the PC accepts a pending proposal. The Intent
-/// settles the Open Item the PC holds, the proposal writes its outcome key
-/// on the PC, and the item closes in a Turn that is a decision.
+/// The PC accepts a pending proposal (B3, then ADR 0007). The proposal
+/// names the Open Item in `closes`, the core writes its outcome on the PC,
+/// and the item closes in a Turn that is a decision.
 #[test]
 fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     let w = HiddenWorld::new();
@@ -878,14 +876,17 @@ fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     let mut accept = proposal(Verdict::Allowed);
     accept.action = ActionKind::Talk;
     accept.minutes = 2;
-    accept.facts = vec![fact(slot(e(ada), "meet", "agreed"), Seen::Pc, vec![])];
+    accept.closes = vec![threshold_core::domain::Close {
+        item: format!("E{ada} pending_meet"),
+        outcome: "agreed".into(),
+    }];
     let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
     let (mut engine, campaign) = w.engine(&gm);
-    let prompt_scene = {
+    let handles = {
         let view = engine.store().snapshot(campaign).unwrap();
-        threshold_core::context::proposal_prompt(&view, &[], "I will meet Brann.").scene
+        threshold_core::context::handle_context(&view, "I will meet Brann.")
     };
-    assert!(prompt_scene.contains("settles: meet"), "{prompt_scene}");
+    assert_eq!(handles.open_items, [format!("E{ada} pending_meet")]);
     let outcome = engine
         .play_turn(
             "t-accept".into(),

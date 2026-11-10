@@ -34,6 +34,9 @@ pub struct HandleContext {
     /// The places the PC knows (`world::known_places`): the values of
     /// `move_to` besides `null`.
     pub places: Vec<domain::Handle>,
+    /// The Open Items the PC holds (`world::open_item_ref`): the values of
+    /// a `closes` item.
+    pub open_items: Vec<String>,
 }
 
 pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
@@ -148,6 +151,12 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         .collect();
     schema["properties"]["move_to"] = json!({"type": ["string", "null"], "enum": places});
     require(&mut schema, "", "move_to");
+    if ctx.open_items.is_empty() {
+        schema["properties"]["closes"]["maxItems"] = json!(0);
+    } else {
+        set(&mut schema, "/$defs/Close/properties/item", &ctx.open_items);
+    }
+    require(&mut schema, "", "closes");
     for stake in ["win", "lose"] {
         schema["$defs"]["CheckDraft"]["properties"][stake] = json!({"$ref": "#/$defs/SlotDraft"});
         require(&mut schema, "/$defs/CheckDraft", stake);

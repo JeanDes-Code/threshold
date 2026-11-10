@@ -259,6 +259,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         action: ActionKind::Act,
         verdict,
         move_to: None,
+        closes: vec![],
         blockers: vec![],
         check: None,
         reactions: vec![],

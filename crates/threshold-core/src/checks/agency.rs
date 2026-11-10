@@ -5,7 +5,6 @@ use super::{CheckKind, Origin, PC_INVOLUNTARY_KEYS, Rejection, pc, same_key, wri
 use crate::{
     domain::{DecisionProposal, Handle},
     store::WorldView,
-    world::pc_open_outcomes,
 };
 
 /// True when a write on the PC may set `key` without a choice of the
@@ -40,20 +39,17 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
             err("a claim cannot put words in the PC's mouth");
         }
     }
-    // The outcome keys of the Open Items the PC holds: the Intent may settle
-    // one with a fact (changed after QA, 2026-11-10).
-    let settles = pc_open_outcomes(view);
     // Every slot write on the PC: facts, both stakes and schedule effects.
-    // The core writes the PC's location from `move_to` (ADR 0007): the
-    // Player's Intent chose that move, so it is no PC act of the model's.
-    for w in writes(p, view)
-        .iter()
-        .filter(|w| Handle::Entity(w.subject) == pc && w.origin != Origin::Move)
-    {
-        let settled = w.origin == Origin::Fact && settles.iter().any(|k| same_key(k, w.key));
-        if !is_involuntary_key(w.key) && !settled {
+    // The core writes the PC's location from `move_to` and the outcomes of
+    // `closes` (ADR 0007): the Player's Intent chose them, so they are no
+    // PC act of the model's. A fact on the outcome key of an Open Item the
+    // PC holds is no longer allowed: `closes` replaces it.
+    for w in writes(p, view).iter().filter(|w| {
+        Handle::Entity(w.subject) == pc && !matches!(w.origin, Origin::Move | Origin::Close)
+    }) {
+        if !is_involuntary_key(w.key) {
             err(&format!(
-                "a write on the PC may only set {} (or the outcome of an open item the PC holds); got {}",
+                "a write on the PC may only set {}; got {}",
                 PC_INVOLUNTARY_KEYS.join(", "),
                 w.key
             ));

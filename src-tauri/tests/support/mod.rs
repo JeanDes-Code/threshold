@@ -24,6 +24,7 @@ pub fn base() -> DecisionProposal {
         action: ActionKind::Observe,
         verdict: Verdict::Allowed,
         move_to: None,
+        closes: vec![],
         blockers: vec![],
         check: None,
         reactions: vec![],

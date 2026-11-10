@@ -703,6 +703,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         goals: vec![Handle::Goal(2)],
         new_slots: 1,
         places: vec![Handle::Entity(7)],
+        open_items: vec!["E1 pending_trip".into()],
     };
     let schema = proposal_schema_for(&ctx);
     let validator = jsonschema::validator_for(&schema).unwrap();
@@ -710,6 +711,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "action": "talk",
         "verdict": "allowed",
         "move_to": null,
+        "closes": [],
         "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}}],
         "facts": [{"slot": {"subject": "N1", "key": "mood", "value": "calm"}, "seen": "pc", "because": ["F40"]}],
         "new_npcs": [{"id": "N1", "name": "Kett", "age": 34, "voice": "terse"}]
@@ -740,6 +742,28 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let mut silent = good.clone();
     silent.as_object_mut().unwrap().remove("move_to");
     assert!(!validator.is_valid(&silent));
+    // `closes` is required; its items name an open item the PC holds.
+    let mut closing = good.clone();
+    closing["closes"] = serde_json::json!([{"item": "E1 pending_trip", "outcome": "accepted"}]);
+    assert!(
+        validator.is_valid(&closing),
+        "{:?}",
+        validator.validate(&closing)
+    );
+    closing["closes"][0]["item"] = "E1 pending_feast".into();
+    assert!(!validator.is_valid(&closing));
+    let mut open = good.clone();
+    open.as_object_mut().unwrap().remove("closes");
+    assert!(!validator.is_valid(&open));
+    // With no open item held, `closes` takes nothing.
+    let none = proposal_schema_for(&HandleContext {
+        open_items: vec![],
+        ..ctx.clone()
+    });
+    let none = jsonschema::validator_for(&none).unwrap();
+    assert!(none.is_valid(&good));
+    closing["closes"][0]["item"] = "E1 pending_trip".into();
+    assert!(!none.is_valid(&closing));
 }
 
 // --- Fix round 1 -----------------------------------------------------------
@@ -1285,41 +1309,63 @@ fn pending(w: &mut World, subject: u64, key: &str, seen_by: Vec<u64>) {
     }]);
 }
 
+/// ADR 0007: the PC's own outcome fact is refused even when the PC holds
+/// the item; `closes` names the item and the core writes the outcome.
 #[test]
-fn pc_may_write_the_outcome_of_an_open_item_it_holds() {
+fn closes_writes_the_outcome_of_an_open_item_the_pc_holds() {
     let mut w = World::new();
+    let ada = w.ada;
+    let item = format!("E{ada} pending_winter_post");
+    let close = |item: &str| threshold_core::domain::Close {
+        item: item.into(),
+        outcome: "accepted".into(),
+    };
+    pending(&mut w, ada, "pending_winter_post", vec![]);
+    // An open item the PC does not hold cannot be closed.
     let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Talk;
-    p.facts = vec![fact(
-        slot(e(w.ada), "winter_post", "accepted"),
-        Seen::Pc,
-        vec![],
-    )];
-    rejected(validate(&p, &w.view), CheckKind::Agency);
-
-    // An open item the PC does not hold unlocks nothing.
-    let ada = w.ada;
-    pending(&mut w, ada, "pending_winter_post", vec![]);
-    rejected(validate(&p, &w.view), CheckKind::Agency);
+    p.closes = vec![close(&item)];
+    rejected(validate(&p, &w.view), CheckKind::References);
+    let (settled, notes) = settle(p.clone(), &w.view);
+    assert!(settled.closes.is_empty());
+    assert_eq!(notes.len(), 1, "{notes:?}");
 
     // The PC learns of it.
-    let item = w.view.live_fact(ada, "pending_winter_post").unwrap().id;
+    let fact_id = w.view.live_fact(ada, "pending_winter_post").unwrap().id;
     let now = w.view.clock_min;
     w.commit(vec![LedgerOp::Know {
         holder: threshold_core::domain::EntityRef::Id(ada),
-        fact_id: Some(item),
+        fact_id: Some(fact_id),
         claim_id: None,
         how: Knowing::Witnessed,
         arrives_at: now,
     }]);
-    ok(validate(&p, &w.view));
-    // Only that key, and only as a fact: never a stake or an event.
-    p.facts = vec![fact(
-        slot(e(w.ada), "summer_post", "accepted"),
+    assert_eq!(
+        threshold_core::world::pc_open_items(&w.view),
+        [(ada, "pending_winter_post".to_owned())]
+    );
+    // The model's own outcome fact on the PC is still refused.
+    let mut own = proposal(Verdict::Allowed);
+    own.facts = vec![fact(
+        slot(e(ada), "winter_post", "accepted"),
         Seen::Pc,
         vec![],
     )];
-    rejected(validate(&p, &w.view), CheckKind::Agency);
+    rejected(validate(&own, &w.view), CheckKind::Agency);
+    // With `closes`, a fact on the same slot goes: closes writes it.
+    p.facts = own.facts.clone();
+    let (settled, notes) = settle(p, &w.view);
+    assert!(settled.facts.is_empty());
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    ok(validate(&settled, &w.view));
+    apply(&mut w, &settled, None);
+    let outcome = w.view.live_fact(ada, "winter_post").unwrap();
+    assert_eq!(outcome.slot.value, "accepted");
+    for holder in [ada, w.orsel, w.brann] {
+        assert!(outcome.seen_by.contains(&holder), "{holder}");
+    }
+    // A closed item is no longer open.
+    assert!(threshold_core::world::pc_open_items(&w.view).is_empty());
 }
 
 #[test]

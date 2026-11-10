@@ -76,6 +76,17 @@ pub fn to_ops(
             b.write(stake, FactSource::Stake, holders, Vec::new());
         }
     }
+    // ADR 0007: each Open Item the Intent settles gets its outcome fact,
+    // witnessed by everyone present, the PC included.
+    for (subject, key, close) in super::closed(p, view) {
+        let holders = b.holders(Seen::Present);
+        let outcome = SlotDraft {
+            subject: Handle::Entity(subject),
+            key: key.to_owned(),
+            value: close.outcome.clone(),
+        };
+        b.write(&outcome, FactSource::Proposal, holders, Vec::new());
+    }
     if let (Some(place), Some(pc)) = (&moved_to, pc(view)) {
         let holders = b.holders(Seen::Pc);
         let location = SlotDraft {

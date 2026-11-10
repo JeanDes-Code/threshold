@@ -10,7 +10,7 @@ use crate::{
     model::Prompt,
     pack::ContentPack,
     store::{Entity, Fact},
-    world::{known_places, pc_open_outcomes},
+    world::{known_places, open_item_ref, pc_open_items},
 };
 
 /// The rules part of the system prompt. Its first lines are the wording
@@ -41,7 +41,7 @@ LATER ACTIONS
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
 - move_to: when the player moves the PC to a place listed under PLACES, that place's handle; else null, and the PC stays. Never write the PC's location in facts or stakes.
-- An open item is a fact on a key pending_x. When the player's intent settles it (accepts, refuses or does it), add a fact on key x of the same subject, seen = pc, in facts (never in a schedule): that closes it. Example for the PC: facts:[{\"slot\":{\"subject\":\"<PC handle>\",\"key\":\"x\",\"value\":\"accepted\"},\"seen\":\"pc\",\"said_by\":null,\"because\":[]}]. On the PC, write x only for the keys listed after settles on the PC's line.
+- closes: for each open item (a fact on a pending_ key) that the player's intent settles (accepts, refuses or does it), {\"item\":\"<subject handle> <pending_ key>\",\"outcome\":\"<short result, such as accepted>\"}; else [].
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.
 - For wait: use the duration the player names. If the player names none, use the minutes until something happens.
@@ -111,6 +111,10 @@ fn handles(r: &Retrieval<'_>) -> HandleContext {
         goals: r.goals.iter().map(|g| Handle::Goal(g.id)).collect(),
         new_slots: 1,
         places: places.into_iter().map(Handle::Entity).collect(),
+        open_items: pc_open_items(r.view)
+            .into_iter()
+            .map(|(subject, key)| open_item_ref(subject, &key))
+            .collect(),
     }
 }
 
@@ -139,12 +143,6 @@ fn entity_line(r: &Retrieval<'_>, e: &Entity) -> String {
     let keys = r.live_keys(id);
     if !keys.is_empty() {
         line.push_str(&format!("; keys: {}", keys.join(", ")));
-    }
-    if r.pc == Some(id) {
-        let settles = pc_open_outcomes(r.view);
-        if !settles.is_empty() {
-            line.push_str(&format!("; settles: {}", settles.join(", ")));
-        }
     }
     line.push('\n');
     line

@@ -112,6 +112,7 @@ pub struct DecisionProposal {
     pub action: ActionKind,                 // talk | move | act | observe | wait
     pub verdict: Verdict,                   // allowed | impossible | check
     #[serde(default)] pub move_to: Option<Handle>,     // E* of a known place, or null; required in the schema (section 11)
+    #[serde(default)] pub closes: Vec<Close>,          // max 2: Open Items the Intent settles; required in the schema (section 11)
     #[serde(default)] pub blockers: Vec<Handle>,       // F*, max 2: what stands in the PC's way
     pub check: Option<CheckDraft>,                      // present iff verdict == check
     #[serde(default)] pub reactions: Vec<Reaction>,    // max 2
@@ -123,6 +124,7 @@ pub struct DecisionProposal {
     #[serde(default)] pub intimate: bool,
 }
 pub struct CheckDraft { against: Option<Handle>, win: Option<SlotDraft>, lose: Option<SlotDraft>, factors: Vec<Factor> } // factors max 3; both stakes required in the schema, optional for the core (section 11)
+pub struct Close      { item: String /* "E3 pending_x", an Open Item the PC holds */, outcome: String /* <= 40 chars */ }
 pub struct Factor     { fact: Handle, helps: bool }
 pub struct Reaction   { npc: Handle, stance: Stance, plan: String /* <= 12 words */, cause: Option<Cause> }
 pub enum   Cause      { Check, Fact(Handle) }
@@ -205,7 +207,7 @@ A QA pass on the live model found game bugs. These rules changed to fix them. Th
 - **The core removes three PC shapes instead of rejecting them.** A reaction of the PC, the PC in a scheduled event's `seen_by`, and a scheduled event whose actor is the PC are removed by `checks::settle` before the checks. Each removal writes one line in the debug log (step `settle`). Removing never adds a PC act, so the Agency rule holds. Every other agency case still rejects, and `validate` still rejects these three shapes when it gets them directly.
 - **The Player reads one sentence for a failed Turn.** When both attempts are rejected, the Player reads "The GM could not settle this Turn. Try to say it another way." The check names follow only in debug mode.
 - **The narrator gets the verdict.** Before, the outcome block held the perceived ops only, so an `impossible` attempt was narrated as done. Now an `impossible` verdict adds the line `context::IMPOSSIBLE_LINE` (the attempt does not happen; nothing changes beyond what is listed), and a lost Check's result line adds `context::FAILED_CHECK_LINE`. Only the verdict passes, never the blockers: a blocker can be a GM-only fact. `renarrate` reads the verdict from the stored proposal.
-- **The PC may settle its own Open Item.** A proposal fact on the PC on key `x` passes the agency check when the PC holds a live fact on `pending_x` about the PC (ADR 0005, same date). The PC's line in the proposal prompt lists those keys after `settles:`.
+- **The PC may settle its own Open Item.** Superseded by section 11 (`closes`). A proposal fact on the PC on key `x` passes the agency check when the PC holds a live fact on `pending_x` about the PC (ADR 0005, same date). The PC's line in the proposal prompt lists those keys after `settles:`.
 - **An opposed contest is a Check.** One proposal rule line says that a physical or social contest against an NPC, whose result is uncertain, is a Check with `against` set to that NPC. No schema change.
 - **The World Clock starts at the seed's hour.** `start.hour` (0 to 23, missing means 8) sets the clock of Day 1 through one `AdvanceClock` op in the seed Setup Turn, so a rebuild finds it again. A World Event `at` in a world file counts from that start. Old seeds and drafts without the field load.
 
@@ -214,12 +216,13 @@ A QA pass on the live model found game bugs. These rules changed to fix them. Th
 The live `play_basics` evaluation showed that the model does not follow the prompt rules of section 10 for a move, a contest or an Open Item. What the code needs is now a required, enum-typed field of the proposal, and the code writes the facts.
 
 - **`move_to`.** Required and nullable in the per-Turn schema. Its enum is the handles of the places the PC knows (`world::known_places`: every place entity the Adventure Seed does not hide) and `null`. The scene block lists them on one `PLACES (for move_to)` line. When the verdict is allowed, or a Check succeeds, `to_ops` writes the PC's `location` with the place's main name, witnessed by the PC. An impossible verdict or a lost Check moves nobody. A move with `move_to: null` commits, and the PC stays. For the Shortcut checks this write counts like a proposal fact, or like the win stake on a Check. The `move` check and `checks::move_note` are gone.
+- **`closes`.** A required list in the per-Turn schema, possibly empty, at most 2 items. Each item is `{item, outcome}`; the `item` enum is the Open Items the PC holds (`world::pc_open_items`), named `E<subject> pending_<x>` (`world::open_item_ref`); with none held, the list takes nothing. For each item, `to_ops` writes the fact on `x` with the `outcome` value, witnessed by everyone present, the PC included (ADR 0005). A proposal fact on the PC's outcome key is an agency error again; a fact on the slot of an item that `closes` names is dropped.
 - **The narrator is told where the PC is.** The outcome block gets one line from the Commit: `context::PC_PLACE_LINE` and the place, or `context::NOT_MOVED_LINE` and the place when the action was a move and the Commit wrote no PC `location`. No narrator rule line is added.
 - **Stakes are optional for the core.** `CheckDraft.win` and `lose` stay required in the schema. The core may drop one, and a Check with no stake still rolls; the narrator gets the result line.
 
 **The leniency rule** (one rule, applied by `checks::settle`):
 
-- An element that only *removes* model output about the PC is dropped, and one line goes to the debug log (step `settle`). These are: a reaction of the PC, the PC in a scheduled event's `seen_by`, a scheduled event whose actor is the PC, a PC `location` in a fact or a stake, and a `move_to` that is not a known place.
-- The core never *creates* a PC act, word or feeling, except the fields that come from the Player's Intent: `move_to`.
+- An element that only *removes* model output about the PC is dropped, and one line goes to the debug log (step `settle`). These are: a reaction of the PC, the PC in a scheduled event's `seen_by`, a scheduled event whose actor is the PC, a PC `location` in a fact or a stake, a `move_to` that is not a known place, a `closes` item that names no Open Item the PC holds (or names one twice), and a fact on the slot that a `closes` item writes.
+- The core never *creates* a PC act, word or feeling, except the fields that come from the Player's Intent: `move_to` and `closes`.
 - Every other agency case still rejects. `validate` still rejects the dropped shapes when it gets them directly. The Player reads one plain sentence for a failed Turn (section 10).
 

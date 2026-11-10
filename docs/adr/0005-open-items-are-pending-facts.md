@@ -27,3 +27,14 @@ QA found that an Open Item on the PC could never close. The PC accepted a propos
 - A write on `x` for another subject was already allowed.
 - One proposal rule line explains the closing rule. The PC's entity line lists the keys it may settle after `settles:`.
 - `world::pc_sight` then closes the item in that Turn, and the Turn counts as a decision.
+
+## Changed after a live evaluation (2026-11-10): `closes`
+
+The rule above did not work on the live model: in `play_basics`, 0 of 4 acceptances closed the item, because the model wrote no outcome fact. ADR 0007 replaces the rule:
+
+- The Decision Proposal has a required list field, `closes`. Each item is `{item, outcome}`. `item` names an Open Item the PC holds, as the prompt shows it: the subject's handle, a space, and the open key (`E3 pending_copy_tithe_roll`, `world::open_item_ref`). The per-Turn schema limits it to those values; with none held, the list takes nothing. `outcome` is a short value, at most 40 characters.
+- The items the PC holds are `world::pc_open_items`: each live fact on a `pending_` key that the PC believes, about any subject, whose outcome slot has no live fact yet.
+- For each item, the core writes the outcome fact on the key without the prefix, with the given value, witnessed by everyone present, the PC included. `world::pc_sight` then closes the item in that Turn, and the Turn counts as a decision.
+- The permission to write the outcome key on the PC in a proposal fact is gone. Such a fact is an agency error again, unless `closes` names the item: then the core drops the fact, because it writes that slot itself.
+- The prompt has one line for `closes`. The rule line about `pending_x` and the `settles:` list on the PC's line are gone.
+

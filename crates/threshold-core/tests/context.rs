@@ -971,3 +971,21 @@ fn proposal_prompt_lists_the_places_for_move_to() {
     assert_eq!(system.matches("move_to").count(), 1, "{system}");
     assert!(!system.contains("A move always has this fact"), "{system}");
 }
+
+/// ADR 0007: one rule line describes `closes`; the B3 lines (the outcome
+/// fact rule and the `settles:` list on the PC's line) are gone.
+#[test]
+fn proposal_prompt_describes_closes_in_one_line() {
+    let w = World::new();
+    let prompt = proposal_prompt(&w.view, &[], "I say yes.");
+    let closes: Vec<&str> = prompt
+        .system
+        .lines()
+        .filter(|l| l.contains("closes"))
+        .collect();
+    assert_eq!(closes.len(), 1, "{}", prompt.system);
+    assert!(closes[0].starts_with("- closes:"), "{}", closes[0]);
+    let all = fields(&prompt).concat();
+    assert!(!all.contains("settles:"), "{all}");
+    assert!(!all.contains("write x only"), "{all}");
+}

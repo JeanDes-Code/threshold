@@ -13,6 +13,12 @@ pub struct DecisionProposal {
     /// schema makes it required, with the known places' handles and `null`.
     #[serde(default)]
     pub move_to: Option<Handle>,
+    /// The Open Items the Player's Intent settles. The core writes each
+    /// outcome fact (ADR 0005, ADR 0007). The per-Turn schema makes it
+    /// required and limits `item` to the open items the PC holds.
+    #[serde(default)]
+    #[schemars(length(max = 2))]
+    pub closes: Vec<Close>,
     #[serde(default)]
     #[schemars(length(max = 2))]
     pub blockers: Vec<Handle>,
@@ -34,6 +40,16 @@ pub struct DecisionProposal {
     pub minutes: u32,
     #[serde(default)]
     pub intimate: bool,
+}
+
+/// One Open Item that the Intent settles: `item` names it as the prompt
+/// shows it (`world::open_item_ref`), and `outcome` is the value of the
+/// outcome fact the core writes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Close {
+    pub item: String,
+    #[schemars(length(max = 40))]
+    pub outcome: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

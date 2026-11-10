@@ -182,11 +182,13 @@ pub(super) enum Origin {
     LoseStake,
     /// The PC's `location` that the core writes from `move_to` (ADR 0007).
     Move,
+    /// An outcome fact that the core writes from `closes` (ADR 0007).
+    Close,
 }
 
 /// A slot write of the proposal on an entity that exists before this Turn:
-/// non-claim facts, schedule effects, both stakes, and the PC's `location`
-/// from `move_to`.
+/// non-claim facts, schedule effects, both stakes, the PC's `location`
+/// from `move_to`, and the outcomes of `closes`.
 pub(super) struct Write<'a> {
     pub subject: EntityId,
     pub key: &'a str,
@@ -240,7 +242,39 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             Origin::Move,
         );
     }
+    for (subject, key, close) in closed(p, view) {
+        push(
+            Handle::Entity(subject),
+            key,
+            &close.outcome,
+            &[],
+            Origin::Close,
+        );
+    }
     out
+}
+
+/// The `closes` items that name an Open Item the PC holds, with the item's
+/// subject and outcome key (the open key without its prefix, ADR 0005).
+/// Items that name nothing are left out.
+pub(super) fn closed<'a>(
+    p: &'a DecisionProposal,
+    view: &WorldView,
+) -> Vec<(EntityId, &'a str, &'a crate::domain::Close)> {
+    let held = crate::world::pc_open_items(view);
+    p.closes
+        .iter()
+        .filter_map(|close| {
+            let (subject, key) = held
+                .iter()
+                .find(|(subject, key)| crate::world::open_item_ref(*subject, key) == close.item)?;
+            let outcome = crate::domain::outcome_key(key)?;
+            // The item text ends with the open key, so it ends with the
+            // outcome key too: borrow it from there.
+            let at = close.item.len() - outcome.len();
+            Some((*subject, &close.item[at..], close))
+        })
+        .collect()
 }
 
 fn pc(view: &WorldView) -> Option<EntityId> {
