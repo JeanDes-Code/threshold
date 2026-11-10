@@ -42,19 +42,6 @@ export interface CharacterFact {
   open: boolean;
 }
 
-export interface JournalEntry {
-  subject: string;
-  text: string;
-  source: string | null;
-  /** An open item: planned or pending, not done. */
-  open: boolean;
-}
-
-export interface JournalView {
-  observations: JournalEntry[];
-  claims: JournalEntry[];
-}
-
 export interface DebugLine {
   step: string;
   prompt: string;
@@ -161,6 +148,45 @@ export interface Note {
   about: Target | null;
   created_ms: number;
   updated_ms: number;
+}
+
+/** What the PC did in one Turn: its Intent. */
+export interface Act {
+  turn_id: number;
+  intent: string;
+  /** A decision of the PC: it lasts, and the PC saw it. */
+  decision: boolean;
+}
+
+/** One Scene: one place and time, who was there, what the PC did and learned. */
+export interface SceneEntry {
+  /** The first Turn of the Scene. */
+  turn_id: number;
+  /** The place name; empty when the PC has no location. */
+  place: string;
+  clock_from: number;
+  clock_to: number;
+  /** Who was there, the PC left out. */
+  present: NameRef[];
+  acts: Act[];
+  learned: FactLine[];
+}
+
+export interface ClosedItem {
+  item: FactLine;
+  closed_in: number;
+}
+
+/** The Journal: written by the app from PC Knowledge only. */
+export interface JournalView {
+  /** Oldest first. */
+  scenes: SceneEntry[];
+  open: FactLine[];
+  closed: ClosedItem[];
+  /** What the PC knew before the Campaign began. */
+  known_before: FactLine[];
+  notes: Note[];
+  pins: Target[];
 }
 
 /** One person, place or Faction as the PC knows it. */

@@ -26,7 +26,19 @@ use threshold_core::{
     rules::D10,
     store::{Store, TurnKind},
     turn::Engine,
+    view::{FactLine, JournalView},
 };
+
+/// Every fact line of a Journal: known before, open, closed and learned.
+fn journal_lines(journal: &JournalView) -> Vec<&FactLine> {
+    journal
+        .known_before
+        .iter()
+        .chain(&journal.open)
+        .chain(journal.closed.iter().map(|c| &c.item))
+        .chain(journal.scenes.iter().flat_map(|s| &s.learned))
+        .collect()
+}
 
 #[test]
 fn get_debug_refused_when_debug_off() {
@@ -58,24 +70,24 @@ fn journal_hides_gm_only_facts() {
     town(&mut s);
 
     let journal = s.get_journal().unwrap();
-    let texts: Vec<&str> = journal
-        .observations
+    let texts: Vec<&str> = journal_lines(&journal)
         .iter()
-        .chain(&journal.claims)
-        .map(|e| e.text.as_str())
+        .map(|f| f.text.as_str())
         .collect();
-    // The PC witnessed who stands in the town hall at the start.
+    // The PC knew from the start who stands in the town hall.
     assert!(
         journal
-            .observations
+            .known_before
             .iter()
-            .any(|e| e.text.contains("Magistrate Orsel holds court")),
+            .any(|f| f.text.contains("Magistrate Orsel holds court")),
         "{texts:?}"
     );
+    // No Scene before Begin.
+    assert!(journal.scenes.is_empty());
     // The GM-only secret and the unheard rumor never show.
     assert!(texts.iter().all(|t| !t.contains("skims")), "{texts:?}");
     assert!(texts.iter().all(|t| !t.contains("scales")), "{texts:?}");
-    assert!(journal.claims.is_empty());
+    assert!(journal_lines(&journal).iter().all(|f| f.told_by.is_none()));
 
     let character = s.get_character().unwrap();
     assert_eq!(character.name, "Wren");
@@ -130,18 +142,23 @@ open = true
 
     let journal = s.get_journal().unwrap();
     let trip = journal
-        .observations
+        .known_before
         .iter()
-        .find(|e| e.text.contains("shopping trip"))
+        .find(|f| f.text.contains("shopping trip"))
         .expect("the PC holds the open item");
     assert!(trip.open);
     assert!(
         journal
-            .observations
+            .known_before
             .iter()
-            .filter(|e| !e.text.contains("shopping trip") && !e.text.contains("audience"))
-            .all(|e| !e.open)
+            .filter(|f| !f.text.contains("shopping trip") && !f.text.contains("audience"))
+            .all(|f| !f.open)
     );
+    // Both are Open Items the PC knows, and neither is closed.
+    let open: Vec<&str> = journal.open.iter().map(|f| f.text.as_str()).collect();
+    assert!(open.iter().any(|t| t.contains("shopping trip")), "{open:?}");
+    assert!(open.iter().any(|t| t.contains("audience")), "{open:?}");
+    assert!(journal.closed.is_empty());
 }
 
 #[test]
@@ -213,17 +230,22 @@ fn journal_lists_claims_with_their_source() {
         .unwrap();
 
     let journal = s.get_journal().unwrap();
+    // The Claim is learned in the Scene where the PC heard it.
     let claim = journal
-        .claims
+        .scenes
         .iter()
-        .find(|c| c.subject == "Tobin")
-        .expect("the told Belief is a Claim");
-    assert_eq!(claim.source.as_deref(), Some("Hessa"));
+        .flat_map(|scene| &scene.learned)
+        .find(|f| f.subject.name.as_deref() == Some("Tobin"))
+        .expect("the told Belief is in its Scene");
+    assert_eq!(
+        claim.told_by.as_ref().and_then(|who| who.name.as_deref()),
+        Some("Hessa")
+    );
     assert!(
-        journal
-            .observations
+        journal_lines(&journal)
             .iter()
-            .all(|o| o.subject != "Tobin" || !o.text.contains("cheats"))
+            .filter(|f| f.subject.name.as_deref() == Some("Tobin") && f.text.contains("cheats"))
+            .all(|f| f.told_by.is_some())
     );
 }
 
@@ -1091,7 +1113,7 @@ fn journal_marks_open_facts() {
     rig.drafts.start_build(&id, &mut |_| {}).unwrap();
 
     let journal = rig.session().get_journal().unwrap();
-    let entries: Vec<_> = journal.observations.iter().chain(&journal.claims).collect();
+    let entries = journal_lines(&journal);
     let vote = entries
         .iter()
         .find(|e| e.text.contains("new pier"))

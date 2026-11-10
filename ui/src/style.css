@@ -369,14 +369,131 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
   .play-intent-field { height: 56px; }
 }
 
+/* ---------------------------------------------------------------------------
+ * The Journal: a top bar, the parts on the left, one part on the right.
+ * ------------------------------------------------------------------------ */
+.journal {
+  display: grid; grid-template-rows: auto minmax(0, 1fr);
+  height: 100%; min-height: 0;
+  background: var(--ground); color: var(--text); font-family: var(--font-ui);
+}
+:where(.journal) p, :where(.journal) h1, :where(.journal) h2, :where(.journal) h3 { margin: 0; }
+.journal-top { padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--rule); }
+.journal-top .play-label { margin: 0; color: var(--faint); }
+.journal-top__title { font-family: var(--font-story); font-size: var(--text-xl); font-weight: 600; line-height: 1.2; }
+.journal__body { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 0; }
+
+.journal-nav {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--rule);
+  overflow-y: auto;
+}
+.journal-nav__item {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  width: 100%; padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui); font-size: var(--text-sm); font-weight: 500; text-align: left;
+  color: var(--muted); background: none; border: 1px solid transparent; border-radius: var(--radius-2);
+}
+.journal-nav__item:hover { color: var(--text); background: var(--card); }
+.journal-nav__item[aria-current="page"] { color: var(--text); background: var(--card); border-color: var(--card-border); font-weight: 600; }
+.journal-nav__item[aria-current="page"] .journal-nav__count { color: var(--accent); }
+.journal-nav__count { font-size: var(--text-xs); color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.journal-page { overflow-y: auto; padding: var(--space-6); }
+.journal-page__measure { max-width: var(--story-measure); margin: 0 auto; }
+.journal-empty { color: var(--faint); font-size: var(--text-sm); }
+.journal-meta { font-family: var(--font-ui); font-size: var(--text-xs); color: var(--muted); }
+.journal-meta--block { display: block; margin-top: var(--space-1); }
+.journal-badge {
+  display: inline-block; margin-left: var(--space-2); padding: 1px var(--space-2); vertical-align: 2px;
+  font-family: var(--font-ui); font-size: var(--text-xs); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase;
+  color: var(--accent-text); background: var(--accent); border-radius: var(--radius-3);
+  white-space: nowrap;
+}
+.journal-badge--open { color: var(--link); background: none; border: 1px solid var(--accent); }
+
+/* Timeline: one card per Scene on a thin rail, the latest first. */
+.journal-timeline { list-style: none; margin: 0; padding: 0; }
+.journal-scene { position: relative; padding: 0 0 var(--space-5) var(--space-6); }
+.journal-scene::before { content: ""; position: absolute; left: 7px; top: var(--space-4); bottom: 0; width: 1px; background: var(--rule); }
+.journal-scene:last-child::before { display: none; }
+.journal-scene__dot {
+  position: absolute; left: 1px; top: var(--space-4);
+  width: 13px; height: 13px; border-radius: var(--radius-3);
+  background: var(--ground); border: 2px solid var(--card-border);
+}
+.journal-scene:first-child .journal-scene__dot { border-color: var(--accent); background: var(--accent); }
+.journal-scene > article {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-2);
+}
+.journal-scene .play-label { margin: 0 0 var(--space-1); }
+.journal-scene__place { font-family: var(--font-story); font-size: var(--text-xl); font-weight: 600; line-height: 1.25; }
+.journal-with { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-3); font-size: var(--text-sm); }
+.journal-with__label { color: var(--faint); }
+.journal-who { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text); }
+.journal-who--unknown { color: var(--faint); font-style: italic; }
+.journal-who__initial { width: 22px; height: 22px; font-size: var(--text-xs); font-style: normal; }
+.journal-part { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--rule); }
+.journal-part .play-label { margin: 0 0 var(--space-2); }
+.journal-acts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.journal-act { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; }
+.journal-act__mark { color: var(--accent); font-weight: 600; }
+.journal-act__text, .journal-fact__text, .journal-decision__intent {
+  font-family: var(--font-story); font-size: var(--text-md); line-height: var(--leading-story);
+}
+
+/* Fact lines: what was learned, what is open, what was known before. */
+.journal-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.journal-fact { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; }
+.journal-fact--closed .journal-fact__text { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.journal-fact__check {
+  width: 9px; height: 5px; margin-left: 1px;
+  border-left: 1.5px solid var(--ok); border-bottom: 1.5px solid var(--ok);
+  transform: translateY(-3px) rotate(-45deg);
+}
+
+/* Decisions. */
+.journal-decisions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.journal-decision {
+  padding: var(--space-3) var(--space-4);
+  background: var(--card); border: 1px solid var(--card-border); border-left: 3px solid var(--accent); border-radius: var(--radius-2);
+}
+.journal-decision__intent { font-size: var(--text-lg); }
+.journal-decision .journal-meta { margin-top: var(--space-1); }
+
+/* Open and closed, Known before the Campaign: cards with small upper-case titles. */
+.journal-section {
+  margin: 0 0 var(--space-4); padding: var(--space-4) var(--space-5);
+  background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-2);
+}
+.journal-section__title {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-ui); font-size: var(--text-xs); font-weight: 600;
+  letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted);
+}
+.journal-section__hint { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--faint); }
+.journal-subject__name { margin: 0 0 var(--space-3); font-size: var(--text-md); font-weight: 600; }
+
+/* Narrow window: the parts go in one row above the page. 760px is --narrow in tokens.css. */
+@media (max-width: 760px) {
+  .journal-top { padding: var(--space-2) var(--space-4); }
+  .journal__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .journal-nav { flex-direction: row; overflow-x: auto; padding: var(--space-2) var(--space-3); border-right: 0; border-bottom: 1px solid var(--rule); }
+  .journal-nav__item { width: auto; white-space: nowrap; }
+  .journal-page { padding: var(--space-5) var(--space-4); }
+  .journal-scene { padding-left: var(--space-5); }
+}
+
 /* The app around the live Play screen: the menu, then the screen in the rest of the window. */
 .app { display: flex; flex-direction: column; height: 100vh; }
 .app__body { flex: 1; min-height: 0; overflow-y: auto; }
-.app__body > .play { height: 100%; }
+.app__body > .play, .app__body > .journal { height: 100%; }
 
 /* Dev preview only. */
 .preview { display: flex; flex-direction: column; height: 100vh; }
-.preview .play { flex: 1; height: auto; min-height: 0; }
+.preview .play, .preview .journal { flex: 1; height: auto; min-height: 0; }
 .preview__strip {
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
   padding: var(--space-1) var(--space-4);

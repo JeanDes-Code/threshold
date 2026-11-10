@@ -88,6 +88,48 @@ fn card_refusal_does_not_tell_hidden_from_missing() {
     assert_eq!(orsel.who.name.as_deref(), Some("Orsel"));
 }
 
+/// The Journal over a real file: a Scene opens at Begin, each Turn adds its
+/// Intent, and a reopened file gives the same Journal.
+#[test]
+fn get_journal_after_begin_and_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(
+        vec![allowed(), allowed()],
+        vec![
+            "The town hall is quiet.".into(),
+            "Orsel looks up.".into(),
+            "Hessa writes on.".into(),
+        ],
+    );
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let db = s.summary().unwrap().db_path;
+    assert!(s.get_journal().unwrap().scenes.is_empty());
+
+    let opening = s.begin(&mut |_| {}).unwrap().turn_id;
+    s.submit_intent("op-1".into(), "I greet the magistrate.", &mut |_| {})
+        .unwrap();
+    s.submit_intent("op-2".into(), "I sit down to copy.", &mut |_| {})
+        .unwrap();
+    let journal = s.get_journal().unwrap();
+    assert_eq!(journal.scenes.len(), 1, "{:?}", journal.scenes);
+    let scene = &journal.scenes[0];
+    assert_eq!(scene.turn_id, opening);
+    assert_eq!(scene.place, "Varn town hall");
+    let intents: Vec<&str> = scene.acts.iter().map(|a| a.intent.as_str()).collect();
+    assert_eq!(intents, ["I greet the magistrate.", "I sit down to copy."]);
+    assert!(
+        scene
+            .present
+            .iter()
+            .any(|who| who.entity_id == entity(&db, "Orsel"))
+    );
+
+    let mut reopened = session(dir.path(), &gm);
+    reopened.open_campaign(Path::new(&db)).unwrap();
+    assert_eq!(reopened.get_journal().unwrap(), journal);
+}
+
 #[test]
 fn get_play_view_after_open_and_after_a_turn() {
     let dir = tempfile::tempdir().unwrap();

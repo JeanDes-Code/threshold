@@ -6,12 +6,12 @@
 use serde::Serialize;
 
 use crate::{
-    domain::{ClockMin, EntityId, EntityKind, Knowing, STATE_KEYS, is_open_key},
+    domain::{ClockMin, EntityId, EntityKind, STATE_KEYS, is_open_key},
     normalize,
     player::{Marks, Note, Target},
     rules::RollResult,
     store::{TurnId, TurnKind},
-    world::{Belief, PcSight, SightLine, SightTurn},
+    world::{Belief, Moment, OpenItem, PcSight, SightLine, SightTurn},
 };
 
 /// The budget of one `play_view` call at 300 Turns, in a release build,
@@ -34,21 +34,6 @@ pub struct CharacterFact {
     pub open: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct JournalEntry {
-    pub subject: String,
-    pub text: String,
-    pub source: Option<String>,
-    /// An open item (ADR 0005): planned or pending, not done.
-    pub open: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct JournalView {
-    pub observations: Vec<JournalEntry>,
-    pub claims: Vec<JournalEntry>,
-}
-
 /// The PC as the PC knows itself: only its own Beliefs about itself.
 pub fn character_view(sight: &PcSight) -> CharacterView {
     let facts = sight
@@ -66,36 +51,6 @@ pub fn character_view(sight: &PcSight) -> CharacterView {
         clock_min: sight.clock_min,
         facts,
     }
-}
-
-/// PC Knowledge, split: what the PC witnessed, and what it was told. A
-/// subject or a speaker the PC cannot name reads "someone".
-pub fn legacy_journal(sight: &PcSight) -> JournalView {
-    let name = |id: EntityId| {
-        sight
-            .known
-            .iter()
-            .find(|k| k.id == id)
-            .and_then(|k| k.name.clone())
-            .unwrap_or_else(|| "someone".to_owned())
-    };
-    let mut journal = JournalView {
-        observations: Vec::new(),
-        claims: Vec::new(),
-    };
-    for belief in &sight.beliefs {
-        let entry = JournalEntry {
-            subject: name(belief.subject),
-            text: belief.text.clone(),
-            source: belief.source.map(name),
-            open: is_open_key(&belief.key),
-        };
-        match belief.how {
-            Knowing::Witnessed => journal.observations.push(entry),
-            Knowing::Told => journal.claims.push(entry),
-        }
-    }
-    journal
 }
 
 /// The Play screen: the story, and the side panel as the PC knows it now.
@@ -281,18 +236,7 @@ pub fn play_view(sight: &PcSight, marks: &Marks) -> PlayView {
                 })
                 .collect(),
         },
-        open: sight
-            .open_items
-            .iter()
-            .filter(|item| item.closed_in.is_none())
-            .filter_map(|item| {
-                sight
-                    .beliefs
-                    .iter()
-                    .find(|b| b.subject == item.subject && b.key == item.key)
-            })
-            .filter_map(|b| fact_line(sight, b))
-            .collect(),
+        open: open_lines(sight),
         pinned: pin_lines(sight, marks),
         known: sight
             .known
@@ -313,6 +257,163 @@ pub fn play_view(sight: &PcSight, marks: &Marks) -> PlayView {
             })
             .collect(),
     }
+}
+
+/// The Journal: the app's record of the Campaign, from PC Knowledge only
+/// (data shape 3.6).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct JournalView {
+    /// One entry per Scene, oldest first.
+    pub scenes: Vec<SceneEntry>,
+    /// The Open Items the PC knows that are not closed.
+    pub open: Vec<FactLine>,
+    pub closed: Vec<ClosedItem>,
+    /// "Known before the Campaign": PC Knowledge from the Setup Turns.
+    pub known_before: Vec<FactLine>,
+    pub notes: Vec<Note>,
+    pub pins: Vec<Target>,
+}
+
+/// One Scene: one place and time, who was there, what the PC did and what
+/// the PC learned.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SceneEntry {
+    /// The first Turn of the Scene.
+    pub turn_id: TurnId,
+    /// The name of the place, or the PC's location text; empty when the PC
+    /// has no location.
+    pub place: String,
+    /// The World Clock after the first Turn of the Scene.
+    pub clock_from: ClockMin,
+    /// The World Clock after its last Turn.
+    pub clock_to: ClockMin,
+    /// Each entity present in one of its Turns, the PC left out.
+    pub present: Vec<NameRef>,
+    /// One per Play and Correction Turn. The Opening has no Intent.
+    pub acts: Vec<Act>,
+    pub learned: Vec<FactLine>,
+}
+
+/// What the PC did in one Turn: its Intent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Act {
+    pub turn_id: TurnId,
+    pub intent: String,
+    /// A decision of the PC (data shape 3.2).
+    pub decision: bool,
+}
+
+/// An Open Item that closed, and the Turn that closed it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ClosedItem {
+    pub item: FactLine,
+    pub closed_in: TurnId,
+}
+
+/// The Journal of `sight`. No model writes it: each entry comes from
+/// committed data and from Narration the Player already read.
+pub fn journal_view(sight: &PcSight, _marks: &Marks) -> JournalView {
+    JournalView {
+        scenes: sight
+            .scenes()
+            .into_iter()
+            .filter_map(|scene| scene_entry(sight, scene))
+            .collect(),
+        open: open_lines(sight),
+        closed: sight
+            .open_items
+            .iter()
+            .filter_map(|item| {
+                let closed_in = item.closed_in?;
+                let mut line = item_line(sight, item)?;
+                line.open = false;
+                Some(ClosedItem {
+                    item: line,
+                    closed_in,
+                })
+            })
+            .collect(),
+        known_before: sight
+            .before
+            .iter()
+            .filter_map(|b| fact_line(sight, b))
+            .collect(),
+        // The rules that follow a Note or a Pin through a Correction come
+        // with the Notes and Pins commands; until then the shell passes none.
+        notes: Vec::new(),
+        pins: Vec::new(),
+    }
+}
+
+fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
+    let (first, last) = (scene.first()?, scene.last()?);
+    let mut present: Vec<NameRef> = Vec::new();
+    for id in scene.iter().flat_map(|m| &m.present) {
+        if *id != sight.pc && present.iter().all(|who| who.entity_id != *id) {
+            present.extend(name_ref(sight, *id));
+        }
+    }
+    Some(SceneEntry {
+        turn_id: first.turn,
+        place: first
+            .place
+            .as_deref()
+            .map(|text| place_name(sight, text))
+            .unwrap_or_default(),
+        clock_from: first.clock_after,
+        clock_to: last.clock_after,
+        present,
+        acts: scene
+            .iter()
+            .filter(|m| m.kind != TurnKind::Opening)
+            .filter_map(|m| {
+                let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
+                Some(Act {
+                    turn_id: m.turn,
+                    intent: turn.intent.clone(),
+                    decision: m.decision,
+                })
+            })
+            .collect(),
+        learned: scene
+            .iter()
+            .flat_map(|m| &m.learned)
+            .filter_map(|b| fact_line(sight, b))
+            .collect(),
+    })
+}
+
+/// A location as the PC names it: the name of a place the PC can name, when
+/// one has that name, else the location text.
+fn place_name(sight: &PcSight, text: &str) -> String {
+    let wanted = normalize::name(text);
+    sight
+        .known
+        .iter()
+        .filter(|k| k.kind == EntityKind::Place)
+        .filter_map(|k| k.name.as_ref())
+        .find(|name| normalize::name(name) == wanted)
+        .cloned()
+        .unwrap_or_else(|| text.to_owned())
+}
+
+/// The Open Items the PC knows that are not closed.
+fn open_lines(sight: &PcSight) -> Vec<FactLine> {
+    sight
+        .open_items
+        .iter()
+        .filter(|item| item.closed_in.is_none())
+        .filter_map(|item| item_line(sight, item))
+        .collect()
+}
+
+/// The line of an Open Item: the PC Belief on its open key.
+fn item_line(sight: &PcSight, item: &OpenItem) -> Option<FactLine> {
+    sight
+        .beliefs
+        .iter()
+        .find(|b| b.subject == item.subject && b.key == item.key)
+        .and_then(|b| fact_line(sight, b))
 }
 
 /// One person, place or Faction as the PC knows it (data shape 3.6).

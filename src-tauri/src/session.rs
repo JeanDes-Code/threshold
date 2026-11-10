@@ -363,9 +363,10 @@ impl Session {
             .ok_or_else(|| failed(UNKNOWN_ENTITY))
     }
 
-    /// PC Knowledge, split: what the PC witnessed, and what it was told.
+    /// The Journal: one entry per Scene, the Open Items, and what the PC
+    /// knew before the Campaign, from PC Knowledge only.
     pub fn get_journal(&self) -> Result<JournalView, AppError> {
-        Ok(view::legacy_journal(&self.sight()?))
+        Ok(view::journal_view(&self.sight()?, &Marks::default()))
     }
 
     pub fn set_debug(&mut self, on: bool) {

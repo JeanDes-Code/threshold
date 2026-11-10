@@ -13,7 +13,8 @@ use threshold_core::{
     store::{Store, TurnId, TurnKind, TurnRecord},
     turn::create_campaign,
     view::{
-        Block, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view, entity_card, play_view,
+        Block, JournalView, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view,
+        entity_card, journal_view, play_view,
     },
 };
 
@@ -508,6 +509,288 @@ fn entity_card_joins_its_notes_and_pin() {
     assert!(card.pinned);
     let card = entity_card(&w.sight(), &marks, w.brann).unwrap();
     assert!(!card.pinned);
+}
+
+fn journal_of(w: &HiddenWorld) -> JournalView {
+    journal_view(&w.sight(), &Marks::default())
+}
+
+/// The hidden world, then: Ada learns what Brann trades in, offers Orsel a
+/// trade and closes it, walks to the market and meets Tamsin there.
+struct Story {
+    w: HiddenWorld,
+    first: TurnId,
+    second: TurnId,
+    talk: TurnId,
+    offer: TurnId,
+    trade: TurnId,
+    walk: TurnId,
+    tamsin: u64,
+}
+
+fn story() -> Story {
+    let mut w = HiddenWorld::new();
+    let (ada, brann) = (w.ada, w.brann);
+    let turns: Vec<TurnId> = w
+        .store
+        .turns(w.campaign)
+        .unwrap()
+        .iter()
+        .filter(|t| t.record.kind == TurnKind::Play)
+        .map(|t| t.id)
+        .collect();
+    let view = w.view();
+    let talk = w.play(
+        "I ask Brann what he sells.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        10,
+        vec![set(
+            &view,
+            brann,
+            "trade",
+            "rope",
+            "Brann trades in rope.",
+            &[ada],
+        )],
+    );
+    let view = w.view();
+    let offer = w.play(
+        "I offer Orsel salt for passage.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        5,
+        vec![set(
+            &view,
+            ada,
+            "pending_trade",
+            "salt for passage",
+            "Ada offered Orsel salt for passage.",
+            &[ada],
+        )],
+    );
+    let view = w.view();
+    let trade = w.play(
+        "I hand over the salt.",
+        &record(ActionKind::Act, Verdict::Allowed, None),
+        5,
+        vec![set(
+            &view,
+            ada,
+            "trade",
+            "done",
+            "Ada traded the salt.",
+            &[ada],
+        )],
+    );
+    let view = w.view();
+    let mut ops = vec![set(
+        &view,
+        ada,
+        "location",
+        "market",
+        "Ada walks to the market.",
+        &[ada],
+    )];
+    ops.extend(newcomer("Tamsin", "market", &[ada]));
+    let walk = w.play(
+        "I walk to the market.",
+        &record(ActionKind::Move, Verdict::Allowed, None),
+        20,
+        ops,
+    );
+    w.narrate(walk, "Tamsin sells salt under a striped awning.");
+    let tamsin = id_of(&w.view(), "Tamsin");
+    Story {
+        first: turns[0],
+        second: turns[1],
+        w,
+        talk,
+        offer,
+        trade,
+        walk,
+        tamsin,
+    }
+}
+
+/// Shape 3.6: the Journal holds what the PC knows, and no more.
+#[test]
+fn journal_view_shows_pc_knowledge_only() {
+    let s = story();
+    let journal = journal_of(&s.w);
+    let json = serde_json::to_value(&journal).unwrap();
+    let text = json.to_string();
+    for hidden in HIDDEN {
+        assert!(!text.contains(hidden), "{hidden} leaks: {text}");
+    }
+    let keys = |v: &Value| -> Vec<String> {
+        let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(
+        keys(&json),
+        ["closed", "known_before", "notes", "open", "pins", "scenes"]
+    );
+    assert_eq!(
+        keys(&json["scenes"][0]),
+        [
+            "acts",
+            "clock_from",
+            "clock_to",
+            "learned",
+            "place",
+            "present",
+            "turn_id"
+        ]
+    );
+    assert_eq!(
+        keys(&json["scenes"][0]["acts"][0]),
+        ["decision", "intent", "turn_id"]
+    );
+    assert_eq!(keys(&json["closed"][0]), ["closed_in", "item"]);
+}
+
+/// Shape 3.3: what the PC knew from the start is "Known before the
+/// Campaign", and no Scene lists it as learned.
+#[test]
+fn seed_knowledge_is_known_before() {
+    let s = story();
+    let journal = journal_of(&s.w);
+    let meet = journal
+        .known_before
+        .iter()
+        .find(|f| f.belief.key == "pending_meet")
+        .expect("the PC knew its plan before the Campaign");
+    assert_eq!(meet.text, "Ada plans to meet Brann at the mill.");
+    let before: Vec<_> = journal.known_before.iter().map(|f| &f.belief).collect();
+    for scene in &journal.scenes {
+        for line in &scene.learned {
+            assert!(!before.contains(&&line.belief), "{line:?} in {scene:?}");
+        }
+    }
+}
+
+#[test]
+fn scene_entry_holds_place_time_people_acts_and_learned() {
+    let s = story();
+    let sight = s.w.sight();
+    let journal = journal_of(&s.w);
+    assert_eq!(journal.scenes.len(), 2, "{:#?}", journal.scenes);
+    let (gate, market) = (&journal.scenes[0], &journal.scenes[1]);
+
+    // Place and time: the first and the last Moment of each Scene.
+    let clock = |turn: TurnId| {
+        sight
+            .moments
+            .iter()
+            .find(|m| m.turn == turn)
+            .unwrap()
+            .clock_after
+    };
+    assert_eq!(gate.turn_id, s.w.opening);
+    assert_eq!(gate.place, "gate square");
+    assert_eq!(gate.clock_from, clock(s.w.opening));
+    assert_eq!(gate.clock_to, clock(s.trade));
+    assert_eq!(market.turn_id, s.walk);
+    assert_eq!(market.place, "market");
+    assert_eq!(
+        (market.clock_from, market.clock_to),
+        (clock(s.walk), clock(s.walk))
+    );
+    assert!(gate.clock_from < gate.clock_to && gate.clock_to < market.clock_from);
+
+    // Who was there, the PC left out; a stranger stays unnamed.
+    let ids = |scene: &threshold_core::view::SceneEntry| -> Vec<u64> {
+        scene.present.iter().map(|who| who.entity_id).collect()
+    };
+    assert!(!ids(gate).contains(&s.w.ada) && !ids(market).contains(&s.w.ada));
+    for id in [s.w.orsel, s.w.brann, s.w.kestrel] {
+        assert!(ids(gate).contains(&id), "{:?}", gate.present);
+    }
+    assert_eq!(ids(market), [s.tamsin]);
+    let stranger = gate.present.iter().find(|w| w.entity_id == s.w.kestrel);
+    assert_eq!(stranger.unwrap().name, None);
+
+    // What the PC did: each Intent, the Opening left out.
+    let acts: Vec<(TurnId, &str)> = gate
+        .acts
+        .iter()
+        .map(|a| (a.turn_id, a.intent.as_str()))
+        .collect();
+    assert_eq!(
+        acts,
+        [
+            (s.first, "I wait by the gate."),
+            (s.second, "I ask Brann about the road."),
+            (s.talk, "I ask Brann what he sells."),
+            (s.offer, "I offer Orsel salt for passage."),
+            (s.trade, "I hand over the salt."),
+        ]
+    );
+    let decision = |turn| {
+        gate.acts
+            .iter()
+            .find(|a| a.turn_id == turn)
+            .unwrap()
+            .decision
+    };
+    assert!(!decision(s.first) && decision(s.trade));
+    assert_eq!(market.acts.len(), 1);
+    assert_eq!(market.acts[0].intent, "I walk to the market.");
+
+    // What the PC learned, in the Scene where it learned it.
+    let learned = |scene: &threshold_core::view::SceneEntry, key: &str, subject: u64| {
+        scene
+            .learned
+            .iter()
+            .any(|f| f.belief.key == key && f.belief.subject_id == subject)
+    };
+    assert!(learned(gate, "trade", s.w.brann));
+    assert!(!learned(market, "trade", s.w.brann));
+    // Tamsin's place is presence, not something learned.
+    assert!(!learned(market, "location", s.tamsin));
+}
+
+#[test]
+fn closed_item_names_the_turn_that_closed_it() {
+    let s = story();
+    let journal = journal_of(&s.w);
+    let closed = journal
+        .closed
+        .iter()
+        .find(|c| c.item.belief.key == "pending_trade")
+        .expect("the trade is done");
+    assert_eq!(closed.closed_in, s.trade);
+    assert_eq!(closed.item.text, "Ada offered Orsel salt for passage.");
+    assert!(!closed.item.open);
+    assert!(journal.open.iter().all(|f| f.belief.key != "pending_trade"));
+    assert!(journal.open.iter().any(|f| f.belief.key == "pending_meet"));
+    assert!(
+        journal
+            .closed
+            .iter()
+            .all(|c| c.item.belief.key != "pending_meet")
+    );
+}
+
+#[test]
+fn reverted_turn_is_in_no_scene_entry() {
+    let mut w = HiddenWorld::new();
+    let undone = w.play("I shout at Orsel.", &observe(), 0, vec![]);
+    let fixed = w.revert(undone, "I speak quietly to Orsel.", 0);
+    let journal = journal_of(&w);
+    let turns: Vec<TurnId> = journal
+        .scenes
+        .iter()
+        .flat_map(|s| std::iter::once(s.turn_id).chain(s.acts.iter().map(|a| a.turn_id)))
+        .collect();
+    assert!(!turns.contains(&undone), "{turns:?}");
+    assert!(turns.contains(&fixed), "{turns:?}");
+    let intents: Vec<&str> = journal
+        .scenes
+        .iter()
+        .flat_map(|s| s.acts.iter().map(|a| a.intent.as_str()))
+        .collect();
+    assert!(!intents.contains(&"I shout at Orsel."), "{intents:?}");
 }
 
 /// The UI reads what the core sends: the core's JSON is kept in

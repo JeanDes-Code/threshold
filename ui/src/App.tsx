@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { errorText, type CampaignSummary, type PlayView } from "./api";
+import LiveJournal from "./journal/LiveJournal";
 import LivePlay from "./play/LivePlay";
 import { api, play, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
 import Debug from "./views/Debug";
-import Journal from "./views/Journal";
 import NewCampaign from "./views/NewCampaign";
 
 type Tab = "play" | "character" | "journal" | "debug";
@@ -101,10 +101,10 @@ export default function App() {
         {campaign && tab === "play" && view && (
           <LivePlay key={campaign.db_path} view={view} onView={setView} onBusy={setTurnBusy} />
         )}
-        {campaign && (tab === "character" || tab === "journal") && (
+        {campaign && tab === "journal" && <LiveJournal revision={story.length} pcName={campaign.pc_name} />}
+        {campaign && tab === "character" && (
           <main>
-            {tab === "character" && <Character revision={story.length} />}
-            {tab === "journal" && <Journal revision={story.length} />}
+            <Character revision={story.length} />
           </main>
         )}
       </div>
