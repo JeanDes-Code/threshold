@@ -8,7 +8,9 @@
 //! `guard_events`), and short NPC reaction intents (filtered by
 //! `guard_plans`). It never gets a fact by id, a hidden fact, a key list, a
 //! goal, or a World Event that is still scheduled or that the PC did not
-//! witness. This is the real protection against leaks.
+//! witness. This is the real protection against leaks. The opening prompt
+//! (Begin) gets the same blocks, with no Turn: the start's situation and
+//! time take the place of the outcome.
 
 use std::collections::HashSet;
 
@@ -36,6 +38,15 @@ NPC intentions tell you how to portray an NPC. Show them through words and manne
 Give each NPC the voice of their Voice Card.
 Never say that more time passed than THIS TURN states. If no minutes pass, time does not pass.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
+";
+
+/// The lines that follow `NARRATION_RULES` in the opening prompt.
+pub const OPENING_RULES: &str = "\
+This is the opening of the adventure: there is no THIS TURN. Narrate the start given under OPENING.
+Describe where the PC is and what the PC perceives as play begins.
+Do not decide anything the PC does, says, or feels.
+Do not move time forward.
+End without asking what the PC does.
 ";
 
 /// The ops of one Turn that the PC perceives, in their order. A fact or a
@@ -198,6 +209,30 @@ pub fn narration_prompt(
         stable: adventure_block(view_after, None),
         scene: scene(&r),
         recent: recent(&r, perceived, events, reactions, intent),
+    }
+}
+
+/// The opening prompt (data shape 3.7): the narration rules with the
+/// opening lines after them, the same stable and scene blocks as a
+/// Narration, then the start's situation and time. It shows no Turn and no
+/// outcome: Begin commits nothing for the PC. An empty situation or time
+/// leaves its line out.
+pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt {
+    let r = Retrieval::new(view, "");
+    let mut recent = String::from("OPENING\n");
+    if let Some(start) = view.adventure_seed.as_ref().map(|seed| &seed.start) {
+        for (label, text) in [("Situation", &start.situation), ("When", &start.when)] {
+            let text = one_line(text);
+            if !text.is_empty() {
+                recent.push_str(&format!("{label}: {text}\n"));
+            }
+        }
+    }
+    Prompt {
+        system: with_fragments(&format!("{NARRATION_RULES}{OPENING_RULES}"), packs),
+        stable: adventure_block(view, None),
+        scene: scene(&r),
+        recent,
     }
 }
 

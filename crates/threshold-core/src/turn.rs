@@ -19,7 +19,7 @@ use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     context::{
         adventure_block, fact_text, guard_events, guard_plans, narration_prompt, one_line,
-        perceived_by_pc, proposal_context, seen_present,
+        opening_prompt, perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource,
@@ -39,6 +39,9 @@ use crate::{
 
 /// The longest Intent, in characters.
 pub const MAX_INTENT_CHARS: usize = 2_000;
+
+/// The `op_id` of the Opening Turn: a Campaign has one Begin at most.
+pub const BEGIN_OP_ID: &str = "__begin__";
 
 /// Milliseconds per pipeline step, and the prompt tokens the adapter
 /// reported for the last proposal call (`None` when it reports none).
@@ -74,6 +77,8 @@ pub enum TurnError {
     Store(StoreError),
     /// Only the last play Turn can be corrected.
     NotCorrectable(String),
+    /// Begin comes before the first play Turn only.
+    PlayStarted,
     /// The Turn is committed, but its Narration failed. The Turn row has no
     /// Narration: `renarrate`, or a retry under the same `op_id`, narrates it
     /// again.
@@ -100,6 +105,7 @@ impl fmt::Display for TurnError {
             }
             Self::Store(e) => e.fmt(f),
             Self::NotCorrectable(why) => write!(f, "nothing to correct: {why}"),
+            Self::PlayStarted => f.write_str("play has already started: Begin comes first"),
             Self::NarrationFailed { turn_id, error } => {
                 write!(
                     f,
@@ -287,6 +293,56 @@ impl Engine {
         self.finish(record, planned, head, timings, start, on_chunk)
     }
 
+    /// Begin: commits the Opening Turn (zero ops, empty Intent, no World
+    /// Clock move, no World Event) and narrates the start state. It decides
+    /// nothing for the PC. A second call returns the stored Turn and makes no
+    /// model call, unless its Narration is missing: then it narrates again.
+    /// Refused once a play Turn exists.
+    pub fn begin(&mut self, on_chunk: &mut dyn FnMut(&str)) -> Result<TurnOutcome, TurnError> {
+        let start = Instant::now();
+        let op_id: OpId = BEGIN_OP_ID.to_owned();
+        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+            return self.stored_outcome(stored, on_chunk);
+        }
+        if self
+            .store
+            .turns(self.campaign)?
+            .iter()
+            .any(|t| matches!(t.record.kind, TurnKind::Play | TurnKind::Correction))
+        {
+            return Err(TurnError::PlayStarted);
+        }
+        let view = self.store.snapshot(self.campaign)?;
+        let record = TurnRecord {
+            campaign_id: self.campaign,
+            op_id: op_id.clone(),
+            kind: TurnKind::Opening,
+            intent: String::new(),
+            proposal_json: "{}".into(),
+            clock_before: view.clock_min,
+            clock_after: view.clock_min,
+        };
+        let mut timings = Timings::default();
+        let Some(turn_id) = self.commit_logged(record, Vec::new(), &mut timings)? else {
+            return self.duplicate_outcome(&op_id, on_chunk);
+        };
+        let view_after = self.store.snapshot(self.campaign)?;
+        let step = Instant::now();
+        let narration = self
+            .narrate_opening(&op_id, &view_after, on_chunk)
+            .map_err(|e| narration_failed(turn_id, e))?;
+        timings.narrate_ms = ms(step);
+        timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
+        self.store.set_narration(turn_id, &narration)?;
+        timings.total_ms = ms(start);
+        Ok(TurnOutcome {
+            turn_id,
+            roll: None,
+            narration,
+            timings,
+        })
+    }
+
     /// Answers an out-of-character question with one plain model call. The
     /// model sees the rules, the Adventure Seed's premise, PC and boundaries,
     /// and PC Knowledge; never a decided or proposed seed fact, a hidden
@@ -316,6 +372,11 @@ impl Engine {
             .filter(|t| t.record.campaign_id == self.campaign)
             .ok_or_else(|| StoreError::Invalid("unknown turn".into()))?;
         let view_after = self.store.snapshot_before(self.campaign, stored.seq + 1)?;
+        if stored.record.kind == TurnKind::Opening {
+            let narration = self.narrate_opening(&stored.record.op_id, &view_after, on_chunk)?;
+            self.store.set_narration(turn, &narration)?;
+            return Ok(narration);
+        }
         let ops: Vec<LedgerOp> = self
             .store
             .turn_ops(turn)?
@@ -363,6 +424,43 @@ impl Engine {
         })
     }
 
+    /// Commits one Turn and writes its `commit` debug row. `None` when a Turn
+    /// already holds this `op_id`.
+    fn commit_logged(
+        &mut self,
+        record: TurnRecord,
+        ops: Vec<LedgerOp>,
+        timings: &mut Timings,
+    ) -> Result<Option<TurnId>, TurnError> {
+        let op_id = record.op_id.clone();
+        let step = Instant::now();
+        let committed = self.store.commit(record, ops);
+        timings.commit_ms = ms(step);
+        let raw = match &committed {
+            Ok(id) => format!("turn {id}"),
+            Err(e) => e.to_string(),
+        };
+        self.log(&op_id, "commit", &Prompt::default(), &raw, step)?;
+        match committed {
+            Ok(id) => Ok(Some(id)),
+            Err(CommitError::DuplicateOp(_)) => Ok(None),
+            Err(CommitError::Store(e)) => Err(e.into()),
+        }
+    }
+
+    /// The outcome of the Turn a Commit found already stored under `op_id`.
+    fn duplicate_outcome(
+        &mut self,
+        op_id: &OpId,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<TurnOutcome, TurnError> {
+        let stored = self
+            .store
+            .turn_by_campaign_op(self.campaign, op_id)?
+            .ok_or_else(|| StoreError::Invalid("duplicate op without a turn".into()))?;
+        self.stored_outcome(stored, on_chunk)
+    }
+
     /// Commits the planned ops (after `head`), then narrates.
     fn finish(
         &mut self,
@@ -377,24 +475,8 @@ impl Engine {
         let intent = record.intent.clone();
         let mut ops = head;
         ops.extend(planned.ops);
-        let step = Instant::now();
-        let committed = self.store.commit(record, ops.clone());
-        timings.commit_ms = ms(step);
-        let raw = match &committed {
-            Ok(id) => format!("turn {id}"),
-            Err(e) => e.to_string(),
-        };
-        self.log(&op_id, "commit", &Prompt::default(), &raw, step)?;
-        let turn_id = match committed {
-            Ok(id) => id,
-            Err(CommitError::DuplicateOp(_)) => {
-                let stored = self
-                    .store
-                    .turn_by_campaign_op(self.campaign, &op_id)?
-                    .ok_or_else(|| StoreError::Invalid("duplicate op without a turn".into()))?;
-                return self.stored_outcome(stored, on_chunk);
-            }
-            Err(CommitError::Store(e)) => return Err(e.into()),
+        let Some(turn_id) = self.commit_logged(record, ops.clone(), &mut timings)? else {
+            return self.duplicate_outcome(&op_id, on_chunk);
         };
 
         let view_after = self.store.snapshot(self.campaign)?;
@@ -457,6 +539,21 @@ impl Engine {
             &reactions,
             intent,
         );
+        let start = Instant::now();
+        let narration = self.gm.narrate(&prompt, on_chunk);
+        self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
+        Ok(narration?)
+    }
+
+    /// The opening narration call: `opening_prompt` on the state after the
+    /// Opening Turn, which equals the state before it.
+    fn narrate_opening(
+        &mut self,
+        op_id: &str,
+        view_after: &WorldView,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<String, TurnError> {
+        let prompt = opening_prompt(view_after, &self.packs);
         let start = Instant::now();
         let narration = self.gm.narrate(&prompt, on_chunk);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;

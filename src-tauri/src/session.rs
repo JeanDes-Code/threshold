@@ -249,7 +249,8 @@ impl Session {
         open.engine.store().snapshot(open.campaign).map_err(failed)
     }
 
-    /// The open campaign, with every play and Correction Turn.
+    /// The open campaign, with its Opening Turn and every play and
+    /// Correction Turn.
     pub fn summary(&self) -> Result<CampaignSummary, AppError> {
         let open = self.open()?;
         let view = self.view()?;
@@ -260,7 +261,12 @@ impl Session {
             .turns(open.campaign)
             .map_err(failed)?
             .into_iter()
-            .filter(|t| matches!(t.record.kind, TurnKind::Play | TurnKind::Correction))
+            .filter(|t| {
+                matches!(
+                    t.record.kind,
+                    TurnKind::Play | TurnKind::Correction | TurnKind::Opening
+                )
+            })
             .map(|t| {
                 let reverted = reverted.contains(&t.id);
                 turn_line(t, reverted)
@@ -477,9 +483,10 @@ fn model_error(e: &GmError) -> String {
 /// log.
 pub fn player_error(e: &TurnError) -> AppError {
     let text = match e {
-        TurnError::EmptyIntent | TurnError::IntentTooLong | TurnError::NotCorrectable(_) => {
-            e.to_string()
-        }
+        TurnError::EmptyIntent
+        | TurnError::IntentTooLong
+        | TurnError::NotCorrectable(_)
+        | TurnError::PlayStarted => e.to_string(),
         TurnError::Model(error) => model_error(error),
         TurnError::NarrationFailed { error, .. } => format!(
             "the Turn is committed, but its narration failed: {}",

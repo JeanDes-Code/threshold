@@ -14,7 +14,9 @@
 mod narration_prompt;
 mod proposal_prompt;
 
-pub use narration_prompt::{guard_events, guard_plans, narration_prompt, perceived_by_pc};
+pub use narration_prompt::{
+    guard_events, guard_plans, narration_prompt, opening_prompt, perceived_by_pc,
+};
 pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, proposal_prompt};
 
 use std::collections::BTreeSet;
@@ -23,7 +25,7 @@ use crate::{
     domain::{AdventureSeed, EntityId, EntityKind, Trigger, is_open_key},
     normalize,
     pack::{ContentPack, InsertPoint},
-    store::{Entity, Fact, Goal, StoredTurn, VoiceCard, WorldEvent, WorldView},
+    store::{Entity, Fact, Goal, StoredTurn, TurnKind, VoiceCard, WorldEvent, WorldView},
     world::pc_knowledge,
 };
 
@@ -365,12 +367,18 @@ pub(crate) fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// One recent Turn. The Opening Turn has no Player line: the PC did nothing
+/// in it.
 fn render_turn(turn: &StoredTurn) -> String {
-    let mut out = format!(
-        "Turn {}\nPlayer: {}\n",
-        turn.seq,
-        one_line(&turn.record.intent)
-    );
+    let mut out = if turn.record.kind == TurnKind::Opening {
+        format!("Turn {} (opening)\n", turn.seq)
+    } else {
+        format!(
+            "Turn {}\nPlayer: {}\n",
+            turn.seq,
+            one_line(&turn.record.intent)
+        )
+    };
     if let Some(narration) = turn.narration.as_deref().filter(|n| !n.trim().is_empty()) {
         out.push_str(&format!("Narration: {}\n", narration.trim()));
     }

@@ -69,6 +69,9 @@ pub enum TurnKind {
     Play,
     Correction,
     Ooc,
+    /// Begin: the opening Narration of the start state, with zero ops and
+    /// an empty Intent (data shape 3.7). Stored as `opening`.
+    Opening,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnRecord {

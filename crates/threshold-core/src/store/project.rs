@@ -874,7 +874,12 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         }
         if visited.insert(id) && recent_turns.len() < 6 {
             let kind: TurnKind = enum_parse(kind)?;
-            if matches!(kind, TurnKind::Play | TurnKind::Correction) {
+            // An Opening Turn counts: the first play Turn's prompts must read
+            // what the opening Narration already described.
+            if matches!(
+                kind,
+                TurnKind::Play | TurnKind::Correction | TurnKind::Opening
+            ) {
                 recent_turns.push(StoredTurn {
                     id,
                     seq,

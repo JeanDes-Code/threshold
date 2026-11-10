@@ -7,7 +7,9 @@ use threshold_app::session::{AppError, Session};
 use threshold_core::{
     Gm, RecordedGm,
     domain::{ActionKind, DecisionProposal, Handle, NewFact, Seen, SlotDraft, Verdict},
+    rules::D10,
     store::Store,
+    turn::Engine,
 };
 
 fn town_dir() -> PathBuf {
@@ -384,4 +386,34 @@ fn summary_marks_reverted_turns() {
     let line = |id: u64| lines.iter().find(|l| l.turn_id == id).unwrap();
     assert!(line(played.turn_id).reverted);
     assert!(!line(corrected.turn_id).reverted);
+}
+
+/// The opening Narration lives on its Opening Turn, so the summary of a
+/// reopened file shows it again.
+#[test]
+fn opening_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec!["The hall is quiet at dawn.".into()]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let db = s.summary().unwrap().db_path;
+    // No `begin` command yet: drive the Engine on the file directly.
+    {
+        let store = Store::open_existing(Path::new(&db)).unwrap();
+        let campaign = *store.campaigns().unwrap().last().unwrap();
+        let mut engine = Engine::new(store, Box::new(gm.clone()), Box::new(D10), vec![], campaign);
+        engine.begin(&mut |_| {}).unwrap();
+    }
+    drop(s);
+
+    let mut reopened = session(dir.path(), &gm);
+    let summary = reopened.open_campaign(Path::new(&db)).unwrap();
+    assert_eq!(summary.turns.len(), 1, "{:?}", summary.turns);
+    assert_eq!(summary.turns[0].kind, "opening");
+    assert_eq!(summary.turns[0].intent, "");
+    assert_eq!(
+        summary.turns[0].narration.as_deref(),
+        Some("The hall is quiet at dawn.")
+    );
+    assert!(!summary.turns[0].reverted);
 }
