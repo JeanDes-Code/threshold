@@ -14,11 +14,12 @@ use serde::{Serialize, Serializer};
 use threshold_core::{
     Gm,
     domain::{EntityKind, Knowing},
-    fixture::{load_adventure_seed, load_world},
+    fixture::{load_adventure_seed, load_world_setup},
     model::GmError,
     rules::{D10, RollResult},
+    setup::create_campaign_file,
     store::{CampaignId, Store, StoredTurn, TurnKind, WorldView},
-    turn::{Engine, TurnError, TurnOutcome, create_campaign, stored_roll},
+    turn::{Engine, TurnError, TurnOutcome, stored_roll},
     world::pc_knowledge,
 };
 use threshold_ollama::OllamaConfig;
@@ -195,7 +196,7 @@ impl Session {
     }
 
     /// Creates a campaign file from an Adventure Seed and a world file, and
-    /// opens it. A file that fails to set up is removed.
+    /// opens it. A failed setup leaves no file.
     pub fn new_campaign(
         &mut self,
         seed_path: &Path,
@@ -203,22 +204,12 @@ impl Session {
         rng_seed: u64,
     ) -> Result<CampaignSummary, AppError> {
         let seed = load_adventure_seed(seed_path).map_err(failed)?;
+        let world = load_world_setup(world_path).map_err(failed)?;
         let dir = self.campaigns_dir();
         fs::create_dir_all(&dir).map_err(failed)?;
         let db_path = dir.join(format!("campaign-{}.sqlite", clock_nanos()));
-        let setup = || -> Result<(Store, CampaignId), AppError> {
-            let mut store = Store::open(&db_path).map_err(failed)?;
-            let campaign = create_campaign(&mut store, &seed, rng_seed).map_err(failed)?;
-            load_world(&mut store, campaign, world_path).map_err(failed)?;
-            Ok((store, campaign))
-        };
-        match setup() {
-            Ok((store, campaign)) => self.attach(store, campaign, db_path),
-            Err(e) => {
-                let _ = fs::remove_file(&db_path);
-                Err(e)
-            }
-        }
+        create_campaign_file(&db_path, &seed, &world, rng_seed).map_err(failed)?;
+        self.open_campaign(&db_path)
     }
 
     /// Opens an existing campaign file: its last campaign.

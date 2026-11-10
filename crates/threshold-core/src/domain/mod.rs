@@ -2,6 +2,7 @@ mod adventure_seed;
 mod handle;
 mod proposal;
 mod types;
+mod world_setup;
 
 pub use adventure_seed::{AdventureSeed, OtherName, PcSeed, SeedEntity, SeedFact};
 pub use handle::{Handle, HandleError};
@@ -12,6 +13,10 @@ pub use proposal::{
 pub use types::{
     Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef, FactDraft, FactSource,
     GoalStatus, Key, Knowing, LedgerOp, STATE_KEYS, Slot, Stance, Trigger, Value, is_state_key,
+};
+pub use world_setup::{
+    AttitudeEntry, EffectEntry, EventEntry, FactEntry, GoalEntry, ObstacleEntry, VoiceCardEntry,
+    WorldSetup,
 };
 
 /// The age from which a character is an adult.

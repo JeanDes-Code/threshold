@@ -6,6 +6,7 @@ pub mod model;
 pub mod normalize;
 pub mod pack;
 pub mod rules;
+pub mod setup;
 pub mod store;
 pub mod turn;
 pub mod world;

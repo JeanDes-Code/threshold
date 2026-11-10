@@ -12,8 +12,9 @@ use threshold_core::{
         ActionKind, Canon, DecisionProposal, EntityKind, EventDraft, Handle, Knowing, LedgerOp,
         NewFact, Reaction, Seen, Stance, Trigger, Verdict, is_adult,
     },
-    fixture::{load_adventure_seed, load_world},
+    fixture::{load_adventure_seed, load_world, load_world_setup},
     rules::D10,
+    setup::create_campaign_file,
     store::{Store, TurnKind, WorldView},
     turn::{Engine, create_campaign},
     world::{beliefs, pc_knowledge},
@@ -128,6 +129,28 @@ fn town_fixture_schedules_the_summons() {
     assert_eq!(event.actors, [orsel]);
     assert!(!event.seen_by.is_empty(), "not a GM-only event");
     assert!(!event.effects.is_empty());
+}
+
+/// The Campaign file that `setup` writes holds the same world as the
+/// in-memory store that `town()` builds, so every test here covers both.
+#[test]
+fn town_campaign_file_matches_the_in_memory_campaign() {
+    let dir = town_dir();
+    let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
+    let world = load_world_setup(&dir.join("world.toml")).unwrap();
+    let folder = std::env::temp_dir().join(format!("threshold-town-file-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("campaign-1.sqlite");
+
+    create_campaign_file(&path, &seed, &world, 11).unwrap();
+    let file = Store::open_existing(&path).unwrap();
+    let from_file = file.snapshot(*file.campaigns().unwrap().last().unwrap());
+    drop(file);
+    let _ = std::fs::remove_dir_all(&folder);
+
+    let (store, campaign) = town();
+    assert_eq!(from_file.unwrap(), store.snapshot(campaign).unwrap());
 }
 
 /// The stuck wait, replayed in the town hall: two waits with `minutes: 0`.
