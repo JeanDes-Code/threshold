@@ -619,7 +619,11 @@ impl Engine {
             let raw = self.gm.propose(&prompt, &schema);
             timings.propose_ms += ms(step);
             timings.proposal_prompt_tokens = self.gm.last_prompt_tokens();
-            self.log(op_id, attempt, &prompt, answer_text(&raw), step)?;
+            let logged = match self.gm.last_done_reason().filter(|r| r != "stop") {
+                Some(reason) => format!("{}\n[generation stopped: {reason}]", answer_text(&raw)),
+                None => answer_text(&raw).to_owned(),
+            };
+            self.log(op_id, attempt, &prompt, &logged, step)?;
             let raw = raw?;
 
             let step = Instant::now();

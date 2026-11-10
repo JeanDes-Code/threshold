@@ -37,6 +37,7 @@ fn report_has_every_metric() {
         memory_turns: None,
         source: None,
         expected: None,
+        raw_log: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
     let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
@@ -428,6 +429,7 @@ fn offscreen_measures_the_seeded_event() {
         memory_turns: None,
         source: None,
         expected: None,
+        raw_log: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
     let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
@@ -1318,6 +1320,7 @@ mod speech {
             memory_turns: None,
             source: None,
             expected: None,
+            raw_log: None,
         };
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
         let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
@@ -1386,6 +1389,7 @@ fn play_basics_counts_each_step() {
         memory_turns: None,
         source: None,
         expected: None,
+        raw_log: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
     let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
@@ -1398,4 +1402,54 @@ fn play_basics_counts_each_step() {
     ] {
         assert!(report.contains(line), "missing {line}:\n{report}");
     }
+}
+
+/// R9: the raw proposals go to a file the caller names outside the
+/// repository, never to the log or the report; a path inside is refused.
+#[test]
+fn raw_log_goes_to_a_file_outside_the_repository_only() {
+    let gm = RecordedGm::new(vec![PROPOSAL.to_owned(); 20], vec!["Text.".to_owned(); 20]);
+    let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+    let config = |raw_log: PathBuf| Config {
+        root: root(),
+        scenarios: vec!["play_basics".into()],
+        runs: 1,
+        model: "recorded".into(),
+        judge: "first-choice".into(),
+        memory_turns: None,
+        source: None,
+        expected: None,
+        raw_log: Some(raw_log),
+    };
+    let inside = root().join("evals/reports/raw.log");
+    let refused = run(
+        &config(inside.clone()),
+        &make,
+        &make,
+        &FirstChoice,
+        &mut |_| {},
+    );
+    assert!(refused.unwrap_err().contains("inside the repository"));
+    assert!(!inside.exists());
+
+    let dir = std::env::temp_dir().join(format!("threshold-raw-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let outside = dir.join("raw.log");
+    let mut lines = Vec::new();
+    let report = run(
+        &config(outside.clone()),
+        &make,
+        &make,
+        &FirstChoice,
+        &mut |l| lines.push(l.to_owned()),
+    )
+    .unwrap();
+    let raw = std::fs::read_to_string(&outside).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(raw.contains("basics-r1-t1 propose: "), "{raw}");
+    assert!(!report.contains("\"verdict\""), "{report}");
+    assert!(
+        lines.iter().all(|l| !l.contains("\"verdict\"")),
+        "{lines:?}"
+    );
 }

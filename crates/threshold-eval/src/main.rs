@@ -16,14 +16,15 @@
 //!   outside the repository's `fixtures/` makes its report section print
 //!   counts only.
 //! - `--out <path>` (default `evals/reports/<date>.md`).
-//!
-//! With `THRESHOLD_EVAL_RAW=1` set, the log (stderr) also prints each raw
-//! proposal and each core repair of every Turn. They can hold GM-only facts.
+//! - `--raw-log <path>`: appends each Turn's raw proposals, core repairs
+//!   and check results to this file. They can hold GM-only facts, so a path
+//!   inside the repository is refused, and nothing of it reaches stderr or
+//!   the report.
 
 use std::{fs, path::PathBuf, process::ExitCode};
 
 use threshold_core::{Gm, build::BUILD_TIMEOUT_S};
-use threshold_eval::{Config, GmJudge, SCENARIOS, find_root, run, today};
+use threshold_eval::{Config, GmJudge, SCENARIOS, check_raw_log, find_root, run, today};
 use threshold_ollama::{OllamaConfig, OllamaGm};
 
 fn main() -> ExitCode {
@@ -43,6 +44,7 @@ fn real_main() -> Result<(), String> {
     let mut ollama = OllamaConfig::default();
     let mut memory_turns = None;
     let mut out: Option<PathBuf> = None;
+    let mut raw_log: Option<PathBuf> = None;
     let (mut source, mut expected): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -60,11 +62,12 @@ fn real_main() -> Result<(), String> {
                 );
             }
             "--out" => out = Some(PathBuf::from(value()?)),
+            "--raw-log" => raw_log = Some(PathBuf::from(value()?)),
             "--source" => source = Some(PathBuf::from(value()?)),
             "--expected" => expected = Some(PathBuf::from(value()?)),
             "-h" | "--help" => {
                 println!(
-                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>]"
+                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>] [--raw-log <path outside the repository>]"
                 );
                 return Ok(());
             }
@@ -84,6 +87,10 @@ fn real_main() -> Result<(), String> {
     }
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = find_root(&cwd).ok_or("run from the repository: evals/scenarios not found")?;
+    let raw_log = raw_log.map(|p| cwd.join(p));
+    if let Some(path) = &raw_log {
+        check_raw_log(&root, path)?;
+    }
 
     let warm = OllamaGm::new(ollama.clone());
     warm.warm_up().map_err(|e| format!("warm-up: {e}"))?;
@@ -98,6 +105,7 @@ fn real_main() -> Result<(), String> {
         memory_turns,
         source: source.map(|p| cwd.join(p)),
         expected: expected.map(|p| cwd.join(p)),
+        raw_log,
     };
     let make = || Box::new(OllamaGm::new(ollama.clone())) as Box<dyn Gm + Send>;
     let mut slow = ollama.clone();

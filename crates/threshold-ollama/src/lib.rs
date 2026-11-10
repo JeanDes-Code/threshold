@@ -54,13 +54,15 @@ impl Error for ConfigError {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallMetrics {
     pub prompt_tokens: u64,
     pub eval_tokens: u64,
     pub eval_duration_ns: u64,
     pub prompt_eval_duration_ns: u64,
     pub total_ms: u64,
+    /// Why generation stopped, as Ollama reports it (`stop`, `length`).
+    pub done_reason: Option<String>,
 }
 
 #[derive(Debug)]
@@ -97,10 +99,10 @@ impl OllamaGm {
     }
 
     pub fn last_metrics(&self) -> Option<CallMetrics> {
-        *self
-            .last_metrics
+        self.last_metrics
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     fn post(&self, path: &str, body: &Value) -> Result<Response, GmError> {
@@ -153,6 +155,7 @@ impl OllamaGm {
                 eval_duration_ns: response.eval_duration.unwrap_or(0),
                 prompt_eval_duration_ns: response.prompt_eval_duration.unwrap_or(0),
                 total_ms: response.total_duration.unwrap_or(0) / 1_000_000,
+                done_reason: response.done_reason.clone(),
             });
         }
     }
@@ -192,6 +195,10 @@ impl Gm for OllamaGm {
     fn last_prompt_tokens(&self) -> Option<u64> {
         self.last_metrics().map(|metrics| metrics.prompt_tokens)
     }
+
+    fn last_done_reason(&self) -> Option<String> {
+        self.last_metrics().and_then(|metrics| metrics.done_reason)
+    }
 }
 
 /// One response body or stream line. An `{"error": ...}` object is the
@@ -218,6 +225,7 @@ struct ChatResponse {
     eval_duration: Option<u64>,
     prompt_eval_duration: Option<u64>,
     total_duration: Option<u64>,
+    done_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -123,7 +123,8 @@ fn propose_sends_schema_and_concatenated_prompt() {
         "eval_count": 45,
         "eval_duration": 2_000_000_000_u64,
         "prompt_eval_duration": 500_000_000_u64,
-        "total_duration": 1_500_000_000_u64
+        "total_duration": 1_500_000_000_u64,
+        "done_reason": "length"
     })
     .to_string();
     let (base_url, request, server) = serve_response(response);
@@ -159,6 +160,8 @@ fn propose_sends_schema_and_concatenated_prompt() {
     assert_eq!(metrics.eval_duration_ns, 2_000_000_000);
     assert_eq!(metrics.prompt_eval_duration_ns, 500_000_000);
     assert_eq!(metrics.total_ms, 1500);
+    assert_eq!(metrics.done_reason.as_deref(), Some("length"));
+    assert_eq!(gm.last_done_reason().as_deref(), Some("length"));
 }
 
 #[test]

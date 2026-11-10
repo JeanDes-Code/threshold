@@ -46,6 +46,12 @@ pub trait Gm {
     fn last_prompt_tokens(&self) -> Option<u64> {
         None
     }
+    /// Why the model stopped generating in the last call (`stop`,
+    /// `length`), if the adapter knows. The engine logs any reason other
+    /// than `stop` with the raw proposal, so a cut answer shows its cause.
+    fn last_done_reason(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Which `Gm` method a recorded call went to.

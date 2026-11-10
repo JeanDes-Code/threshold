@@ -80,6 +80,34 @@ pub struct Config {
     /// A file outside `<root>/fixtures/` makes the report print counts only.
     pub source: Option<PathBuf>,
     pub expected: Option<PathBuf>,
+    /// A file that receives each Turn's raw proposals, core repairs and
+    /// check results. They can hold GM-only facts, so `run` refuses a path
+    /// inside `root`: they never reach a committed report.
+    pub raw_log: Option<PathBuf>,
+}
+
+/// Refuses a raw log path inside the repository root (`Config::raw_log`).
+pub fn check_raw_log(root: &Path, path: &Path) -> Result<(), String> {
+    let absolute = |p: &Path| {
+        let p = if p.is_absolute() {
+            p.to_owned()
+        } else {
+            std::env::current_dir().map_or_else(|_| p.to_owned(), |cwd| cwd.join(p))
+        };
+        // The file may not exist yet: resolve its folder.
+        let dir = p.parent().map(Path::to_owned).unwrap_or_default();
+        let dir = dir.canonicalize().unwrap_or(dir);
+        dir.join(p.file_name().unwrap_or_default())
+    };
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+    if absolute(path).starts_with(&root) {
+        Err(format!(
+            "the raw log {} is inside the repository; give a path outside it",
+            path.display()
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 pub type GmFactory<'a> = &'a dyn Fn() -> Box<dyn Gm + Send>;
@@ -97,6 +125,9 @@ pub fn run(
         if !SCENARIOS.contains(&name.as_str()) {
             return Err(format!("unknown scenario {name}"));
         }
+    }
+    if let Some(path) = &config.raw_log {
+        check_raw_log(&config.root, path)?;
     }
     let declared = if config
         .root
@@ -295,11 +326,27 @@ impl Ctx<'_> {
             .engine
             .play_turn(op_id.clone(), intent, &mut |_: &str| {})
             .map_err(|e| e.to_string());
-        if std::env::var_os("THRESHOLD_EVAL_RAW").is_some() {
-            for row in s.engine.store().debug_log(&op_id).unwrap_or_default() {
-                if row.step.starts_with("propose") || row.step == "settle" {
-                    (self.log)(&format!("RAW {op_id} {}: {}", row.step, row.raw));
-                }
+        if let Some(path) = &self.config.raw_log {
+            let rows: String = s
+                .engine
+                .store()
+                .debug_log(&op_id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|row| {
+                    row.step.starts_with("propose")
+                        || row.step == "settle"
+                        || row.step == "validate"
+                })
+                .map(|row| format!("{op_id} {}: {}\n", row.step, row.raw))
+                .collect();
+            let written = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .and_then(|mut file| std::io::Write::write_all(&mut file, rows.as_bytes()));
+            if let Err(e) = written {
+                (self.log)(&format!("raw log {}: {e}", path.display()));
             }
         }
         let attempts: Vec<Vec<String>> = s

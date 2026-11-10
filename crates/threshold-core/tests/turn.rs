@@ -1344,3 +1344,52 @@ fn impossible_act_citing_the_pc_location_does_not_block_a_later_move() {
         "gate"
     );
 }
+
+/// R6: a proposal the model stopped for a reason other than `stop` keeps
+/// that reason in its debug row, so a cut answer shows its cause.
+#[test]
+fn a_cut_proposal_logs_why_the_model_stopped() {
+    struct Cut(RecordedGm);
+    impl Gm for Cut {
+        fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
+            self.0.propose(prompt, schema)
+        }
+        fn narrate(
+            &self,
+            prompt: &Prompt,
+            on_chunk: &mut dyn FnMut(&str),
+        ) -> Result<String, GmError> {
+            self.0.narrate(prompt, on_chunk)
+        }
+        fn last_done_reason(&self) -> Option<String> {
+            Some("length".into())
+        }
+    }
+    let w = World::new();
+    let gm = RecordedGm::new(
+        vec![
+            r#"{"action":"act","verdict":"allowed","factors":["#.into(),
+            json(&proposal(Verdict::Allowed)),
+        ],
+        vec!["Done.".into()],
+    );
+    let mut engine = Engine::new(
+        w.store,
+        Box::new(Cut(gm)),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    engine
+        .play_turn("t1".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    let first = steps(&engine, "t1")
+        .into_iter()
+        .find(|(step, _)| step == "propose")
+        .unwrap();
+    assert!(
+        first.1.ends_with("[generation stopped: length]"),
+        "{}",
+        first.1
+    );
+}
