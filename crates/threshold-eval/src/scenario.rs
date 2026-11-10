@@ -159,6 +159,10 @@ pub enum BasicKind {
     Contest,
     /// The PC accepts the pending item: it must close.
     Accept,
+    /// The PC heads for a place that is not an entity (ADR 0007): the
+    /// Turn commits, the scene place stays, and the Narration must tell
+    /// that the PC does not arrive.
+    UnknownMove,
 }
 
 /// A Seed Draft and a World Build from a Source Text, scored against a

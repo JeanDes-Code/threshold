@@ -74,13 +74,14 @@ fn report_has_every_metric() {
         "Impossible acts narrated as failure (judge)",
         "Contests with a Roll",
         "Pending items closed",
+        "Moves to an unknown place that left the PC in place",
     ] {
         assert!(report.contains(metric), "missing {metric}:\n{report}");
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4, speech 10, play_basics 5 = 98 Turns.
-    assert!(report.contains("- Turns played: 196 (0 failed"), "{report}");
+    // agency_leaks 12, offscreen 4, speech 10, play_basics 6 = 99 Turns.
+    assert!(report.contains("- Turns played: 198 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1376,9 +1377,11 @@ fn play_basics_counts_each_step() {
     let back = format!(
         r#"{{"action":"move","verdict":"allowed","move_to":"E{hall}","check":null,"schedule":null,"minutes":15}}"#
     );
+    let nowhere = r#"{"action":"move","verdict":"allowed","move_to":null,"check":null,"schedule":null,"minutes":10}"#
+        .to_owned();
     let gm = RecordedGm::new(
-        vec![contest, impossible, accept, away, back],
-        vec!["It happens.".to_owned(); 5],
+        vec![contest, impossible, accept, away, back, nowhere],
+        vec!["It happens.".to_owned(); 6],
     );
     let config = Config {
         root: root(),
@@ -1398,7 +1401,8 @@ fn play_basics_counts_each_step() {
         "- Impossible acts narrated as failure (judge): 1 / 1 (100%) (0 judge errors)",
         "- Contests with a Roll: 1 / 1 (100%)",
         "- Pending items closed: 1 / 1 (100%)",
-        "- Turns failed: 0 / 5 (0%)",
+        "- Moves to an unknown place that left the PC in place: 1 / 1 (100%); told as not arriving (judge): 1 / 1 (100%)",
+        "- Turns failed: 0 / 6 (0%)",
     ] {
         assert!(report.contains(line), "missing {line}:\n{report}");
     }
@@ -1408,7 +1412,9 @@ fn play_basics_counts_each_step() {
 /// repository, never to the log or the report; a path inside is refused.
 #[test]
 fn raw_log_goes_to_a_file_outside_the_repository_only() {
-    let gm = RecordedGm::new(vec![PROPOSAL.to_owned(); 20], vec!["Text.".to_owned(); 20]);
+    // The live model writes newlines inside its JSON (R6).
+    let spread = PROPOSAL.replace(",\"minutes\"", ",\n  \"minutes\"");
+    let gm = RecordedGm::new(vec![spread; 20], vec!["Text.".to_owned(); 20]);
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
     let config = |raw_log: PathBuf| Config {
         root: root(),
@@ -1447,6 +1453,8 @@ fn raw_log_goes_to_a_file_outside_the_repository_only() {
     let raw = std::fs::read_to_string(&outside).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
     assert!(raw.contains("basics-r1-t1 propose: "), "{raw}");
+    // One row per line, so a row never reads as a cut answer.
+    assert!(raw.lines().all(|l| l.starts_with("basics-r1-t")), "{raw}");
     assert!(!report.contains("\"verdict\""), "{report}");
     assert!(
         lines.iter().all(|l| !l.contains("\"verdict\"")),

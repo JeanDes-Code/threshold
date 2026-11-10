@@ -1,9 +1,12 @@
 # Play basics on the town demo (QA, 2026-11-10). One campaign per run plays
 # the steps in order: a contest with an NPC, an impossible act, the
-# acceptance of a pending item, a move away and a move back. The report
-# counts the moves that changed the scene place, the impossible acts the
-# judge reads as a failure, the contests with a Roll, the pending items
-# that closed, the failed Turns and the Turn time.
+# acceptance of a pending item, a move to a second known place (the Varn
+# mill, a place entity since ADR 0007), a move back, and a move to a place
+# that is not an entity. The report counts the moves that changed the
+# scene place, the impossible acts the judge reads as a failure, the
+# contests with a Roll, the pending items that closed, the unknown-place
+# moves that left the PC in place and that the judge reads as "does not
+# arrive", the failed Turns and the Turn time.
 fixture = "town"
 
 # Orsel's request, an Open Item the PC holds before play.
@@ -32,3 +35,7 @@ intent = "I leave the town hall and walk down the river road to the Varn mill."
 [[steps]]
 kind = "move"
 intent = "I walk back up the road to the Varn town hall."
+
+[[steps]]
+kind = "unknown_move"
+intent = "I cross the river and walk to the old watchtower on the far ridge."

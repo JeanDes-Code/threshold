@@ -338,7 +338,9 @@ impl Ctx<'_> {
                         || row.step == "settle"
                         || row.step == "validate"
                 })
-                .map(|row| format!("{op_id} {}: {}\n", row.step, row.raw))
+                // One row per line: the model writes newlines inside its
+                // JSON, and a row cut over lines reads as a cut answer.
+                .map(|row| format!("{op_id} {}: {}\n", row.step, row.raw.replace('\n', "\\n")))
                 .collect();
             let written = std::fs::OpenOptions::new()
                 .create(true)
