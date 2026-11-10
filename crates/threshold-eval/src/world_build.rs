@@ -506,6 +506,10 @@ struct Tally {
     /// Drafted characters under 18 that the expected list does not hold
     /// as children, by drafted main name.
     minors: (usize, BTreeSet<String>),
+    /// Wrong `age_stated` claims, of, the drafted characters found in the
+    /// list; by expected main name: claimed stated with no listed age, and
+    /// claimed proposed with a listed age.
+    claims: (usize, usize, BTreeSet<String>, BTreeSet<String>),
     start_place: usize,
     present: (usize, usize),
     /// Facts scored on the known facts of each draft.
@@ -616,6 +620,29 @@ fn tally_draft(expected: &Expected, run: &BuildRun, draft: &SeedDraft, t: &mut T
             t.minors.0 += 1;
             t.minors.1.insert(d.main.clone());
         }
+    }
+    // The model's claim that the text states an age, against the list: an
+    // age in the list means the text states it.
+    let stated: BTreeSet<String> = draft
+        .ages_stated
+        .iter()
+        .map(|n| normalize::name(n))
+        .collect();
+    let characters = got
+        .iter()
+        .filter(|d| matches!(d.kind, EntityKind::Pc | EntityKind::Npc));
+    for d in characters {
+        let Some(entry) = wanted.iter().find(|e| e.same(d)) else {
+            continue;
+        };
+        t.claims.1 += 1;
+        let claimed = stated.contains(&normalize::name(&d.main));
+        match (claimed, entry.age.is_some()) {
+            (true, false) => t.claims.2.insert(entry.main.clone()),
+            (false, true) => t.claims.3.insert(entry.main.clone()),
+            _ => continue,
+        };
+        t.claims.0 += 1;
     }
     let place = subject_names(&wanted, &got, &expected.start_place);
     t.start_place += usize::from(place.contains(&normalize::name(&seed.start.place)));
@@ -772,7 +799,7 @@ pub fn section(
     }
     let _ = writeln!(
         out,
-        " Each run drafts a Seed Draft, confirms every proposed age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a fact with the same subject (through the main and other names) holds every word of one of the item's phrases in its key, value and text. The draft lines score the known facts of each draft; the world lines score the facts of each built world (known facts included) and cover only the runs that built one. Fact recall and open recall use the item's `about` phrase. False past counts the open items for which a settled fact (`open = false`) holds one of the item's `done` phrases: words that only a completed event would hold, so a settled fact about the plan itself does not count. An open item for which no such phrase exists is not scored for false past, and the false past lines leave it out of both terms. A paraphrase does not match, so every fact line is a lower bound. The run confirms every proposed age, so a proposed minor shows only on the line of characters drafted under 18. PC-centred share: the NPC goals and secrets whose text names the PC by one of its full names, or by the first word of its main name when no other drafted entry has that word in a name, as whole words (the build's own rule, `build::names_pc`, with the drafted roster); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
+        " Each run drafts a Seed Draft, confirms every age, approves the draft when no gap is left, and builds the world; a run stops at the first step that does not succeed. Roster: an expected entry is found when one of its names, main or other, is a drafted name after `normalize::name`. Facts: an expected item is found when a fact with the same subject (through the main and other names) holds every word of one of the item's phrases in its key, value and text. The draft lines score the known facts of each draft; the world lines score the facts of each built world (known facts included) and cover only the runs that built one. Fact recall and open recall use the item's `about` phrase. False past counts the open items for which a settled fact (`open = false`) holds one of the item's `done` phrases: words that only a completed event would hold, so a settled fact about the plan itself does not count. An open item for which no such phrase exists is not scored for false past, and the false past lines leave it out of both terms. A paraphrase does not match, so every fact line is a lower bound. The run confirms every age, as the Player must, so a proposed minor shows only on the line of characters drafted under 18. Wrong age_stated claims compare the model's claim that the text states an age (information only: it never skips a confirmation) with the list, for each drafted character found in it: an age in the list means the text states it. PC-centred share: the NPC goals and secrets whose text names the PC by one of its full names, or by the first word of its main name when no other drafted entry has that word in a name, as whole words (the build's own rule, `build::names_pc`, with the drafted roster); a secret is a fact that an NpcState call wrote as one. Voice distance: for each NPC the judge sees the first sample line of its Voice Card, names removed, and the habits and vocabulary of up to {VOICE_CHOICES} Voice Cards, and picks the speaker. Times cover the drafts and builds that succeeded.\n"
     );
 
     let n = runs.len();
@@ -820,6 +847,27 @@ pub fn section(
             named(t.child.1, &t.child.2)
         );
     }
+    let claim_names = if private || t.claims.0 == 0 {
+        String::new()
+    } else {
+        let list = |set: &BTreeSet<String>| {
+            if set.is_empty() {
+                "none".to_owned()
+            } else {
+                set.iter().cloned().collect::<Vec<_>>().join(", ")
+            }
+        };
+        format!(
+            " (claimed stated, the list has no age: {}; claimed proposed, the list states it: {})",
+            list(&t.claims.2),
+            list(&t.claims.3)
+        )
+    };
+    let _ = writeln!(
+        out,
+        "- Wrong age_stated claims: {} of {} drafted characters{claim_names}",
+        t.claims.0, t.claims.1
+    );
     let _ = writeln!(
         out,
         "- Characters drafted under 18 that the expected list does not hold as children: {}",

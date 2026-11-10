@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AdventureSeed } from "./api";
+import type { AdventureSeed, DraftView } from "./api";
 import {
+  ageSource,
+  agesStated,
   agesToConfirm,
   confirmRow,
   createSaver,
@@ -9,6 +11,7 @@ import {
   focusTarget,
   gapSentence,
   flagsFromNames,
+  formOfView,
   isUnconfirmed,
   parseAt,
   removeAt,
@@ -51,6 +54,7 @@ function form(): ReviewForm {
       { subject: "Agathe Morrow", key: "trade", value: "innkeeper", text: "Agathe runs the inn.", open: false },
     ],
     unconfirmed: { pc: false, entities: [false, true, false] },
+    stated: { pc: true, entities: [true, false, false] },
   };
 }
 
@@ -136,10 +140,10 @@ describe("gapSentence", () => {
   it("names the field in plain words", () => {
     expect(sentence("missing", "premise")).toBe("The premise is empty.");
     expect(sentence("age_unconfirmed", "entities[1].age")).toBe(
-      "The age of Sefa Lind is a guess: confirm it.",
+      "The age of Sefa Lind is not confirmed: check it, then confirm it.",
     );
     expect(sentence("age_unconfirmed", "pc.age")).toBe(
-      "Your character's age is a guess: confirm it.",
+      "Your character's age is not confirmed: check it, then confirm it.",
     );
     expect(sentence("missing", "entities[2].name")).toBe("The name of entry 3 is empty.");
     expect(sentence("unknown_name", "start.present[0]")).toBe(
@@ -185,6 +189,7 @@ describe("ages to confirm", () => {
         })),
       },
       unconfirmed: { pc: false, entities: flags },
+      stated: { pc: false, entities: names.map(() => false) },
     };
   }
   const rename = (f: ReviewForm, i: number, name: string): ReviewForm => ({
@@ -240,6 +245,45 @@ describe("ages to confirm", () => {
     expect([isUnconfirmed(f, 0), isUnconfirmed(f, 1)]).toEqual([true, true]);
     f = confirmRow(f, 1);
     expect(agesToConfirm(f)).toEqual([]);
+  });
+
+  it("a new draft asks for every age, the PC's too, whatever the model says", () => {
+    const base = form();
+    const view: DraftView = {
+      draft_id: "draft-1",
+      state: "draft",
+      seed: base.seed,
+      knowledge: base.knowledge,
+      ages_to_confirm: ["Teodor Brandt", "Agathe Morrow", "Sefa Lind"],
+      ages_stated: ["Teodor Brandt", "Agathe Morrow", "Sefa Lind"],
+      gaps: [],
+      last_failure: null,
+    };
+    let f = formOfView(view);
+    expect(f.unconfirmed).toEqual({ pc: true, entities: [true, true, false] });
+    expect(isUnconfirmed(f, "pc")).toBe(true);
+    expect(ageSource(f, "pc")).toBe("from the text");
+    // The PC row confirms on its own; the other rows still wait.
+    f = confirmRow(f, "pc");
+    expect(isUnconfirmed(f, "pc")).toBe(false);
+    expect(agesToConfirm(f)).toEqual(["Agathe Morrow", "Sefa Lind"]);
+    // A stated claim never confirms a row.
+    expect(isUnconfirmed(f, 0)).toBe(true);
+  });
+
+  it("labels each age with the model's claim, kept per row", () => {
+    let f = form();
+    expect(ageSource(f, "pc")).toBe("from the text");
+    expect(ageSource(f, 0)).toBe("from the text");
+    expect(ageSource(f, 1)).toBe("proposed by the model");
+    // A rename keeps the label on its row and saves it under the new name.
+    f = { ...f, seed: { ...f.seed, entities: replaceAt(f.seed.entities, 0, { name: "Aggie" }) } };
+    expect(ageSource(f, 0)).toBe("from the text");
+    expect(agesStated(f)).toEqual(["Teodor Brandt", "Aggie"]);
+    // Deleting a row drops its label and no other.
+    f = removeEntityRow(f, 0);
+    expect(f.stated.entities).toEqual([false, false]);
+    expect(agesStated(f)).toEqual(["Teodor Brandt"]);
   });
 
   it("confirming a row clears its own entry only", () => {

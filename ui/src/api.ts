@@ -194,6 +194,8 @@ export interface DraftView {
   seed: AdventureSeed;
   knowledge: KnownFact[];
   ages_to_confirm: string[];
+  /** Information only: the names whose age the model says the text states. */
+  ages_stated: string[];
   gaps: Gap[];
   last_failure: BuildFailure | null;
 }
@@ -314,12 +316,14 @@ export function createApi(invoke: Invoke) {
       seed: AdventureSeed,
       knowledge: KnownFact[],
       agesToConfirm: string[],
+      agesStated: string[],
     ) =>
       invoke<DraftView>("save_draft", {
         draft_id: draftId,
         seed,
         knowledge,
         ages_to_confirm: agesToConfirm,
+        ages_stated: agesStated,
       }),
     /** Approves the draft, or returns its gaps. Any other error rejects. */
     approveDraft: async (draftId: string): Promise<Approval> => {

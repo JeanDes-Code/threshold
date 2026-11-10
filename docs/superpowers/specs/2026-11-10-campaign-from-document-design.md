@@ -143,7 +143,7 @@ A failed build shows the Player the stage and the check that failed, never model
 
 Every character has an explicit age in years: the PC, each NPC from the source, each NPC the model creates later in play. This replaces the `adult` flag. Code derives adult status as age 18 or more. Code never assumes that a character is an adult.
 
-Where the Source Text gives no age, the model proposes one that fits the text, and the seed review shows it for the Player to confirm or change. So every age of a source character passes the Player's review. A Player statement in the seed, such as "every character is an adult", is a constraint on the model. Code still checks each stored age.
+Where the Source Text gives no age, the model proposes one that fits the text. The seed review shows every age, the PC's included, with the model's claim ("from the text" or "proposed by the model"). The Player confirms or changes each one: the claim never skips a confirmation, because the hard limit on intimate scenes reads the stored age. So every age of a source character passes the Player's review. A Player statement in the seed, such as "every character is an adult", is a constraint on the model. Code still checks each stored age.
 
 A character may have several names. Every name resolves to one entity. Whether a given NPC knows that two names are one person is a fact with holders, like any other knowledge. The spike showed that the model flattens this. This slice stores the fact and its holders. It does not yet enforce that an NPC without the fact acts as if they were two people. The evaluations measure it.
 

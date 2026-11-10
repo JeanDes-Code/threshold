@@ -129,7 +129,8 @@ struct PcOut {
     name: String,
     #[schemars(range(max = 999))]
     age: u16,
-    // False when the model proposed the age.
+    // False when the model proposed the age. Information only: the Player
+    // confirms every age.
     age_stated: bool,
     #[schemars(length(max = 4))]
     other_names: Vec<NameOut>,
@@ -600,9 +601,13 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
         .map(|n| main(n).unwrap_or_else(|| n.clone()))
         .collect();
 
-    let mut ages_to_confirm = vec![];
-    if !roster.pc.age_stated {
-        ages_to_confirm.push(pc.clone());
+    // Every age waits for the Player: the hard limit on intimate scenes
+    // reads it, so it never rests on the model's word. What the model says
+    // about the text is kept as information only.
+    let mut ages_to_confirm = vec![pc.clone()];
+    let mut ages_stated = vec![];
+    if roster.pc.age_stated {
+        ages_stated.push(pc.clone());
     }
     let others = |list: Vec<NameOut>| -> Vec<OtherName> {
         list.into_iter()
@@ -611,8 +616,9 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
     };
     let mut entities = vec![];
     for character in roster.characters {
-        if !character.age_stated {
-            ages_to_confirm.push(character.name.clone());
+        ages_to_confirm.push(character.name.clone());
+        if character.age_stated {
+            ages_stated.push(character.name.clone());
         }
         entities.push(SeedEntity {
             other_names: others(character.other_names),
@@ -669,6 +675,7 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
         },
         knowledge: vec![],
         ages_to_confirm,
+        ages_stated,
         last_failure: None,
         campaign_file: None,
     }

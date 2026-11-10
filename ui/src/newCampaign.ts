@@ -6,14 +6,15 @@ import type {
   BuildFailure,
   BuildProgress,
   BuildStage,
+  DraftView,
   Gap,
   GapKind,
   KnownFact,
 } from "./api";
 
 /**
- * Which characters have an age the Player has not confirmed. It is kept per
- * row, never by name: a name the Player is typing must not move a mark.
+ * One flag per character row. It is kept per row, never by name: a name the
+ * Player is typing must not move a mark.
  */
 export interface AgeFlags {
   pc: boolean;
@@ -21,11 +22,17 @@ export interface AgeFlags {
   entities: boolean[];
 }
 
-/** What the review edits. `save_draft` takes it, with `agesToConfirm` as the name list. */
+/**
+ * What the review edits. `save_draft` takes it, with `agesToConfirm` and
+ * `agesStated` as the name lists.
+ */
 export interface ReviewForm {
   seed: AdventureSeed;
   knowledge: KnownFact[];
+  /** The rows whose age the Player has not confirmed. A new draft marks every character. */
   unconfirmed: AgeFlags;
+  /** The rows whose age the model says the text states. Information only. */
+  stated: AgeFlags;
 }
 
 /** A character row: the PC, or an index in `seed.entities`. */
@@ -159,7 +166,7 @@ export function fieldLabel(at: string, form: ReviewForm): string {
 const SENTENCES: Record<GapKind, (field: string) => string> = {
   missing: (f) => `${f} is empty.`,
   age_missing: (f) => `${f} is missing.`,
-  age_unconfirmed: (f) => `${f} is a guess: confirm it.`,
+  age_unconfirmed: (f) => `${f} is not confirmed: check it, then confirm it.`,
   age_below_min: (f) => `${f} is below the minimum age.`,
   unknown_name: (f) => `${f} does not match a name of the right kind.`,
   duplicate_name: (f) => `${f} is used twice.`,
@@ -200,6 +207,16 @@ export function flagsFromNames(seed: AdventureSeed, names: string[]): AgeFlags {
   };
 }
 
+/** The review form of a draft as the store holds it. */
+export function formOfView(view: DraftView): ReviewForm {
+  return {
+    seed: view.seed,
+    knowledge: view.knowledge,
+    unconfirmed: flagsFromNames(view.seed, view.ages_to_confirm),
+    stated: flagsFromNames(view.seed, view.ages_stated),
+  };
+}
+
 const rowName = (form: ReviewForm, row: Row) =>
   row === "pc" ? form.seed.pc.name : (form.seed.entities[row]?.name ?? "");
 
@@ -208,9 +225,25 @@ const rowName = (form: ReviewForm, row: Row) =>
  * unconfirmed rows, built only when saving.
  */
 export function agesToConfirm(form: ReviewForm): string[] {
+  return rowNames(form, form.unconfirmed);
+}
+
+/** The `ages_stated` list for `save_draft`: the current names of the rows the model calls stated. */
+export function agesStated(form: ReviewForm): string[] {
+  return rowNames(form, form.stated);
+}
+
+/** Where a row's age comes from, as the model said it. It never confirms the age. */
+export function ageSource(form: ReviewForm, row: Row): "from the text" | "proposed by the model" {
+  const stated = row === "pc" ? form.stated.pc : form.stated.entities[row];
+  return stated ? "from the text" : "proposed by the model";
+}
+
+/** The current names of the flagged rows, each name once. */
+function rowNames(form: ReviewForm, flags: AgeFlags): string[] {
   const rows: Row[] = [
-    ...(form.unconfirmed.pc ? (["pc"] as const) : []),
-    ...form.unconfirmed.entities.flatMap((on, i) => (on ? [i] : [])),
+    ...(flags.pc ? (["pc"] as const) : []),
+    ...flags.entities.flatMap((on, i) => (on ? [i] : [])),
   ];
   const seen = new Set<string>();
   const names: string[] = [];
@@ -245,12 +278,13 @@ export function confirmRow(form: ReviewForm, row: Row): ReviewForm {
 
 const replaceFlag = (flags: boolean[], i: number) => flags.map((on, j) => (j === i ? false : on));
 
-/** The form without the roster entry at `i`, and without that entry's flag only. */
+/** The form without the roster entry at `i`, and without that entry's flags only. */
 export function removeEntityRow(form: ReviewForm, i: number): ReviewForm {
   return {
     ...form,
     seed: { ...form.seed, entities: removeAt(form.seed.entities, i) },
     unconfirmed: { ...form.unconfirmed, entities: removeAt(form.unconfirmed.entities, i) },
+    stated: { ...form.stated, entities: removeAt(form.stated.entities, i) },
   };
 }
 

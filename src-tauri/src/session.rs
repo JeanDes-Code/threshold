@@ -501,6 +501,8 @@ pub struct DraftView {
     pub seed: AdventureSeed,
     pub knowledge: Vec<KnownFact>,
     pub ages_to_confirm: Vec<String>,
+    /// Information only: the names whose age the model says the text states.
+    pub ages_stated: Vec<String>,
     pub gaps: Vec<Gap>,
     pub last_failure: Option<BuildFailure>,
 }
@@ -514,6 +516,7 @@ impl DraftView {
             seed: draft.seed,
             knowledge: draft.knowledge,
             ages_to_confirm: draft.ages_to_confirm,
+            ages_stated: draft.ages_stated,
             last_failure: draft.last_failure,
         }
     }
@@ -658,19 +661,21 @@ impl Drafts {
         Ok(DraftView::of(draft))
     }
 
-    /// A Player edit: it replaces the seed, the knowledge and the ages to
-    /// confirm, and returns the draft to `Draft`.
+    /// A Player edit: it replaces the seed, the knowledge, the ages to
+    /// confirm and the ages the model calls stated, and returns the draft to
+    /// `Draft`.
     pub fn save_draft(
         &self,
         draft_id: &str,
         seed: AdventureSeed,
         knowledge: Vec<KnownFact>,
         ages_to_confirm: Vec<String>,
+        ages_stated: Vec<String>,
     ) -> Result<DraftView, AppError> {
         let store = lock(&self.store);
         self.refuse_under_build(draft_id)?;
         let mut draft = store.load(draft_id).map_err(draft_error)?;
-        build::apply_edit(&mut draft, seed, knowledge, ages_to_confirm);
+        build::apply_edit(&mut draft, seed, knowledge, ages_to_confirm, ages_stated);
         store.save(&draft).map_err(draft_error)?;
         Ok(DraftView::of(draft))
     }

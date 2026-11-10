@@ -528,7 +528,7 @@ impl Rig {
             .unwrap();
         let view = self
             .drafts
-            .save_draft(&view.draft_id, view.seed, view.knowledge, vec![])
+            .save_draft(&view.draft_id, view.seed, view.knowledge, vec![], vec![])
             .unwrap();
         let view = self.drafts.approve_draft(&view.draft_id).unwrap();
         assert_eq!(view.state, DraftState::Approved);
@@ -705,14 +705,21 @@ fn draft_flow_end_to_end() {
         .unwrap();
     assert_eq!(view.state, DraftState::Draft);
     assert_eq!(view.seed.pc.name, "Mira Holt");
-    assert_eq!(view.ages_to_confirm, ["Ada Venn"]);
-    assert!(
-        view.gaps
-            .iter()
-            .any(|g| g.kind == GapKind::AgeUnconfirmed && g.at == "entities[1].age"),
-        "{:?}",
-        view.gaps
+    // Every age waits for the Player; the model's claim is information.
+    assert_eq!(
+        view.ages_to_confirm,
+        ["Mira Holt", "Tobin Reed", "Ada Venn"]
     );
+    assert_eq!(view.ages_stated, ["Mira Holt", "Tobin Reed"]);
+    for at in ["pc.age", "entities[0].age", "entities[1].age"] {
+        assert!(
+            view.gaps
+                .iter()
+                .any(|g| g.kind == GapKind::AgeUnconfirmed && g.at == at),
+            "{at}: {:?}",
+            view.gaps
+        );
+    }
     assert!(stages(&progress).contains(&(Stage::DraftSeed, 0, 1)));
     assert!(stages(&progress).contains(&(Stage::DraftKnowledge, 2, 2)));
     let id = view.draft_id.clone();
@@ -732,10 +739,16 @@ fn draft_flow_end_to_end() {
         }
         other => panic!("{other:?}"),
     }
-    // The Player confirms the age: the draft has no gap left.
+    // The Player confirms every age: the draft has no gap left.
     let saved = rig
         .drafts
-        .save_draft(&id, view.seed.clone(), view.knowledge.clone(), vec![])
+        .save_draft(
+            &id,
+            view.seed.clone(),
+            view.knowledge.clone(),
+            vec![],
+            vec![],
+        )
         .unwrap();
     assert_eq!(saved.state, DraftState::Draft);
     assert!(saved.gaps.is_empty(), "{:?}", saved.gaps);
@@ -915,7 +928,7 @@ fn one_build_at_a_time() {
     let view = rig.drafts.get_draft(&id).unwrap();
     assert!(
         rig.drafts
-            .save_draft(&id, view.seed, view.knowledge, vec![])
+            .save_draft(&id, view.seed, view.knowledge, vec![], vec![])
             .is_err()
     );
     assert!(rig.drafts.delete_draft(&id).is_err());

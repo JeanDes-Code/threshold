@@ -33,9 +33,14 @@ pub struct SeedDraft {
     pub seed: AdventureSeed,
     /// PC Knowledge: the PC is the implied holder of each fact.
     pub knowledge: Vec<KnownFact>,
-    /// Main names whose age the model proposed and the Player has not
-    /// confirmed yet.
+    /// Main names whose age the Player has not confirmed yet. A new draft
+    /// lists every character, the PC included: an age never passes on the
+    /// model's word.
     pub ages_to_confirm: Vec<String>,
+    /// Main names whose age the model says the Source Text states.
+    /// Information for the Player only: it never removes a confirmation.
+    #[serde(default)]
+    pub ages_stated: Vec<String>,
     #[serde(default)]
     pub last_failure: Option<BuildFailure>,
     /// The Campaign file the build wrote; set when the state is `Built`.
@@ -53,6 +58,7 @@ impl SeedDraft {
             seed,
             knowledge: vec![],
             ages_to_confirm: vec![],
+            ages_stated: vec![],
             last_failure: None,
             campaign_file: None,
         }
@@ -86,7 +92,8 @@ pub enum GapKind {
     Missing,
     /// A character has no age.
     AgeMissing,
-    /// The model proposed the age and the Player has not confirmed it.
+    /// The Player has not confirmed the age yet. A new draft lists every
+    /// character, whatever the model says about the text.
     AgeUnconfirmed,
     /// An age is below the seed's `min_age`.
     AgeBelowMin,
@@ -308,7 +315,8 @@ pub fn approve(draft: &mut SeedDraft) -> Result<(), Vec<Gap>> {
 }
 
 /// A Player edit of the draft (the `save_draft` command): it replaces the
-/// seed, the knowledge and the ages to confirm, and returns the draft to
+/// seed, the knowledge, the ages to confirm and the ages the model calls
+/// stated (under the rows' current names), and returns the draft to
 /// `Draft`. The last failure and the Campaign file belong to the build of
 /// the content it replaces, so both are cleared. The caller then saves.
 pub fn apply_edit(
@@ -316,10 +324,12 @@ pub fn apply_edit(
     seed: AdventureSeed,
     knowledge: Vec<KnownFact>,
     ages_to_confirm: Vec<String>,
+    ages_stated: Vec<String>,
 ) {
     draft.seed = seed;
     draft.knowledge = knowledge;
     draft.ages_to_confirm = ages_to_confirm;
+    draft.ages_stated = ages_stated;
     draft.state = DraftState::Draft;
     draft.last_failure = None;
     draft.campaign_file = None;

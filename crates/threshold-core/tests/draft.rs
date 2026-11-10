@@ -371,13 +371,22 @@ fn any_save_returns_the_draft_to_draft_state() {
     let mut seed = draft.seed.clone();
     seed.premise = "A ferry crossing at dawn".into();
     let knowledge = draft.knowledge.clone();
-    apply_edit(&mut draft, seed, knowledge, vec!["Jean".into()]);
+    apply_edit(
+        &mut draft,
+        seed,
+        knowledge,
+        vec!["Jean".into()],
+        vec!["Wren".into()],
+    );
     store.save(&draft).unwrap();
 
     let loaded = store.load(&draft.id).unwrap();
     assert_eq!(loaded.state, DraftState::Draft);
     assert_eq!(loaded.seed.premise, "A ferry crossing at dawn");
     assert_eq!(loaded.ages_to_confirm, vec!["Jean".to_owned()]);
+    // The model's claim follows the Player's renames, as the list to
+    // confirm does.
+    assert_eq!(loaded.ages_stated, vec!["Wren".to_owned()]);
     assert_eq!(loaded.last_failure, None);
 }
 

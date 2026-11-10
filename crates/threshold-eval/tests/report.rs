@@ -835,6 +835,13 @@ done = ["owns ferry", "bought ferry"]
     /// Three runs: one built, one not approvable, one failed in the build.
     fn runs() -> Vec<BuildRun> {
         let mut draft = SeedDraft::new("text".into(), seed());
+        // The model calls Gerrit's age stated (the list has none) and leaves
+        // out Pim and Osric (the list states theirs).
+        draft.ages_stated = vec![
+            "Teodor Brandt".into(),
+            "Agathe Morrow".into(),
+            "Toll-Master".into(),
+        ];
         draft.knowledge.push(KnownFact {
             subject: "Teodor Brandt".into(),
             key: "ferry".into(),
@@ -968,6 +975,7 @@ done = ["owns ferry", "bought ferry"]
             "- Missing entries: 3 (Sefa Lind)",
             "- Ages that differ from a stated age: 3 of 12 (Osric Fell: stated 52, drafted 47)",
             "- Child (stated age under 18) drafted under 18: 3 of 3 (Pim Quast)",
+            "- Wrong age_stated claims: 9 of 18 drafted characters (claimed stated, the list has no age: Gerrit Vane; claimed proposed, the list states it: Osric Fell, Pim Quast)",
             "- Start place right: 3 of 3 drafts; present characters found: 3 of 3",
             "- Draft gaps before approval, by kind: age_missing 1, unknown_name 1",
             "- Not approvable: 1 of 3 runs",
@@ -1013,6 +1021,7 @@ done = ["owns ferry", "bought ferry"]
             "- Missing entries: 3\n",
             "- Ages that differ from a stated age: 3 of 12\n",
             "- Child (stated age under 18) drafted under 18: 3 of 3\n",
+            "- Wrong age_stated claims: 9 of 18 drafted characters\n",
             "- Characters drafted under 18 that the expected list does not hold as children: 3\n",
             "- Fact recall, draft knowledge (settled items found): 3 of 6 over 3 drafts (50%)\n",
             "- False past, built world (open items stated as done): 1 of 2 over 1 built worlds\n",

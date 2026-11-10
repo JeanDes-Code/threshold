@@ -12,12 +12,14 @@ import {
   type StartSeed,
 } from "../api";
 import {
+  ageSource,
+  agesStated,
   agesToConfirm,
   confirmRow,
   createSaver,
   fieldId,
-  flagsFromNames,
   focusTarget,
+  formOfView,
   gapSentence,
   isUnconfirmed,
   removeAt,
@@ -59,11 +61,7 @@ const isCharacter = (kind: EntityKind) => kind === "npc" || kind === "pc";
  * brings back the fresh gaps. "Approve" waits for no gap and no pending save.
  */
 export default function SeedReview({ view, onApproved, onBack }: Props) {
-  const [form, setForm] = useState<ReviewForm>({
-    seed: view.seed,
-    knowledge: view.knowledge,
-    unconfirmed: flagsFromNames(view.seed, view.ages_to_confirm),
-  });
+  const [form, setForm] = useState<ReviewForm>(() => formOfView(view));
   const [gaps, setGaps] = useState<Gap[]>(view.gaps);
   const [state, setState] = useState(view.state);
   const [pending, setPending] = useState(false);
@@ -75,7 +73,7 @@ export default function SeedReview({ view, onApproved, onBack }: Props) {
   const [saver] = useState(() =>
     createSaver<ReviewForm, DraftView>({
       delayMs: 600,
-      save: (f) => api.saveDraft(draftId, f.seed, f.knowledge, agesToConfirm(f)),
+      save: (f) => api.saveDraft(draftId, f.seed, f.knowledge, agesToConfirm(f), agesStated(f)),
       onResult: (saved) => {
         setGaps(saved.gaps);
         setState(saved.state);
@@ -146,10 +144,16 @@ export default function SeedReview({ view, onApproved, onBack }: Props) {
     }
   };
 
-  /** An age input, its "under 18" mark, and its "Confirm" button while the age is a guess. */
+  /**
+   * An age input, where the model says the age comes from, its "under 18"
+   * mark, and its "Confirm" button until the Player confirms it. Every age
+   * starts unconfirmed: the model's word never confirms one.
+   */
   const age = (row: Row, value: number | null, onChange: (n: number | null) => void) => {
     const path = row === "pc" ? "pc.age" : `entities[${row}].age`;
     const name = row === "pc" ? seed.pc.name : (seed.entities[row]?.name ?? "");
+    const character = row === "pc" || isCharacter(seed.entities[row]?.kind ?? "place");
+    const source = ageSource(form, row);
     return (
       <span className="age">
         <AgeInput
@@ -159,12 +163,14 @@ export default function SeedReview({ view, onApproved, onBack }: Props) {
           nullable={row !== "pc"}
           onChange={onChange}
         />
+        {character && (
+          <span className={source === "from the text" ? "mark" : "mark warn"}>{source}</span>
+        )}
         {value !== null && value < 18 && <span className="mark warn">under 18</span>}
-        {isUnconfirmed(form, row) && (
-          <>
-            <span className="mark warn">proposed</span>
-            <button onClick={() => confirm(row)}>Confirm</button>
-          </>
+        {isUnconfirmed(form, row) ? (
+          <button onClick={() => confirm(row)}>Confirm</button>
+        ) : (
+          character && <span className="mark">confirmed</span>
         )}
       </span>
     );

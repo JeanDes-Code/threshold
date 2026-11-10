@@ -128,7 +128,8 @@ pub struct SeedDraft {
     pub source_text: String,
     pub seed: AdventureSeed,               // the roster is seed.pc and seed.entities
     pub knowledge: Vec<KnownFact>,         // PC Knowledge; the PC is the implied holder
-    pub ages_to_confirm: Vec<String>,      // names with an age that the model proposed
+    pub ages_to_confirm: Vec<String>,      // names whose age the Player has not confirmed; a new draft lists every character, the PC too
+    pub ages_stated: Vec<String>,          // names whose age the model says the text states; information only, never skips a confirmation
     pub last_failure: Option<BuildFailure>,
     pub campaign_file: Option<String>,     // set when the state is Built
 }
@@ -193,7 +194,7 @@ pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt;   // c
 | `draft_from_text` | `text` | `DraftView` |
 | `list_drafts` | none | `Vec<DraftLine { draft_id, title, state }>` |
 | `get_draft` | `draft_id` | `DraftView` |
-| `save_draft` | `draft_id`, `seed`, `knowledge`, `ages_to_confirm` | `DraftView`, state back to `draft` |
+| `save_draft` | `draft_id`, `seed`, `knowledge`, `ages_to_confirm`, `ages_stated` | `DraftView`, state back to `draft` |
 | `approve_draft` | `draft_id` | `DraftView`, or the gaps as an error |
 | `start_build` | `draft_id` | `CampaignSummary` of the opened Campaign |
 | `cancel_build` | none | nothing; sets a flag and takes no lock |
@@ -201,7 +202,7 @@ pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt;   // c
 | `delete_draft` | `draft_id` | nothing |
 | `get_build_debug` | `draft_id` | `Vec<DebugLine>`; `DebugOff` unless debug is on |
 
-`DraftView { draft_id, state, seed, knowledge, ages_to_confirm, gaps, last_failure }`. `CampaignSummary` gains `needs_begin: bool`.
+`DraftView { draft_id, state, seed, knowledge, ages_to_confirm, ages_stated, gaps, last_failure }`. `CampaignSummary` gains `needs_begin: bool`.
 
 One new event: `build_progress { stage, done, total }`. `draft_from_text` and `start_build` emit it. `begin` reuses `narration_chunk` (with `op_id` `__begin__`), `turn_committed` and `turn_failed`. A failure is the command error: the stage name and the check name, nothing else. `save_draft` replaces the whole document. `cancel_build` also stops a running draft.
 

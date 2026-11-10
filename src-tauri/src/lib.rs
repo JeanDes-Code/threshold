@@ -288,9 +288,10 @@ async fn save_draft(
     seed: AdventureSeed,
     knowledge: Vec<KnownFact>,
     ages_to_confirm: Vec<String>,
+    ages_stated: Vec<String>,
 ) -> Result<DraftView, AppError> {
     drafting(&drafts, move |d| {
-        d.save_draft(&draft_id, seed, knowledge, ages_to_confirm)
+        d.save_draft(&draft_id, seed, knowledge, ages_to_confirm, ages_stated)
     })
     .await
 }

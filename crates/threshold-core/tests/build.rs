@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use threshold_core::{
     RecordedGm,
     build::{
-        BuildCheck, BuildFailure, Control, DebugEntry, DraftState, KnownFact, Progress,
-        SOURCE_TEXT_MAX_CHARS, SeedDraft, Stage, draft_from_text, gaps,
+        BuildCheck, BuildFailure, Control, DebugEntry, DraftState, GapKind, KnownFact, Progress,
+        SOURCE_TEXT_MAX_CHARS, SeedDraft, Stage, approve, draft_from_text, gaps,
     },
     domain::{EntityKind, OpenMode},
 };
@@ -257,14 +257,20 @@ fn draft_holds_seed_roster_and_known_facts() {
             known("Tobin Reed", "location", "Gull Point", false),
         ]
     );
-    assert_eq!(draft.ages_to_confirm, vec!["Ada Venn"]);
+    // Every age waits for the Player, the PC's too; the model's claim that
+    // the text states an age is kept as information only.
+    assert_eq!(
+        draft.ages_to_confirm,
+        vec!["Mira Holt", "Tobin Reed", "Ada Venn"]
+    );
+    assert_eq!(draft.ages_stated, vec!["Mira Holt", "Tobin Reed"]);
     // The PC knows every other name that the draft lists.
     assert_eq!(
         seed.pc.other_names[0].known_to,
         vec!["Mira Holt", "Tobin Reed"]
     );
 
-    // The draft passes its own review once the proposed age is confirmed.
+    // The draft passes its own review once every age is confirmed.
     let mut confirmed = draft.clone();
     confirmed.ages_to_confirm.clear();
     assert_eq!(gaps(&confirmed), vec![]);
@@ -301,7 +307,51 @@ fn proposed_ages_are_listed_for_confirmation() {
         knowledge(&[]),
     ]);
     let draft = run(&source(), &gm).result.unwrap();
-    assert_eq!(draft.ages_to_confirm, vec!["Mira Holt", "Ada Venn"]);
+    assert_eq!(
+        draft.ages_to_confirm,
+        vec!["Mira Holt", "Tobin Reed", "Ada Venn"]
+    );
+    assert_eq!(draft.ages_stated, vec!["Tobin Reed"]);
+}
+
+#[test]
+fn an_age_the_model_calls_stated_still_needs_the_player() {
+    // The model says the text states every age: no age passes on its word.
+    let mut roster = roster_out();
+    roster["characters"][1]["age_stated"] = json!(true);
+    let gm = gm(&[
+        roster,
+        seed_out(),
+        knowledge(&[]),
+        knowledge(&[]),
+        knowledge(&[]),
+    ]);
+    let mut draft = run(&source(), &gm).result.unwrap();
+    assert_eq!(
+        draft.ages_stated,
+        vec!["Mira Holt", "Tobin Reed", "Ada Venn"]
+    );
+    let unconfirmed = |d: &SeedDraft| -> Vec<String> {
+        gaps(d)
+            .into_iter()
+            .filter(|g| g.kind == GapKind::AgeUnconfirmed)
+            .map(|g| g.at)
+            .collect()
+    };
+    assert_eq!(
+        unconfirmed(&draft),
+        vec!["pc.age", "entities[0].age", "entities[1].age"]
+    );
+
+    // Approval waits for every confirmation, the PC's included.
+    for name in ["Tobin Reed", "Ada Venn", "Mira Holt"] {
+        assert!(approve(&mut draft).is_err());
+        assert_eq!(draft.state, DraftState::Draft);
+        draft.ages_to_confirm.retain(|n| n != name);
+    }
+    assert_eq!(unconfirmed(&draft), Vec::<String>::new());
+    assert_eq!(approve(&mut draft), Ok(()));
+    assert_eq!(draft.state, DraftState::Approved);
 }
 
 #[test]
@@ -850,7 +900,27 @@ fn a_live_shaped_answer_with_a_start_place_phrase_still_drafts() {
     );
     assert_eq!(
         draft.ages_to_confirm,
-        vec!["Sefa Lind", "Gerrit Vane", "Ludo Brenn", "Henrike Sall"]
+        vec![
+            "Teodor Brandt",
+            "Agathe Morrow",
+            "Sefa Lind",
+            "Odile Quast",
+            "Pim Quast",
+            "Gerrit Vane",
+            "Ludo Brenn",
+            "Henrike Sall",
+            "Osric Fell"
+        ]
+    );
+    assert_eq!(
+        draft.ages_stated,
+        vec![
+            "Teodor Brandt",
+            "Agathe Morrow",
+            "Odile Quast",
+            "Pim Quast",
+            "Osric Fell"
+        ]
     );
     draft.ages_to_confirm.clear();
     assert_eq!(gaps(&draft), vec![]);

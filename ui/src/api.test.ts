@@ -234,7 +234,7 @@ describe("draft commands", () => {
     const api = createApi(invoke);
     const seed = { premise: "p" } as unknown as AdventureSeed;
     await api.draftFromText("text");
-    await api.saveDraft("draft-1", seed, [], ["Sefa Lind"]);
+    await api.saveDraft("draft-1", seed, [], ["Sefa Lind"], ["Agathe Morrow"]);
     await api.startBuild("draft-1");
     await api.cancelBuild();
     await api.begin();
@@ -244,7 +244,13 @@ describe("draft commands", () => {
       { cmd: "draft_from_text", args: { text: "text" } },
       {
         cmd: "save_draft",
-        args: { draft_id: "draft-1", seed, knowledge: [], ages_to_confirm: ["Sefa Lind"] },
+        args: {
+          draft_id: "draft-1",
+          seed,
+          knowledge: [],
+          ages_to_confirm: ["Sefa Lind"],
+          ages_stated: ["Agathe Morrow"],
+        },
       },
       { cmd: "start_build", args: { draft_id: "draft-1" } },
       { cmd: "cancel_build", args: undefined },
