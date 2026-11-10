@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::domain::{ClockMin, EntityId, EntityKind, Key, Knowing, Value};
+use crate::domain::{ClockMin, EntityId, EntityKind, Key, Knowing, Value, outcome_key};
 use crate::store::{Knowledge, WorldView};
 
 /// What a holder takes to be true about one slot. A Belief can be false: a
@@ -90,4 +90,23 @@ pub fn pc_knowledge(view: &WorldView) -> Vec<Belief> {
         .find(|entity| entity.kind == EntityKind::Pc)
         .map(|pc| beliefs(view, pc.id))
         .unwrap_or_default()
+}
+
+/// The outcome keys of the Open Items the PC holds about the PC: for each
+/// live fact on the PC on a `pending_x` key that the PC believes, `x`. A
+/// Turn whose Intent settles the item may write `x` on the PC, which closes
+/// it (ADR 0005, changed after QA, 2026-11-10). Sorted, no duplicates.
+pub fn pc_open_outcomes(view: &WorldView) -> Vec<String> {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return Vec::new();
+    };
+    let mut keys: Vec<String> = beliefs(view, pc.id)
+        .into_iter()
+        .filter(|b| b.subject == pc.id && view.live_fact(pc.id, &b.key).is_some())
+        .filter_map(|b| outcome_key(&b.key).map(str::to_owned))
+        .filter(|k| !k.is_empty())
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
 }

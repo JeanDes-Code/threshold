@@ -1217,3 +1217,74 @@ fn settle_spells_a_known_place_by_its_name() {
     assert_eq!(settled.facts[0].slot.value, "tavern");
     assert!(notes.is_empty());
 }
+
+// --- Open Items the PC settles (QA, 2026-11-10) ------------------------------
+
+fn pending(w: &mut World, subject: u64, key: &str, seen_by: Vec<u64>) {
+    w.commit(vec![LedgerOp::AddFact {
+        slot: threshold_core::domain::Slot {
+            subject: threshold_core::domain::EntityRef::Id(subject),
+            key: key.into(),
+            value: "agathe asked".into(),
+        },
+        text: "Agathe asked for help with the winter post.".into(),
+        canon: Canon::Established,
+        source: threshold_core::domain::FactSource::Proposal,
+        seen_by: seen_by
+            .into_iter()
+            .map(threshold_core::domain::EntityRef::Id)
+            .collect(),
+        causes: vec![],
+    }]);
+}
+
+#[test]
+fn pc_may_write_the_outcome_of_an_open_item_it_holds() {
+    let mut w = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.action = threshold_core::domain::ActionKind::Talk;
+    p.facts = vec![fact(
+        slot(e(w.ada), "winter_post", "accepted"),
+        Seen::Pc,
+        vec![],
+    )];
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+
+    // An open item the PC does not hold unlocks nothing.
+    let ada = w.ada;
+    pending(&mut w, ada, "pending_winter_post", vec![]);
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+
+    // The PC learns of it.
+    let item = w.view.live_fact(ada, "pending_winter_post").unwrap().id;
+    let now = w.view.clock_min;
+    w.commit(vec![LedgerOp::Know {
+        holder: threshold_core::domain::EntityRef::Id(ada),
+        fact_id: Some(item),
+        claim_id: None,
+        how: Knowing::Witnessed,
+        arrives_at: now,
+    }]);
+    ok(validate(&p, &w.view));
+    // Only that key, and only as a fact: never a stake or an event.
+    p.facts = vec![fact(
+        slot(e(w.ada), "summer_post", "accepted"),
+        Seen::Pc,
+        vec![],
+    )];
+    rejected(validate(&p, &w.view), CheckKind::Agency);
+}
+
+#[test]
+fn outcome_of_an_npc_open_item_needs_no_unlock() {
+    let mut w = World::new();
+    let brann = w.brann;
+    pending(&mut w, brann, "pending_winter_post", vec![]);
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![fact(
+        slot(e(w.brann), "winter_post", "done"),
+        Seen::Pc,
+        vec![],
+    )];
+    ok(validate(&p, &w.view));
+}

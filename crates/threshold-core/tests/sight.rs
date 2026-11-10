@@ -856,3 +856,33 @@ fn a_streamed_narration_never_shows_an_unknown_tag() {
     // One proposal and three Narrations: the filter calls no model.
     assert_eq!(gm.calls().len(), 4);
 }
+
+/// B3 (QA, 2026-11-10): the PC accepts a pending proposal. The Intent
+/// settles the Open Item the PC holds, the proposal writes its outcome key
+/// on the PC, and the item closes in a Turn that is a decision.
+#[test]
+fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
+    let w = HiddenWorld::new();
+    let ada = w.ada;
+    let mut accept = proposal(Verdict::Allowed);
+    accept.action = ActionKind::Talk;
+    accept.minutes = 2;
+    accept.facts = vec![fact(slot(e(ada), "meet", "agreed"), Seen::Pc, vec![])];
+    let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
+    let (mut engine, campaign) = w.engine(&gm);
+    let prompt_scene = {
+        let view = engine.store().snapshot(campaign).unwrap();
+        threshold_core::context::proposal_prompt(&view, &[], "I will meet Brann.").scene
+    };
+    assert!(prompt_scene.contains("settles: meet"), "{prompt_scene}");
+    let outcome = engine
+        .play_turn(
+            "t-accept".into(),
+            "Yes, I will meet Brann.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let sight = sight_of(engine.store(), campaign);
+    assert_eq!(meet(&sight, ada).closed_in, Some(outcome.turn_id));
+    assert!(moment(&sight, outcome.turn_id).unwrap().decision);
+}

@@ -5,6 +5,7 @@ use super::{CheckKind, Origin, PC_INVOLUNTARY_KEYS, Rejection, pc, same_key, wri
 use crate::{
     domain::{ActionKind, DecisionProposal, Handle},
     store::WorldView,
+    world::pc_open_outcomes,
 };
 
 /// True when a write on the PC may set `key` without a choice of the
@@ -39,6 +40,9 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
             err("a claim cannot put words in the PC's mouth");
         }
     }
+    // The outcome keys of the Open Items the PC holds: the Intent may settle
+    // one with a fact (changed after QA, 2026-11-10).
+    let settles = pc_open_outcomes(view);
     // Every slot write on the PC: facts, both stakes and schedule effects.
     for w in writes(p).iter().filter(|w| Handle::Entity(w.subject) == pc) {
         // The Player's Intent chose the move, so a move Turn may set where the
@@ -47,9 +51,10 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
         let chosen_move = matches!(w.origin, Origin::Fact | Origin::WinStake)
             && p.action == ActionKind::Move
             && same_key(w.key, "location");
-        if !is_involuntary_key(w.key) && !chosen_move {
+        let settled = w.origin == Origin::Fact && settles.iter().any(|k| same_key(k, w.key));
+        if !is_involuntary_key(w.key) && !chosen_move && !settled {
             err(&format!(
-                "a write on the PC may only set {} (or location on a move Turn); got {}",
+                "a write on the PC may only set {} (or location on a move Turn, or the outcome of an open item the PC holds); got {}",
                 PC_INVOLUNTARY_KEYS.join(", "),
                 w.key
             ));

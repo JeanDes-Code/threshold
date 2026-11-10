@@ -13,7 +13,7 @@ mod wait;
 pub use arrival::{
     arrival, hidden, openly_here, pc_witnesses, with_arrival, with_witnessed_events,
 };
-pub use beliefs::{Belief, beliefs, pc_knowledge};
+pub use beliefs::{Belief, beliefs, pc_knowledge, pc_open_outcomes};
 pub use clock::{MAX_EVENTS_PER_TURN, advance, written_slots};
 pub use sight::{
     Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, SightTurn, pc_sight,
