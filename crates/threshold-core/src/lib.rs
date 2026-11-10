@@ -6,6 +6,7 @@ pub mod fixture;
 pub mod model;
 pub mod normalize;
 pub mod pack;
+pub mod player;
 pub mod rules;
 pub mod setup;
 pub mod store;

@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 
 pub type CampaignId = u64;
 pub type TurnId = u64;
+
+/// The schema version of a Campaign file. An older file is refused, with no
+/// migration.
+pub(crate) const SCHEMA_VERSION: u32 = 3;
 pub type OpId = String;
 
 #[derive(Debug)]
@@ -163,6 +167,8 @@ pub struct Knowledge {
     pub how: Knowing,
     pub learned_at: ClockMin,
     pub arrives_at: ClockMin,
+    /// The Turn whose `Know` op wrote the row.
+    pub turn: TurnId,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WorldView {

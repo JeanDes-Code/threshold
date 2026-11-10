@@ -316,7 +316,7 @@ fn apply(
             if let Some(a) = claim_id {
                 claim(db, *a, c)?;
             }
-            db.execute("INSERT INTO knowledge(holder_id,fact_id,claim_id,how,learned_at,arrives_at) VALUES(?1,?2,?3,?4,(SELECT clock_min FROM campaign WHERE id=?5),?6)",params![holder,fact_id,claim_id,enum_text(how)?,c,arrives_at])?;
+            db.execute("INSERT INTO knowledge(holder_id,fact_id,claim_id,how,learned_at,arrives_at,turn_id) VALUES(?1,?2,?3,?4,(SELECT clock_min FROM campaign WHERE id=?5),?6,?7)",params![holder,fact_id,claim_id,enum_text(how)?,c,arrives_at,turn])?;
             let witnessed_now: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM entity e JOIN campaign camp ON camp.id=e.campaign_id WHERE e.id=?1 AND e.kind='pc' AND ?2<=camp.clock_min)", params![holder, arrives_at], |r| r.get(0))?;
             if *how == Knowing::Witnessed && fact_id.is_some() && witnessed_now {
                 promote_seen(db, c, None, *fact_id)?;
@@ -814,7 +814,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let mut stmt=db.prepare("SELECT k.holder_id,k.fact_id,k.claim_id,k.how,k.learned_at,k.arrives_at FROM knowledge k JOIN entity e ON e.id=k.holder_id WHERE e.campaign_id=?1 ORDER BY k.rowid")?;
+    let mut stmt=db.prepare("SELECT k.holder_id,k.fact_id,k.claim_id,k.how,k.learned_at,k.arrives_at,k.turn_id FROM knowledge k JOIN entity e ON e.id=k.holder_id WHERE e.campaign_id=?1 ORDER BY k.rowid")?;
     let rows = stmt
         .query_map([c], |r| {
             Ok((
@@ -824,21 +824,25 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
                 r.get::<_, String>(3)?,
                 r.get(4)?,
                 r.get(5)?,
+                r.get(6)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     let knowledge = rows
         .into_iter()
-        .map(|(holder, fact_id, claim_id, how, learned_at, arrives_at)| {
-            Ok(Knowledge {
-                holder,
-                fact_id,
-                claim_id,
-                how: enum_parse::<Knowing>(how)?,
-                learned_at,
-                arrives_at,
-            })
-        })
+        .map(
+            |(holder, fact_id, claim_id, how, learned_at, arrives_at, turn)| {
+                Ok(Knowledge {
+                    holder,
+                    fact_id,
+                    claim_id,
+                    how: enum_parse::<Knowing>(how)?,
+                    learned_at,
+                    arrives_at,
+                    turn,
+                })
+            },
+        )
         .collect::<Result<Vec<_>, StoreError>>()?;
     let mut stmt = db.prepare("SELECT t.id,t.seq,t.op_id,t.kind,t.intent,t.proposal_json,t.clock_before,t.clock_after,t.narration,l.op_json FROM turn t LEFT JOIN ledger l ON l.turn_id=t.id AND (json_type(l.op_json,'$.op.revert_turn') IS NOT NULL OR json_type(l.op_json,'$.revert_turn') IS NOT NULL) WHERE t.campaign_id=?1 ORDER BY t.seq DESC,l.seq DESC")?;
     let rows = stmt

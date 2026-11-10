@@ -1719,3 +1719,91 @@ fn world_is_reserved_for_other_names_too() {
     assert!(err.contains("world"), "{err}");
     assert!(db.campaigns().unwrap().is_empty());
 }
+
+#[test]
+fn knowledge_rows_carry_their_turn() {
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let pc = db.snapshot(c).unwrap().entities[0].id;
+    let turn = db
+        .commit(
+            record(c, "seen"),
+            vec![LedgerOp::AddFact {
+                slot: Slot {
+                    subject: EntityRef::Id(pc),
+                    key: "door".into(),
+                    value: "open".into(),
+                },
+                text: "Door open".into(),
+                canon: Canon::Established,
+                source: FactSource::Proposal,
+                seen_by: vec![EntityRef::Id(pc)],
+                causes: vec![],
+            }],
+        )
+        .unwrap();
+    let row_turn = |db: &Store| {
+        let view = db.snapshot(c).unwrap();
+        let fact = view.live_fact(pc, "door").unwrap().id;
+        view.knowledge
+            .iter()
+            .find(|k| k.holder == pc && k.fact_id == Some(fact))
+            .expect("the PC knows the fact it witnessed")
+            .turn
+    };
+
+    assert_eq!(row_turn(&db), turn);
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(row_turn(&db), turn);
+}
+
+#[test]
+fn version_2_file_is_refused() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-2");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.sqlite");
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch(
+        "CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL);
+         PRAGMA user_version=2;",
+    )
+    .unwrap();
+    drop(sql);
+    let bytes = std::fs::read(&path).unwrap();
+
+    let err = match Store::open_existing(&path) {
+        Ok(_) => panic!("a version 2 file opened"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("version 2"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "the file changed");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn new_file_has_the_player_tables() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("player-tables");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("new.sqlite");
+    drop(Store::open(&path).unwrap());
+
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let version: u32 = sql
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
+    for table in ["player_note", "player_pin"] {
+        let exists: bool = sql
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                [table],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(exists, "no table {table}");
+    }
+    drop(sql);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
