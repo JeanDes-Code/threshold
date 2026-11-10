@@ -5,7 +5,7 @@ use std::{fmt, path::Path};
 
 use crate::domain::{
     AdventureSeed, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,
-    FactSource, Handle, Knowing, LedgerOp, Slot, Trigger,
+    FactSource, Handle, Knowing, LedgerOp, OtherName, Slot, Trigger,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -93,7 +93,9 @@ pub struct Entity {
     pub kind: EntityKind,
     pub name: String,
     pub norm_name: String,
-    pub adult: Option<bool>,
+    /// A PC or an NPC has an age; nothing else does.
+    pub age: Option<u16>,
+    pub other_names: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fact {
@@ -208,6 +210,22 @@ impl WorldView {
             .collect()
     }
 
+    /// The entity that `name` names: its main name or one of its other
+    /// names, compared through `normalize::name`. The lowest id wins a tie.
+    /// Every name match in the core goes through this function.
+    pub fn entity_by_name(&self, name: &str) -> Option<&Entity> {
+        let name = crate::normalize::name(name);
+        self.entities
+            .iter()
+            .filter(|e| {
+                e.norm_name == name
+                    || e.other_names
+                        .iter()
+                        .any(|other| crate::normalize::name(other) == name)
+            })
+            .min_by_key(|e| e.id)
+    }
+
     pub fn entity(&self, handle: Handle) -> Option<&Entity> {
         if let Handle::Entity(id) = handle {
             self.entities.iter().find(|e| e.id == id)
@@ -304,11 +322,6 @@ impl Store {
         rng_seed: u64,
         setup: impl FnOnce(&WorldView) -> Vec<LedgerOp>,
     ) -> Result<CampaignId, StoreError> {
-        if crate::normalize::name(&adventure_seed.pc.name) == "world" {
-            return Err(StoreError::Invalid(
-                "world is a reserved adventure seed subject".into(),
-            ));
-        }
         let tx = self.db.transaction()?;
         tx.execute(
             "INSERT INTO campaign(adventure_seed_json,clock_min,seed) VALUES(?1,0,?2)",
@@ -325,25 +338,23 @@ impl Store {
             clock_after: 0,
         };
         let turn = insert_turn(&tx, &rec)?;
-        let mut names = std::collections::HashMap::new();
-        let pc = project::append(
-            &tx,
-            campaign,
-            turn,
-            &LedgerOp::AddEntity {
-                local: None,
-                kind: EntityKind::Pc,
-                name: adventure_seed.pc.name.clone(),
-                adult: Some(adventure_seed.pc.adult),
-            },
-        )?
-        .ok_or_else(|| StoreError::Invalid("missing PC id".into()))?;
-        names.insert(crate::normalize::name(&adventure_seed.pc.name), pc);
-        for e in &adventure_seed.entities {
-            let name = crate::normalize::name(&e.name);
-            if name == "world" || names.contains_key(&name) {
+        let pc_seed = &adventure_seed.pc;
+        let declared: Vec<(&str, &[OtherName])> =
+            std::iter::once((pc_seed.name.as_str(), pc_seed.other_names.as_slice()))
+                .chain(
+                    adventure_seed
+                        .entities
+                        .iter()
+                        .map(|e| (e.name.as_str(), e.other_names.as_slice())),
+                )
+                .collect();
+        let added = std::iter::once((EntityKind::Pc, Some(pc_seed.age)))
+            .chain(adventure_seed.entities.iter().map(|e| (e.kind, e.age)));
+        let mut ids = Vec::new();
+        for (&(name, other_names), (kind, age)) in declared.iter().zip(added) {
+            if crate::normalize::name(name) == "world" {
                 return Err(StoreError::Invalid(
-                    "duplicate or reserved adventure seed entity name".into(),
+                    "world is a reserved adventure seed entity name".into(),
                 ));
             }
             let id = project::append(
@@ -352,37 +363,109 @@ impl Store {
                 turn,
                 &LedgerOp::AddEntity {
                     local: None,
-                    kind: e.kind,
-                    name: e.name.clone(),
-                    adult: e.adult,
+                    kind,
+                    name: name.to_owned(),
+                    age,
+                    other_names: other_names.iter().map(|o| o.name.clone()).collect(),
                 },
             )?
             .ok_or_else(|| StoreError::Invalid("missing entity id".into()))?;
-            names.insert(name, id);
+            ids.push(id);
         }
+        let view = project::snapshot(&tx, campaign)?;
+        // A name that resolves to another entity than its own is a duplicate.
+        for (&(name, _), id) in declared.iter().zip(&ids) {
+            if view.entity_by_name(name).map(|e| e.id) != Some(*id) {
+                return Err(StoreError::Invalid(format!(
+                    "duplicate adventure seed entity name: {name}"
+                )));
+            }
+        }
+        // Who knows that two names are one entity: one Persistent fact per
+        // other name, held by the bearer and each name in `known_to`.
+        for (&(name, other_names), &bearer) in declared.iter().zip(&ids) {
+            for other in other_names {
+                let mut holders = vec![bearer];
+                for known_to in &other.known_to {
+                    let holder = view
+                        .entity_by_name(known_to)
+                        .ok_or_else(|| {
+                            StoreError::Invalid(format!(
+                                "unknown name in known_to of {}: {known_to}",
+                                other.name
+                            ))
+                        })?
+                        .id;
+                    if !holders.contains(&holder) {
+                        holders.push(holder);
+                    }
+                }
+                let fact = project::append(
+                    &tx,
+                    campaign,
+                    turn,
+                    &LedgerOp::AddFact {
+                        slot: Slot {
+                            subject: bearer,
+                            key: format!(
+                                "alias_{}",
+                                crate::normalize::name(&other.name).replace(' ', "_")
+                            ),
+                            value: other.name.clone(),
+                        },
+                        text: format!("{name} is also called {}.", other.name),
+                        canon: Canon::Persistent,
+                        source: FactSource::AdventureSeed,
+                        seen_by: holders.clone(),
+                        causes: vec![],
+                    },
+                )?
+                .ok_or_else(|| StoreError::Invalid("missing fact id".into()))?;
+                for holder in holders {
+                    project::append(
+                        &tx,
+                        campaign,
+                        turn,
+                        &LedgerOp::Know {
+                            holder,
+                            fact_id: Some(fact),
+                            claim_id: None,
+                            how: Knowing::Witnessed,
+                            arrives_at: 0,
+                        },
+                    )?;
+                }
+            }
+        }
+        let mut world = None;
         for (facts, canon) in [
             (&adventure_seed.decided, Canon::Persistent),
             (&adventure_seed.proposed, Canon::Possible),
         ] {
             for f in facts {
-                let normalized = crate::normalize::name(&f.subject);
-                let subject = if let Some(id) = names.get(&normalized) {
-                    *id
-                } else if normalized == "world" {
-                    let id = project::append(
-                        &tx,
-                        campaign,
-                        turn,
-                        &LedgerOp::AddEntity {
-                            local: None,
-                            kind: EntityKind::Place,
-                            name: f.subject.clone(),
-                            adult: None,
-                        },
-                    )?
-                    .ok_or_else(|| StoreError::Invalid("missing subject id".into()))?;
-                    names.insert(normalized, id);
-                    id
+                let subject = if let Some(e) = view.entity_by_name(&f.subject) {
+                    e.id
+                } else if crate::normalize::name(&f.subject) == "world" {
+                    match world {
+                        Some(id) => id,
+                        None => {
+                            let id = project::append(
+                                &tx,
+                                campaign,
+                                turn,
+                                &LedgerOp::AddEntity {
+                                    local: None,
+                                    kind: EntityKind::Place,
+                                    name: f.subject.clone(),
+                                    age: None,
+                                    other_names: vec![],
+                                },
+                            )?
+                            .ok_or_else(|| StoreError::Invalid("missing subject id".into()))?;
+                            world = Some(id);
+                            id
+                        }
+                    }
                 } else {
                     return Err(StoreError::Invalid(format!(
                         "unknown adventure seed subject: {}",

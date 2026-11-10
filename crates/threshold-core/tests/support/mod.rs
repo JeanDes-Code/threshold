@@ -12,8 +12,8 @@ use threshold_core::{
     store::{Store, TurnKind, TurnRecord, WorldView},
 };
 
-/// The gate scene. Ada (the PC), Orsel and Brann (adult NPCs) stand at the
-/// gate square. Pip (a minor) is at the market. The gate is locked and that is
+/// The gate scene. Ada (the PC, 30), Orsel (52) and Brann (18) stand at the
+/// gate square. Pip (17, a minor) is at the market. The gate is locked and that is
 /// an open obstacle.
 pub struct World {
     pub store: Store,
@@ -52,11 +52,12 @@ fn seed_fact(subject: &str, key: &str, value: &str) -> SeedFact {
     }
 }
 
-fn npc(name: &str, adult: bool) -> SeedEntity {
+fn npc(name: &str, age: u16) -> SeedEntity {
     SeedEntity {
         name: name.into(),
         kind: EntityKind::Npc,
-        adult: Some(adult),
+        age: Some(age),
+        other_names: vec![],
         hidden: false,
     }
 }
@@ -66,17 +67,19 @@ pub fn adventure_seed() -> AdventureSeed {
         premise: "A town gate at dusk".into(),
         pc: PcSeed {
             name: "Ada".into(),
-            adult: true,
+            age: 30,
+            other_names: vec![],
             concept: "Courier".into(),
         },
         entities: vec![
-            npc("Orsel", true),
-            npc("Brann", true),
-            npc("Pip", false),
+            npc("Orsel", 52),
+            npc("Brann", 18),
+            npc("Pip", 17),
             SeedEntity {
                 name: "Gate".into(),
                 kind: EntityKind::Place,
-                adult: None,
+                age: None,
+                other_names: vec![],
                 hidden: false,
             },
         ],
@@ -277,11 +280,11 @@ pub fn check(against: Option<Handle>, win: SlotDraft, lose: SlotDraft) -> CheckD
     }
 }
 
-pub fn new_npc(n: u64, name: &str, adult: bool) -> NewNpc {
+pub fn new_npc(n: u64, name: &str, age: u16) -> NewNpc {
     NewNpc {
         id: Handle::NewNpc(n),
         name: name.into(),
-        adult,
+        age,
         voice: "Clipped words, never says please.".into(),
     }
 }

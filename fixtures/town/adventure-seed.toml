@@ -5,7 +5,7 @@ story_language = "en"
 
 [pc]
 name = "Wren"
-adult = true
+age = 29
 concept = "An outsider scribe, hired to copy the town's charters"
 
 [[entities]]
@@ -19,22 +19,22 @@ kind = "place"
 [[entities]]
 name = "Orsel"
 kind = "npc"
-adult = true
+age = 54
 
 [[entities]]
 name = "Doul"
 kind = "npc"
-adult = true
+age = 41
 
 [[entities]]
 name = "Hessa"
 kind = "npc"
-adult = true
+age = 36
 
 [[entities]]
 name = "Tobin"
 kind = "npc"
-adult = true
+age = 47
 
 [[entities]]
 name = "Magistracy"

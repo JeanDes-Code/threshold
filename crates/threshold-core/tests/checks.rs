@@ -338,9 +338,9 @@ fn bad_handles_rejected() {
     let cases: Vec<Box<Edit>> = vec![
         Box::new(|p| p.reactions = vec![reaction(Handle::Entity(999), Stance::Neutral, None)]),
         Box::new(move |p| p.reactions = vec![reaction(f(w.debt), Stance::Neutral, None)]),
-        Box::new(|p| p.new_npcs = vec![new_npc(1, "Kett", true), new_npc(1, "Lio", true)]),
+        Box::new(|p| p.new_npcs = vec![new_npc(1, "Kett", 34), new_npc(1, "Lio", 34)]),
         Box::new(|p| p.reactions = vec![reaction(Handle::NewNpc(2), Stance::Neutral, None)]),
-        Box::new(|p| p.new_npcs = vec![new_npc(300, "Kett", true)]),
+        Box::new(|p| p.new_npcs = vec![new_npc(300, "Kett", 34)]),
         Box::new(move |p| p.blockers = vec![e(w.gate)]),
         Box::new(move |p| {
             p.cancel = vec![Cancel {
@@ -475,9 +475,15 @@ fn intimate_with_minor_rejected() {
     p.reactions = vec![reaction(e(w.pip), Stance::Neutral, None)];
     rejected(validate(&p, &w.view), CheckKind::ContentBoundary);
 
+    // Pip is 17: one year short of `ADULT_AGE`.
+    assert_eq!(
+        w.view.entities.iter().find(|e| e.id == w.pip).unwrap().age,
+        Some(17)
+    );
+
     let mut p = proposal(Verdict::Allowed);
     p.intimate = true;
-    p.new_npcs = vec![new_npc(1, "Kett", false)];
+    p.new_npcs = vec![new_npc(1, "Kett", 17)];
     rejected(validate(&p, &w.view), CheckKind::ContentBoundary);
 
     // A minor who is merely present also blocks an intimate scene.
@@ -509,10 +515,20 @@ fn intimate_with_minor_rejected() {
 #[test]
 fn intimate_with_adults_ok() {
     let w = World::new();
+    // Brann is 18, exactly `ADULT_AGE`; so is the new NPC.
+    assert_eq!(
+        w.view
+            .entities
+            .iter()
+            .find(|e| e.id == w.brann)
+            .unwrap()
+            .age,
+        Some(18)
+    );
     let mut p = proposal(Verdict::Allowed);
     p.intimate = true;
     p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
-    p.new_npcs = vec![new_npc(1, "Kett", true)];
+    p.new_npcs = vec![new_npc(1, "Kett", 18)];
     ok(validate(&p, &w.view));
 }
 
@@ -522,7 +538,7 @@ fn intimate_with_adults_ok() {
 fn new_npc_commits_with_voice_card_location_and_witnessed_fact() {
     let mut w = World::new();
     let mut p = proposal(Verdict::Allowed);
-    p.new_npcs = vec![new_npc(1, "Kett", true)];
+    p.new_npcs = vec![new_npc(1, "Kett", 34)];
     p.reactions = vec![reaction(Handle::NewNpc(1), Stance::Comply, None)];
     p.facts = vec![fact(
         slot(Handle::NewNpc(1), "mood", "wary"),
@@ -533,7 +549,7 @@ fn new_npc_commits_with_voice_card_location_and_witnessed_fact() {
     apply(&mut w, &p, None);
 
     let kett = w.view.entities.iter().find(|e| e.name == "Kett").unwrap();
-    assert_eq!(kett.adult, Some(true));
+    assert_eq!(kett.age, Some(34));
     let kett = kett.id;
     assert!(w.view.present().contains(&kett));
     assert!(w.store.voice_card(kett).unwrap().is_some());
@@ -693,12 +709,21 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "verdict": "allowed",
         "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}}],
         "facts": [{"slot": {"subject": "N1", "key": "mood", "value": "calm"}, "seen": "pc", "because": ["F40"]}],
-        "new_npcs": [{"id": "N1", "name": "Kett", "adult": true, "voice": "terse"}]
+        "new_npcs": [{"id": "N1", "name": "Kett", "age": 34, "voice": "terse"}]
     });
     assert!(validator.is_valid(&good), "{:?}", validator.validate(&good));
     let mut bad = good.clone();
     bad["reactions"][0]["npc"] = "E999".into();
     assert!(!validator.is_valid(&bad));
+    let mut ageless = good.clone();
+    ageless["new_npcs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("age");
+    assert!(!validator.is_valid(&ageless));
+    let mut too_old = good.clone();
+    too_old["new_npcs"][0]["age"] = 1000.into();
+    assert!(!validator.is_valid(&too_old));
 }
 
 // --- Fix round 1 -----------------------------------------------------------
@@ -1006,7 +1031,7 @@ fn new_npc_on_a_move_turn_stands_at_the_new_place() {
     let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Move;
     p.facts = vec![fact(slot(e(w.ada), "location", "tavern"), Seen::Pc, vec![])];
-    p.new_npcs = vec![new_npc(1, "Kett", true)];
+    p.new_npcs = vec![new_npc(1, "Kett", 34)];
     apply(&mut w, &p, None);
     let kett = w
         .view

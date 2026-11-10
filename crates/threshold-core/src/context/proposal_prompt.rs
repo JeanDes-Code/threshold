@@ -139,10 +139,8 @@ fn entity_line(r: &Retrieval<'_>, e: &Entity) -> String {
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_default();
     let mut line = format!("E{id} {} ({kind}", e.name);
-    match e.adult {
-        Some(true) => line.push_str(", adult"),
-        Some(false) => line.push_str(", minor"),
-        None => {}
+    if let Some(age) = e.age {
+        line.push_str(&format!(", age {age}"));
     }
     line.push(')');
     if let Some(pc) = r.pc.filter(|pc| *pc != id)

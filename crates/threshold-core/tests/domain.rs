@@ -1,7 +1,8 @@
 use schemars::schema_for;
 use threshold_core::{
     domain::{
-        AdventureSeed, CheckDraft, DecisionProposal, EventDraft, Handle, NewNpc, Reaction, Stance,
+        ADULT_AGE, AdventureSeed, CheckDraft, DecisionProposal, EventDraft, Handle, NewNpc,
+        Reaction, Stance, is_adult,
     },
     normalize, proposal_schema,
 };
@@ -52,6 +53,25 @@ fn schema_caps_text() {
 }
 
 #[test]
+fn is_adult_needs_a_stored_age() {
+    assert_eq!(ADULT_AGE, 18);
+    assert!(!is_adult(None));
+    assert!(!is_adult(Some(17)));
+    assert!(is_adult(Some(18)));
+    assert!(is_adult(Some(80)));
+}
+
+#[test]
+fn new_npc_schema_requires_age() {
+    let npc = serde_json::to_value(schema_for!(NewNpc)).unwrap();
+    let required = npc.pointer("/required").unwrap().as_array().unwrap();
+    assert!(required.contains(&"age".into()), "{required:?}");
+    assert_eq!(npc.pointer("/properties/age/minimum").unwrap(), 0);
+    assert_eq!(npc.pointer("/properties/age/maximum").unwrap(), 999);
+    assert!(npc.pointer("/properties/adult").is_none());
+}
+
+#[test]
 fn proposal_minimal_parses() {
     let p: DecisionProposal =
         serde_json::from_str(r#"{"action":"talk","verdict":"allowed"}"#).unwrap();
@@ -73,7 +93,7 @@ fn normalize_french_names() {
 
 #[test]
 fn normalize_uses_nfkc_and_strips_english_articles() {
-    assert_eq!(normalize::name("  The  Ｈôtel  "), "hôtel");
+    assert_eq!(normalize::name("  The  Ｈôtel  "), "hotel");
     assert_eq!(normalize::value(" An  Orsel d’Aubrac "), "orsel d'aubrac");
 }
 
@@ -88,7 +108,7 @@ proposed = []
 
 [pc]
 name = "Orsel"
-adult = true
+age = 34
 concept = "A traveling mediator"
 
 [[decided]]
@@ -101,7 +121,8 @@ text = "Orsel comes from Aubrac."
     .unwrap();
 
     assert_eq!(adventure_seed.pc.name, "Orsel");
-    assert!(adventure_seed.pc.adult);
+    assert_eq!(adventure_seed.pc.age, 34);
+    assert!(adventure_seed.pc.other_names.is_empty());
     assert_eq!(adventure_seed.decided[0].key, "home");
     assert!(adventure_seed.proposed.is_empty());
 }

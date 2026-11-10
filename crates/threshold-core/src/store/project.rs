@@ -140,9 +140,13 @@ fn apply(
 ) -> Result<Option<u64>, StoreError> {
     let made = match op {
         LedgerOp::AddEntity {
-            kind, name, adult, ..
+            kind,
+            name,
+            age,
+            other_names,
+            ..
         } => {
-            db.execute("INSERT INTO entity(id,campaign_id,kind,name,norm_name,adult) VALUES(?1,?2,?3,?4,?5,?6)",params![id,c,enum_text(kind)?,name,normalize::name(name),adult])?;
+            db.execute("INSERT INTO entity(id,campaign_id,kind,name,norm_name,age,other_names_json) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,c,enum_text(kind)?,name,normalize::name(name),age,serde_json::to_string(other_names)?])?;
             true
         }
         LedgerOp::AddFact {
@@ -654,17 +658,26 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         "SELECT id FROM entity WHERE campaign_id=?1 ORDER BY id",
         c,
     )? {
-        let (kind, name, norm_name, adult) = db.query_row(
-            "SELECT kind,name,norm_name,adult FROM entity WHERE id=?1",
+        let (kind, name, norm_name, age, other_names) = db.query_row(
+            "SELECT kind,name,norm_name,age,other_names_json FROM entity WHERE id=?1",
             [id],
-            |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            },
         )?;
         entities.push(Entity {
             id,
             kind: enum_parse::<EntityKind>(kind)?,
             name,
             norm_name,
-            adult,
+            age,
+            other_names: parse(other_names)?,
         });
     }
     let mut facts = Vec::new();

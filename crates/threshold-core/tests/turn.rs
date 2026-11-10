@@ -475,7 +475,8 @@ fn arrival_shows_open_npcs_and_keeps_hidden_out() {
     seed.entities.push(SeedEntity {
         name: "Vell".into(),
         kind: threshold_core::domain::EntityKind::Npc,
-        adult: Some(true),
+        age: Some(40),
+        other_names: vec![],
         hidden: true,
     });
     seed.decided.push(SeedFact {

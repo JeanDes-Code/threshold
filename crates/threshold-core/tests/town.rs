@@ -10,7 +10,7 @@ use threshold_core::{
     CallKind, RecordedGm,
     domain::{
         ActionKind, Canon, DecisionProposal, EntityKind, EventDraft, Handle, Knowing, LedgerOp,
-        NewFact, Reaction, Seen, Stance, Trigger, Verdict,
+        NewFact, Reaction, Seen, Stance, Trigger, Verdict, is_adult,
     },
     fixture::{load_adventure_seed, load_world},
     rules::D10,
@@ -69,7 +69,7 @@ fn town_fixture_loads() {
     let magistracy = id(&view, "Magistracy");
     for person in [pc, orsel, doul, hessa] {
         let e = view.entities.iter().find(|e| e.id == person).unwrap();
-        assert_eq!(e.adult, Some(true), "{} is adult", e.name);
+        assert!(is_adult(e.age), "{} has an adult age: {:?}", e.name, e.age);
     }
     let kind = |id: u64| view.entities.iter().find(|e| e.id == id).unwrap().kind;
     assert_eq!(kind(pc), EntityKind::Pc);

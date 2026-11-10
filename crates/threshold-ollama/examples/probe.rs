@@ -11,7 +11,7 @@ const RUNS: usize = 30;
 
 const SYSTEM: &str = "You are the Game Master for a single-player tabletop role-playing game. Never decide the player character's actions, words, or feelings. Return only one-line minified JSON with no spaces or newlines, matching the supplied schema. Stake values and reaction plans must be short snake_case or at most 6 words. Omit optional fields that are empty. Include check only when verdict is check; when verdict is check, include check. Never set numeric difficulty: express a Check through its win and lose stakes and factors. Reference entities and facts only by their handles.\n";
 
-const STABLE: &str = "WORLD\nE1 Orsel, an adult human magistrate\nE2 Hessa, an adult human clerk\nE3 the player character\nE4 Rusk, an adult human clerk\nE5 the archive door\nFACTS\nF1 E1 role = magistrate\nF2 E2 role = clerk\nF3 E4 role = clerk\nF4 E3 location = town_hall\nF5 E5 locked = yes (archive_door.locked = yes; OPEN OBSTACLE)\nF6 E5 location = archive\n";
+const STABLE: &str = "WORLD\nE1 Orsel (npc, age 54), a human magistrate\nE2 Hessa (npc, age 36), a human clerk\nE3 the player character\nE4 Rusk (npc, age 29), a human clerk\nE5 the archive door\nFACTS\nF1 E1 role = magistrate\nF2 E2 role = clerk\nF3 E4 role = clerk\nF4 E3 location = town_hall\nF5 E5 locked = yes (archive_door.locked = yes; OPEN OBSTACLE)\nF6 E5 location = archive\n";
 
 const SCENE: &str = "SCENE\nThe town hall is open to the public. Magistrate Orsel is hearing petitions at the front of the room. Hessa and Rusk are copying records nearby and can hear a raised voice. The locked archive door stands at the back.\n";
 

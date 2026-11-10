@@ -1,11 +1,12 @@
 //! Content Boundary: an intimate proposal involves adults only. Participants
-//! are the present entities, the reacting NPCs and the new NPCs.
+//! are the present entities, the reacting NPCs and the new NPCs. Adult status
+//! comes from the stored age through `domain::is_adult`, and only here.
 
 use std::collections::BTreeSet;
 
 use super::{CheckKind, Rejection};
 use crate::{
-    domain::{DecisionProposal, EntityKind, Handle},
+    domain::{DecisionProposal, EntityKind, Handle, is_adult},
     store::WorldView,
 };
 
@@ -28,20 +29,20 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
         }
     }
     for id in participants {
-        let adult = view
+        let age = view
             .entities
             .iter()
             .find(|e| e.id == id)
-            .and_then(|e| e.adult);
-        if adult != Some(true) {
+            .and_then(|e| e.age);
+        if !is_adult(age) {
             errs.push(Rejection::new(
                 CheckKind::ContentBoundary,
                 Some(Handle::Entity(id)),
-                "an intimate scene involves adults only; this participant is not a stored adult",
+                "an intimate scene involves adults only; this participant has no stored adult age",
             ));
         }
     }
-    for npc in p.new_npcs.iter().filter(|n| !n.adult) {
+    for npc in p.new_npcs.iter().filter(|n| !is_adult(Some(n.age))) {
         errs.push(Rejection::new(
             CheckKind::ContentBoundary,
             Some(npc.id),

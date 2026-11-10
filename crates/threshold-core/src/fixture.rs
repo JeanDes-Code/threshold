@@ -247,11 +247,7 @@ pub fn load_world(
 }
 
 fn entity(view: &WorldView, name: &str) -> Option<EntityId> {
-    let name = normalize::name(name);
-    view.entities
-        .iter()
-        .find(|e| e.norm_name == name)
-        .map(|e| e.id)
+    view.entity_by_name(name).map(|e| e.id)
 }
 
 fn read(path: &Path) -> Result<String, FixtureError> {

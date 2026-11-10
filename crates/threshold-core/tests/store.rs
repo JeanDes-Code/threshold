@@ -14,7 +14,8 @@ fn adventure_seed() -> AdventureSeed {
         entities: vec![],
         pc: PcSeed {
             name: "Ada".into(),
-            adult: true,
+            age: 30,
+            other_names: vec![],
             concept: "Scout".into(),
         },
         boundaries: vec![],
@@ -50,7 +51,8 @@ fn local_npc(local: u8) -> LedgerOp {
         local: Some(local),
         kind: EntityKind::Npc,
         name: "Orsel".into(),
-        adult: Some(true),
+        age: Some(40),
+        other_names: vec![],
     }
 }
 
@@ -178,13 +180,15 @@ fn present_matches_pc_location() {
         threshold_core::domain::SeedEntity {
             kind: EntityKind::Npc,
             name: "Near".into(),
-            adult: Some(true),
+            age: Some(40),
+            other_names: vec![],
             hidden: false,
         },
         threshold_core::domain::SeedEntity {
             kind: EntityKind::Npc,
             name: "Far".into(),
-            adult: Some(true),
+            age: Some(40),
+            other_names: vec![],
             hidden: false,
         },
     ];
@@ -280,24 +284,37 @@ fn migrations_apply_on_empty_db() {
     );
 }
 #[test]
-fn npc_without_adult_status_is_refused() {
+fn character_without_age_is_refused() {
     let mut db = Store::open_in_memory().unwrap();
     let c = db.create_campaign(&adventure_seed(), 42).unwrap();
     let before = db.snapshot(c).unwrap();
-    assert!(
-        db.commit(
-            record(c, "bad"),
-            vec![LedgerOp::AddEntity {
-                local: None,
-                kind: EntityKind::Npc,
-                name: "Stranger".into(),
-                adult: None
-            }]
-        )
-        .is_err()
-    );
-    assert_eq!(db.snapshot(c).unwrap(), before);
-    assert!(db.turn_by_op(&"bad".into()).unwrap().is_none());
+    let add = |kind, age| LedgerOp::AddEntity {
+        local: None,
+        kind,
+        name: "Stranger".into(),
+        age,
+        other_names: vec![],
+    };
+    for (op_id, kind, age) in [
+        ("ageless-npc", EntityKind::Npc, None),
+        ("ageless-pc", EntityKind::Pc, None),
+        ("aged-place", EntityKind::Place, Some(40)),
+    ] {
+        assert!(
+            db.commit(record(c, op_id), vec![add(kind, age)]).is_err(),
+            "{op_id} committed"
+        );
+        assert_eq!(db.snapshot(c).unwrap(), before);
+        assert!(db.turn_by_op(&op_id.into()).unwrap().is_none());
+    }
+    // The same entities with the right age commit.
+    db.commit(record(c, "aged-npc"), vec![add(EntityKind::Npc, Some(0))])
+        .unwrap();
+    db.commit(
+        record(c, "ageless-place"),
+        vec![add(EntityKind::Place, None)],
+    )
+    .unwrap();
 }
 #[test]
 fn one_live_value_per_slot() {
@@ -374,7 +391,8 @@ fn rebuild_matches_projections() {
                 local: None,
                 kind: EntityKind::Npc,
                 name: "Bela".into(),
-                adult: Some(true),
+                age: Some(40),
+                other_names: vec![],
             },
             fact(pc, "open"),
         ],
@@ -618,7 +636,8 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
                 local: None,
                 kind: EntityKind::Npc,
                 name: "Bela".into(),
-                adult: Some(true),
+                age: Some(40),
+                other_names: vec![],
             },
             fact(pc, "closed"),
         ],
@@ -928,7 +947,8 @@ fn claim_listeners_receive_delayed_told_knowledge() {
             local: None,
             kind: EntityKind::Npc,
             name: "Bela".into(),
-            adult: Some(true),
+            age: Some(40),
+            other_names: vec![],
         }],
     )
     .unwrap();
@@ -1045,7 +1065,8 @@ fn adventure_seed_subjects_require_pc_declared_entity_or_world() {
     ch.entities.push(SeedEntity {
         name: "Bela".into(),
         kind: EntityKind::Npc,
-        adult: Some(true),
+        age: Some(40),
+        other_names: vec![],
         hidden: false,
     });
     ch.decided.push(SeedFact {
@@ -1075,9 +1096,9 @@ fn adventure_seed_subjects_require_pc_declared_entity_or_world() {
     ch.decided[0].subject = "unknown".into();
     assert!(db.create_campaign(&ch, 2).is_err());
     ch.decided[0].subject = "Ada".into();
-    ch.entities[0].adult = None;
+    ch.entities[0].age = None;
     assert!(db.create_campaign(&ch, 3).is_err());
-    ch.entities[0].adult = Some(true);
+    ch.entities[0].age = Some(40);
     ch.pc.name = "world".into();
     ch.decided[0].subject = "world".into();
     ch.proposed[0].subject = "world".into();
@@ -1103,7 +1124,8 @@ fn additional_projections_survive_rebuild() {
             local: None,
             kind: EntityKind::Npc,
             name: "Bela".into(),
-            adult: Some(true),
+            age: Some(40),
+            other_names: vec![],
         }],
     )
     .unwrap();
@@ -1531,4 +1553,107 @@ fn open_existing_refuses_a_foreign_file() {
         1
     );
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn version_1_file_is_refused() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-1");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.sqlite");
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch(
+        "CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL);
+         PRAGMA user_version=1;",
+    )
+    .unwrap();
+    drop(sql);
+    let bytes = std::fs::read(&path).unwrap();
+
+    let err = match Store::open_existing(&path) {
+        Ok(_) => panic!("a version 1 file opened"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("version 1"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "the file changed");
+    assert!(Store::open(&path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "the file changed");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn seed_other_names_resolve_and_are_known_facts() {
+    use threshold_core::domain::{OtherName, SeedEntity};
+    let mut db = Store::open_in_memory().unwrap();
+    let mut seed = adventure_seed();
+    seed.pc.other_names = vec![OtherName {
+        name: "Jade".into(),
+        known_to: vec!["Bela".into()],
+    }];
+    seed.entities = vec![
+        SeedEntity {
+            name: "Bela".into(),
+            kind: EntityKind::Npc,
+            age: Some(61),
+            other_names: vec![OtherName {
+                name: "the Old Chloé".into(),
+                known_to: vec![],
+            }],
+            hidden: false,
+        },
+        SeedEntity {
+            name: "Cato".into(),
+            kind: EntityKind::Npc,
+            age: Some(25),
+            other_names: vec![],
+            hidden: false,
+        },
+    ];
+    // A fact may name its subject by an other name.
+    seed.decided.push(SeedFact {
+        subject: "jade".into(),
+        key: "trade".into(),
+        value: "courier".into(),
+        text: "Ada carries letters.".into(),
+    });
+    let c = db.create_campaign(&seed, 7).unwrap();
+    let view = db.snapshot(c).unwrap();
+    let id = |name: &str| view.entity_by_name(name).unwrap().id;
+    let (ada, bela, cato) = (id("Ada"), id("Bela"), id("Cato"));
+    assert_eq!(id("JADE"), ada);
+    assert_eq!(id("Old Chloe"), bela);
+    let pc = view.entities.iter().find(|e| e.id == ada).unwrap();
+    assert_eq!(
+        (pc.age, pc.other_names.clone()),
+        (Some(30), vec!["Jade".into()])
+    );
+    assert!(view.live_fact(ada, "trade").is_some());
+
+    // One Persistent fact per other name, held by the bearer and `known_to`.
+    let holders = |fact: u64| {
+        let mut h: Vec<u64> = view
+            .knowledge
+            .iter()
+            .filter(|k| k.fact_id == Some(fact))
+            .map(|k| k.holder)
+            .collect();
+        h.sort();
+        h
+    };
+    let alias = view.live_fact(ada, "alias_jade").unwrap();
+    assert_eq!(alias.canon, Canon::Persistent);
+    assert_eq!(alias.slot.value, "jade");
+    assert_eq!(holders(alias.id), vec![ada, bela]);
+    // The key takes the name's normal form: "Chloé" and "Chloe" share it.
+    let alias = view.live_fact(bela, "alias_old_chloe").unwrap();
+    assert_eq!(holders(alias.id), vec![bela]);
+    assert!(view.knowledge.iter().all(|k| k.holder != cato));
+
+    // The projections rebuild to the same view.
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(db.snapshot(c).unwrap(), view);
+
+    // A `known_to` name that resolves to nobody is refused.
+    seed.pc.other_names[0].known_to = vec!["Nobody".into()];
+    assert!(db.create_campaign(&seed, 8).is_err());
 }

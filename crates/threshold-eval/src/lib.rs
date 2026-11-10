@@ -407,12 +407,9 @@ fn per_100(n: usize, d: usize) -> String {
 }
 
 fn entity_id(view: &WorldView, name: &str) -> Result<u64, String> {
-    let name = normalize::name(name);
-    view.entities
-        .iter()
-        .find(|e| e.norm_name == name)
+    view.entity_by_name(name)
         .map(|e| e.id)
-        .ok_or_else(|| format!("no entity {name}"))
+        .ok_or_else(|| format!("no entity {}", normalize::name(name)))
 }
 
 fn pc_location(view: &WorldView) -> Option<String> {

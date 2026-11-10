@@ -25,7 +25,7 @@ pub fn arrival(view: &WorldView, location: &str, at: ClockMin) -> Vec<LedgerOp> 
     let location = normalize::value(location);
     view.entities
         .iter()
-        .filter(|e| e.id != pc.id && !hidden(view, &e.norm_name))
+        .filter(|e| e.id != pc.id && !hidden(view, e.id))
         .filter_map(|e| view.live_fact(e.id, "location"))
         .filter(|f| normalize::value(&f.slot.value) == location)
         .filter(|f| !placed_unseen(f, pc.id))
@@ -45,13 +45,12 @@ pub fn arrival(view: &WorldView, location: &str, at: ClockMin) -> Vec<LedgerOp> 
         .collect()
 }
 
-/// True when the Adventure Seed declares the entity with this normalized
-/// name hidden.
-pub fn hidden(view: &WorldView, norm_name: &str) -> bool {
+/// True when the Adventure Seed declares this entity hidden.
+pub fn hidden(view: &WorldView, entity: EntityId) -> bool {
     view.adventure_seed.as_ref().is_some_and(|seed| {
         seed.entities
             .iter()
-            .any(|s| s.hidden && normalize::name(&s.name) == norm_name)
+            .any(|s| s.hidden && view.entity_by_name(&s.name).is_some_and(|e| e.id == entity))
     })
 }
 
@@ -185,7 +184,7 @@ pub fn openly_here(view: &WorldView, entity: EntityId) -> bool {
             .entities
             .iter()
             .find(|e| e.id == entity)
-            .is_some_and(|e| !hidden(view, &e.norm_name))
+            .is_some_and(|e| !hidden(view, e.id))
         && view
             .live_fact(entity, "location")
             .is_some_and(|f| normalize::value(&f.slot.value) == here && !placed_unseen(f, pc.id))
@@ -259,11 +258,7 @@ pub fn with_witnessed_events(
 
 fn hidden_ref(view: &WorldView, entity: EntityRef) -> bool {
     match entity {
-        EntityRef::Id(id) => view
-            .entities
-            .iter()
-            .find(|e| e.id == id)
-            .is_some_and(|e| hidden(view, &e.norm_name)),
+        EntityRef::Id(id) => hidden(view, id),
         EntityRef::New(_) => false,
     }
 }

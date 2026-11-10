@@ -190,7 +190,8 @@ impl Builder<'_> {
                 local: Some(local),
                 kind: EntityKind::Npc,
                 name: npc.name.clone(),
-                adult: Some(npc.adult),
+                age: Some(npc.age),
+                other_names: Vec::new(),
             });
             self.ops.push(LedgerOp::AddVoiceCard {
                 npc: EntityRef::New(local),

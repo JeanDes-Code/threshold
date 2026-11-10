@@ -36,7 +36,8 @@ fn npc(name: &str) -> SeedEntity {
     SeedEntity {
         name: name.into(),
         kind: EntityKind::Npc,
-        adult: Some(true),
+        age: Some(40),
+        other_names: vec![],
         hidden: false,
     }
 }
@@ -49,7 +50,8 @@ fn fixture() -> Result<WorldView, Box<dyn Error>> {
         premise: "A courier arrives in a river town run by a proud magistrate.".into(),
         pc: PcSeed {
             name: "Ada".into(),
-            adult: true,
+            age: 30,
+            other_names: vec![],
             concept: "a blunt courier".into(),
         },
         entities: vec![npc("Orsel"), npc("Hessa")],

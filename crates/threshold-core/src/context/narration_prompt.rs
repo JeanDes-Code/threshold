@@ -59,13 +59,10 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
                 ..
             } => *delay_min == 0 && listeners.contains(&pc_ref),
             LedgerOp::AddEntity { kind, name, .. } => {
-                *kind != EntityKind::Pc && {
-                    let name = normalize::name(name);
-                    view_after
-                        .entities
-                        .iter()
-                        .any(|e| e.norm_name == name && present.contains(&e.id))
-                }
+                *kind != EntityKind::Pc
+                    && view_after
+                        .entity_by_name(name)
+                        .is_some_and(|e| present.contains(&e.id))
             }
             LedgerOp::RecordRoll { .. } | LedgerOp::AdvanceClock { .. } => true,
             _ => false,
@@ -112,7 +109,7 @@ pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
             .iter()
             .filter(|e| e.kind == EntityKind::Npc)
             .filter(|e| {
-                hidden(view, &e.norm_name)
+                hidden(view, e.id)
                     || !(openly_here(view, e.id)
                         || present.contains(&e.id)
                         || known.contains(&e.id))

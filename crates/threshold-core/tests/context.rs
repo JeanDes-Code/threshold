@@ -305,7 +305,7 @@ fn pack_cannot_change_checks() {
 
     let mut p = proposal(Verdict::Allowed);
     p.intimate = true;
-    p.new_npcs = vec![new_npc(1, "Kett", false)];
+    p.new_npcs = vec![new_npc(1, "Kett", 12)];
     let errs = validate(&p, &w.view).expect_err("still rejected");
     assert!(errs.iter().any(|r| r.check == CheckKind::ContentBoundary));
 }
@@ -374,13 +374,15 @@ fn unwitnessed_presence_never_reaches_the_narrator() {
             local: Some(1),
             kind: EntityKind::Npc,
             name: "Vell".into(),
-            adult: Some(true),
+            age: Some(40),
+            other_names: vec![],
         },
         LedgerOp::AddEntity {
             local: Some(2),
             kind: EntityKind::Item,
             name: "Ledger Chest".into(),
-            adult: None,
+            age: None,
+            other_names: vec![],
         },
     ]);
     let id = |w: &World, name: &str| w.view.entities.iter().find(|e| e.name == name).unwrap().id;
@@ -390,7 +392,8 @@ fn unwitnessed_presence_never_reaches_the_narrator() {
         local: Some(1),
         kind: EntityKind::Npc,
         name: "Vell".into(),
-        adult: Some(true),
+        age: Some(40),
+        other_names: vec![],
     }];
     w.commit(vec![hidden_at_gate(vell), hidden_at_gate(chest)]);
     // World truth: both stand in the gate square.
@@ -525,13 +528,37 @@ fn pack_with_symlink_is_refused() {
 }
 
 #[test]
+fn entity_lines_show_the_stored_age() {
+    let w = World::new();
+    let prompt = proposal_prompt(&w.view, &[], "I look around.");
+    let scene = &prompt.scene;
+    assert!(
+        scene.contains(&format!("E{} Ada (pc, age 30)", w.ada)),
+        "{scene}"
+    );
+    assert!(
+        scene.contains(&format!("E{} Brann (npc, age 18)", w.brann)),
+        "{scene}"
+    );
+    assert!(
+        scene.contains(&format!("E{} Gate (place)", w.gate)),
+        "{scene}"
+    );
+    assert!(
+        !scene.contains("adult") && !scene.contains("minor"),
+        "{scene}"
+    );
+}
+
+#[test]
 fn unknown_entity_ids_are_never_rendered() {
     let entity = |id, kind, name: &str| Entity {
         id,
         kind,
         name: name.into(),
         norm_name: name.to_lowercase(),
-        adult: Some(true),
+        age: Some(40),
+        other_names: vec![],
     };
     let view = WorldView {
         entities: vec![
@@ -560,7 +587,7 @@ fn unknown_entity_ids_are_never_rendered() {
 fn new_npc_is_seen_by_those_present() {
     let mut w = World::new();
     let mut p = proposal(Verdict::Allowed);
-    p.new_npcs = vec![new_npc(1, "Kett", true)];
+    p.new_npcs = vec![new_npc(1, "Kett", 34)];
     let valid = validate(&p, &w.view).expect("valid proposal");
     let resolved = to_ops(valid, None, &w.view);
     play_turn(&mut w, "turn-kett", "I wait.", "", resolved.ops.clone());

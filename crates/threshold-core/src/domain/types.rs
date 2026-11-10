@@ -199,7 +199,10 @@ pub enum LedgerOp<E = EntityRef> {
         local: Option<u8>,
         kind: EntityKind,
         name: String,
-        adult: Option<bool>,
+        /// A PC or an NPC has an age; nothing else does.
+        age: Option<u16>,
+        #[serde(default)]
+        other_names: Vec<String>,
     },
     AddFact {
         slot: Slot<E>,
@@ -380,12 +383,14 @@ impl<E> LedgerOp<E> {
                 local,
                 kind,
                 name,
-                adult,
+                age,
+                other_names,
             } => LedgerOp::AddEntity {
                 local,
                 kind,
                 name,
-                adult,
+                age,
+                other_names,
             },
             Self::AddFact {
                 slot,

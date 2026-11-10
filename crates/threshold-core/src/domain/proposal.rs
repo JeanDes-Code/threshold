@@ -83,7 +83,9 @@ pub enum Cause {
 pub struct NewNpc {
     pub id: Handle,
     pub name: String,
-    pub adult: bool,
+    /// Age in years.
+    #[schemars(range(min = 0, max = 999))]
+    pub age: u16,
     #[schemars(length(max = 120))]
     pub voice: String,
 }

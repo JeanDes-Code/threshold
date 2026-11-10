@@ -17,7 +17,10 @@ pub struct AdventureSeed {
 pub struct SeedEntity {
     pub name: String,
     pub kind: super::EntityKind,
-    pub adult: Option<bool>,
+    /// A character's age in years. A PC or an NPC has one; nothing else does.
+    pub age: Option<u16>,
+    #[serde(default)]
+    pub other_names: Vec<OtherName>,
     /// A hidden entity is not seen on arrival: the PC does not witness its
     /// location just by entering its place.
     #[serde(default)]
@@ -27,8 +30,18 @@ pub struct SeedEntity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PcSeed {
     pub name: String,
-    pub adult: bool,
+    pub age: u16,
+    #[serde(default)]
+    pub other_names: Vec<OtherName>,
     pub concept: String,
+}
+
+/// A second name of an entity, and the characters who know that it names the
+/// same entity. The bearer always knows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OtherName {
+    pub name: String,
+    pub known_to: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
