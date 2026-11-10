@@ -91,7 +91,9 @@ Rejected:
 
 **Cost if wrong.** If the model ignores the rule, the story has no bubble and reads as it does today. If the model tags a line with the wrong present NPC, the bubble is wrong. Code cannot see that case. The evaluation measures both: the share of spoken lines with a mark, and the share of wrong marks by the judge.
 
-**Stream.** `narration_chunk` does not change. While the Narration streams, the UI shows the raw text, marks included. The blocks arrive with the `PlayView` after the Turn commits. A running Turn holds the `Session` lock, so no view command can run during the stream.
+**Stream.** `narration_chunk` does not change. While the Narration streams, the UI shows the streamed text, marks included. The blocks arrive with the `PlayView` after the Turn commits. A running Turn holds the `Session` lock, so no view command can run during the stream.
+
+**Changed after review (2026-11-10): the stream drops unknown tags too.** The streamed text showed a tag such as `Kestrel: "…"` until the Commit. The core now filters the stream, not the UI, since the UI parses no Narration. `speech::TagFilter` holds each line start until a colon, a newline or 48 characters. When the text before the colon is, through `normalize::name`, in `world::unnameable_names` (each name, main or other, of an entity the PC cannot call by that name), it drops that text, the colon and the blanks after it. The Engine reads the set once before each narrator call, for a play Turn, a Correction, the opening Narration and `renarrate`. It adds no model call. One measure at 300 Turns, in a release build: about 10 ms of store reads and 2 ms to compute, before a narrator call of several seconds. The stored Narration is unchanged; the commit-time rule above still handles it. A name written inside prose is still not covered (ADR 0006).
 
 ### 3.2 Decisions (2)
 

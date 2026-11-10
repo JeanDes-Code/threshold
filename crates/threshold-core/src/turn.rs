@@ -11,7 +11,7 @@
 //! Every step writes one `debug_log` row with its milliseconds. The debug log
 //! sits outside the Commit transaction, so a failed Turn stays visible.
 
-use std::{fmt, time::Instant};
+use std::{collections::HashSet, fmt, time::Instant};
 
 use serde_json::json;
 
@@ -29,6 +29,7 @@ use crate::{
     pack::ContentPack,
     proposal_schema_for,
     rules::{RollResult, Ruleset, turn_seed},
+    speech::TagFilter,
     store::{
         CampaignId, CommitError, DebugEntry, OpId, Store, StoreError, StoredTurn, TurnId, TurnKind,
         TurnRecord, WorldView,
@@ -329,7 +330,7 @@ impl Engine {
         let view_after = self.store.snapshot(self.campaign)?;
         let step = Instant::now();
         let narration = self
-            .narrate_opening(&op_id, &view_after, on_chunk)
+            .narrate_opening(&op_id, &view_after, &view_after, on_chunk)
             .map_err(|e| narration_failed(turn_id, e))?;
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
@@ -372,8 +373,12 @@ impl Engine {
             .filter(|t| t.record.campaign_id == self.campaign)
             .ok_or_else(|| StoreError::Invalid("unknown turn".into()))?;
         let view_after = self.store.snapshot_before(self.campaign, stored.seq + 1)?;
+        // The screens read the story against the state now, so the stream
+        // filter does too.
+        let now = self.store.snapshot(self.campaign)?;
         if stored.record.kind == TurnKind::Opening {
-            let narration = self.narrate_opening(&stored.record.op_id, &view_after, on_chunk)?;
+            let op_id = &stored.record.op_id;
+            let narration = self.narrate_opening(op_id, &view_after, &now, on_chunk)?;
             self.store.set_narration(turn, &narration)?;
             return Ok(narration);
         }
@@ -396,6 +401,7 @@ impl Engine {
         let narration = self.narrate(
             &stored.record.op_id,
             &view_after,
+            &now,
             &committed,
             &stored.record.intent,
             on_chunk,
@@ -487,7 +493,14 @@ impl Engine {
             reactions: &planned.reactions,
         };
         let narration = self
-            .narrate(&op_id, &view_after, &committed, &intent, on_chunk)
+            .narrate(
+                &op_id,
+                &view_after,
+                &view_after,
+                &committed,
+                &intent,
+                on_chunk,
+            )
             .map_err(|e| narration_failed(turn_id, e))?;
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
@@ -504,11 +517,13 @@ impl Engine {
     /// The narration call. Only what the PC perceives reaches it, and only
     /// the reactions of NPCs the PC knows are here: the others are offscreen
     /// intents. A plan or a World Event text that names a secret is dropped
-    /// (`guard_plans`, `guard_events`).
+    /// (`guard_plans`, `guard_events`). `now` is the current state: the
+    /// stream filter reads it (`narrate_through`).
     fn narrate(
         &mut self,
         op_id: &str,
         view_after: &WorldView,
+        now: &WorldView,
         committed: &Committed<'_>,
         intent: &str,
         on_chunk: &mut dyn FnMut(&str),
@@ -539,25 +554,42 @@ impl Engine {
             &reactions,
             intent,
         );
+        let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
-        let narration = self.gm.narrate(&prompt, on_chunk);
+        let narration = narrate_through(self.gm.as_ref(), &prompt, hidden, on_chunk);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
         Ok(narration?)
     }
 
     /// The opening narration call: `opening_prompt` on the state after the
-    /// Opening Turn, which equals the state before it.
+    /// Opening Turn, which equals the state before it. `now` is the current
+    /// state, for the stream filter.
     fn narrate_opening(
         &mut self,
         op_id: &str,
         view_after: &WorldView,
+        now: &WorldView,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, TurnError> {
         let prompt = opening_prompt(view_after, &self.packs);
+        let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
-        let narration = self.gm.narrate(&prompt, on_chunk);
+        let narration = narrate_through(self.gm.as_ref(), &prompt, hidden, on_chunk);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
         Ok(narration?)
+    }
+
+    /// The names a speech tag must not print, from the state `now` and the
+    /// Turn rows, as the screens will read them after the Commit (data shape
+    /// 3.1). Store reads only: no model call.
+    fn unnameable_names(&self, now: &WorldView) -> Result<HashSet<String>, TurnError> {
+        let turns = self.store.turns(self.campaign)?;
+        let reverted = self
+            .store
+            .reverted_turns(self.campaign)?
+            .into_iter()
+            .collect();
+        Ok(world::unnameable_names(now, &turns, &reverted))
     }
 
     /// Every step before the Commit, against `view` (the state before the
@@ -817,4 +849,28 @@ fn ooc_prompt(view: &WorldView, question: &str) -> Prompt {
         scene,
         recent: format!("QUESTION\n{}\n", one_line(question)),
     }
+}
+
+/// One narrator call whose stream passes through `speech::TagFilter`: a tag
+/// that names someone the PC cannot name never reaches `on_chunk`. The
+/// answer, which becomes the stored Narration, is returned unchanged; the
+/// commit-time rule of `world::pc_sight` handles it.
+fn narrate_through(
+    gm: &dyn Gm,
+    prompt: &Prompt,
+    hidden: HashSet<String>,
+    on_chunk: &mut dyn FnMut(&str),
+) -> Result<String, GmError> {
+    let mut filter = TagFilter::new(hidden);
+    let answer = gm.narrate(prompt, &mut |chunk| {
+        let shown = filter.push(chunk);
+        if !shown.is_empty() {
+            on_chunk(&shown);
+        }
+    });
+    let rest = filter.finish();
+    if !rest.is_empty() {
+        on_chunk(&rest);
+    }
+    answer
 }

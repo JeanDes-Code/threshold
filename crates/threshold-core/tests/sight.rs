@@ -3,7 +3,7 @@
 
 mod support;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use support::{hidden::*, *};
 use threshold_core::{
@@ -12,8 +12,9 @@ use threshold_core::{
     domain::{
         ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Seen, Verdict,
     },
+    normalize,
     store::{TurnId, TurnKind},
-    world::{Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN},
+    world::{Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, unnameable_names},
 };
 
 fn json(p: &DecisionProposal) -> String {
@@ -763,4 +764,95 @@ fn correction_replaces_the_reverted_turn() {
     assert!(moment(&sight, old).is_none());
     assert!(moment(&sight, new).is_some());
     assert!(!sight.needs_begin);
+}
+
+// ---- The stream filter's names (data shape 3.1, changed after review) -------
+
+/// The set the stream filter reads, from the store as it is now.
+fn unnameable(store: &threshold_core::store::Store, campaign: u64) -> HashSet<String> {
+    let view = store.snapshot(campaign).unwrap();
+    let turns = store.turns(campaign).unwrap();
+    let reverted: HashSet<TurnId> = store
+        .reverted_turns(campaign)
+        .unwrap()
+        .into_iter()
+        .collect();
+    unnameable_names(&view, &turns, &reverted)
+}
+
+/// A tag is in the stream filter's set exactly when the commit-time rule
+/// removes it: one tagged line for every name and other name of the world.
+#[test]
+fn unnameable_names_match_the_commit_time_rule() {
+    let mut w = HiddenWorld::new();
+    w.play(
+        "I wait.",
+        &observe_record(),
+        0,
+        newcomer("Brann", "market", &[]),
+    );
+    let said = w.play("I listen.", &observe_record(), 0, vec![]);
+    let view = w.view();
+    let names: Vec<String> = view
+        .entities
+        .iter()
+        .flat_map(|e| std::iter::once(e.name.clone()).chain(e.other_names.clone()))
+        .chain(["Thunder".to_owned()])
+        .collect();
+    let lines: Vec<String> = names.iter().map(|n| format!("{n}: \"Hi.\"")).collect();
+    w.narrate(said, &lines.join("\n"));
+
+    let set = unnameable(&w.store, w.campaign);
+    assert!(set.contains("kestrel") && set.contains("toll-wolf") && set.contains("vey"));
+    assert!(!set.contains("orsel") && !set.contains("thunder"));
+    let sight = w.sight();
+    let turn = sight.story.iter().find(|t| t.turn == said).unwrap();
+    assert_eq!(turn.lines.len(), names.len());
+    for (name, line) in names.iter().zip(&turn.lines) {
+        let dropped = *line == SightLine::Prose("\"Hi.\"".into());
+        assert_eq!(dropped, set.contains(&normalize::name(name)), "{name}");
+    }
+}
+
+fn observe_record() -> String {
+    record(ActionKind::Observe, Verdict::Allowed, None)
+}
+
+/// The Turn path: the Player never sees the tag of a name the PC does not
+/// know, not even while the Narration streams. The stored Narration keeps
+/// it, and the screens remove it after the Commit as before.
+#[test]
+fn a_streamed_narration_never_shows_an_unknown_tag() {
+    let w = HiddenWorld::new();
+    let opening = w.opening;
+    let raw =
+        "Kestrel: \"Nobody knows my name.\"\n\nOrsel: \"You are late.\"\nThe Toll-Wolf: \"Pay.\"";
+    let shown = "\"Nobody knows my name.\"\n\nOrsel: \"You are late.\"\n\"Pay.\"";
+    let gm = RecordedGm::new(
+        vec![json(&proposal(Verdict::Allowed))],
+        vec![raw.to_owned(), raw.to_owned(), raw.to_owned()],
+    );
+    let (mut engine, _) = w.engine(&gm);
+    let mut seen = String::new();
+    let outcome = engine
+        .play_turn("stream-1".into(), "I listen.", &mut |c| seen.push_str(c))
+        .unwrap();
+    assert_eq!(seen, shown);
+    assert_eq!(outcome.narration, raw);
+    let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    assert_eq!(stored.narration.as_deref(), Some(raw));
+
+    // `renarrate`, of a play Turn and of the Opening Turn.
+    let mut seen = String::new();
+    engine
+        .renarrate(outcome.turn_id, &mut |c| seen.push_str(c))
+        .unwrap();
+    assert_eq!(seen, shown);
+    let mut seen = String::new();
+    engine
+        .renarrate(opening, &mut |c| seen.push_str(c))
+        .unwrap();
+    assert_eq!(seen, shown);
+    // One proposal and three Narrations: the filter calls no model.
+    assert_eq!(gm.calls().len(), 4);
 }

@@ -1,6 +1,8 @@
 //! The speech mark: the narrator writes it, `speech::parse` reads it.
 
-use threshold_core::speech::{Line, RULE, parse};
+use std::collections::HashSet;
+
+use threshold_core::speech::{Line, RULE, TAG_HOLD_CHARS, TagFilter, parse, strip_tags};
 
 fn tagged<'a>(name: &'a str, words: &'a str, line: &'a str) -> Line<'a> {
     let said = line.split_once(':').unwrap().1.trim();
@@ -109,4 +111,97 @@ fn parse_drops_blank_lines_only() {
 fn rule_is_one_line() {
     assert!(!RULE.contains('\n'));
     assert!(!RULE.is_empty());
+}
+
+// ---- The stream filter (data shape 3.1, changed after review) ----------------
+
+/// The names the PC cannot use: Kestrel, and the hidden other name of a
+/// toll keeper.
+fn hidden() -> HashSet<String> {
+    ["kestrel", "toll-wolf"].map(String::from).into()
+}
+
+const STORED: &str = "The hood hides a face.\n\nKestrel: \"Nobody knows my name.\"\n\nOrsel: \"You are late.\"\nThe Toll-Wolf: \u{ab}Pay the toll.\u{bb}\nKESTREL : \"Again.\"\nThunder: \"Boom.\"";
+
+/// `STORED` with the tags of the unknown names removed.
+const SHOWN: &str = "The hood hides a face.\n\n\"Nobody knows my name.\"\n\nOrsel: \"You are late.\"\n\u{ab}Pay the toll.\u{bb}\n\"Again.\"\nThunder: \"Boom.\"";
+
+/// Feeds `chunks` one by one and joins what the filter emits.
+fn stream(chunks: &[&str]) -> String {
+    let mut filter = TagFilter::new(hidden());
+    let mut out: String = chunks.iter().map(|c| filter.push(c)).collect();
+    out.push_str(&filter.finish());
+    out
+}
+
+fn split_at_chars(text: &str, size: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    chars.chunks(size).map(|c| c.iter().collect()).collect()
+}
+
+#[test]
+fn stream_drops_the_tag_of_a_name_the_pc_cannot_use() {
+    assert_eq!(strip_tags(STORED, &hidden()), SHOWN);
+    assert_eq!(stream(&[STORED]), SHOWN);
+}
+
+#[test]
+fn stream_gives_the_same_text_for_any_chunk_boundary() {
+    // One character per chunk, and every other chunk size.
+    for size in 1..=STORED.chars().count() {
+        let chunks = split_at_chars(STORED, size);
+        let chunks: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        assert_eq!(stream(&chunks), SHOWN, "chunks of {size}");
+    }
+    // Boundaries inside the tag, and right at the colon.
+    assert_eq!(stream(&["Kes", "trel", ":", " \"Hi.\"\n"]), "\"Hi.\"\n");
+    assert_eq!(stream(&["Kestrel", ": \"Hi.\""]), "\"Hi.\"");
+    assert_eq!(stream(&["Kestrel:", " ", " \"Hi.\""]), "\"Hi.\"");
+}
+
+#[test]
+fn stream_keeps_the_tag_of_a_name_the_pc_can_use() {
+    let mut filter = TagFilter::new(hidden());
+    assert_eq!(filter.push("Orsel"), "");
+    assert_eq!(
+        filter.push(": \"You are late.\""),
+        "Orsel: \"You are late.\""
+    );
+    assert_eq!(filter.finish(), "");
+    // A colon in prose after the line start passes at once.
+    let mut filter = TagFilter::new(hidden());
+    assert_eq!(
+        filter.push("Kestrel waits: then she"),
+        "Kestrel waits: then she"
+    );
+    assert_eq!(filter.push(" goes."), " goes.");
+}
+
+#[test]
+fn a_line_with_no_colon_waits_for_no_more_than_the_hold() {
+    assert_eq!(TAG_HOLD_CHARS, 48);
+    let mut filter = TagFilter::new(hidden());
+    let long = "a".repeat(TAG_HOLD_CHARS - 1);
+    assert_eq!(filter.push(&long), "");
+    // The 48th character releases the line: it cannot be a tag any more.
+    assert_eq!(filter.push("b"), format!("{long}b"));
+    assert_eq!(filter.push("Kestrel: \"Hi.\""), "Kestrel: \"Hi.\"");
+    // A newline releases a short line, and the next line is held again.
+    assert_eq!(filter.push("\nShort line\nKest"), "\nShort line\n");
+    assert_eq!(filter.push("rel: \"Hi.\""), "\"Hi.\"");
+    // The end of the stream releases what is held.
+    let mut filter = TagFilter::new(hidden());
+    assert_eq!(filter.push("The end"), "");
+    assert_eq!(filter.finish(), "The end");
+}
+
+#[test]
+fn stream_with_no_hidden_name_is_unchanged() {
+    let mut filter = TagFilter::new(HashSet::new());
+    let mut out: String = split_at_chars(STORED, 3)
+        .iter()
+        .map(|c| filter.push(c))
+        .collect();
+    out.push_str(&filter.finish());
+    assert_eq!(out, STORED);
 }

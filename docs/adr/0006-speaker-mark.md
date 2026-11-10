@@ -15,10 +15,15 @@ The first version kept every line that did not resolve with its text unchanged. 
 - The tag names several entities and at least one of them is not nameable by the PC by that name. The tag is removed too.
 - The tag names no entity ("Thunder"). The text stays unchanged: it tells nothing about the world.
 
+## Changed after a second review (2026-11-10): the stream
+
+While a Narration streamed, the Player read the raw text, so `Kestrel: "…"` showed until the Turn committed. The core now closes that case. `speech::TagFilter` sits between the model's chunks and the `narration_chunk` events. At each line start it holds the text back until a colon, a newline or 48 characters (`TAG_HOLD_CHARS`). When the text before the colon is, through `normalize::name`, a name in `world::unnameable_names`, it drops that text, the colon and the blanks after it. Any other text passes unchanged. The set is read once before the narrator call, from the same rule as the commit-time one, so a tag is in it exactly when the screens remove it after the Commit. The filter covers the play Turn, the Correction, the opening Narration and `renarrate`. It adds no model call and no change to the `Gm` trait. The stored Narration does not change.
+
 What this does not cover:
 
-- The narrator can still write an unknown name inside prose ("Kestrel smiles."). Rule 4 of data shape 3.5 then makes that name known, because the Narration printed it. Only a prompt change can stop that (data shape 3.5, "Cost if wrong").
-- While a Narration streams, the Player reads the raw text, marks included. A tag with an unknown name shows until the Turn commits and the blocks replace the stream.
+- The narrator can still write an unknown name inside prose ("Kestrel smiles."), in the stream and after the Commit. Rule 4 of data shape 3.5 then makes that name known, because the Narration printed it. Only a prompt change can stop that (data shape 3.5, "Cost if wrong").
+- The stream filter drops a hidden name before a colon even when the line is not a full mark (`Kestrel: he waits.`). The screens keep such a line after the Commit, because it is not a mark. That is the safe side: the name shows later, from the stored text, by the commit-time rule.
+- A tag of 48 characters or more is not held, so it is not dropped while it streams. No entity name in the fixtures comes close to that length.
 
 ## Considered options
 
@@ -30,7 +35,7 @@ What this does not cover:
 ## Consequences
 
 - No model call, no proposal field and no ledger op is added. The cost is a few output tokens for each spoken line.
-- Stored Narrations hold the mark. While a Narration streams, the Player reads the raw text, marks included. The bubbles come with the Play view after the Commit.
+- Stored Narrations hold the mark. While a Narration streams, the Player reads the text with the tags of unknown names removed, other marks included. The bubbles come with the Play view after the Commit.
 - A model that drops the mark gives prose and no error. A model that tags the wrong present NPC gives a wrong bubble, and code cannot see it. The evaluation measures both.
 - The name in a mark does not count as a Narration naming the speaker: a line whose mark cannot resolve must not make its own speaker resolve. A hidden other name never resolves.
 - It is easy to reverse: the parser stops, and the mark reads as plain text.

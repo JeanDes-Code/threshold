@@ -5,7 +5,12 @@
 //! NPC's name, a colon, then the words in quotes. `RULE` asks for it and
 //! `parse` reads it, so the writer side and the reader side of the format
 //! live here. The mark only says who the narrator meant; `world::pc_sight`
-//! decides if the line may show as a bubble.
+//! decides if the line may show as a bubble. `TagFilter` drops the tag of a
+//! name the PC cannot use from the stream, before the Commit.
+
+use std::collections::HashSet;
+
+use crate::normalize;
 
 /// The text of `RULE`, as a literal, so `NARRATION_RULES` can hold it with
 /// `concat!`.
@@ -79,4 +84,114 @@ fn mark(line: &str) -> Option<Line<'_>> {
         words: inner_words,
         said,
     })
+}
+
+/// The longest text the stream filter holds back at the start of a line,
+/// in characters, before it knows that the line has no tag to drop.
+pub const TAG_HOLD_CHARS: usize = 48;
+
+/// Where the stream filter is in the current line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum At {
+    /// At the start of a line: the text is held until a colon, a newline or
+    /// `TAG_HOLD_CHARS` characters.
+    Start,
+    /// A tag was dropped: the blanks after its colon are dropped too.
+    AfterTag,
+    /// The rest of a line: each character passes at once.
+    Rest,
+}
+
+/// The stream side of the tag rule (data shape 3.1, ADR 0006). It sits
+/// between the narrator's chunks and the chunks the Player sees. At each
+/// line start it holds the text back until a colon, a newline or
+/// `TAG_HOLD_CHARS` characters. When the text before the colon is, through
+/// `normalize::name`, one of the `hidden` names, the filter drops it, the
+/// colon and the blanks after the colon; any other text passes unchanged.
+/// So a tag that names someone the PC cannot name never shows, not even
+/// while the Narration streams. The stored Narration does not change. It
+/// makes no model call, and it holds back at most one line start.
+#[derive(Clone, Debug)]
+pub struct TagFilter {
+    hidden: HashSet<String>,
+    held: String,
+    held_chars: usize,
+    at: At,
+}
+
+impl TagFilter {
+    /// A filter for one Narration. `hidden` holds the names, through
+    /// `normalize::name`, that a tag must not print
+    /// (`world::unnameable_names`).
+    pub fn new(hidden: HashSet<String>) -> Self {
+        Self {
+            hidden,
+            held: String::new(),
+            held_chars: 0,
+            at: At::Start,
+        }
+    }
+
+    /// Takes one chunk of the narrator; returns the text to show now, which
+    /// can be empty.
+    pub fn push(&mut self, chunk: &str) -> String {
+        let mut out = String::with_capacity(chunk.len());
+        for c in chunk.chars() {
+            match self.at {
+                At::Start => match c {
+                    '\n' => {
+                        out.push_str(&self.release());
+                        out.push(c);
+                    }
+                    ':' => {
+                        let name = normalize::name(&self.held);
+                        if !name.is_empty() && self.hidden.contains(&name) {
+                            self.release();
+                            self.at = At::AfterTag;
+                        } else {
+                            out.push_str(&self.release());
+                            out.push(c);
+                            self.at = At::Rest;
+                        }
+                    }
+                    _ => {
+                        self.held.push(c);
+                        self.held_chars += 1;
+                        if self.held_chars >= TAG_HOLD_CHARS {
+                            out.push_str(&self.release());
+                            self.at = At::Rest;
+                        }
+                    }
+                },
+                At::AfterTag if c == ' ' || c == '\t' => {}
+                At::AfterTag | At::Rest => {
+                    out.push(c);
+                    self.at = if c == '\n' { At::Start } else { At::Rest };
+                }
+            }
+        }
+        out
+    }
+
+    /// The end of the Narration: returns the text still held.
+    pub fn finish(&mut self) -> String {
+        self.at = At::Start;
+        self.release()
+    }
+
+    fn release(&mut self) -> String {
+        self.held_chars = 0;
+        std::mem::take(&mut self.held)
+    }
+}
+
+/// `text` as the stream filter shows it: each line whose text before its
+/// first colon is one of the `hidden` names loses that text, the colon and
+/// the blanks after it, unless the line reached `TAG_HOLD_CHARS` characters
+/// before the colon.
+pub fn strip_tags(text: &str, hidden: &HashSet<String>) -> String {
+    let mut filter = TagFilter::new(hidden.clone());
+    let mut out = filter.push(text);
+    out.push_str(&filter.finish());
+    out
 }

@@ -412,6 +412,54 @@ pub fn pc_sight(
     })
 }
 
+/// The names that a speech tag must not print (data shape 3.1): each name,
+/// main or other, through `normalize::name`, of an entity that the PC
+/// cannot call by that name. It applies the rule of `hides_a_name` to every
+/// name of the world, so a tag is in the set exactly when the commit-time
+/// rule removes it. The stream filter of a Narration reads it
+/// (`speech::TagFilter`); it never reaches a screen. Empty when the
+/// campaign has no PC.
+pub fn unnameable_names(
+    view: &WorldView,
+    turns: &[StoredTurn],
+    reverted: &HashSet<TurnId>,
+) -> HashSet<String> {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return HashSet::new();
+    };
+    let standing: Vec<&StoredTurn> = turns
+        .iter()
+        .filter(|t| is_story(t.record.kind) && !reverted.contains(&t.id))
+        .collect();
+    let rows = view.knowledge.iter().filter(|r| r.holder == pc.id);
+    let now = held(view, rows, view.clock_min);
+    let named = named(view, pc.id, &now, &standing);
+    // The other names the PC holds the Belief for, as `pc_sight` lists them.
+    let mut known: Vec<Known> = Vec::new();
+    for (b, _) in now
+        .iter()
+        .filter(|(b, _)| named.contains(&b.subject) && is_alias_key(&b.key))
+    {
+        let other = spelled(&b.text, &b.value);
+        match known.iter_mut().find(|k| k.id == b.subject) {
+            Some(k) => k.other_names.push(other),
+            None => known.push(Known {
+                id: b.subject,
+                kind: EntityKind::Npc,
+                name: None,
+                other_names: vec![other],
+            }),
+        }
+    }
+    view.entities
+        .iter()
+        .flat_map(|e| std::iter::once(&e.name).chain(&e.other_names))
+        .filter(|name| hides_a_name(view, name, &named, &known))
+        .map(|name| normalize::name(name))
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
 /// The entities the PC can name (data shape 3.5): the PC; an Adventure Seed
 /// entry that is not hidden; an entity the PC holds a Belief about that is
 /// not a witnessed `location`; an entity whose main name is in the Narration

@@ -8,9 +8,10 @@ use support::{allowed, entity, session, town, town_dir, with_fact};
 use threshold_app::session::{RENARRATE_OP_PREFIX, renarrate_op_id};
 use threshold_core::{
     RecordedGm,
-    store::TurnKind,
+    store::{Store, TurnKind},
     turn::BEGIN_OP_ID,
     view::{Block, PLAY_VIEW_MAX_MS, TurnBody},
+    world::unnameable_names,
 };
 
 /// A Narration told again streams under an op_id of its own, so the Play
@@ -70,6 +71,26 @@ fn play_view_builds_within_budget_at_300_turns() {
         PLAY_VIEW_MAX_MS
     };
     eprintln!("get_play_view at {TURNS} Turns: {ms} ms (budget {budget} ms)");
+    assert!(ms <= budget, "{ms} ms over the budget of {budget} ms");
+
+    // The stream filter's names, read once before each Narration as the
+    // Engine reads them: a small share of the view's budget.
+    let store = Store::open_existing(Path::new(&db)).unwrap();
+    let campaign = store.campaigns().unwrap()[0];
+    let start = Instant::now();
+    let now = store.snapshot(campaign).unwrap();
+    let turns = store.turns(campaign).unwrap();
+    let reverted = store
+        .reverted_turns(campaign)
+        .unwrap()
+        .into_iter()
+        .collect();
+    let hidden = unnameable_names(&now, &turns, &reverted);
+    let ms = start.elapsed().as_millis() as u64;
+    eprintln!(
+        "stream filter names at {TURNS} Turns: {ms} ms, {} names",
+        hidden.len()
+    );
     assert!(ms <= budget, "{ms} ms over the budget of {budget} ms");
 }
 
