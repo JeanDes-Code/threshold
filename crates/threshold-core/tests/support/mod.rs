@@ -99,7 +99,12 @@ pub fn adventure_seed() -> AdventureSeed {
         gm_agreement: String::new(),
         resolution: String::new(),
         min_age: None,
-        start: StartSeed::default(),
+        // The gate world counts its times from midnight of Day 1: its
+        // events and clocks are absolute minutes.
+        start: StartSeed {
+            hour: Some(0),
+            ..StartSeed::default()
+        },
         open_details: vec![],
     }
 }

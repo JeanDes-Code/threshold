@@ -17,6 +17,7 @@ import {
   draftScreen,
   entryOf,
   parseAge,
+  parseHour,
   cutSections,
   cutSentence,
   failureText,
@@ -328,6 +329,16 @@ describe("ages", () => {
       expect(parseAge(text), text).toBeUndefined();
     }
     expect(parseAge("65535")).toBe(65535);
+  });
+
+  it("reads a start hour 0 to 23, empty as the default", () => {
+    expect(parseHour("19")).toBe(19);
+    expect(parseHour(" 0 ")).toBe(0);
+    expect(parseHour("23")).toBe(23);
+    expect(parseHour("")).toBeNull();
+    for (const text of ["24", "-1", "7.5", "7h", "abc", "100"]) {
+      expect(parseHour(text), text).toBeUndefined();
+    }
   });
 
   it("shows confirmed only while the field shows the confirmed, saved age", () => {

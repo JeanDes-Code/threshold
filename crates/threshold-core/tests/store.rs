@@ -36,7 +36,11 @@ fn adventure_seed() -> AdventureSeed {
         gm_agreement: String::new(),
         resolution: String::new(),
         min_age: None,
-        start: StartSeed::default(),
+        // These tests use absolute minutes: the clock starts at midnight.
+        start: StartSeed {
+            hour: Some(0),
+            ..StartSeed::default()
+        },
         open_details: vec![],
     }
 }
@@ -1806,4 +1810,30 @@ fn new_file_has_the_player_tables() {
     }
     drop(sql);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// B6 (QA, 2026-11-10): the World Clock starts at the seed's hour of Day 1;
+/// a seed with no hour starts at 08:00; a rebuild keeps it; a seed saved
+/// before the field existed still loads.
+#[test]
+fn clock_starts_at_the_seed_hour() {
+    let mut db = Store::open_in_memory().unwrap();
+    let mut evening = adventure_seed();
+    evening.start.hour = Some(19);
+    let c = db.create_campaign(&evening, 42).unwrap();
+    assert_eq!(db.snapshot(c).unwrap().clock_min, 19 * 60);
+    let before = db.snapshot(c).unwrap();
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(db.snapshot(c).unwrap(), before);
+
+    let mut unset = adventure_seed();
+    unset.start.hour = None;
+    let c = db.create_campaign(&unset, 42).unwrap();
+    assert_eq!(db.snapshot(c).unwrap().clock_min, 8 * 60);
+
+    let mut json = serde_json::to_value(adventure_seed()).unwrap();
+    json["start"].as_object_mut().unwrap().remove("hour");
+    let old: AdventureSeed = serde_json::from_value(json).unwrap();
+    assert_eq!(old.start.hour, None);
+    assert_eq!(old.start.start_hour(), 8);
 }

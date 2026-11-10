@@ -247,6 +247,8 @@ struct StartOut {
     situation: String,
     #[schemars(length(max = 80))]
     when: String,
+    #[schemars(range(max = 23))]
+    hour: Option<u8>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -393,7 +395,7 @@ Rules:
 - gm_agreement: how the text asks the Game Master to run the game. Empty when it does not say.
 - resolution: how the text says uncertain actions are resolved. Empty when it does not say.
 - min_age: the lowest age a character may have, only when the text states such a constraint (\"every character is an adult\" gives 18). Otherwise null.
-- start: where play starts, one name from PLACES, spelled as written there; the characters present there, by names from CHARACTERS (not the PC); what is going on; and when, in words.
+- start: where play starts, one name from PLACES, spelled as written there; the characters present there, by names from CHARACTERS (not the PC); what is going on; and when, in words; hour: the hour of the day (0 to 23) when play starts, read from the text (evening gives about 19); null when the text gives no clue.
 - open_details: what the text leaves open. mode is delegated when the text leaves it to the Game Master, discover when the PC finds it out in play, to_agree when the Player and the Game Master settle it before play.
 - Something planned, proposed or pending has not happened yet. Never write it as done.";
 
@@ -761,6 +763,7 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
                 present,
                 situation: seed.start.situation,
                 when: seed.start.when,
+                hour: seed.start.hour.filter(|h| *h <= 23),
             },
             open_details: seed
                 .open_details

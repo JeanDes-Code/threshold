@@ -421,6 +421,9 @@ impl Store {
             params![serde_json::to_string(adventure_seed)?, rng_seed as i64],
         )?;
         let campaign = tx.last_insert_rowid() as u64;
+        // The World Clock starts at the seed's hour of Day 1 (QA,
+        // 2026-11-10). A ledger op sets it, so a rebuild finds it again.
+        let start = adventure_seed.start.start_minute();
         let rec = TurnRecord {
             campaign_id: campaign,
             op_id: "__seed__".into(),
@@ -428,9 +431,13 @@ impl Store {
             intent: String::new(),
             proposal_json: "{}".into(),
             clock_before: 0,
-            clock_after: 0,
+            clock_after: start,
         };
         let turn = insert_turn(&tx, &rec)?;
+        if start > 0 {
+            let minutes = u32::try_from(start).expect("a start hour is at most 23");
+            project::append(&tx, campaign, turn, &LedgerOp::AdvanceClock { minutes })?;
+        }
         let pc_seed = &adventure_seed.pc;
         let declared: Vec<(&str, &[OtherName])> =
             std::iter::once((pc_seed.name.as_str(), pc_seed.other_names.as_slice()))

@@ -24,7 +24,7 @@ use threshold_core::{
 
 /// The town fixture after one Turn that gave Wren a fact Wren saw and a
 /// fact only the GM knows.
-const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":5,"facts":[{"text":"Wren carries a satchel of quills.","open":false}]}"#;
+const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":485,"facts":[{"text":"Wren carries a satchel of quills.","open":false}]}"#;
 
 /// What it gave for the hidden world, from `WorldView`.
 const HIDDEN_CHARACTER: &str = r#"{"name":"Ada","concept":"Courier","clock_min":5,"facts":[{"text":"Ada plans to meet Brann at the mill.","open":true}]}"#;

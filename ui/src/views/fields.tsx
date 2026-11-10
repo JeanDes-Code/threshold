@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import type { OtherName } from "../api";
-import { fieldId, parseAge, removeAt, replaceAt, splitList } from "../newCampaign";
+import { fieldId, parseAge, parseHour, removeAt, replaceAt, splitList } from "../newCampaign";
 
 interface TextProps {
   path: string;
@@ -124,6 +124,38 @@ export function AgeInput({ path, label, value, nullable, onChange, onText }: Age
         }
       }}
     />
+  );
+}
+
+interface HourProps {
+  path: string;
+  value: number | null;
+  onChange: (value: number | null) => void;
+}
+
+/** The start hour, as a plain field: "The story starts at about … h". Empty means the default hour. */
+export function HourInput({ path, value, onChange }: HourProps) {
+  const [text, setText] = useState<string | null>(null);
+  const id = fieldId(path);
+  return (
+    <p className="review-hour">
+      <label htmlFor={id}>The story starts at about</label>{" "}
+      <input
+        id={id}
+        className="number"
+        inputMode="numeric"
+        aria-invalid={text !== null && parseHour(text) === undefined ? true : undefined}
+        value={text ?? (value === null ? "" : String(value))}
+        onBlur={() => setText(null)}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setText(raw);
+          const n = parseHour(raw);
+          if (n !== undefined) onChange(n);
+        }}
+      />{" "}
+      h
+    </p>
   );
 }
 

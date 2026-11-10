@@ -51,7 +51,7 @@ import {
   type SectionId,
 } from "../newCampaign";
 import { api } from "../tauri";
-import { AgeInput, ListInput, NameInput, OtherNames, TextInput } from "./fields";
+import { AgeInput, HourInput, ListInput, NameInput, OtherNames, TextInput } from "./fields";
 
 /** The commands the review calls. The dev preview passes a stand-in. */
 export type ReviewClient = Pick<Api, "saveDraft" | "confirmAge" | "renameDraftEntity" | "approveDraft">;
@@ -495,6 +495,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
           onChange={(situation) => setStart({ situation })}
         />
         <TextInput path="start.when" label="When" value={seed.start.when} onChange={(when) => setStart({ when })} />
+        <HourInput path="start.hour" value={seed.start.hour ?? null} onChange={(hour) => setStart({ hour })} />
       </>
     ),
     you: (

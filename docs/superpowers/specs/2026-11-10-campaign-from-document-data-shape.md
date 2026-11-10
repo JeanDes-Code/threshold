@@ -66,7 +66,7 @@ pub struct AdventureSeed {
 pub struct PcSeed     { name: String, age: u16, other_names: Vec<OtherName>, concept: String }
 pub struct SeedEntity { name: String, kind: EntityKind, age: Option<u16>, other_names: Vec<OtherName>, hidden: bool }
 pub struct OtherName  { name: String, known_to: Vec<String> }      // 3.3
-pub struct StartSeed  { place: String, present: Vec<String>, situation: String, when: String }
+pub struct StartSeed  { place: String, present: Vec<String>, situation: String, when: String, hour: Option<u8> /* 0..=23, added after QA */ }
 pub struct OpenDetail { text: String, mode: OpenMode }             // Delegated | Discover | ToAgree
 ```
 
@@ -176,7 +176,7 @@ The other entry types keep the fields that `fixture.rs` has today. Entries name 
 
 Code writes the `location` of the PC and of each entity in `start.present`, with the PC as holder. An entity marked `hidden` gets no PC holder. A hidden fact with the slot and value of an accepted fact adds holders and adds no fact. The same slot with another value fails `SettledFacts`. A settled fact on `(s, k)` fails `OpenItems` when `(s, pending_k)` exists.
 
-No new `LedgerOp`. Only `AddEntity` changes its payload. `FactSource::AdventureSeed` covers every build fact. The Campaign clock starts at 0, and `start.when` is display text.
+No new `LedgerOp`. Only `AddEntity` changes its payload. `FactSource::AdventureSeed` covers every build fact. The Campaign clock starts at 0, and `start.when` is display text. *Changed after QA (2026-11-10):* the clock starts at `start.hour` of Day 1 (missing means 8), through one `AdvanceClock` op in the seed Setup Turn. The draft seed stage reads the hour from the Source Text; the review shows it as a plain field. A World Event's `at` counts from that start.
 
 ### 3.7 Begin (G)
 

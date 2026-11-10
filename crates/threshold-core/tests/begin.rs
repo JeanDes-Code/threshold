@@ -24,6 +24,7 @@ fn seed_with_start() -> AdventureSeed {
         present: vec!["Orsel".into(), "Brann".into()],
         situation: SITUATION.into(),
         when: WHEN.into(),
+        hour: None,
     };
     seed
 }

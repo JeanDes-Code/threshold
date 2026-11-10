@@ -274,6 +274,8 @@ export interface StartSeed {
   present: string[];
   situation: string;
   when: string;
+  /** The hour of Day 1 when play starts, 0 to 23. Missing or null means 8. */
+  hour?: number | null;
 }
 
 export type OpenMode = "delegated" | "discover" | "to_agree";

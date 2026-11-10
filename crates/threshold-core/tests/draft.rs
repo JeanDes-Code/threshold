@@ -148,6 +148,7 @@ fn unconfirmed_draft() -> SeedDraft {
             present: vec!["Jean".into()],
             situation: "The last ferry is late.".into(),
             when: "Midnight".into(),
+            hour: None,
         },
         open_details: vec![],
     };

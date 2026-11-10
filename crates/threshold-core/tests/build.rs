@@ -1227,3 +1227,28 @@ fn added_character_reaches_the_world_build() {
     let voices: Vec<&str> = world.voice_cards.iter().map(|v| v.npc.as_str()).collect();
     assert_eq!(voices, ["Tobin Reed", "Ada Venn", "Nell Quay"]);
 }
+
+/// B6 (QA, 2026-11-10): the seed stage asks for the start hour, and the
+/// draft keeps it. An hour outside 0 to 23 is dropped.
+#[test]
+fn the_seed_stage_reads_the_start_hour() {
+    for (hour, kept) in [
+        (json!(19), Some(19)),
+        (json!(null), None),
+        (json!(30), None),
+    ] {
+        let mut outputs = plain_outputs();
+        outputs[1]["start"]["hour"] = hour;
+        let gm = gm(&outputs);
+        let draft = run(&source(), &gm).result.unwrap();
+        assert_eq!(draft.seed.start.hour, kept);
+        let call = &gm.calls()[1];
+        let schema = node(&call.schema, &["start", "hour"]);
+        assert_eq!(schema["maximum"], json!(23), "{schema}");
+        let prompt = format!(
+            "{}{}{}{}",
+            call.prompt.system, call.prompt.stable, call.prompt.scene, call.prompt.recent
+        );
+        assert!(prompt.contains("hour: the hour of the day"), "{prompt}");
+    }
+}

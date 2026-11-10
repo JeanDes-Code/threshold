@@ -47,6 +47,26 @@ pub struct StartSeed {
     pub situation: String,
     #[serde(default)]
     pub when: String,
+    /// The hour of the day when play starts, 0 to 23. Missing means
+    /// `DEFAULT_START_HOUR` (added after QA, 2026-11-10).
+    #[serde(default)]
+    pub hour: Option<u8>,
+}
+
+/// The start hour of a seed that names none.
+pub const DEFAULT_START_HOUR: u8 = 8;
+
+impl StartSeed {
+    /// The hour of Day 1 the World Clock starts at: `hour` when it is 0 to
+    /// 23, else `DEFAULT_START_HOUR`.
+    pub fn start_hour(&self) -> u8 {
+        self.hour.filter(|h| *h <= 23).unwrap_or(DEFAULT_START_HOUR)
+    }
+
+    /// The World Clock minute play starts at.
+    pub fn start_minute(&self) -> u64 {
+        u64::from(self.start_hour()) * 60
+    }
 }
 
 /// A detail the Source Text leaves open, and who settles it.

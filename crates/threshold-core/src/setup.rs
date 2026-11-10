@@ -178,7 +178,8 @@ pub fn commit_world(
         }
         ops.push(LedgerOp::ScheduleEvent {
             text: ev.text.clone(),
-            trigger: Trigger::At(ev.at),
+            // `at` counts from the campaign's start, not from minute 0.
+            trigger: Trigger::At(view.clock_min + ev.at),
             actors: vec![EntityRef::Id(id(&ev.actor)?)],
             goal_id: None,
             cause_fact_id: None,

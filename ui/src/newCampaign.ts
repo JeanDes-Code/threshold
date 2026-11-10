@@ -434,6 +434,15 @@ export function parseAge(text: string): number | null | undefined {
   return n <= 65535 ? n : undefined;
 }
 
+/** The start hour typed in the review: null when empty (the core then starts at 8), undefined when it is not a whole hour 0 to 23. */
+export function parseHour(text: string): number | null | undefined {
+  const t = text.trim();
+  if (t === "") return null;
+  if (!/^\d{1,2}$/.test(t)) return undefined;
+  const n = Number(t);
+  return n <= 23 ? n : undefined;
+}
+
 /** True when an age field shows the age the form holds. `text` is null while the field shows that age. */
 export const ageTextMatches = (text: string | null, value: number | null): boolean =>
   value !== null && (text === null || text === String(value));

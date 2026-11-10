@@ -64,6 +64,7 @@ fn seed() -> AdventureSeed {
             present: vec!["Tobin Reed".into()],
             situation: "Night falls on the point.".into(),
             when: "An autumn evening".into(),
+            hour: None,
         },
         open_details: vec![],
     }

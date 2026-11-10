@@ -5,7 +5,8 @@ mod types;
 mod world_setup;
 
 pub use adventure_seed::{
-    AdventureSeed, OpenDetail, OpenMode, OtherName, PcSeed, SeedEntity, SeedFact, StartSeed,
+    AdventureSeed, DEFAULT_START_HOUR, OpenDetail, OpenMode, OtherName, PcSeed, SeedEntity,
+    SeedFact, StartSeed,
 };
 pub use handle::{Handle, HandleError};
 pub use proposal::{

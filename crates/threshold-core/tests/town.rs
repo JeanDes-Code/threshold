@@ -21,6 +21,8 @@ use threshold_core::{
 };
 
 const DAY: u32 = 24 * 60;
+/// The town seed names no start hour: the clock starts at 08:00.
+const START: u64 = 8 * 60;
 
 fn town_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/town")
@@ -125,7 +127,10 @@ fn town_fixture_schedules_the_summons() {
     let orsel = id(&view, "Orsel");
     assert_eq!(view.events_scheduled.len(), 1);
     let event = &view.events_scheduled[0];
-    assert_eq!(event.trigger, Trigger::At(90));
+    // The seed names no hour, so the clock starts at 08:00 of Day 1, and
+    // `at = 90` counts from there (QA, 2026-11-10).
+    assert_eq!(view.clock_min, START);
+    assert_eq!(event.trigger, Trigger::At(START + 90));
     assert_eq!(event.actors, [orsel]);
     assert!(!event.seen_by.is_empty(), "not a GM-only event");
     assert!(!event.effects.is_empty());
@@ -170,13 +175,13 @@ fn waiting_in_the_town_hall_ends_with_the_summons() {
         .play_turn("t1".into(), "I wait.", &mut |_: &str| {})
         .unwrap();
     let view = engine.store().snapshot(campaign).unwrap();
-    assert_eq!(view.clock_min, 60);
+    assert_eq!(view.clock_min, START + 60);
     assert_eq!(view.events_scheduled.len(), 1);
     engine
         .play_turn("t2".into(), "I wait an hour", &mut |_: &str| {})
         .unwrap();
     let view = engine.store().snapshot(campaign).unwrap();
-    assert_eq!(view.clock_min, 90);
+    assert_eq!(view.clock_min, START + 90);
     assert!(view.events_scheduled.is_empty(), "the summons fired");
     let narration = gm
         .calls()
