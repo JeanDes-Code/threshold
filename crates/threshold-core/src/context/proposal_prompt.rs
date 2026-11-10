@@ -17,6 +17,8 @@ use crate::{
 /// measured by the live probe (`threshold-ollama/examples/probe.rs`); the
 /// VERDICT and LATER ACTIONS parts answer two failures that probe found: a
 /// Check on every proposal, and no scheduled event for a delayed action.
+/// The contest line answers a QA failure (2026-11-10): an arm-wrestle with
+/// an NPC came back as `talk`, `allowed`, with no Roll.
 pub const PROPOSAL_RULES: &str = "\
 You are the Game Master for a single-player tabletop role-playing game. You decide what the world and its NPCs do; the player decides what the player character (PC) does.
 Never decide the player character's actions, words, or feelings.
@@ -29,6 +31,7 @@ VERDICT
 - Words are never a check: whatever the PC says, even an insult or a threat, is said. The consequence is the NPCs' reactions and their later actions.
 - impossible: the world prevents it outright. List the facts that block it in blockers.
 - check: only when BOTH are true: the outcome is truly uncertain, AND failure has real stakes (danger, an NPC who actively opposes the PC, an open obstacle). Then include check with win and lose stakes as slot writes, and factors that cite existing facts.
+- A contest against an NPC, physical or social, whose result is uncertain (arm-wrestling, a race, a staring match) is a check, with against = that NPC.
 - If either part is missing, do not use check: choose allowed or impossible. Include check only when verdict is check. Never set a numeric difficulty.
 LATER ACTIONS
 - reactions: what each affected NPC intends right now, as a short plan, not prose.
