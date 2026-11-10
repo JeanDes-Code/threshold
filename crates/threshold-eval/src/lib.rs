@@ -8,6 +8,7 @@
 //! gives counts, never a pass/fail, except the latency pass line.
 
 mod judge;
+mod play_basics;
 pub mod scan;
 mod scenario;
 pub mod speech;
@@ -36,7 +37,7 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 8] = [
+pub const SCENARIOS: [&str; 9] = [
     "latency",
     "memory",
     "voices",
@@ -45,6 +46,7 @@ pub const SCENARIOS: [&str; 8] = [
     "offscreen",
     "world_build",
     "speech",
+    "play_basics",
 ];
 
 /// The latency pass line (design §10): p90 at or under 15 s, warm.
@@ -52,10 +54,11 @@ pub const P90_PASS_MS: u64 = 15_000;
 
 /// The Commit checks, as `CheckKind` prints them at the start of a rejection
 /// line in the debug log.
-const CHECK_NAMES: [&str; 8] = [
+const CHECK_NAMES: [&str; 9] = [
     "schema",
     "references",
     "agency",
+    "move",
     "coincidence",
     "npc folds",
     "fact bends",
@@ -133,6 +136,7 @@ pub fn run(
             "offscreen" => offscreen(&mut ctx)?,
             "world_build" => world_build::scenario(&mut ctx)?,
             "speech" => speech::scenario(&mut ctx)?,
+            "play_basics" => play_basics::scenario(&mut ctx)?,
             _ => unreachable!("checked above"),
         };
         sections.insert(name, section);
@@ -291,6 +295,13 @@ impl Ctx<'_> {
             .engine
             .play_turn(op_id.clone(), intent, &mut |_: &str| {})
             .map_err(|e| e.to_string());
+        if std::env::var_os("THRESHOLD_EVAL_RAW").is_some() {
+            for row in s.engine.store().debug_log(&op_id).unwrap_or_default() {
+                if row.step.starts_with("propose") || row.step == "settle" {
+                    (self.log)(&format!("RAW {op_id} {}: {}", row.step, row.raw));
+                }
+            }
+        }
         let attempts: Vec<Vec<String>> = s
             .engine
             .store()

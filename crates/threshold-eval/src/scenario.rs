@@ -119,6 +119,48 @@ pub struct Offscreen {
     pub ask: String,
 }
 
+/// Play basics (QA, 2026-11-10): one campaign per run plays each step in
+/// order. The pending item is committed as a Setup Turn before play, held by
+/// the PC.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayBasics {
+    #[serde(default = "default_fixture")]
+    pub fixture: String,
+    pub pending: Pending,
+    pub steps: Vec<BasicStep>,
+}
+
+/// An Open Item: a fact on a `pending_` key, witnessed by the PC.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Pending {
+    pub subject: String,
+    pub key: String,
+    pub value: String,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BasicStep {
+    pub kind: BasicKind,
+    pub intent: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BasicKind {
+    /// The PC goes elsewhere: the scene place must change.
+    Move,
+    /// The world prevents it: the Narration must tell a failure.
+    Impossible,
+    /// An opposed contest with an NPC: the Turn must have a Roll.
+    Contest,
+    /// The PC accepts the pending item: it must close.
+    Accept,
+}
+
 /// A Seed Draft and a World Build from a Source Text, scored against a
 /// hand-made list. A relative path starts at the repository root; the
 /// command line can name files outside it.

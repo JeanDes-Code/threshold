@@ -7,8 +7,13 @@ use crate::{
     store::WorldView,
 };
 
-/// The repair note of a move that writes no PC `location`.
-pub const MOVE_NOTE: &str = "a move writes exactly one fact: subject = the PC, key = location, value = the destination place (on a check, the win stake writes it)";
+/// The repair note of a move that writes no PC `location`: the exact fact
+/// to add, with the PC's handle (made concrete after the first live run).
+pub fn move_note(pc: Handle) -> String {
+    format!(
+        "a move needs this fact in facts: {{\"slot\":{{\"subject\":\"{pc}\",\"key\":\"location\",\"value\":\"<the destination place>\"}},\"seen\":\"pc\",\"said_by\":null,\"because\":[]}} (on a check, put that slot in the win stake instead)"
+    )
+}
 
 pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
     if p.action != ActionKind::Move || p.verdict == Verdict::Impossible {
@@ -28,10 +33,7 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
             }
     });
     if !moves {
-        errs.push(Rejection::new(
-            CheckKind::Move,
-            Some(Handle::Entity(pc)),
-            MOVE_NOTE,
-        ));
+        let pc = Handle::Entity(pc);
+        errs.push(Rejection::new(CheckKind::Move, Some(pc), move_note(pc)));
     }
 }

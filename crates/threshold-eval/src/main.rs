@@ -3,7 +3,8 @@
 //!
 //! Options:
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
-//!   voices, shortcuts, agency_leaks, offscreen, world_build, speech.
+//!   voices, shortcuts, agency_leaks, offscreen, world_build, speech,
+//!   play_basics.
 //!   Repeat or comma-separate.
 //! - `--runs <n>` (default 3)
 //! - `--judge local` (default): the same local model, with a short rubric.
@@ -15,6 +16,9 @@
 //!   outside the repository's `fixtures/` makes its report section print
 //!   counts only.
 //! - `--out <path>` (default `evals/reports/<date>.md`).
+//!
+//! With `THRESHOLD_EVAL_RAW=1` set, the log (stderr) also prints each raw
+//! proposal and each core repair of every Turn. They can hold GM-only facts.
 
 use std::{fs, path::PathBuf, process::ExitCode};
 

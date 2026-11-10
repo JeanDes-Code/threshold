@@ -1097,7 +1097,7 @@ fn move_without_location_is_repaired_on_the_retry() {
         retry.recent.contains(&format!(
             "move E{}: {}",
             w.ada,
-            threshold_core::checks::MOVE_NOTE
+            threshold_core::checks::move_note(e(w.ada))
         )),
         "{}",
         retry.recent

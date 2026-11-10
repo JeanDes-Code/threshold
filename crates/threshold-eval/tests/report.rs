@@ -69,13 +69,17 @@ fn report_has_every_metric() {
         "Secret leaks per 100 Turns",
         "Offscreen consequence observed",
         "Mark rate",
+        "Moves that changed the scene place",
+        "Impossible acts narrated as failure (judge)",
+        "Contests with a Roll",
+        "Pending items closed",
     ] {
         assert!(report.contains(metric), "missing {metric}:\n{report}");
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4, speech 10 = 93 Turns.
-    assert!(report.contains("- Turns played: 186 (0 failed"), "{report}");
+    // agency_leaks 12, offscreen 4, speech 10, play_basics 5 = 98 Turns.
+    assert!(report.contains("- Turns played: 196 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1331,5 +1335,73 @@ mod speech {
         ] {
             assert!(report.contains(metric), "missing {metric}:\n{report}");
         }
+    }
+}
+
+/// B12 (QA, 2026-11-10): the play-basics counts, on recorded answers that
+/// do each step right.
+#[test]
+fn play_basics_counts_each_step() {
+    use threshold_core::{
+        fixture::{load_adventure_seed, load_world},
+        store::Store,
+        turn::create_campaign,
+    };
+
+    let dir = root().join("fixtures/town");
+    let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &seed, 1).unwrap();
+    load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let id = |name: &str| view.entity_by_name(name).unwrap().id;
+    let (wren, doul, hall) = (id("Wren"), id("Doul"), id("Varn town hall"));
+    let fact = |key: &str, value: &str| {
+        format!(
+            r#"{{"slot":{{"subject":"E{wren}","key":"{key}","value":"{value}"}},"seen":"pc","said_by":null,"because":[]}}"#
+        )
+    };
+    let contest = format!(
+        r#"{{"action":"act","verdict":"check","check":{{"against":"E{doul}","win":{{"subject":"E{doul}","key":"mood","value":"beaten"}},"lose":{{"subject":"E{wren}","key":"fatigue","value":"sore_arm"}},"factors":[]}},"schedule":null,"minutes":5}}"#
+    );
+    let impossible =
+        r#"{"action":"act","verdict":"impossible","check":null,"schedule":null,"minutes":1}"#
+            .to_owned();
+    let accept = format!(
+        r#"{{"action":"talk","verdict":"allowed","check":null,"schedule":null,"minutes":2,"facts":[{}]}}"#,
+        fact("copy_tithe_roll", "accepted")
+    );
+    let away = format!(
+        r#"{{"action":"move","verdict":"allowed","check":null,"schedule":null,"minutes":15,"facts":[{}]}}"#,
+        fact("location", "Varn mill")
+    );
+    let back = format!(
+        r#"{{"action":"move","verdict":"allowed","check":null,"schedule":null,"minutes":15,"facts":[{}]}}"#,
+        fact("location", &format!("E{hall}"))
+    );
+    let gm = RecordedGm::new(
+        vec![contest, impossible, accept, away, back],
+        vec!["It happens.".to_owned(); 5],
+    );
+    let config = Config {
+        root: root(),
+        scenarios: vec!["play_basics".into()],
+        runs: 1,
+        model: "recorded".into(),
+        judge: "first-choice".into(),
+        memory_turns: None,
+        source: None,
+        expected: None,
+    };
+    let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+    let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
+    for line in [
+        "- Moves that changed the scene place: 2 / 2 (100%)",
+        "- Impossible acts narrated as failure (judge): 1 / 1 (100%) (0 judge errors)",
+        "- Contests with a Roll: 1 / 1 (100%)",
+        "- Pending items closed: 1 / 1 (100%)",
+        "- Turns failed: 0 / 5 (0%)",
+    ] {
+        assert!(report.contains(line), "missing {line}:\n{report}");
     }
 }

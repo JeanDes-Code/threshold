@@ -4,7 +4,7 @@ use support::*;
 use threshold_core::{
     HandleContext,
     checks::{
-        CheckKind, MOVE_NOTE, PC_INVOLUNTARY_KEYS, Rejection, STANCE_CEILINGS, ceiling, settle,
+        CheckKind, PC_INVOLUNTARY_KEYS, Rejection, STANCE_CEILINGS, ceiling, move_note, settle,
         to_ops, validate,
     },
     domain::{Cancel, Canon, Cause, EventDraft, Handle, Knowing, LedgerOp, Seen, Stance, Verdict},
@@ -871,7 +871,7 @@ fn allowed_move_without_a_pc_location_is_rejected_with_the_note() {
     p.minutes = 10;
     let errs = rejected(validate(&p, &w.view), CheckKind::Move);
     assert_eq!(errs[0].handle, Some(e(w.ada)));
-    assert_eq!(errs[0].reason, MOVE_NOTE);
+    assert_eq!(errs[0].reason, move_note(e(w.ada)));
     // Another entity's location is not the PC's.
     p.facts = vec![fact(
         slot(e(w.brann), "location", "tavern"),

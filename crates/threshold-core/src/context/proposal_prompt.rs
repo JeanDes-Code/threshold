@@ -40,8 +40,8 @@ LATER ACTIONS
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
-- A move writes exactly one fact: subject = the PC, key = location, value = the destination place (its name as listed, never a handle). On a check, the win stake writes it instead.
-- An open item is a fact on a key pending_x. When the player's intent settles it (accepts, refuses or does it), write a fact on key x of the same subject, seen = pc: that closes it. On the PC, write x only for the keys listed after settles on the PC's line.
+- A move always has this fact, with the PC's handle and the destination place (its name, never a handle): facts:[{\"slot\":{\"subject\":\"<PC handle>\",\"key\":\"location\",\"value\":\"<destination>\"},\"seen\":\"pc\",\"said_by\":null,\"because\":[]}]. On a check, that slot is the win stake instead.
+- An open item is a fact on a key pending_x. When the player's intent settles it (accepts, refuses or does it), add a fact on key x of the same subject, seen = pc, in facts (never in a schedule): that closes it. Example for the PC: facts:[{\"slot\":{\"subject\":\"<PC handle>\",\"key\":\"x\",\"value\":\"accepted\"},\"seen\":\"pc\",\"said_by\":null,\"because\":[]}]. On the PC, write x only for the keys listed after settles on the PC's line.
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.
 - For wait: use the duration the player names. If the player names none, use the minutes until something happens.

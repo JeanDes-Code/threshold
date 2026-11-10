@@ -18,7 +18,7 @@ use crate::{
 };
 
 pub(crate) use agency::is_involuntary_key;
-pub use moves::MOVE_NOTE;
+pub use moves::move_note;
 pub use ops::{Resolved, to_ops};
 pub use settle::settle;
 

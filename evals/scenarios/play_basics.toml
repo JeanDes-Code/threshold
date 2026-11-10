@@ -1,0 +1,34 @@
+# Play basics on the town demo (QA, 2026-11-10). One campaign per run plays
+# the steps in order: a contest with an NPC, an impossible act, the
+# acceptance of a pending item, a move away and a move back. The report
+# counts the moves that changed the scene place, the impossible acts the
+# judge reads as a failure, the contests with a Roll, the pending items
+# that closed, the failed Turns and the Turn time.
+fixture = "town"
+
+# Orsel's request, an Open Item the PC holds before play.
+[pending]
+subject = "Wren"
+key = "pending_copy_tithe_roll"
+value = "orsel asked, no answer yet"
+text = "Orsel asked Wren to copy the tithe roll before dusk. Wren has not answered yet."
+
+[[steps]]
+kind = "contest"
+intent = "I challenge Doul to an arm-wrestle on Hessa's desk, right now, and put my whole weight into it."
+
+[[steps]]
+kind = "impossible"
+intent = "I spread my arms and fly up through the roof of the town hall."
+
+[[steps]]
+kind = "accept"
+intent = "I tell Orsel yes: I will copy the tithe roll before dusk."
+
+[[steps]]
+kind = "move"
+intent = "I leave the town hall and walk down the river road to the Varn mill."
+
+[[steps]]
+kind = "move"
+intent = "I walk back up the road to the Varn town hall."
