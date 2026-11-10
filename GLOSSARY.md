@@ -16,9 +16,25 @@ _Avoid_: Charter, settings, config, session zero doc, "seed" alone (a Roll seed 
 The interview that produces a Adventure Seed, conducted one question at a time.
 _Avoid_: Character creation, onboarding, setup wizard
 
+**Source Text**:
+A document the Player gives to start a Campaign from a defined idea, such as the chronicle of a game played elsewhere.
+_Avoid_: Import, save file, transcript
+
+**Seed Draft**:
+A Adventure Seed before the Player approves it, with the list of characters and the PC Knowledge taken from a Source Text.
+_Avoid_: Proposal (a Decision Proposal is something else), preview
+
+**World Build**:
+The step that creates the hidden part of the world from an approved Adventure Seed: NPC goals, secrets, Voice Cards and World Events. The Player does not read its result.
+_Avoid_: Generation, worldgen, import
+
 **Content Boundary**:
 A Adventure Seed rule that limits or allows a kind of content, such as sexual or violent content, or names a specific exclusion.
 _Avoid_: Filter, safety setting
+
+**Detail Level**:
+The Adventure Seed setting for intimate content. Excluded: no Intimate Scene. Implied: the Narration tells that it happens, with no explicit description. Explicit: full description, which needs a Content Pack.
+_Avoid_: Adult mode, NSFW level, rating
 
 ## Participants
 
@@ -51,6 +67,14 @@ _Avoid_: Organization, guild, team
 **Scene**:
 A continuous stretch of play at one place and time, with a known set of participants.
 _Avoid_: Chapter, encounter
+
+**Intimate Scene**:
+A Scene of sexual or erotic content between adults, from the first Turn tagged intimate to its end.
+_Avoid_: Sex scene, NSFW scene, adult scene
+
+**Fade to Black**:
+The Player's choice to skip the description of a Turn or of an Intimate Scene. The world keeps what happened, and the Player reads one neutral line.
+_Avoid_: Skip, censor, cut
 
 **Turn**:
 One cycle from a Player Intent to the Narration of its committed result.
