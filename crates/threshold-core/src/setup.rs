@@ -230,7 +230,8 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 }
 
 /// Removes a `.part` file and the side files SQLite may keep next to it.
-fn remove_part(part: &Path) {
+/// The app calls it at start for each `.part` file a crash left behind.
+pub fn remove_part(part: &Path) {
     for side in ["", "-journal", "-wal", "-shm"] {
         let _ = fs::remove_file(with_suffix(part, side));
     }

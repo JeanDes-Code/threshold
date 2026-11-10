@@ -1,27 +1,37 @@
 //! The Tauri shell: thin commands over `session::Session`.
 //!
 //! Engine work runs in `spawn_blocking`, so a Turn never blocks the async
-//! runtime. Narration streams out as `narration_chunk` events. The app binds
-//! no network port; it only calls the local Ollama server.
+//! runtime. Narration streams out as `narration_chunk` events, and draft and
+//! build progress as `build_progress` events. The app binds no network port;
+//! it only calls the local Ollama server.
 
 pub mod session;
 
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
 
 use serde::Serialize;
 use session::{
-    AppError, CampaignSummary, CharacterView, DebugView, JournalView, Session, TurnSummary,
-    clock_nanos, load_config,
+    AppError, CampaignSummary, CharacterView, DebugLine, DebugView, DraftLine, DraftView, Drafts,
+    JournalView, Session, TurnSummary, clock_nanos, load_config, lock,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
-use threshold_core::rules::RollResult;
+use threshold_core::{
+    build::{KnownFact, Progress},
+    domain::AdventureSeed,
+    rules::RollResult,
+    turn::BEGIN_OP_ID,
+};
 use threshold_ollama::OllamaGm;
+
+/// The model timeout of draft and build calls, in seconds. They are much
+/// slower than a Turn: one spike call took 117 s.
+const BUILD_TIMEOUT_S: u64 = 600;
 
 /// The session every command shares.
 struct Shared(Arc<Mutex<Session>>);
@@ -32,10 +42,6 @@ struct DebugFlag(Arc<AtomicBool>);
 
 /// The model's warm-up state: "warming", "ready", or the error text.
 struct ModelStatus(Arc<Mutex<String>>);
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 #[derive(Clone, Serialize)]
 struct NarrationChunk {
@@ -72,6 +78,27 @@ where
     tauri::async_runtime::spawn_blocking(move || f(&mut lock(&shared)))
         .await
         .map_err(|e| AppError::Failed(e.to_string()))?
+}
+
+/// Runs `f` on the draft commands in a blocking task. It takes no session
+/// lock: a job locks the session only to open the finished Campaign.
+async fn drafting<T, F>(drafts: &State<'_, Drafts>, f: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce(&Drafts) -> Result<T, AppError> + Send + 'static,
+{
+    let drafts = drafts.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || f(&drafts))
+        .await
+        .map_err(|e| AppError::Failed(e.to_string()))?
+}
+
+/// A sink that sends draft and build progress to the webview.
+fn progress_sink(app: &AppHandle) -> impl FnMut(Progress) + Send + 'static {
+    let app = app.clone();
+    move |progress: Progress| {
+        let _ = app.emit("build_progress", progress);
+    }
 }
 
 /// A sink that sends narration chunks of `op_id` to the webview.
@@ -234,6 +261,81 @@ async fn get_debug(state: State<'_, Shared>, turn_id: u64) -> Result<DebugView, 
     blocking(&state, move |s| s.get_debug(turn_id)).await
 }
 
+#[tauri::command(rename_all = "snake_case")]
+async fn draft_from_text(
+    app: AppHandle,
+    drafts: State<'_, Drafts>,
+    text: String,
+) -> Result<DraftView, AppError> {
+    let mut sink = progress_sink(&app);
+    drafting(&drafts, move |d| d.draft_from_text(&text, &mut sink)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn list_drafts(drafts: State<'_, Drafts>) -> Result<Vec<DraftLine>, AppError> {
+    drafting(&drafts, |d| d.list_drafts()).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn get_draft(drafts: State<'_, Drafts>, draft_id: String) -> Result<DraftView, AppError> {
+    drafting(&drafts, move |d| d.get_draft(&draft_id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn save_draft(
+    drafts: State<'_, Drafts>,
+    draft_id: String,
+    seed: AdventureSeed,
+    knowledge: Vec<KnownFact>,
+    ages_to_confirm: Vec<String>,
+) -> Result<DraftView, AppError> {
+    drafting(&drafts, move |d| {
+        d.save_draft(&draft_id, seed, knowledge, ages_to_confirm)
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn approve_draft(drafts: State<'_, Drafts>, draft_id: String) -> Result<DraftView, AppError> {
+    drafting(&drafts, move |d| d.approve_draft(&draft_id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn start_build(
+    app: AppHandle,
+    drafts: State<'_, Drafts>,
+    draft_id: String,
+) -> Result<CampaignSummary, AppError> {
+    let mut sink = progress_sink(&app);
+    drafting(&drafts, move |d| d.start_build(&draft_id, &mut sink)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn cancel_build(drafts: State<'_, Drafts>) {
+    drafts.cancel_build();
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn delete_draft(drafts: State<'_, Drafts>, draft_id: String) -> Result<(), AppError> {
+    drafting(&drafts, move |d| d.delete_draft(&draft_id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn get_build_debug(
+    drafts: State<'_, Drafts>,
+    draft_id: String,
+) -> Result<Vec<DebugLine>, AppError> {
+    drafting(&drafts, move |d| d.get_build_debug(&draft_id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+async fn begin(app: AppHandle, state: State<'_, Shared>) -> Result<TurnSummary, AppError> {
+    let mut sink = chunk_sink(&app, BEGIN_OP_ID);
+    let result = blocking(&state, move |s| s.begin(&mut sink)).await;
+    report(&app, BEGIN_OP_ID, &result);
+    result
+}
+
 /// Loads the config, starts the warm-up call without blocking the window,
 /// and installs the session.
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -253,12 +355,24 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let _ = handle.emit("model_status", now);
     });
 
+    // Drafts and builds get their own model, with a longer timeout; play
+    // keeps the config as it is.
+    let mut build_config = config.clone();
+    build_config.timeout_s = BUILD_TIMEOUT_S;
+
     let session = Session::new(
-        data_dir,
+        data_dir.clone(),
         Box::new(move || Box::new(OllamaGm::new(config.clone()))),
     );
     app.manage(DebugFlag(session.debug_flag()));
-    app.manage(Shared(Arc::new(Mutex::new(session))));
+    let session = Arc::new(Mutex::new(session));
+    let drafts = Drafts::new(
+        &data_dir,
+        session.clone(),
+        Box::new(move || Box::new(OllamaGm::new(build_config.clone()))),
+    )?;
+    app.manage(drafts);
+    app.manage(Shared(session));
     Ok(())
 }
 
@@ -280,6 +394,16 @@ pub fn run() {
             get_journal,
             set_debug,
             get_debug,
+            draft_from_text,
+            list_drafts,
+            get_draft,
+            save_draft,
+            approve_draft,
+            start_build,
+            cancel_build,
+            begin,
+            delete_draft,
+            get_build_debug,
         ])
         .run(tauri::generate_context!())
         .expect("Threshold failed to start");
