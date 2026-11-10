@@ -498,8 +498,9 @@ fn is_main_name(entity: &Entity, tag: &str) -> bool {
 }
 
 /// The entities a speech tag names: those of `WorldView::entities_by_name`,
-/// and each character whose first names the tag is (`first_names`).
-fn tagged<'a>(view: &'a WorldView, tag: &str) -> impl Iterator<Item = &'a Entity> {
+/// and each character whose first names the tag is (`first_names`). The
+/// evaluation reads tags through this function too.
+pub fn tagged<'a>(view: &'a WorldView, tag: &str) -> impl Iterator<Item = &'a Entity> {
     let tag = normalize::name(tag);
     view.entities.iter().filter(move |e| {
         is_main_name(e, &tag)

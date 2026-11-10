@@ -1204,6 +1204,68 @@ mod speech {
         assert_eq!(read.tally.spoken, 2);
     }
 
+    /// B11 (QA, 2026-11-10): a tag that is the first name of a character
+    /// names an entity, as in the core (`world::tagged`). The eval matched
+    /// full names only, so "Mara:" counted as a tag of no entity.
+    #[test]
+    fn a_first_name_tag_names_an_entity() {
+        use threshold_core::domain::{Canon, EntityKind, EntityRef, FactSource, LedgerOp, Slot};
+        let (mut store, campaign) = town();
+        let clock = store.snapshot(campaign).unwrap().clock_min;
+        store
+            .commit(
+                TurnRecord {
+                    campaign_id: campaign,
+                    op_id: "mara".into(),
+                    kind: TurnKind::Play,
+                    intent: "I ask about the mill.".into(),
+                    proposal_json: "{}".into(),
+                    clock_before: clock,
+                    clock_after: clock,
+                },
+                vec![
+                    LedgerOp::AddEntity {
+                        local: Some(1),
+                        kind: EntityKind::Npc,
+                        name: "Mara Quell".into(),
+                        age: Some(40),
+                        other_names: vec![],
+                    },
+                    LedgerOp::AddFact {
+                        slot: Slot {
+                            subject: EntityRef::New(1),
+                            key: "location".into(),
+                            value: "varn mill".into(),
+                        },
+                        text: "Mara Quell is at the mill.".into(),
+                        canon: Canon::Established,
+                        source: FactSource::Proposal,
+                        seen_by: vec![],
+                        causes: vec![],
+                    },
+                ],
+            )
+            .unwrap();
+        // A Narration names her, so the PC can name her; she is not here.
+        narrated(
+            &mut store,
+            campaign,
+            "named",
+            "Hessa says Mara Quell runs the mill now.",
+        );
+        let turn = narrated(
+            &mut store,
+            campaign,
+            "speech-mara",
+            "Mara: \"Bring the sacks.\"\n\nMara: Bring them now.",
+        );
+        let read = read_turn(&store, campaign, turn).unwrap();
+        assert_eq!(read.tally.marks, 1);
+        assert_eq!(read.tally.no_entity, 0, "{:?}", read.tally);
+        assert_eq!(read.tally.other, 1, "{:?}", read.tally);
+        assert_eq!(read.tally.unquoted, 1, "{:?}", read.tally);
+    }
+
     #[test]
     fn quoted_spans_are_counted_once_per_span() {
         assert_eq!(quoted_spans(r#""Late," he says, "very late.""#), 2);

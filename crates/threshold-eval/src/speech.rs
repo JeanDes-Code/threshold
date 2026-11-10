@@ -14,7 +14,7 @@ use threshold_core::{
     speech::{self, Line, MAX_NAME_WORDS},
     store::{CampaignId, Store, TurnId},
     view::{Block, Part, TurnBody, play_view},
-    world::pc_sight,
+    world::{pc_sight, tagged},
 };
 
 use super::{Ctx, pct, scan::percentile, scenario, secs};
@@ -173,7 +173,9 @@ pub fn read_turn(store: &Store, campaign: CampaignId, turn: TurnId) -> Result<Tu
             blocks.len()
         ));
     }
-    let is_entity = |name: &str| view.entities_by_name(name).next().is_some();
+    // The core's tag rule: a main or other name, or the first names of a
+    // character's main name.
+    let is_entity = |name: &str| tagged(&view, name).next().is_some();
     let present: Vec<String> = sight
         .moments
         .iter()
