@@ -1234,8 +1234,73 @@ fn place_card_lists_who_the_pc_knows_is_there() {
     assert!(!json.contains("Quillon"), "{json}");
     assert!(!people.iter().any(|(p, _)| *p == tobin || *p == wren));
 
-    // The PC does not know the archive: no card. A person lists nobody.
-    assert_eq!(entity_card(&sight, &Marks::default(), archive), None);
+    // The archive is a seed place the PC can name (bug pass 3): it has a
+    // card, and the PC knows nobody there. A person lists nobody.
+    let archive_card = entity_card(&sight, &Marks::default(), archive).unwrap();
+    assert!(archive_card.people_here.is_empty());
+    assert!(archive_card.facts.is_empty());
     let person = entity_card(&sight, &Marks::default(), orsel).unwrap();
     assert!(person.people_here.is_empty());
+}
+
+/// Bug pass 3, M4: "Harrowmere" was an Adventure Seed place, named in eight
+/// facts the PC held and the target of the main request, but search in
+/// People and places said "No match". The PC can name it (data shape 3.5:
+/// a seed entry that is not hidden), yet `PcSight.known` held only the
+/// subjects of PC Beliefs. Every entity the PC can name is now known, and
+/// its card lists the facts the PC holds that name it.
+#[test]
+fn a_seed_place_with_no_belief_has_a_card() {
+    let mut seed = support::adventure_seed();
+    seed.entities.push(support::place("Harrowmere"));
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &seed, 3).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let harrowmere = view.entity_by_name("Harrowmere").unwrap().id;
+    let pip = view.entity_by_name("Pip").unwrap().id;
+    let ada = view.entity_by_name("Ada").unwrap().id;
+    store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: "told".into(),
+                kind: TurnKind::Play,
+                intent: "I ask Pip about his mother.".into(),
+                proposal_json: record(ActionKind::Talk, Verdict::Allowed, None),
+                clock_before: view.clock_min,
+                clock_after: view.clock_min,
+            },
+            vec![set(
+                &view,
+                pip,
+                "mother",
+                "at harrowmere",
+                "Pip's mother sells clay in Harrowmere.",
+                &[ada],
+            )],
+        )
+        .unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let turns = store.turns(campaign).unwrap();
+    let sight = threshold_core::world::pc_sight(&view, &turns, &HashSet::new()).unwrap();
+    assert!(
+        sight.beliefs.iter().all(|b| b.subject != harrowmere),
+        "no Belief is about the place"
+    );
+    let play = play_view(&sight, &Marks::default());
+    assert!(
+        play.known
+            .iter()
+            .any(|k| k.who == named(harrowmere, EntityKind::Place, "Harrowmere")),
+        "{:?}",
+        play.known
+    );
+    let card = entity_card(&sight, &Marks::default(), harrowmere).unwrap();
+    assert!(card.facts.is_empty());
+    let named_in: Vec<&str> = card.named_in.iter().map(|f| f.text.as_str()).collect();
+    assert_eq!(named_in, ["Pip's mother sells clay in Harrowmere."]);
+    assert_eq!(card.named_in[0].subject.entity_id, pip);
+    // Pip's own card does not list its own fact again.
+    let pips = entity_card(&sight, &Marks::default(), pip).unwrap();
+    assert!(pips.named_in.is_empty(), "{:?}", pips.named_in);
 }

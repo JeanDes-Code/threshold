@@ -434,6 +434,10 @@ pub struct EntityCard {
     pub here: bool,
     /// The PC Beliefs about it, Open Items marked.
     pub facts: Vec<FactLine>,
+    /// A place or a Faction only: the PC Beliefs about other subjects whose
+    /// text names it, by a name the PC knows for it (bug pass 3). Empty for
+    /// any other entity.
+    pub named_in: Vec<FactLine>,
     /// A place only: the characters the PC believes are located there, from
     /// the PC's `location` Beliefs (QA, 2026-11-10). One the PC cannot
     /// name has no name. Empty for any other entity.
@@ -470,6 +474,11 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
         } else {
             Vec::new()
         },
+        named_in: if named && matches!(known.kind, EntityKind::Place | EntityKind::Faction) {
+            named_in(sight, known)
+        } else {
+            Vec::new()
+        },
         notes: notes_seen(sight, marks)
             .into_iter()
             .filter(|n| n.about.as_ref() == Some(&target))
@@ -477,6 +486,31 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
         pinned: pins_seen(sight, marks).contains(&target),
         who,
     })
+}
+
+/// The PC Beliefs about another subject whose text names `entity` by its
+/// main name or an other name the PC knows, as whole words after
+/// `normalize::name_words`. In Belief order.
+fn named_in(sight: &PcSight, entity: &crate::world::Known) -> Vec<FactLine> {
+    let names: Vec<Vec<String>> = entity
+        .name
+        .iter()
+        .chain(&entity.other_names)
+        .map(|n| normalize::name_words(&normalize::name(n)))
+        .filter(|words| !words.is_empty())
+        .collect();
+    sight
+        .beliefs
+        .iter()
+        .filter(|b| b.subject != entity.id)
+        .filter(|b| {
+            let text = normalize::name_words(&b.text);
+            names
+                .iter()
+                .any(|name| text.windows(name.len()).any(|w| w == name.as_slice()))
+        })
+        .filter_map(|b| fact_line(sight, b))
+        .collect()
 }
 
 /// The characters the PC believes are at `place`: a location Belief whose

@@ -263,10 +263,16 @@ function CardView({ who: listed, card, refusal, onClose, pins, onPin, onNote }: 
             </>
           )}
           <h4 className="play-label play-entity__part">What you know</h4>
-          {card.facts.length === 0 ? (
-            <p className="play-empty">Nothing more yet.</p>
-          ) : (
+          {card.facts.length > 0 ? (
             <Facts lines={card.facts} pins={pins} onPin={onPin} />
+          ) : (
+            card.named_in.length === 0 && <p className="play-empty">Nothing more yet.</p>
+          )}
+          {card.named_in.length > 0 && (
+            <>
+              <h4 className="play-label play-entity__part">Named in</h4>
+              <Facts lines={card.named_in} pins={pins} onPin={onPin} />
+            </>
           )}
           <h4 className="play-label play-entity__part play-entity__notes">Your notes</h4>
           {card.notes.length > 0 && (

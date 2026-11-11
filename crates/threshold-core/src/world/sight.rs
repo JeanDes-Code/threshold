@@ -105,8 +105,9 @@ pub struct PcSight {
     pub place: Option<(Option<EntityId>, String)>,
     /// `seen_present` now, the PC included.
     pub present: Vec<EntityId>,
-    /// The PC, each entity of a `present` list, each subject or speaker of a
-    /// kept Belief, and the named place. Sorted by id.
+    /// The PC, each place and Faction the PC can name (3.5), each entity of
+    /// a `present` list, each subject or speaker of a kept Belief, and the
+    /// named place. Sorted by id.
     pub known: Vec<Known>,
     /// PC Beliefs now, Setup rows included, none about an unnamed entity.
     pub beliefs: Vec<Belief>,
@@ -300,6 +301,18 @@ pub fn pc_sight(
     });
 
     let mut ids: BTreeSet<EntityId> = BTreeSet::from([pc.id]);
+    // Every place and Faction the PC can name (3.5), a Belief about it or
+    // not: an Adventure Seed place that no Belief is about was missing from
+    // People and places, though `known_places` offered it as a move target
+    // (bug pass 3). An NPC elsewhere still needs a Belief or presence.
+    ids.extend(
+        view.entities
+            .iter()
+            .filter(|e| {
+                named.contains(&e.id) && matches!(e.kind, EntityKind::Place | EntityKind::Faction)
+            })
+            .map(|e| e.id),
+    );
     ids.extend(present.iter().copied());
     ids.extend(moments.iter().flat_map(|m| m.present.iter().copied()));
     ids.extend(place.as_ref().and_then(|(entity, _)| *entity));

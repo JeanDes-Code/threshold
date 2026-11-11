@@ -173,7 +173,7 @@ pub struct Known { pub id: EntityId, pub kind: EntityKind, pub name: Option<Stri
 
 - `name` is the main name, or `None`. `None` with presence means "perceived, not named". The UI shows "unknown".
 - `other_names` holds only the other names for which the PC holds the `alias_` Belief. No view reads `Entity.other_names`: that list holds names the PC does not know.
-- `PcSight.known` lists the PC, each entity in a `present` list, and each subject or speaker of a PC Belief. No other entity is in `PcSight`.
+- `PcSight.known` lists the PC, each entity in a `present` list, and each subject or speaker of a PC Belief. No other entity is in `PcSight`. *Changed in bug pass 3 (2026-11-11):* it also lists each place and Faction the PC can name by the rule above. QA searched People and places for "Harrowmere", an Adventure Seed place named in 7 facts the PC held and the target of the main request, and got "No match": no Belief had the place as its subject, though `world::known_places` offered it as a move target. An NPC elsewhere still needs presence or a Belief.
 - An entity with `name: None` has no fact line and no card text. Its only Belief is a witnessed `location`, and the text of that fact holds its name (`checks/ops.rs:209`).
 - A known name in the story is a link. `view` finds it with the same match as rule 4 and returns it as a `Part::Name`.
 
@@ -230,10 +230,12 @@ pub struct Act         { turn_id: TurnId, intent: String, decision: bool }
 pub struct ClosedItem  { item: FactLine, closed_in: TurnId }
 
 pub struct EntityCard  { who: NameRef, other_names: Vec<String>, here: bool, facts: Vec<FactLine>,
-                         people_here: Vec<NameRef>, notes: Vec<Note>, pinned: bool }
+                         named_in: Vec<FactLine>, people_here: Vec<NameRef>, notes: Vec<Note>, pinned: bool }
 ```
 
 *Changed after QA (2026-11-10):* a place card was empty ("Nothing more yet"), because facts sit on people. `people_here` lists, for a place card only, the characters the PC believes are located there. It comes from the PC's `location` Beliefs only (`PcSight.whereabouts`), matched to the place's names through `normalize::name`. A character the PC cannot name has a `NameRef` with no name. The card shows them under "Who you know is here".
+
+*Changed in bug pass 3 (2026-11-11):* `named_in` lists, for a place or a Faction card only, the PC Beliefs about other subjects whose text names it, by its main name or an other name the PC knows, as whole words after `normalize::name_words`. The card shows them under "Named in". On the QA Campaign, Harrowmere's card lists 7 such facts.
 
 Rules:
 

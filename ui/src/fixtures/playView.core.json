@@ -36,6 +36,15 @@
         "kind": "npc",
         "name": "Brann"
       }
+    },
+    {
+      "here": false,
+      "other_names": [],
+      "who": {
+        "entity_id": 5,
+        "kind": "place",
+        "name": "Gate"
+      }
     }
   ],
   "needs_begin": false,
@@ -73,7 +82,16 @@
             "parts": [
               {
                 "kind": "text",
-                "text": "Dusk falls on the gate square. "
+                "text": "Dusk falls on the "
+              },
+              {
+                "entity_id": 5,
+                "kind": "name",
+                "text": "gate"
+              },
+              {
+                "kind": "text",
+                "text": " square. "
               },
               {
                 "entity_id": 2,
