@@ -32,8 +32,9 @@ pub struct Blocked {
     pub who: Vec<EntityId>,
 }
 
-/// Clears the characters at the PC's place, world truth (hidden ones
-/// included, `WorldView::present`), plus the ids in `also`.
+/// Clears the characters at the PC's place as `checked_here` gives them
+/// (world truth, hidden ones included, and everyone the PC believes is
+/// there), plus the ids in `also`.
 ///
 /// A character is cleared when all of these hold:
 /// - its kind is PC or NPC;
@@ -57,8 +58,7 @@ pub fn clearance(view: &WorldView, also: &[EntityId]) -> Result<Cleared, Blocked
             is_character(e) && holds_alone(e) && names(e).all(|n| !failing.contains(&n))
         })
     };
-    let characters_here = view
-        .present()
+    let characters_here = checked_here(view)
         .into_iter()
         .filter(|id| view.entities.iter().any(|e| e.id == *id && is_character(e)));
     let who: BTreeSet<EntityId> = characters_here
@@ -74,15 +74,43 @@ pub fn clearance(view: &WorldView, also: &[EntityId]) -> Result<Cleared, Blocked
     }
 }
 
+/// Everyone the gate checks at the PC's place (ADR 0008, changed after
+/// review): the union of
+/// - world truth at the PC's place (`WorldView::present`, hidden
+///   characters included);
+/// - everyone the PC believes is at the PC's place, through the very
+///   function the narrator's `Present` line reads (`context::seen_present`),
+///   so a stale Belief or a Claim counts: the narrator would tell that
+///   character as here;
+/// - the PC.
+///
+/// The narrator's `Present` line is a subset of this set by construction;
+/// the test `the_narrator_present_line_is_a_subset_of_the_checked_set`
+/// pins it. Things and places are in the set too; `clearance` checks the
+/// characters among them.
+pub fn checked_here(view: &WorldView) -> BTreeSet<EntityId> {
+    let mut here: BTreeSet<EntityId> = view.present().into_iter().collect();
+    here.extend(seen_present(view));
+    here.extend(
+        view.entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::Pc)
+            .map(|e| e.id),
+    );
+    here
+}
+
 /// Who is at the PC's place once the ops of one Turn are committed (data
 /// shape 3.4): `truth` is world truth, hidden characters included, as
 /// `WorldView::present` will read it; `seen` the characters the PC knows
-/// are there, as `context::seen_present` will read it; `pc_place` the PC's
+/// are there, as `context::seen_present` will read it; `checked` the set
+/// the gate checks, as `checked_here` will read it; `pc_place` the PC's
 /// location value, in normal form.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Presence {
     pub truth: BTreeSet<EntityId>,
     pub seen: BTreeSet<EntityId>,
+    pub checked: BTreeSet<EntityId>,
     pub pc_place: Option<String>,
 }
 
@@ -115,17 +143,20 @@ pub fn after(view: &WorldView, ops: &[LedgerOp]) -> Presence {
     Presence {
         truth: world.present().into_iter().collect(),
         seen: seen_present(&world).into_iter().collect(),
+        checked: checked_here(&world),
         pc_place,
     }
 }
 
-/// G3: for an intimate proposal, `clearance` over every character at the
-/// PC's place once the Turn's ops are committed (`after.truth`, world
-/// truth, so an arrival the PC does not see counts), on top of the place
-/// before the Turn that `clearance` always covers. G2 read the place before
-/// the Turn; both must pass. Any other proposal passes.
+/// G3: for an intimate proposal, `clearance` over every character the gate
+/// checks at the PC's place once the Turn's ops are committed
+/// (`after.checked`: world truth, so an arrival the PC does not see counts,
+/// and everyone the PC then believes is here, so a Claim of this Turn
+/// counts), on top of the place before the Turn that `clearance` always
+/// covers. G2 read the place before the Turn; both must pass. Any other
+/// proposal passes.
 ///
-/// A thing or a place in `after.truth` is no character and blocks nothing,
+/// A thing or a place in `after.checked` is no character and blocks nothing,
 /// as before the Turn. An id the view does not hold (an entity this Turn
 /// creates) stays in, and `clearance` blocks it.
 pub fn check_after(
@@ -137,7 +168,7 @@ pub fn check_after(
         return Ok(());
     }
     let here: Vec<EntityId> = after
-        .truth
+        .checked
         .iter()
         .copied()
         .filter(|id| {

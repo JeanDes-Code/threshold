@@ -11,23 +11,29 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use support::*;
+use support::{
+    hidden::{HiddenWorld, claim as hidden_claim, id_of, record, set},
+    *,
+};
 use threshold_core::{
     CallKind, RecordedGm,
     checks::{CheckKind, Rejection, to_ops, validate},
-    context::seen_present,
+    context::{narration_prompt, seen_present},
     domain::{
         ActionKind, Canon, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef, FactDraft,
         FactSource, Handle, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict,
     },
-    mature::{Blocked, RefusalKind, Told, after, clearance, stored_intimate, told},
+    mature::{
+        Blocked, RefusalKind, Told, after, check_after, checked_here, clearance, stored_intimate,
+        told,
+    },
     normalize,
     pack::ContentPack,
     rules::D10,
     store::{Store, WorldView},
     turn::{Engine, TurnError},
     view::{REFUSAL_ADULTS_ONLY, refusal_text},
-    world::{advance, with_arrival, with_witnessed_events, written_slots},
+    world::{advance, arrival, with_arrival, with_witnessed_events, written_slots},
 };
 
 fn src() -> PathBuf {
@@ -513,6 +519,7 @@ fn step(w: &mut World, p: &DecisionProposal) -> threshold_core::mature::Presence
         .map(|f| normalize::value(&f.slot.value));
     assert_eq!(presence.truth, truth, "world truth after the Commit");
     assert_eq!(presence.seen, seen, "what the PC knows is here");
+    assert_eq!(presence.checked, checked_here(&w.view), "the checked set");
     assert_eq!(presence.pc_place, place, "the PC's place");
     presence
 }
@@ -675,5 +682,178 @@ fn only_mature_calls_is_adult() {
             "{} calls is_adult outside mature",
             file.display()
         );
+    }
+}
+
+// --- Review of Tasks 1 and 2: the checked set ------------------------------
+
+/// The hidden world with every adult character confirmed: Ada, Orsel,
+/// Brann, Vey and Kestrel. Pip (17) stands at the market.
+fn confirmed_hidden() -> HiddenWorld {
+    let mut w = HiddenWorld::new();
+    let ids = [w.ada, w.orsel, w.brann, w.vey, w.kestrel];
+    w.play(
+        "test",
+        &record(ActionKind::Observe, Verdict::Allowed, None),
+        0,
+        ids.iter()
+            .map(|id| LedgerOp::ConfirmAge {
+                entity: EntityRef::Id(*id),
+            })
+            .collect(),
+    );
+    w
+}
+
+/// Commits `ops` as one plain play Turn of the hidden world.
+fn play_ops(w: &mut HiddenWorld, ops: Vec<LedgerOp>) {
+    w.play(
+        "test",
+        &record(ActionKind::Observe, Verdict::Allowed, None),
+        0,
+        ops,
+    );
+}
+
+/// A World Event puts Wren (16) at the gate square, and the PC sees Wren
+/// there through the arrival path (`world::arrival`). Then Wren walks to
+/// the market and nobody sees it: the PC's Belief is stale.
+fn stale_belief() -> (HiddenWorld, u64) {
+    let mut w = confirmed_hidden();
+    play_ops(
+        &mut w,
+        vec![
+            LedgerOp::AddEntity {
+                local: Some(1),
+                kind: EntityKind::Npc,
+                name: "Wren".into(),
+                age: Some(16),
+                other_names: vec![],
+                age_confirmed: false,
+            },
+            LedgerOp::AddFact {
+                slot: Slot {
+                    subject: EntityRef::New(1),
+                    key: "location".into(),
+                    value: "gate square".into(),
+                },
+                text: "Wren stands at the gate square.".into(),
+                canon: Canon::Established,
+                source: FactSource::WorldEvent,
+                seen_by: vec![],
+                causes: vec![],
+            },
+        ],
+    );
+    let view = w.view();
+    let wren = id_of(&view, "Wren");
+    let seen = arrival(&view, "gate square", view.clock_min);
+    assert!(!seen.is_empty(), "the PC sees Wren arrive");
+    play_ops(&mut w, seen);
+    let view = w.view();
+    assert!(seen_present(&view).contains(&wren));
+    play_ops(
+        &mut w,
+        vec![set(
+            &view,
+            wren,
+            "location",
+            "market",
+            "Wren walks to the market.",
+            &[],
+        )],
+    );
+    (w, wren)
+}
+
+/// Brann tells the PC that Pip is at the gate square. Pip is at the market.
+fn claimed_here() -> HiddenWorld {
+    let mut w = confirmed_hidden();
+    let (brann, pip, ada) = (w.brann, w.pip, w.ada);
+    play_ops(
+        &mut w,
+        vec![hidden_claim(
+            brann,
+            pip,
+            "location",
+            "gate square",
+            &[ada],
+            0,
+        )],
+    );
+    w
+}
+
+/// The names the narrator's `Present:` line lists for `view`.
+fn narrator_present(view: &WorldView) -> Vec<u64> {
+    let prompt = narration_prompt(view, &[], &[], &[], &[], "", None, &Told::Plain);
+    let text = format!("{}{}{}", prompt.stable, prompt.scene, prompt.recent);
+    let line = text
+        .lines()
+        .find_map(|l| l.strip_prefix("Present: "))
+        .expect("a Present line");
+    line.split(", ").map(|name| id_of(view, name)).collect()
+}
+
+/// B1: a minor the PC believes is here, through a stale Belief or a Claim,
+/// is checked like one who is truly here, before the Turn (G2) and after
+/// its ops (G3).
+#[test]
+fn the_gate_checks_who_the_pc_believes_is_here() {
+    let (w, wren) = stale_belief();
+    let view = w.view();
+    assert!(!view.present().contains(&wren), "world truth: Wren left");
+    assert_eq!(
+        clearance(&view, &[]).unwrap_err(),
+        Blocked { who: vec![wren] }
+    );
+
+    let w = claimed_here();
+    let view = w.view();
+    assert!(!view.present().contains(&w.pip));
+    assert_eq!(
+        clearance(&view, &[]).unwrap_err(),
+        Blocked { who: vec![w.pip] }
+    );
+
+    // G3: the Claim comes in this Turn's ops.
+    let w = confirmed_hidden();
+    let view = w.view();
+    assert!(clearance(&view, &[]).is_ok());
+    let ops = vec![hidden_claim(
+        w.brann,
+        w.pip,
+        "location",
+        "gate square",
+        &[w.ada],
+        0,
+    )];
+    let mut p = proposal(Verdict::Allowed);
+    p.intimate = true;
+    assert_eq!(
+        check_after(&p, &view, &after(&view, &ops)).unwrap_err(),
+        Blocked { who: vec![w.pip] }
+    );
+}
+
+/// B1: the narrator's Present line, built from the same view, never names
+/// anyone the gate does not check.
+#[test]
+fn the_narrator_present_line_is_a_subset_of_the_checked_set() {
+    let (stale, wren) = stale_belief();
+    let claimed = claimed_here();
+    for (view, believed) in [(stale.view(), wren), (claimed.view(), claimed.pip)] {
+        let checked = checked_here(&view);
+        let listed = narrator_present(&view);
+        assert!(listed.contains(&believed), "{listed:?}");
+        for id in &listed {
+            assert!(checked.contains(id), "{id} is told but not checked");
+        }
+        for id in seen_present(&view) {
+            assert!(checked.contains(&id), "{id} is seen but not checked");
+        }
+        for id in view.present() {
+            assert!(checked.contains(&id), "{id} is here but not checked");
+        }
     }
 }

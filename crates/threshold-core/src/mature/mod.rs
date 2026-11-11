@@ -17,7 +17,7 @@ mod text;
 
 use serde::Serialize;
 
-pub use gate::{Blocked, Cleared, Presence, after, check, check_after, clearance};
+pub use gate::{Blocked, Cleared, Presence, after, check, check_after, checked_here, clearance};
 pub use text::{Told, stored_intimate, told};
 
 use crate::{
