@@ -1123,6 +1123,48 @@ fn an_intent_names_the_items_that_share_a_content_word() {
     assert_eq!(both, ["pending_feast", "pending_winter_post"]);
 }
 
+/// Review M2 (T2): everyday verbs and nouns name no item. "meet", "plans",
+/// "time" or "night" offered items that only used the same word. An NPC
+/// name still counts: "I tell Orsel yes." offers Orsel's item.
+#[test]
+fn everyday_words_name_no_item() {
+    use threshold_core::world::items_named_by;
+    let mut w = World::new();
+    let (brann, orsel) = (w.brann, w.orsel);
+    held(
+        &mut w,
+        brann,
+        "pending_meet",
+        "Brann wants to meet Ada at the mill tonight.",
+    );
+    held(
+        &mut w,
+        orsel,
+        "pending_feast",
+        "Orsel plans a feast in town at night, and will offer a toast.",
+    );
+    for intent in [
+        "I greet the stranger: pleased to meet you.",
+        "What are your plans for the night?",
+        "I take my time and come back to town tomorrow.",
+        "I tell the guard I accept nothing he can offer, and I give him a look.",
+    ] {
+        assert!(
+            items_named_by(&w.view, intent).is_empty(),
+            "{intent}: {:?}",
+            items_named_by(&w.view, intent)
+        );
+    }
+    assert_eq!(
+        items_named_by(&w.view, "I tell Orsel yes."),
+        [(orsel, "pending_feast".to_owned())]
+    );
+    assert_eq!(
+        items_named_by(&w.view, "I will be at the mill."),
+        [(brann, "pending_meet".to_owned())]
+    );
+}
+
 /// C7: the places for `move_to` are the place entities the PC can name,
 /// by the same rule as the Player screens (`world::pc_can_name`). A place
 /// that is no Adventure Seed entry, that the PC holds no Belief about and

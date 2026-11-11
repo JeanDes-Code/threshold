@@ -85,6 +85,12 @@ text = "Hessa asked Wren to keep quiet about the ledger she misfiled."
 kind = "unrelated"
 intent = "I sit on the bench by the window and look around the hall."
 
+# Review M2: an NPC name alone, with an everyday word, offers that NPC's
+# items. The step settles nothing.
+[[steps]]
+kind = "unrelated"
+intent = "I tell Orsel a joke."
+
 [[steps]]
 kind = "keep"
 intent = "I ask Orsel for more time to think about copying the tithe roll."
@@ -102,6 +108,11 @@ intent = "I ask Hessa how long the walk down to the Varn mill takes."
 kind = "refuse"
 intent = "I tell Hessa: no, thank you, I will not come to supper at your house tonight."
 closes = ["supper"]
+
+# Review M2, as above.
+[[steps]]
+kind = "unrelated"
+intent = "I ask Doul about his plans for the winter."
 
 [[steps]]
 kind = "keep"

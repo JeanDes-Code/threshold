@@ -85,9 +85,9 @@ fn report_has_every_metric() {
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4, speech 10, play_basics 8, open_items 7
-    // = 108 Turns.
-    assert!(report.contains("- Turns played: 216 (0 failed"), "{report}");
+    // agency_leaks 12, offscreen 4, speech 10, play_basics 8, open_items 9
+    // = 110 Turns.
+    assert!(report.contains("- Turns played: 220 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1539,16 +1539,20 @@ fn open_items_counts_right_and_wrong_closes() {
     let gm = RecordedGm::new(
         vec![
             talk.clone(),
+            // "I tell Orsel a joke.": nothing.
+            talk.clone(),
             talk.clone(),
             settle(format!("E{orsel} pending_copy_tithe_roll")),
             // Not offered by "the walk down to the Varn mill": dropped.
             settle(format!("E{tobin} pending_millstone_sale")),
             talk.clone(),
+            // "I ask Doul about his plans for the winter.": nothing.
+            talk.clone(),
             // Offered by "the flour", and wrong on a keep step.
             settle(format!("E{wren} pending_flour_debt")),
             talk,
         ],
-        vec!["It happens.".to_owned(); 7],
+        vec!["It happens.".to_owned(); 9],
     );
     let config = Config {
         root: root(),
@@ -1567,7 +1571,7 @@ fn open_items_counts_right_and_wrong_closes() {
         "| Accept | 1 | 1 / 1 | 0 | 0 |",
         "| Refuse | 1 | 0 / 1 | 0 | 0 |",
         "| Keep | 2 | (none asked) | 1 | 0 |",
-        "| Unrelated | 3 | (none asked) | 0 | 0 |",
+        "| Unrelated | 5 | (none asked) | 0 | 0 |",
         "- Wrong closes in total: 1",
         "- Wrong closes by item: flour_debt 1",
     ] {
