@@ -342,8 +342,22 @@ fn a_slot_reads_as_a_plain_sentence() {
             "sore_loser",
             "Doul's mood now is now sore loser.",
         ),
+        // Review minor (T8): a value that says "none" reads as a plain no.
+        ("Ada", "injury", "none", "Ada is not injured."),
+        ("Ada", "injury", "", "Ada is not injured."),
+        ("Ada", "carrying", "nothing", "Ada carries nothing."),
+        ("Ada", "condition", "none", "Ada is well."),
+        ("Doul", "grudge", "none", "Doul holds no grudge."),
+        ("Ada", "debt", "no", "Ada has no debt."),
+        (
+            "Ada",
+            "condition",
+            "no longer tired",
+            "Ada is no longer tired.",
+        ),
     ] {
-        assert_eq!(slot_sentence(name, key, value), sentence, "{key}");
+        assert_eq!(slot_sentence(name, key, value), sentence, "{key} {value:?}");
         assert!(!sentence.contains(" = "));
+        assert!(!sentence.contains("(none)"), "{sentence}");
     }
 }

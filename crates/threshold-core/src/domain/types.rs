@@ -54,10 +54,24 @@ pub fn outcome_key(key: &str) -> Option<&str> {
 /// own: a stake, a model fact, a World Event effect (bug pass 3). The
 /// Player never reads `key = value`. A few keys have their own template;
 /// any other reads "<name>'s <key words> is now <value words>.". An `_` in
-/// the key or the value is a space.
+/// the key or the value is a space. A value "none", "no", "nothing" or an
+/// empty one reads as a plain no: "Ada is not injured.", "Ada has no
+/// debt.".
 pub fn slot_sentence(name: &str, key: &str, value: &str) -> String {
     let words = |text: &str| text.trim().replace('_', " ");
     let (name, value) = (name.trim(), words(value));
+    // A value that says "none" reads as a plain no, never "injured (none)"
+    // (review minor).
+    if ["", "none", "no", "nothing", "n/a"].contains(&crate::normalize::value(&value).as_str()) {
+        return match crate::normalize::key(key).as_str() {
+            "location" => format!("{name}'s location is unknown."),
+            "injury" => format!("{name} is not injured."),
+            "condition" => format!("{name} is well."),
+            "carrying" => format!("{name} carries nothing."),
+            "grudge" => format!("{name} holds no grudge."),
+            other => format!("{name} has no {}.", words(other)),
+        };
+    }
     match crate::normalize::key(key).as_str() {
         "location" => format!("{name} is at {value}."),
         "injury" => format!("{name} is injured ({value})."),
