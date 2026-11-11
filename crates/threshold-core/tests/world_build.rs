@@ -340,7 +340,7 @@ fn full_build_commits_through_setup() {
 
     let dir = TempDir::new("commit");
     let path = dir.0.join("campaign-1.sqlite");
-    create_campaign_file(&path, &draft.seed, &world, 7).unwrap();
+    create_campaign_file(&path, &draft.seed, &world, 7, None).unwrap();
     let store = Store::open_existing(&path).unwrap();
     let campaign = store.campaigns().unwrap()[0];
     let view = store.snapshot(campaign).unwrap();
@@ -383,7 +383,7 @@ fn build_adds_no_character() {
     let world = run(&draft, &plain()).world();
     let dir = TempDir::new("roster");
     let path = dir.0.join("campaign-1.sqlite");
-    create_campaign_file(&path, &draft.seed, &world, 7).unwrap();
+    create_campaign_file(&path, &draft.seed, &world, 7, None).unwrap();
     let store = Store::open_existing(&path).unwrap();
     let view = store.snapshot(store.campaigns().unwrap()[0]).unwrap();
     let mut names: Vec<&str> = view.entities.iter().map(|e| e.name.as_str()).collect();
@@ -451,7 +451,7 @@ fn roster_without_npc_builds() {
     assert!(world.voice_cards.is_empty() && world.goals.is_empty() && world.events.is_empty());
     assert_eq!(facts_on(&world, "Mira Holt", "location").len(), 1);
     let dir = TempDir::new("no-npc");
-    create_campaign_file(&dir.0.join("c.sqlite"), &draft.seed, &world, 7).unwrap();
+    create_campaign_file(&dir.0.join("c.sqlite"), &draft.seed, &world, 7, None).unwrap();
 }
 
 #[test]
@@ -600,7 +600,7 @@ fn the_start_state_is_the_latest_location() {
     assert_eq!(location.len(), 1);
     assert_eq!(location[0].value, "Gull Point");
     let dir = TempDir::new("slots");
-    create_campaign_file(&dir.0.join("c.sqlite"), &draft.seed, &world, 7).unwrap();
+    create_campaign_file(&dir.0.join("c.sqlite"), &draft.seed, &world, 7, None).unwrap();
 }
 
 #[test]
@@ -842,7 +842,7 @@ fn settled_facts_trap() {
     assert_eq!(debt.len(), 1);
     assert_eq!(debt[0].value, "forty coins");
     let dir = TempDir::new("settled");
-    create_campaign_file(&dir.0.join("c.sqlite"), &draft().seed, &world, 7).unwrap();
+    create_campaign_file(&dir.0.join("c.sqlite"), &draft().seed, &world, 7, None).unwrap();
 }
 
 #[test]
@@ -870,7 +870,7 @@ fn open_items_trap() {
     let moving = facts_on(&world, "Ada Venn", "move");
     assert!(moving[0].open);
     let dir = TempDir::new("open");
-    create_campaign_file(&dir.0.join("c.sqlite"), &draft().seed, &world, 7).unwrap();
+    create_campaign_file(&dir.0.join("c.sqlite"), &draft().seed, &world, 7, None).unwrap();
 }
 
 /// Bug pass 3: the QA World Build wrote 7 Open Items of the draft again,
@@ -1598,7 +1598,7 @@ fn an_attitude_toward_a_group_is_built_and_committed() {
 
     let dir = TempDir::new("group-attitude");
     let path = dir.0.join("campaign-1.sqlite");
-    create_campaign_file(&path, &draft.seed, &world, 7).unwrap();
+    create_campaign_file(&path, &draft.seed, &world, 7, None).unwrap();
     let store = Store::open_existing(&path).unwrap();
     let view = store.snapshot(store.campaigns().unwrap()[0]).unwrap();
     let id = |name: &str| view.entity_by_name(name).unwrap().id;

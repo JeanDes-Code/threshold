@@ -33,7 +33,7 @@ fn town() -> (Store, u64) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/town");
     let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 11).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 11, None).unwrap();
     load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
     (store, campaign)
 }
@@ -1291,7 +1291,7 @@ fn a_seed_place_with_no_belief_has_a_card() {
     let mut seed = support::adventure_seed();
     seed.entities.push(support::place("Harrowmere"));
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 3).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 3, None).unwrap();
     let view = store.snapshot(campaign).unwrap();
     let harrowmere = view.entity_by_name("Harrowmere").unwrap().id;
     let pip = view.entity_by_name("Pip").unwrap().id;

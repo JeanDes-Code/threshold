@@ -200,7 +200,7 @@ impl HiddenWorld {
             text: "Vey waits in the shadow of the gate square.".into(),
         });
         let mut store = Store::open_in_memory().unwrap();
-        let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+        let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();
         let view = store.snapshot(campaign).unwrap();
         let id = |name: &str| view.entities.iter().find(|e| e.name == name).unwrap().id;
         let mut w = HiddenWorld {

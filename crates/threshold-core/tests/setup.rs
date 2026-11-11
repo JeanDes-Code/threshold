@@ -26,7 +26,7 @@ fn town_seed() -> AdventureSeed {
 
 fn campaign(seed: &AdventureSeed) -> (Store, CampaignId) {
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, seed, 11).unwrap();
+    let campaign = create_campaign(&mut store, seed, 11, None).unwrap();
     (store, campaign)
 }
 
@@ -284,7 +284,7 @@ attitude = -1
 
     let dir = TempDir::new("complete");
     let path = dir.0.join("campaign-1.sqlite");
-    create_campaign_file(&path, &seed, &good, 11).unwrap();
+    create_campaign_file(&path, &seed, &good, 11, None).unwrap();
     assert!(path.is_file());
     assert!(!dir.0.join("campaign-1.sqlite.part").exists());
     // No journal or other side file stays behind.
@@ -299,7 +299,7 @@ attitude = -1
             .is_some()
     );
     // A Campaign file is never overwritten.
-    assert!(create_campaign_file(&path, &seed, &good, 12).is_err());
+    assert!(create_campaign_file(&path, &seed, &good, 12, None).is_err());
     assert_eq!(dir.files(), ["campaign-1.sqlite"]);
 
     let bad = world(
@@ -312,7 +312,7 @@ attitude = -1
     );
     let dir = TempDir::new("failed");
     let path = dir.0.join("campaign-2.sqlite");
-    let result = create_campaign_file(&path, &seed, &bad, 11);
+    let result = create_campaign_file(&path, &seed, &bad, 11, None);
     assert!(matches!(result, Err(SetupError::Invalid(_))), "{result:?}");
     assert!(!path.exists());
     assert!(!dir.0.join("campaign-2.sqlite.part").exists());
@@ -382,4 +382,22 @@ samples = ["The tide waits for no one.", "Fare first."]
     );
     assert!(view.goals_active.iter().any(|g| g.npc_id == jean));
     assert!(view.voice_card(jean).is_some());
+}
+
+/// Path 7 of the mature content module: the two-file fixture path passes
+/// no `ConfirmedAges`, so no PC or NPC of such a Campaign has a confirmed
+/// age, whatever its stored age.
+#[test]
+fn a_fixture_campaign_has_no_confirmed_age() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/town");
+    let seed = town_seed();
+    let world = threshold_core::fixture::load_world_setup(&dir.join("world.toml")).unwrap();
+    let files = TempDir::new("fixture-ages");
+    let path = files.0.join("campaign-1.sqlite");
+    create_campaign_file(&path, &seed, &world, 11, None).unwrap();
+    let store = Store::open_existing(&path).unwrap();
+    let view = store.snapshot(store.campaigns().unwrap()[0]).unwrap();
+    let characters: Vec<_> = view.entities.iter().filter(|e| e.age.is_some()).collect();
+    assert!(characters.len() > 2, "{characters:?}");
+    assert!(view.entities.iter().all(|e| !e.age_confirmed));
 }

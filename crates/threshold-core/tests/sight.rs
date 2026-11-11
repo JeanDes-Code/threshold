@@ -1036,7 +1036,7 @@ fn an_intent_that_asks_for_time_leaves_the_open_item_open() {
 /// The Opening Turn of a new Campaign made from `seed`, with `narration`.
 fn opened(seed: &threshold_core::domain::AdventureSeed, narration: &str) -> (Store, u64) {
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, seed, 7).unwrap();
+    let campaign = create_campaign(&mut store, seed, 7, None).unwrap();
     let opening = store
         .commit(
             TurnRecord {

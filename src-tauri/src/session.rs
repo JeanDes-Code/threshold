@@ -318,7 +318,9 @@ impl Session {
     }
 
     /// Creates a campaign file from an Adventure Seed and a world file, and
-    /// opens it. A failed setup leaves no file.
+    /// opens it. A failed setup leaves no file. Nobody confirmed the ages of
+    /// such a file, so it gives no `ConfirmedAges`: every age stays
+    /// unconfirmed.
     pub fn new_campaign(
         &mut self,
         seed_path: &Path,
@@ -328,7 +330,7 @@ impl Session {
         let seed = load_adventure_seed(seed_path).map_err(failed)?;
         let world = load_world_setup(world_path).map_err(failed)?;
         let db_path = new_campaign_path(&self.campaigns_dir())?;
-        create_campaign_file(&db_path, &seed, &world, rng_seed).map_err(failed)?;
+        create_campaign_file(&db_path, &seed, &world, rng_seed, None).map_err(failed)?;
         self.open_campaign(&db_path)
     }
 

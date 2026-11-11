@@ -6,10 +6,16 @@ use threshold_core::{
     build::{
         AgeLine, AgeMark, AgeRows, AgeSource, BuildCheck, BuildFailure, DebugEntry, DraftLine,
         DraftState, DraftStore, EntryRef, Gap, GapKind, KnownFact, ReviewError, SeedDraft, Stage,
-        age_lines, apply_edit, approve, confirm_age, gaps, rename,
+        age_lines, apply_edit, approve, confirm_age, confirmed_ages, gaps, rename,
     },
     context::ADVENTURE_BLOCK_MAX_CHARS,
-    domain::{AdventureSeed, EntityKind, OtherName, PcSeed, SeedEntity, SeedFact, StartSeed},
+    domain::{
+        AdventureSeed, ConfirmedAges, EntityKind, OtherName, PcSeed, SeedEntity, SeedFact,
+        StartSeed, WorldSetup,
+    },
+    mature::{Blocked, clearance},
+    setup::create_campaign_file,
+    store::{Store, WorldView},
 };
 
 /// An empty folder of its own under the system temp dir, removed on drop.
@@ -1182,4 +1188,139 @@ fn an_edit_rewrites_only_the_age_facts_of_a_changed_row() {
         (fact.value.as_str(), fact.text.as_str()),
         ("40", "Jean is 40 years old.")
     );
+}
+
+// --- Mature content module, Task 2: confirmed ages reach the Campaign ------
+
+/// Builds a Campaign file from `draft` with no World Build content and the
+/// confirmed ages `ages`, and returns its world.
+fn built(draft: &SeedDraft, ages: Option<&ConfirmedAges>, name: &str) -> WorldView {
+    let dir = TempDir::new(name);
+    fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join("campaign.sqlite");
+    create_campaign_file(&path, &draft.seed, &WorldSetup::default(), 7, ages).unwrap();
+    let store = Store::open_existing(&path).unwrap();
+    store.snapshot(store.campaigns().unwrap()[0]).unwrap()
+}
+
+/// Each character's main name and its Age Confirmation in the Campaign.
+fn marks(view: &WorldView) -> Vec<(String, bool)> {
+    view.entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+        .map(|e| (e.name.clone(), e.age_confirmed))
+        .collect()
+}
+
+/// Path 1: a draft with every age confirmed marks every PC and NPC of the
+/// Campaign it builds. A place has no mark. With no `ConfirmedAges`, as on
+/// the fixture path, nothing is marked.
+#[test]
+fn a_built_campaign_marks_only_confirmed_ages() {
+    let draft = valid_draft();
+    let ages = confirmed_ages(&draft).expect("no gap");
+    assert!(ages.holds(EntityKind::Pc, "Wren", 29));
+    assert!(ages.holds(EntityKind::Npc, "Jean", 40));
+    assert!(!ages.holds(EntityKind::Npc, "jean", 40), "exact main name");
+    assert!(!ages.holds(EntityKind::Pc, "Jean", 40), "same kind");
+
+    let view = built(&draft, Some(&ages), "marked");
+    assert_eq!(
+        marks(&view),
+        [("Wren".to_owned(), true), ("Jean".to_owned(), true)]
+    );
+    assert!(view.entities.iter().all(|e| match e.kind {
+        EntityKind::Pc | EntityKind::Npc => true,
+        _ => !e.age_confirmed,
+    }));
+
+    let view = built(&draft, None, "unmarked");
+    assert_eq!(
+        marks(&view),
+        [("Wren".to_owned(), false), ("Jean".to_owned(), false)]
+    );
+}
+
+/// Path 2: an age edited after its confirmation is not confirmed; once the
+/// Player confirms it again, the mark holds the new age only.
+#[test]
+fn an_edited_age_is_unconfirmed_in_the_campaign() {
+    let mut draft = valid_draft();
+    let mut seed = draft.seed.clone();
+    seed.entities[0].age = Some(41);
+    let knowledge = draft.knowledge.clone();
+    apply_edit(&mut draft, seed, knowledge);
+    let gaps = confirmed_ages(&draft).expect_err("Jean's new age waits");
+    assert_eq!(gaps, [gap(GapKind::AgeUnconfirmed, "entities[0].age")]);
+
+    confirm(&mut draft, "Jean").unwrap();
+    let ages = confirmed_ages(&draft).unwrap();
+    assert!(ages.holds(EntityKind::Npc, "Jean", 41));
+    assert!(!ages.holds(EntityKind::Npc, "Jean", 40));
+    let view = built(&draft, Some(&ages), "edited");
+    let jean = view.entities.iter().find(|e| e.name == "Jean").unwrap();
+    assert_eq!((jean.age, jean.age_confirmed), (Some(41), true));
+}
+
+/// Path 6: the state a draft file says counts for nothing. The gaps are
+/// computed again.
+#[test]
+fn an_approved_draft_with_a_gap_gives_no_confirmed_ages() {
+    let mut draft = unconfirmed_draft();
+    draft.state = DraftState::Approved;
+    let gaps = confirmed_ages(&draft).expect_err("ages wait");
+    assert_eq!(
+        gaps,
+        [
+            gap(GapKind::AgeUnconfirmed, "pc.age"),
+            gap(GapKind::AgeUnconfirmed, "entities[0].age"),
+        ]
+    );
+    let mut built_state = valid_draft();
+    built_state.state = DraftState::Built;
+    built_state.seed.pc.age = 30;
+    assert!(confirmed_ages(&built_state).is_err());
+}
+
+/// Path 3 and the review note of the campaign-from-document shape: clearing
+/// or lowering `min_age` removes the `AgeBelowMin` gap of a minor, and the
+/// Player may confirm that age. The Campaign then holds a confirmed age of
+/// 16, and the adults-only rule still blocks that character: its floor is
+/// `ADULT_AGE`, never `min_age`.
+#[test]
+fn a_cleared_min_age_never_clears_a_minor() {
+    for min_age in [None, Some(10), Some(16)] {
+        let mut draft = valid_draft();
+        let mut seed = draft.seed.clone();
+        seed.min_age = min_age;
+        seed.entities.push(entity("Tam", EntityKind::Npc, Some(16)));
+        let knowledge = draft.knowledge.clone();
+        apply_edit(&mut draft, seed, knowledge);
+        confirm_all(&mut draft);
+        let found = gaps(&draft);
+        assert!(found.is_empty(), "min_age {min_age:?}: {found:?}");
+        let ages = confirmed_ages(&draft).unwrap();
+        assert!(ages.holds(EntityKind::Npc, "Tam", 16));
+
+        let view = built(&draft, Some(&ages), "minor");
+        let tam = view.entities.iter().find(|e| e.name == "Tam").unwrap();
+        assert_eq!((tam.age, tam.age_confirmed), (Some(16), true));
+        assert_eq!(
+            clearance(&view, &[tam.id]).unwrap_err(),
+            Blocked { who: vec![tam.id] },
+            "min_age {min_age:?}"
+        );
+        let jean = view.entities.iter().find(|e| e.name == "Jean").unwrap();
+        assert!(clearance(&view, &[jean.id]).is_ok());
+    }
+
+    // A `min_age` above the minor's age keeps the gap: no confirmed ages.
+    let mut draft = valid_draft();
+    let mut seed = draft.seed.clone();
+    seed.entities.push(entity("Tam", EntityKind::Npc, Some(16)));
+    let knowledge = draft.knowledge.clone();
+    apply_edit(&mut draft, seed, knowledge);
+    confirm_all(&mut draft);
+    let gaps = confirmed_ages(&draft).expect_err("below min_age");
+    assert_eq!(gaps, [gap(GapKind::AgeBelowMin, "entities[2].age")]);
 }

@@ -15,6 +15,7 @@ use crate::{
 /// The proposal after the repairs, and one note per repair.
 pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, Vec<String>) {
     let mut notes = Vec::new();
+    drop_age_keys(&mut p, &mut notes);
     if let Some(pc) = pc(view).map(Handle::Entity) {
         drop_pc_acts(&mut p, pc, &mut notes);
         drop_pc_location(&mut p, pc, &mut notes);
@@ -37,6 +38,52 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     spell_places(&mut p, view, &mut notes);
     (p, notes)
 }
+
+/// The key `age` is reserved (mature content module, data shape 3.3): the
+/// adults-only rule reads the stored age of an entity only, never a fact,
+/// and a fact that states another age would only mislead the narrator. So
+/// each proposal fact, Check stake and scheduled effect on `age`, on any
+/// subject, goes, with one note each. A removal only takes model output
+/// away.
+fn drop_age_keys(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+    let is_age = |slot: &SlotDraft| same_key(&slot.key, AGE_KEY);
+    p.facts.retain(|f| {
+        let age = is_age(&f.slot);
+        if age {
+            notes.push(format!(
+                "removed the fact on key age of {}: the core reads the stored age only",
+                f.slot.subject
+            ));
+        }
+        !age
+    });
+    if let Some(c) = p.check.as_mut() {
+        for (name, stake) in [("win", &mut c.win), ("lose", &mut c.lose)] {
+            if let Some(slot) = stake.as_ref().filter(|slot| is_age(slot)) {
+                notes.push(format!(
+                    "removed the {name} stake on key age of {}: the core reads the stored age only",
+                    slot.subject
+                ));
+                *stake = None;
+            }
+        }
+    }
+    if let Some(s) = p.schedule.as_mut() {
+        s.effects.retain(|slot| {
+            let age = is_age(slot);
+            if age {
+                notes.push(format!(
+                    "removed the scheduled effect on key age of {}: the core reads the stored age only",
+                    slot.subject
+                ));
+            }
+            !age
+        });
+    }
+}
+
+/// The reserved key of `drop_age_keys`.
+const AGE_KEY: &str = "age";
 
 /// Three shapes that put the PC where only NPCs belong: a reaction of the
 /// PC, a scheduled event whose actor is the PC, and the PC among an event's

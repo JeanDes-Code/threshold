@@ -262,7 +262,7 @@ impl Drafts {
         on_progress: &mut dyn FnMut(Progress),
     ) -> Result<CampaignSummary, AppError> {
         let _slot = self.start_job(Job::Build(draft_id.to_owned()))?;
-        let draft = {
+        let (draft, ages) = {
             let store = lock(&self.store);
             let mut draft = store.load(draft_id).map_err(draft_error)?;
             match draft.state {
@@ -274,7 +274,10 @@ impl Drafts {
                 store.save(&draft).map_err(draft_error)?;
                 return Err(AppError::Gaps(gaps));
             }
-            draft
+            // The ages the Player confirmed, from the core: the shell
+            // cannot make them. The gaps are computed again inside.
+            let ages = build::confirmed_ages(&draft).map_err(AppError::Gaps)?;
+            (draft, ages)
         };
         lock(&self.store)
             .clear_debug(draft_id)
@@ -300,7 +303,7 @@ impl Drafts {
         on_progress(Progress::of(Stage::Commit, 0, 1));
         let path = new_campaign_path(&self.campaigns_dir)
             .map_err(|_| self.build_failed(draft_id, commit_failure(None)))?;
-        create_campaign_file(&path, &draft.seed, &world, clock_nanos())
+        create_campaign_file(&path, &draft.seed, &world, clock_nanos(), Some(&ages))
             .map_err(|e| self.build_failed(draft_id, commit_failure(Some(&e))))?;
         on_progress(Progress::of(Stage::Commit, 1, 1));
         self.update(draft_id, |d| {

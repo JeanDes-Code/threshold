@@ -1,16 +1,22 @@
-//! The adults-only rule: who is cleared for an intimate Turn, and the Commit
-//! check of an intimate proposal (G2). It reads the world only: stored ages,
-//! Age Confirmations and who stands at the PC's place. No prompt and no
+//! The adults-only rule: who is cleared for an intimate Turn, the Commit
+//! check of an intimate proposal (G2), and the same rule over who stands at
+//! the PC's place once the Turn's ops are committed (G3). It reads the world
+//! only: stored ages, Age Confirmations and who stands at the PC's place. No prompt and no
 //! model output reach it, and it names nothing outside the core's world.
 //! A source test in `tests/mature.rs` pins that.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::{
     checks::{CheckKind, Rejection},
-    domain::{DecisionProposal, DetailLevel, EntityId, EntityKind, Handle, Stance, is_adult},
+    context::seen_present,
+    domain::{
+        Canon, ClockMin, DecisionProposal, DetailLevel, EntityId, EntityKind, EntityRef,
+        FactSource, Handle, Knowing, LedgerOp, OPEN_KEY_PREFIX, Slot, Stance, is_adult,
+        is_state_key,
+    },
     normalize,
-    store::{Entity, WorldView},
+    store::{Claim, Entity, Fact, Knowledge, WorldView},
 };
 
 /// The proof that every character of a place is cleared. Only `clearance`
@@ -65,6 +71,361 @@ pub fn clearance(view: &WorldView, also: &[EntityId]) -> Result<Cleared, Blocked
         Err(Blocked {
             who: who.into_iter().collect(),
         })
+    }
+}
+
+/// Who is at the PC's place once the ops of one Turn are committed (data
+/// shape 3.4): `truth` is world truth, hidden characters included, as
+/// `WorldView::present` will read it; `seen` the characters the PC knows
+/// are there, as `context::seen_present` will read it; `pc_place` the PC's
+/// location value, in normal form.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Presence {
+    pub truth: BTreeSet<EntityId>,
+    pub seen: BTreeSet<EntityId>,
+    pub pc_place: Option<String>,
+}
+
+/// The presence after `ops`, the ops of one Turn before its Commit (the
+/// proposal's, the World Clock's and its due World Events', perception on
+/// arrival), on the state `view` before the Turn. It replays, in memory,
+/// what the store's projection does with the ops that decide a place and
+/// who knows it: new entities, location facts and their supersessions, the
+/// witnesses of a fact, `Know` rows, Claims, the World Clock and the
+/// promotion of a witnessed Possible fact. Then it reads the result with
+/// the same two functions the next snapshot is read with
+/// (`WorldView::present`, `context::seen_present`). The oracle test
+/// `presence_after_matches_the_next_snapshot` pins the two together.
+///
+/// A new entity gets the next id above the view's: the id the store gives
+/// it in a file where no Turn was reverted. A wrong guess only blocks:
+/// `clearance` never clears an id that the view does not hold.
+pub fn after(view: &WorldView, ops: &[LedgerOp]) -> Presence {
+    let mut sim = Replay::new(view);
+    for op in ops {
+        sim.apply(op);
+    }
+    let world = sim.world;
+    let pc_place = world
+        .entities
+        .iter()
+        .find(|e| e.kind == EntityKind::Pc)
+        .and_then(|pc| world.live_fact(pc.id, "location"))
+        .map(|f| normalize::value(&f.slot.value));
+    Presence {
+        truth: world.present().into_iter().collect(),
+        seen: seen_present(&world).into_iter().collect(),
+        pc_place,
+    }
+}
+
+/// G3: for an intimate proposal, `clearance` over every character at the
+/// PC's place once the Turn's ops are committed (`after.truth`, world
+/// truth, so an arrival the PC does not see counts), on top of the place
+/// before the Turn that `clearance` always covers. G2 read the place before
+/// the Turn; both must pass. Any other proposal passes.
+///
+/// A thing or a place in `after.truth` is no character and blocks nothing,
+/// as before the Turn. An id the view does not hold (an entity this Turn
+/// creates) stays in, and `clearance` blocks it.
+pub fn check_after(
+    p: &DecisionProposal,
+    view: &WorldView,
+    after: &Presence,
+) -> Result<(), Blocked> {
+    if !p.intimate {
+        return Ok(());
+    }
+    let here: Vec<EntityId> = after
+        .truth
+        .iter()
+        .copied()
+        .filter(|id| {
+            view.entities
+                .iter()
+                .find(|e| e.id == *id)
+                .is_none_or(is_character)
+        })
+        .collect();
+    clearance(view, &here).map(|_| ())
+}
+
+/// The in-memory replay of one Turn's ops for `after`. It mirrors
+/// `store::project::apply` and `Store::commit` for the ops that change a
+/// place or what the PC knows of one; every other op changes nothing here.
+struct Replay {
+    world: WorldView,
+    pc: Option<EntityId>,
+    locals: HashMap<u8, EntityId>,
+    next_entity: EntityId,
+    next_fact: u64,
+    next_claim: u64,
+}
+
+impl Replay {
+    fn new(view: &WorldView) -> Self {
+        Self {
+            world: view.clone(),
+            pc: view
+                .entities
+                .iter()
+                .find(|e| e.kind == EntityKind::Pc)
+                .map(|e| e.id),
+            locals: HashMap::new(),
+            next_entity: view.entities.iter().map(|e| e.id).max().unwrap_or(0),
+            next_fact: view.facts.iter().map(|f| f.id).max().unwrap_or(0),
+            next_claim: view.claims.iter().map(|c| c.id).max().unwrap_or(0),
+        }
+    }
+
+    fn apply(&mut self, op: &LedgerOp) {
+        if let LedgerOp::AddEntity {
+            local: Some(local), ..
+        } = op
+        {
+            self.locals.insert(*local, self.next_entity + 1);
+        }
+        let locals = &self.locals;
+        let Ok(op) = op.clone().try_map(&mut |r| match r {
+            EntityRef::Id(id) => Ok(id),
+            EntityRef::New(n) => locals.get(&n).copied().ok_or(()),
+        }) else {
+            return;
+        };
+        match op {
+            LedgerOp::AddEntity {
+                kind,
+                name,
+                age,
+                other_names,
+                age_confirmed,
+                ..
+            } => {
+                self.next_entity += 1;
+                self.world.entities.push(Entity {
+                    id: self.next_entity,
+                    kind,
+                    norm_name: normalize::name(&name),
+                    name,
+                    age,
+                    other_names,
+                    age_confirmed,
+                });
+            }
+            LedgerOp::AddFact {
+                slot,
+                text,
+                canon,
+                source,
+                seen_by,
+                ..
+            } => self.add_fact(slot, text, canon, source, seen_by),
+            LedgerOp::SupersedeFact { old, new } => {
+                let replacement = self.next_fact + 1;
+                self.update_fact(old, |f| f.superseded_by = Some(replacement));
+                self.world.live_facts.retain(|f| f.id != old);
+                self.add_fact(new.slot, new.text, new.canon, new.source, new.seen_by);
+            }
+            LedgerOp::EstablishFact { fact_id } => self.update_fact(fact_id, |f| {
+                if f.canon == Canon::Possible && f.superseded_by.is_none() {
+                    f.canon = Canon::Established;
+                }
+            }),
+            LedgerOp::Know {
+                holder,
+                fact_id,
+                claim_id,
+                how,
+                arrives_at,
+            } => self.know(holder, fact_id, claim_id, how, arrives_at),
+            LedgerOp::AddClaim {
+                claim,
+                listeners,
+                delay_min,
+            } => {
+                self.next_claim += 1;
+                let claim_id = self.next_claim;
+                self.world.claims.push(Claim {
+                    id: claim_id,
+                    claim,
+                    turn_id: 0,
+                });
+                let arrives_at = self
+                    .world
+                    .clock_min
+                    .saturating_add(ClockMin::from(delay_min));
+                let mut unique = HashSet::new();
+                for holder in listeners.into_iter().filter(|h| unique.insert(*h)) {
+                    self.know(holder, None, Some(claim_id), Knowing::Told, arrives_at);
+                }
+            }
+            LedgerOp::AdvanceClock { minutes } => {
+                let before = self.world.clock_min;
+                self.world.clock_min = before.saturating_add(ClockMin::from(minutes));
+                self.promote_seen(Some(before), None);
+            }
+            _ => {}
+        }
+    }
+
+    /// `apply` of `AddFact`, then the `Know` row of each witness (the rows
+    /// `Store::commit` adds for `seen_by`).
+    fn add_fact(
+        &mut self,
+        slot: Slot<EntityId>,
+        text: String,
+        canon: Canon,
+        source: FactSource,
+        seen_by: Vec<EntityId>,
+    ) {
+        let key = normalize::key(&slot.key);
+        let pc_seen = self.pc.is_some_and(|pc| seen_by.contains(&pc));
+        let mut canon = if matches!(
+            source,
+            FactSource::Proposal | FactSource::Stake | FactSource::Correction
+        ) && canon != Canon::Possible
+        {
+            if pc_seen {
+                Canon::Persistent
+            } else {
+                Canon::Established
+            }
+        } else {
+            canon
+        };
+        let open = format!("{OPEN_KEY_PREFIX}{key}");
+        let outcome_slot = self
+            .world
+            .facts
+            .iter()
+            .any(|f| f.slot.subject == slot.subject && f.slot.key == open);
+        if canon == Canon::Persistent && (is_state_key(&key) || outcome_slot) {
+            canon = Canon::Established;
+        }
+        self.next_fact += 1;
+        let id = self.next_fact;
+        let mut holders = Vec::new();
+        for holder in seen_by {
+            if !holders.contains(&holder) {
+                holders.push(holder);
+            }
+        }
+        let fact = Fact {
+            id,
+            slot: Slot {
+                subject: slot.subject,
+                value: normalize::value(&slot.value),
+                key,
+            },
+            text,
+            canon,
+            source,
+            created_turn: 0,
+            superseded_by: None,
+            seen_by: holders.clone(),
+        };
+        // A canon write retires a live departure record on its slot.
+        if canon != Canon::Possible && fact.slot.key == "location" {
+            let retired: Vec<u64> = self
+                .world
+                .live_facts
+                .iter()
+                .filter(|f| {
+                    f.slot.subject == fact.slot.subject
+                        && f.slot.key == "location"
+                        && f.slot.value.is_empty()
+                        && f.canon == Canon::Possible
+                })
+                .map(|f| f.id)
+                .collect();
+            for old in retired {
+                self.update_fact(old, |f| f.superseded_by = Some(id));
+                self.world.live_facts.retain(|f| f.id != old);
+            }
+        }
+        self.world.facts.push(fact.clone());
+        self.world.live_facts.push(fact);
+        let clock = self.world.clock_min;
+        for holder in holders {
+            self.know(holder, Some(id), None, Knowing::Witnessed, clock);
+        }
+    }
+
+    /// `apply` of `Know`: one row, learned now; a PC witness that has
+    /// arrived promotes the fact.
+    fn know(
+        &mut self,
+        holder: EntityId,
+        fact_id: Option<u64>,
+        claim_id: Option<u64>,
+        how: Knowing,
+        arrives_at: ClockMin,
+    ) {
+        self.world.knowledge.push(Knowledge {
+            holder,
+            fact_id,
+            claim_id,
+            how,
+            learned_at: self.world.clock_min,
+            arrives_at,
+            turn: 0,
+        });
+        if how == Knowing::Witnessed
+            && fact_id.is_some()
+            && Some(holder) == self.pc
+            && arrives_at <= self.world.clock_min
+        {
+            self.promote_seen(None, fact_id);
+        }
+    }
+
+    /// The store's `promote_seen`: a live Possible fact that the PC
+    /// witnessed, with an arrived row (after `after`, when given), becomes
+    /// Established when it is the only such fact on its slot and no live
+    /// canon fact holds the slot.
+    fn promote_seen(&mut self, after: Option<ClockMin>, fact_id: Option<u64>) {
+        let Some(pc) = self.pc else {
+            return;
+        };
+        let clock = self.world.clock_min;
+        let witnessed: HashSet<u64> = self
+            .world
+            .knowledge
+            .iter()
+            .filter(|k| k.holder == pc && k.how == Knowing::Witnessed)
+            .filter(|k| k.arrives_at <= clock && after.is_none_or(|a| k.arrives_at > a))
+            .filter_map(|k| k.fact_id)
+            .filter(|id| fact_id.is_none_or(|f| f == *id))
+            .collect();
+        let candidates: Vec<(u64, EntityId, String)> = self
+            .world
+            .live_facts
+            .iter()
+            .filter(|f| f.canon == Canon::Possible && witnessed.contains(&f.id))
+            .map(|f| (f.id, f.slot.subject, f.slot.key.clone()))
+            .collect();
+        for (id, subject, key) in &candidates {
+            let alone = candidates
+                .iter()
+                .filter(|(_, s, k)| s == subject && k == key)
+                .count()
+                == 1;
+            let held = self.world.live_facts.iter().any(|f| {
+                f.slot.subject == *subject && f.slot.key == *key && f.canon != Canon::Possible
+            });
+            if alone && !held {
+                self.update_fact(*id, |f| f.canon = Canon::Established);
+            }
+        }
+    }
+
+    /// Changes the fact `id` in both lists of the view.
+    fn update_fact(&mut self, id: u64, change: impl Fn(&mut Fact)) {
+        for list in [&mut self.world.facts, &mut self.world.live_facts] {
+            if let Some(f) = list.iter_mut().find(|f| f.id == id) {
+                change(f);
+            }
+        }
     }
 }
 

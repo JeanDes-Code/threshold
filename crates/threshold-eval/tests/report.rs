@@ -125,7 +125,7 @@ fn town_secret_is_a_forbidden_token() {
     let dir = root().join("fixtures/town");
     let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 1).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 1, None).unwrap();
     load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
     let view = store.snapshot(campaign).unwrap();
 
@@ -158,7 +158,7 @@ fn town() -> (threshold_core::store::Store, u64) {
     let dir = root().join("fixtures/town");
     let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 1).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 1, None).unwrap();
     load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
     (store, campaign)
 }
@@ -1380,7 +1380,7 @@ fn play_basics_counts_each_step() {
     let dir = root().join("fixtures/town");
     let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 1).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 1, None).unwrap();
     load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
     let view = store.snapshot(campaign).unwrap();
     let id = |name: &str| view.entity_by_name(name).unwrap().id;
@@ -1547,7 +1547,7 @@ fn open_items_counts_right_and_wrong_closes() {
     let dir = root().join("fixtures/town");
     let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 1).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 1, None).unwrap();
     load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
     let view = store.snapshot(campaign).unwrap();
     let id = |name: &str| view.entity_by_name(name).unwrap().id;

@@ -324,7 +324,8 @@ impl Ctx<'_> {
         let seed =
             load_adventure_seed(&dir.join("adventure-seed.toml")).map_err(|e| e.to_string())?;
         let mut store = Store::open_in_memory().map_err(|e| e.to_string())?;
-        let campaign = create_campaign(&mut store, &seed, rng_seed).map_err(|e| e.to_string())?;
+        let campaign =
+            create_campaign(&mut store, &seed, rng_seed, None).map_err(|e| e.to_string())?;
         load_world(&mut store, campaign, &dir.join("world.toml")).map_err(|e| e.to_string())?;
         setup(&mut store, campaign)?;
         let engine = Engine::new(store, (self.gm)(), Box::new(D10), vec![], campaign);

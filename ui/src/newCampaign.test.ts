@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdventureSeed, AgeLine, DraftView, EntryRef, GapKind } from "./api";
 import {
   CANCEL_NOTE,
+  DETAIL_LEVELS,
   DOCUMENT_MAX_BYTES,
   readDocument,
   addEntry,
@@ -21,6 +22,7 @@ import {
   factEditFields,
   cutSections,
   cutSentence,
+  detailOf,
   failureText,
   fieldId,
   focusTarget,
@@ -38,10 +40,12 @@ import {
   elapsedText,
   saveArgs,
   sectionOf,
+  selectedDetail,
   shownName,
   splitList,
   stageLabel,
   typeName,
+  withDetail,
   withStoredAges,
   type ReviewForm,
 } from "./newCampaign";
@@ -808,5 +812,24 @@ describe("age facts after a store answer", () => {
     // A row that changed under the Player's hands keeps the Player's text.
     const moved = view({ ...held, knowledge: held.knowledge.slice(1) });
     expect(withStoredAges(held, moved)).toBe(held);
+  });
+});
+
+describe("the Detail Level select", () => {
+  it("the Detail Level select starts at excluded and saves the chosen level", () => {
+    expect(DETAIL_LEVELS.map(([level]) => level)).toEqual(["excluded", "implied", "explicit"]);
+    const f = formOfView(view(form()));
+    expect(selectedDetail(f.seed)).toBe("excluded");
+    // A draft saved before the field existed reads as excluded too.
+    const old = { ...f.seed } as Partial<AdventureSeed>;
+    delete old.detail;
+    expect(selectedDetail(old as AdventureSeed)).toBe("excluded");
+
+    const chosen = withDetail(f, detailOf("implied"));
+    expect(saveArgs(chosen).seed.detail).toBe("implied");
+    expect(saveArgs(f).seed.detail).toBe("excluded");
+    expect(saveArgs(withDetail(f, detailOf("explicit"))).seed.detail).toBe("explicit");
+    // A value the select never offers changes nothing to the safe default.
+    expect(detailOf("everything")).toBe("excluded");
   });
 });

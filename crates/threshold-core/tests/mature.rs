@@ -1,25 +1,33 @@
-//! The adults-only gate (mature content module, Task 1): the Detail Level,
-//! the age rule over stored and confirmed ages, the namesake rule, the
-//! stance rule and the final refusal. Neutral fixtures only.
+//! The adults-only gate (mature content module, Tasks 1 and 2): the Detail
+//! Level, the age rule over stored and confirmed ages, the namesake rule,
+//! the stance rule, the final refusal, who is at the PC's place after the
+//! ops of a Turn, the reserved `age` key and the telling of an intimate
+//! Turn. Neutral fixtures only.
 
 mod support;
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use support::*;
 use threshold_core::{
     CallKind, RecordedGm,
     checks::{CheckKind, Rejection, to_ops, validate},
+    context::seen_present,
     domain::{
-        Canon, DecisionProposal, DetailLevel, EntityKind, EntityRef, FactDraft, FactSource, Handle,
-        LedgerOp, SeedEntity, Slot, Stance, Verdict,
+        ActionKind, Canon, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef, FactDraft,
+        FactSource, Handle, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict,
     },
-    mature::{Blocked, RefusalKind, clearance},
+    mature::{Blocked, RefusalKind, Told, after, clearance, stored_intimate, told},
+    normalize,
     pack::ContentPack,
     rules::D10,
     store::{Store, WorldView},
     turn::{Engine, TurnError},
     view::{REFUSAL_ADULTS_ONLY, refusal_text},
+    world::{advance, with_arrival, with_witnessed_events, written_slots},
 };
 
 fn src() -> PathBuf {
@@ -389,6 +397,239 @@ fn the_sample_pack_asks_to_ignore_the_age_rule_and_the_check_rejects() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].kind, CallKind::Propose);
     assert!(calls[0].prompt.system.contains("ignore all age rules"));
+}
+
+// --- Task 2: the reserved age key, presence after the ops, telling ---------
+
+/// Path 11: a proposal fact on the key `age` is dropped with a note. The
+/// gate reads the stored age only, so Pip (17) still blocks the Turn.
+#[test]
+fn a_fact_on_the_age_key_changes_no_clearance() {
+    let mut w = confirmed_gate();
+    let pip = w.pip;
+    bring(&mut w, pip, "Gate Square");
+
+    // `settle` drops every carrier of the key, on any subject, one note each.
+    let mut p = proposal(Verdict::Allowed);
+    p.facts = vec![
+        fact(slot(e(pip), "age", "30"), Seen::Pc, vec![]),
+        fact(slot(e(w.orsel), " Age ", "60"), Seen::Gm, vec![]),
+        fact(slot(e(w.orsel), "mood", "calm"), Seen::Pc, vec![]),
+    ];
+    p.check = Some(check(
+        None,
+        slot(e(pip), "age", "31"),
+        slot(e(w.brann), "age", "40"),
+    ));
+    p.schedule = Some(threshold_core::domain::EventDraft {
+        in_minutes: 30,
+        actor: e(w.orsel),
+        goal: None,
+        text: "Orsel files a record.".into(),
+        effects: vec![slot(e(pip), "age", "21"), slot(e(w.orsel), "mood", "busy")],
+        seen_by: vec![],
+        public: false,
+        moves_actor_to: None,
+    });
+    let (settled, notes) = threshold_core::checks::settle(p, &w.view);
+    let dropped = notes.iter().filter(|n| n.contains("key age")).count();
+    assert_eq!(dropped, 5, "{notes:?}");
+    assert_eq!(settled.facts.len(), 1);
+    let check = settled.check.as_ref().unwrap();
+    assert_eq!((&check.win, &check.lose), (&None, &None));
+    assert_eq!(settled.schedule.as_ref().unwrap().effects.len(), 1);
+
+    // A plain Turn commits no fact on `age`.
+    let mut plain = proposal(Verdict::Allowed);
+    plain.facts = vec![fact(slot(e(pip), "age", "30"), Seen::Pc, vec![])];
+    let mut tagged = intimate(&w, Stance::Comply);
+    tagged.facts = vec![fact(slot(e(pip), "age", "30"), Seen::Pc, vec![])];
+    let gm = RecordedGm::new(
+        vec![
+            serde_json::to_string(&plain).unwrap(),
+            serde_json::to_string(&tagged).unwrap(),
+        ],
+        vec!["Pip shrugs.".into()],
+    );
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    engine
+        .play_turn("t1".into(), "I ask Pip a question.", &mut |_| {})
+        .unwrap();
+    let view = engine.store().snapshot(w.campaign).unwrap();
+    assert!(
+        view.facts.iter().all(|f| f.slot.key != "age"),
+        "{:?}",
+        view.facts
+    );
+
+    // An intimate Turn that says Pip is 30 is still refused for Pip.
+    let err = engine
+        .play_turn("t2".into(), "I lean closer.", &mut |_| {})
+        .expect_err("refused");
+    let TurnError::Refused { kind, blocked } = err else {
+        panic!("expected a refusal, got {err:?}");
+    };
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![pip]));
+    let view = engine.store().snapshot(w.campaign).unwrap();
+    let pip_row = view.entities.iter().find(|e| e.id == pip).unwrap();
+    assert_eq!((pip_row.age, pip_row.age_confirmed), (Some(17), false));
+}
+
+/// The ops one Turn commits for `p`, built as `turn::resolve` builds them:
+/// `to_ops`, the World Clock and its due World Events, perception on
+/// arrival and of the witnessed events.
+fn turn_ops(view: &WorldView, p: &DecisionProposal) -> Vec<LedgerOp> {
+    let valid = validate(p, view).unwrap();
+    let mut ops = to_ops(valid, None, view).ops;
+    let written = written_slots(&ops);
+    ops.extend(
+        advance(view, p.minutes, &written)
+            .into_iter()
+            .filter(|op| !matches!(op, LedgerOp::AdvanceClock { .. })),
+    );
+    let ops = with_arrival(view, ops, view.clock_min + u64::from(p.minutes));
+    with_witnessed_events(view, ops).0
+}
+
+/// Plays `p` as one committed Turn and checks `mature::after` against the
+/// snapshot after the Commit: world truth, what the PC knows is here, and
+/// the PC's place. Returns the presence it computed.
+fn step(w: &mut World, p: &DecisionProposal) -> threshold_core::mature::Presence {
+    let ops = turn_ops(&w.view, p);
+    let presence = after(&w.view, &ops);
+    w.commit(ops);
+    let truth: BTreeSet<u64> = w.view.present().into_iter().collect();
+    let seen: BTreeSet<u64> = seen_present(&w.view).into_iter().collect();
+    let place = w
+        .view
+        .live_fact(w.ada, "location")
+        .map(|f| normalize::value(&f.slot.value));
+    assert_eq!(presence.truth, truth, "world truth after the Commit");
+    assert_eq!(presence.seen, seen, "what the PC knows is here");
+    assert_eq!(presence.pc_place, place, "the PC's place");
+    presence
+}
+
+/// A World Event due now that sets `subject`'s location to `place`. A
+/// `witnessed` event is public and has `subject` among its witnesses, so a
+/// PC who stands with `subject` sees it happen.
+fn schedule_move(w: &mut World, subject: u64, place: &str, witnessed: bool) {
+    let at = w.view.clock_min;
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: format!("Someone goes to {place}."),
+        trigger: Trigger::At(at),
+        actors: vec![EntityRef::Id(subject)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![Effect::SetFact {
+            slot: Slot {
+                subject: EntityRef::Id(subject),
+                key: "location".into(),
+                value: place.into(),
+            },
+            text: format!("They are at {place}."),
+            seen_by: vec![],
+        }],
+        seen_by: if witnessed {
+            vec![EntityRef::Id(subject)]
+        } else {
+            vec![]
+        },
+        public: witnessed,
+    }]);
+}
+
+/// Oracle: over a move, an arrival event, a departure event, a new NPC and
+/// a hidden arrival, `after` gives the presence the next snapshot holds.
+#[test]
+fn presence_after_matches_the_next_snapshot() {
+    let mut seed = adventure_seed();
+    seed.entities.push(SeedEntity {
+        name: "Moth".into(),
+        kind: EntityKind::Npc,
+        age: Some(16),
+        other_names: vec![],
+        hidden: true,
+    });
+    seed.decided.push(seed_fact("Moth", "location", "far road"));
+    let mut w = World::with_seed(seed);
+    let moth = w.view.entity_by_name("Moth").unwrap().id;
+    let market = w.add_place("Market");
+    let mut wait = proposal(Verdict::Allowed);
+    wait.minutes = 5;
+
+    // A plain Turn changes nobody's place.
+    let start = step(&mut w, &wait);
+    assert!(start.truth.contains(&w.orsel));
+
+    // The PC moves to the market, where Pip stands.
+    let mut walk = proposal(Verdict::Allowed);
+    walk.action = ActionKind::Move;
+    walk.move_to = Some(e(market));
+    walk.minutes = 10;
+    let moved = step(&mut w, &walk);
+    assert!(moved.truth.contains(&w.pip) && moved.seen.contains(&w.pip));
+    assert!(!moved.truth.contains(&w.orsel));
+    assert_eq!(moved.pc_place.as_deref(), Some("market"));
+
+    // A public World Event brings Orsel to the market.
+    let orsel = w.orsel;
+    schedule_move(&mut w, orsel, "Market", true);
+    let arrived = step(&mut w, &wait);
+    assert!(arrived.truth.contains(&orsel));
+
+    // A World Event takes Pip away, before the PC's eyes, to a place the
+    // PC cannot name: a departure record.
+    let pip = w.pip;
+    schedule_move(&mut w, pip, "gate square", true);
+    let left = step(&mut w, &wait);
+    assert!(!left.truth.contains(&pip) && !left.seen.contains(&pip));
+    assert!(
+        w.view
+            .live_facts
+            .iter()
+            .any(|f| f.slot.subject == pip && f.slot.key == "location" && f.slot.value.is_empty()),
+        "a departure record"
+    );
+
+    // A new NPC joins the PC.
+    let mut meet = wait.clone();
+    meet.new_npcs = vec![new_npc(1, "Kett", 34)];
+    let met = step(&mut w, &meet);
+    let kett = w.view.entity_by_name("Kett").unwrap().id;
+    assert!(met.truth.contains(&kett));
+
+    // A hidden character arrives, unseen.
+    schedule_move(&mut w, moth, "Market", false);
+    let hidden = step(&mut w, &wait);
+    assert!(hidden.truth.contains(&moth));
+    assert!(!hidden.seen.contains(&moth));
+}
+
+/// G4 in Task 2: an intimate Turn is told by implication, any other Turn
+/// plainly. The stored proposal keeps the tag for a later `renarrate`.
+#[test]
+fn an_intimate_turn_is_told_by_implication_only() {
+    let w = confirmed_gate();
+    assert_eq!(told(&w.view, &w.view, true), Told::Implied);
+    assert_eq!(told(&w.view, &w.view, false), Told::Plain);
+
+    let record = |intimate: bool| {
+        let mut p = proposal(Verdict::Allowed);
+        p.intimate = intimate;
+        serde_json::json!({ "proposal": p, "reactions": [], "events": [] }).to_string()
+    };
+    assert!(stored_intimate(&record(true)));
+    assert!(!stored_intimate(&record(false)));
+    assert!(!stored_intimate("{}"));
+    assert!(!stored_intimate("not json"));
 }
 
 /// Every Rust file under `dir`, recursively.

@@ -301,7 +301,7 @@ fn interrupted_narration_recoverable() {
         .join(format!("turn-interrupted-{}.sqlite", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let mut store = Store::open(&path).unwrap();
-    let campaign = create_campaign(&mut store, &adventure_seed(), 7).unwrap();
+    let campaign = create_campaign(&mut store, &adventure_seed(), 7, None).unwrap();
     let gm = RecordedGm::new(
         vec![json(&proposal(Verdict::Allowed))],
         vec!["You look around.".into()],
@@ -518,7 +518,7 @@ fn arrival_shows_open_npcs_and_keeps_hidden_out() {
     });
     seed.entities.push(place("Market"));
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();
     let view = store.snapshot(campaign).unwrap();
     let id = |name: &str| view.entities.iter().find(|e| e.name == name).unwrap().id;
     let ada = id("Ada");
@@ -1201,7 +1201,7 @@ fn stored_action_reads_the_proposal_record() {
 #[test]
 fn turn_makes_the_same_model_calls() {
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &adventure_seed(), 7).unwrap();
+    let campaign = create_campaign(&mut store, &adventure_seed(), 7, None).unwrap();
     let gm = RecordedGm::new(
         vec![json(&proposal(Verdict::Allowed))],
         vec![
@@ -1219,6 +1219,16 @@ fn turn_makes_the_same_model_calls() {
         kinds(&gm),
         [CallKind::Narrate, CallKind::Propose, CallKind::Narrate]
     );
+
+    // An intimate Turn of confirmed adults makes the same two calls: the
+    // gate after the World Events and the implied telling add none.
+    let w0 = gate_at_implied(false);
+    let tagged = json(&intimate_with_brann(&w0, Stance::Comply));
+    let (mut engine, _w, gm) = engine_for(w0, vec![tagged], vec!["Brann smiles."]);
+    engine
+        .play_turn("t1".into(), "I lean closer.", &mut |_| {})
+        .unwrap();
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
 }
 
 // --- QA, 2026-11-10 -----------------------------------------------------------
@@ -2238,4 +2248,209 @@ fn a_retry_keeps_the_tag_of_a_first_attempt_that_did_not_parse() {
         refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
     assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![w.pip]));
     assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Propose]);
+}
+
+// --- Task 2: the gate after the World Events (G3), implied telling ---------
+
+/// Adds a character with a confirmed age at `place`, with raw ops: an age
+/// confirmed through the core, as a built Seed Draft would write it.
+fn add_confirmed(w: &mut World, name: &str, age: u16, place: &str) -> u64 {
+    w.commit(vec![
+        LedgerOp::AddEntity {
+            local: Some(1),
+            kind: threshold_core::domain::EntityKind::Npc,
+            name: name.into(),
+            age: Some(age),
+            other_names: vec![],
+            age_confirmed: true,
+        },
+        LedgerOp::AddFact {
+            slot: threshold_core::domain::Slot {
+                subject: EntityRef::New(1),
+                key: "location".into(),
+                value: place.into(),
+            },
+            text: format!("{name} stands at {place}."),
+            canon: threshold_core::domain::Canon::Established,
+            source: FactSource::Proposal,
+            seen_by: vec![],
+            causes: vec![],
+        },
+    ]);
+    w.view.entity_by_name(name).unwrap().id
+}
+
+/// A World Event due at once that brings `subject` to the gate square.
+fn arrival_event(w: &mut World, subject: u64, public: bool) -> u64 {
+    let at = w.view.clock_min;
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: "Someone walks up to the gate.".into(),
+        trigger: threshold_core::domain::Trigger::At(at),
+        actors: vec![EntityRef::Id(subject)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![threshold_core::domain::Effect::SetFact {
+            slot: threshold_core::domain::Slot {
+                subject: EntityRef::Id(subject),
+                key: "location".into(),
+                value: "gate square".into(),
+            },
+            text: "They reach the gate square.".into(),
+            seen_by: vec![],
+        }],
+        seen_by: vec![],
+        public,
+    }]);
+    w.view.events_scheduled.iter().map(|e| e.id).max().unwrap()
+}
+
+/// Path 13: a minor whose age is confirmed, brought by a World Event due
+/// this Turn. G2 passes on the place before the Turn; G3 refuses after the
+/// event, with no retry and no Commit, so the event fires in a later Turn.
+#[test]
+fn an_event_that_brings_a_minor_refuses_the_turn() {
+    let mut w0 = gate_at_implied(false);
+    let wren = add_confirmed(&mut w0, "Wren", 16, "market");
+    let event = arrival_event(&mut w0, wren, true);
+    let p = json(&intimate_with_brann(&w0, Stance::Comply));
+    let (mut engine, w, gm) = engine_for(w0, vec![p.clone(), p], vec!["never"]);
+    let before = snapshot(&engine, &w);
+    let (kind, blocked) =
+        refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![wren]));
+    assert_eq!(kinds(&gm), [CallKind::Propose]);
+    let validate: Vec<String> = steps(&engine, "t1")
+        .into_iter()
+        .filter(|(step, _)| step == "validate")
+        .map(|(_, raw)| raw)
+        .collect();
+    assert_eq!(validate, ["ok"], "G2 passed; G3 refused");
+    let now = snapshot(&engine, &w);
+    assert_eq!(now, before, "no Turn row, no op");
+    assert!(now.events_scheduled.iter().any(|e| e.id == event));
+}
+
+/// Path 14: the PC walks into a place where a minor stands. G2 reads the
+/// place before the Turn and passes; G3 reads the place after it.
+#[test]
+fn moving_into_a_place_with_a_minor_refuses_after_the_ops() {
+    let mut w0 = gate_at_implied(false);
+    let market = w0.add_place("Market");
+    let mut p = intimate_with_brann(&w0, Stance::Comply);
+    p.action = ActionKind::Move;
+    p.move_to = Some(e(market));
+    let raw = json(&p);
+    let (mut engine, w, gm) = engine_for(w0, vec![raw.clone(), raw], vec!["never"]);
+    let before = snapshot(&engine, &w);
+    let (kind, blocked) =
+        refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![w.pip]));
+    assert_eq!(kinds(&gm), [CallKind::Propose]);
+    assert_eq!(snapshot(&engine, &w), before);
+}
+
+/// Path 13, hidden: the PC does not see the arrival. The age rule reads
+/// world truth, and the Player reads the one fixed sentence.
+#[test]
+fn a_hidden_minor_who_arrives_refuses_the_turn() {
+    let mut seed = adventure_seed();
+    seed.detail = threshold_core::domain::DetailLevel::Implied;
+    seed.entities.push(SeedEntity {
+        name: "Moth".into(),
+        kind: threshold_core::domain::EntityKind::Npc,
+        age: Some(16),
+        other_names: vec![],
+        hidden: true,
+    });
+    seed.decided.push(SeedFact {
+        subject: "Moth".into(),
+        key: "location".into(),
+        value: "far road".into(),
+        text: "Moth waits on the far road.".into(),
+    });
+    let mut w0 = World::with_seed(seed);
+    let ids = [w0.ada, w0.orsel, w0.brann];
+    w0.confirm(&ids);
+    let moth = w0.view.entity_by_name("Moth").unwrap().id;
+    arrival_event(&mut w0, moth, false);
+    let p = json(&intimate_with_brann(&w0, Stance::Comply));
+    let (mut engine, w, gm) = engine_for(w0, vec![p.clone(), p], vec!["never"]);
+    let before = snapshot(&engine, &w);
+    let result = engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks());
+    let text = result.as_ref().map_err(ToString::to_string).unwrap_err();
+    assert_eq!(text, threshold_core::view::REFUSAL_ADULTS_ONLY);
+    let (kind, blocked) = refused(result);
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![moth]));
+    assert_eq!(kinds(&gm), [CallKind::Propose]);
+    assert_eq!(snapshot(&engine, &w), before);
+}
+
+/// An intimate Turn is told with the core's implied line at the head of
+/// the narration's recent block, and so is its `renarrate`. A plain Turn
+/// is not, and the narrator's prefix is the same for both.
+#[test]
+fn an_intimate_turn_is_narrated_with_the_implied_line() {
+    use threshold_core::context::IMPLIED_LINE;
+    let w0 = gate_at_implied(false);
+    let tagged = json(&intimate_with_brann(&w0, Stance::Comply));
+    let plain = json(&proposal(Verdict::Allowed));
+    let (mut engine, _w, gm) = engine_for(
+        w0,
+        vec![plain, tagged],
+        vec!["You wait.", "Brann smiles.", "Brann smiles again."],
+    );
+    engine
+        .play_turn("t1".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    let close = engine
+        .play_turn("t2".into(), "I lean closer.", &mut no_chunks())
+        .unwrap();
+    engine.renarrate(close.turn_id, &mut no_chunks()).unwrap();
+    let narrations = prompts(&gm, CallKind::Narrate);
+    assert_eq!(narrations.len(), 3);
+    assert!(!narrations[0].recent.contains(IMPLIED_LINE));
+    assert!(narrations[1].recent.starts_with(IMPLIED_LINE));
+    assert!(narrations[2].recent.starts_with(IMPLIED_LINE));
+    for later in &narrations[1..] {
+        assert_eq!(later.system, narrations[0].system);
+        assert_eq!(later.stable, narrations[0].stable);
+    }
+}
+
+/// G3 reads world truth after the ops, which holds every entity at the
+/// PC's place. A thing or a place standing there is no character: it
+/// blocks nothing, as it blocks nothing before the Turn (G2).
+#[test]
+fn a_thing_at_the_place_blocks_no_intimate_turn() {
+    let mut w0 = gate_at_implied(false);
+    w0.commit(vec![
+        LedgerOp::AddEntity {
+            local: Some(1),
+            kind: threshold_core::domain::EntityKind::Item,
+            name: "Lantern".into(),
+            age: None,
+            other_names: vec![],
+            age_confirmed: false,
+        },
+        LedgerOp::AddFact {
+            slot: threshold_core::domain::Slot {
+                subject: EntityRef::New(1),
+                key: "location".into(),
+                value: "gate square".into(),
+            },
+            text: "A lantern hangs by the gate.".into(),
+            canon: threshold_core::domain::Canon::Established,
+            source: FactSource::Proposal,
+            seen_by: vec![],
+            causes: vec![],
+        },
+    ]);
+    let lantern = w0.view.entity_by_name("Lantern").unwrap().id;
+    assert!(w0.view.present().contains(&lantern));
+    let tagged = json(&intimate_with_brann(&w0, Stance::Comply));
+    let (mut engine, _w, gm) = engine_for(w0, vec![tagged], vec!["Brann smiles."]);
+    engine
+        .play_turn("t1".into(), "I lean closer.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
 }

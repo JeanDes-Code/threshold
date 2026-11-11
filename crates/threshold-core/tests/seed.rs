@@ -71,7 +71,7 @@ mode = "to_agree"
 
 fn campaign(seed: &AdventureSeed) -> (Store, CampaignId) {
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, seed, 11).unwrap();
+    let campaign = create_campaign(&mut store, seed, 11, None).unwrap();
     (store, campaign)
 }
 
@@ -123,7 +123,17 @@ fn stable_block_holds_the_agreed_fields() {
     let (store, campaign) = campaign(&seed);
     let view = store.snapshot(campaign).unwrap();
     let gm = proposal_prompt(&view, &[], "I wait.").stable;
-    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None).stable;
+    let narrator = narration_prompt(
+        &view,
+        &[],
+        &[],
+        &[],
+        &[],
+        "I wait.",
+        None,
+        &threshold_core::mature::Told::Plain,
+    )
+    .stable;
 
     for block in [&gm, &narrator] {
         assert!(block.contains("A ferry crossing at night"), "{block}");
@@ -163,7 +173,17 @@ fn stable_block_holds_the_agreed_fields() {
     // Without `min_age`, no age line.
     let (store, campaign) = self::campaign(&town_seed());
     let view = store.snapshot(campaign).unwrap();
-    let block = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None).stable;
+    let block = narration_prompt(
+        &view,
+        &[],
+        &[],
+        &[],
+        &[],
+        "I wait.",
+        None,
+        &threshold_core::mature::Told::Plain,
+    )
+    .stable;
     assert!(!block.contains("years old"), "{block}");
     assert!(block.contains("Wren (age 29)"), "{block}");
 }

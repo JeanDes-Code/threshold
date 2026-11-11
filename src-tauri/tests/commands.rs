@@ -22,7 +22,7 @@ use threshold_app::{
 use threshold_core::{
     Gm, GmError, Prompt, RecordedGm,
     build::{AgeSource, BuildCheck, BuildFailure, DraftState, EntryRef, GapKind, Progress, Stage},
-    domain::{EntityKind, Handle},
+    domain::{DetailLevel, EntityKind, Handle},
     rules::D10,
     store::{Store, TurnKind},
     turn::Engine,
@@ -1452,4 +1452,100 @@ fn an_age_edit_then_confirm_reaches_the_known_fact() {
     let later = rig.drafts.save_draft(&id, seed, held).unwrap();
     assert_eq!(tobin_fact(&later), new);
     assert_eq!(tobin_fact(&rig.drafts.get_draft(&id).unwrap()), new);
+}
+
+// --- Mature content module, Task 2 -----------------------------------------
+
+/// The one Campaign file of the rig, opened, and its world.
+fn built_world(rig: &Rig) -> threshold_core::store::WorldView {
+    let files = rig.campaign_files();
+    assert_eq!(files.len(), 1, "{files:?}");
+    let path = rig.dir.path().join("campaigns").join(&files[0]);
+    let store = Store::open_existing(&path).unwrap();
+    store.snapshot(store.campaigns().unwrap()[0]).unwrap()
+}
+
+/// `save_draft` carries the Detail Level the Player chose, unchanged, and
+/// the Campaign it builds starts at that level. A new draft is `excluded`.
+#[test]
+fn save_draft_carries_the_detail_level() {
+    let rig = Rig::new();
+    rig.push(&draft_outputs());
+    let view = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap();
+    assert_eq!(view.seed.detail, DetailLevel::Excluded);
+    let id = view.draft_id.clone();
+    let mut seed = view.seed.clone();
+    seed.detail = DetailLevel::Implied;
+    let saved = rig
+        .drafts
+        .save_draft(&id, seed, view.knowledge.clone())
+        .unwrap();
+    assert_eq!(saved.seed.detail, DetailLevel::Implied);
+    assert_eq!(
+        rig.drafts.get_draft(&id).unwrap().seed.detail,
+        DetailLevel::Implied
+    );
+    let confirmed = rig.confirm_all(&saved);
+    rig.drafts.approve_draft(&confirmed.draft_id).unwrap();
+    rig.push(&build_outputs());
+    rig.drafts.start_build(&id, &mut |_| {}).unwrap();
+    assert_eq!(built_world(&rig).detail, DetailLevel::Implied);
+}
+
+/// Path 1: `start_build` gives the ages the Player confirmed to the
+/// Campaign file. Every PC and NPC of a built draft is confirmed; no other
+/// entity is.
+#[test]
+fn start_build_marks_confirmed_ages() {
+    let rig = Rig::new();
+    let id = rig.approved_draft();
+    rig.push(&build_outputs());
+    rig.drafts.start_build(&id, &mut |_| {}).unwrap();
+    let world = built_world(&rig);
+    let characters: Vec<(&str, bool)> = world
+        .entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+        .map(|e| (e.name.as_str(), e.age_confirmed))
+        .collect();
+    assert_eq!(
+        characters,
+        [
+            ("Mira Holt", true),
+            ("Tobin Reed", true),
+            ("Ada Venn", true)
+        ]
+    );
+    assert!(
+        world
+            .entities
+            .iter()
+            .filter(|e| !matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+            .all(|e| !e.age_confirmed)
+    );
+}
+
+/// Path 7: the two-file fixture path (`Session::new_campaign`) confirms no
+/// age.
+#[test]
+fn the_fixture_path_confirms_no_age() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut session = session(dir.path(), &gm);
+    town(&mut session);
+    let campaigns = dir.path().join("campaigns");
+    let file = std::fs::read_dir(&campaigns)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "sqlite"))
+        .unwrap();
+    drop(session);
+    let store = Store::open_existing(&file).unwrap();
+    let world = store.snapshot(store.campaigns().unwrap()[0]).unwrap();
+    assert!(world.entities.iter().any(|e| e.age.is_some()));
+    assert!(world.entities.iter().all(|e| !e.age_confirmed));
 }

@@ -24,8 +24,8 @@ use crate::{
         one_line, opening_prompt, perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
-        ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityId, EntityKind, EntityRef,
-        FactSource, Handle, LedgerOp, Reaction, Verdict,
+        ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, EntityId, EntityKind,
+        EntityRef, FactSource, Handle, LedgerOp, Reaction, Verdict,
     },
     mature::{self, RefusalKind},
     model::{Gm, GmError, Prompt},
@@ -148,13 +148,16 @@ impl From<GmError> for TurnError {
 }
 
 /// Creates a campaign and, in its Setup Turn, lets the PC witness who openly
-/// stands at the starting place (perception on arrival).
+/// stands at the starting place (perception on arrival). `ages` are the
+/// ages the Player confirmed in the Seed Draft (`build::confirmed_ages`);
+/// `None` confirms no age (`Store::create_campaign_with`).
 pub fn create_campaign(
     store: &mut Store,
     adventure_seed: &AdventureSeed,
     rng_seed: u64,
+    ages: Option<&ConfirmedAges>,
 ) -> Result<CampaignId, StoreError> {
-    store.create_campaign_with(adventure_seed, rng_seed, |view| {
+    store.create_campaign_with(adventure_seed, rng_seed, ages, |view| {
         let pc = view.entities.iter().find(|e| e.kind == EntityKind::Pc);
         match pc.and_then(|pc| view.live_fact(pc.id, "location")) {
             Some(location) => world::arrival(view, &location.slot.value, view.clock_min),
@@ -184,6 +187,8 @@ struct Committed<'a> {
     turn: Option<(ActionKind, Verdict)>,
     /// Outcome lines the engine adds: a wait cut short (`wait_cut_line`).
     extra: Vec<String>,
+    /// The Turn was committed with `intimate`: G4 (`mature::told`) reads it.
+    intimate: bool,
 }
 
 /// The result of the steps before the Commit.
@@ -199,6 +204,8 @@ struct Planned {
     verdict: Verdict,
     /// The minutes a wait Intent stated (`world::intent_minutes`), if any.
     wait_asked: Option<u32>,
+    /// The proposal's `intimate`, after the tag of the first attempt stuck.
+    intimate: bool,
 }
 
 pub const OOC_RULES: &str = "\
@@ -440,6 +447,7 @@ impl Engine {
                 })
                 .into_iter()
                 .collect(),
+            intimate: mature::stored_intimate(&stored.record.proposal_json),
         };
         let narration = self.narrate(
             &stored.record.op_id,
@@ -540,6 +548,7 @@ impl Engine {
                 .and_then(|asked| wait_cut_line(planned.minutes, asked))
                 .into_iter()
                 .collect(),
+            intimate: planned.intimate,
         };
         let narration = self
             .narrate(
@@ -567,7 +576,9 @@ impl Engine {
     /// the reactions of NPCs the PC knows are here: the others are offscreen
     /// intents. A plan or a World Event text that names a secret is dropped
     /// (`guard_plans`, `guard_events`). `now` is the current state: the
-    /// stream filter reads it (`narrate_through`).
+    /// stream filter reads it (`narrate_through`). G4: `mature::told`
+    /// chooses how the Turn is told; an intimate Turn is told by
+    /// implication only, with the core's own line.
     fn narrate(
         &mut self,
         op_id: &str,
@@ -606,6 +617,7 @@ impl Engine {
         if !committed.events.is_empty() && events.is_empty() && !event_fact {
             events.push(QUIET_EVENT_LINE.to_owned());
         }
+        let told = mature::told(view_after, now, committed.intimate);
         let prompt = narration_prompt_with(
             view_after,
             &self.packs,
@@ -615,6 +627,7 @@ impl Engine {
             intent,
             committed.turn,
             &committed.extra,
+            &told,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
@@ -767,7 +780,11 @@ impl Engine {
     }
 
     /// Roll, `to_ops`, World Clock, perception on arrival and of World
-    /// Events, for a valid proposal.
+    /// Events, for a valid proposal. Then G3 (ADR 0008): for an intimate
+    /// proposal, everyone at the PC's place once these ops are committed,
+    /// arrivals of this Turn included, must be cleared too. A failure is a
+    /// final Refusal before the Commit, so a due World Event fires in a
+    /// later Turn.
     fn resolve(
         &mut self,
         op_id: &str,
@@ -804,6 +821,20 @@ impl Engine {
         timings.world_ms = ms(step);
         self.log(op_id, "world", &Prompt::default(), "", step)?;
 
+        if p.intimate {
+            let step = Instant::now();
+            let presence = mature::after(view, &ops);
+            if let Err(blocked) = mature::check_after(p, view, &presence) {
+                let raw = format!("adults only after the ops: {:?}", blocked.who);
+                self.log(op_id, "gate_after", &Prompt::default(), &raw, step)?;
+                return Err(TurnError::Refused {
+                    kind: RefusalKind::AdultsOnly,
+                    blocked: blocked.who,
+                });
+            }
+            self.log(op_id, "gate_after", &Prompt::default(), "ok", step)?;
+        }
+
         let proposal_json = json!({
             "proposal": p,
             "reactions": resolved.reactions,
@@ -822,6 +853,7 @@ impl Engine {
             action: p.action,
             verdict: p.verdict,
             wait_asked,
+            intimate: p.intimate,
         })
     }
 

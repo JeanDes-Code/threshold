@@ -23,6 +23,7 @@ use crate::{
         ActionKind, EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, Verdict,
         is_open_key, is_state_key, outcome_key,
     },
+    mature::Told,
     model::Prompt,
     normalize,
     pack::ContentPack,
@@ -30,7 +31,16 @@ use crate::{
     world::{hidden, name_parts, openly_here, pc_can_name, pc_knowledge},
 };
 
-/// The narrator's rules. The last line is `speech::RULE`, the speech mark.
+/// The text of `INTIMATE_RULE`, as a literal, so `NARRATION_RULES` can
+/// hold it with `concat!`.
+macro_rules! intimate_rule_text {
+    () => {
+        "Tell intimate or sexual content only as far as a line headed INTIMATE TURN allows; with no such line, tell none."
+    };
+}
+
+/// The narrator's rules. The line before the last is `INTIMATE_RULE`; the
+/// last is `speech::RULE`, the speech mark.
 pub const NARRATION_RULES: &str = concat!(
     "\
 You are the narrator of a single-player tabletop role-playing game. Write what the player character (PC) perceives, in the second person, in the story language.
@@ -42,9 +52,23 @@ Only the people the outcome lists as here are present. Nobody comes or goes unle
 Never say that more time passed than the time line of THIS TURN states. Do not open with the time; tell it only when it matters.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
 ",
+    intimate_rule_text!(),
+    "\n",
     crate::speech::rule_text!(),
     "\n"
 );
+
+/// The narrator's one stable line on intimate content (data shape 3.10),
+/// in neutral words. It is part of `NARRATION_RULES`, placed before
+/// `speech::RULE`, and never changes, so the cached prefix stays the same
+/// on every Turn. The owner reads it before the merge.
+pub const INTIMATE_RULE: &str = intimate_rule_text!();
+
+/// The head of the narration's `recent` block when the Turn is told by
+/// implication (`mature::Told::Implied`): the narrator passes over the
+/// intimate moment without describing it. One line, in neutral words. The
+/// owner reads it before the merge.
+pub const IMPLIED_LINE: &str = "INTIMATE TURN (implied): tell only that the moment happens and how the characters are with each other, then pass over it without describing it. Add no act, word or feeling of the PC beyond the player intent.\n";
 
 /// The lines that follow `NARRATION_RULES` in the opening prompt.
 pub const OPENING_RULES: &str = "\
@@ -272,6 +296,7 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn narration_prompt(
     view_after: &WorldView,
     packs: &[ContentPack],
@@ -280,6 +305,7 @@ pub fn narration_prompt(
     reactions: &[Reaction],
     intent: &str,
     turn: Option<(ActionKind, Verdict)>,
+    told: &Told,
 ) -> Prompt {
     narration_prompt_with(
         view_after,
@@ -290,11 +316,15 @@ pub fn narration_prompt(
         intent,
         turn,
         &[],
+        told,
     )
 }
 
 /// `narration_prompt` with outcome lines the engine adds after the
 /// perceived ops: a wait cut short (`turn::wait_cut_line`, bug pass 5).
+/// `told` is the telling `mature::told` chose (G4): `Implied` opens the
+/// `recent` block with `IMPLIED_LINE`. The rules, stable and scene blocks
+/// do not depend on it.
 #[allow(clippy::too_many_arguments)]
 pub fn narration_prompt_with(
     view_after: &WorldView,
@@ -305,8 +335,13 @@ pub fn narration_prompt_with(
     intent: &str,
     turn: Option<(ActionKind, Verdict)>,
     extra: &[String],
+    told: &Told,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
+    let head = match told {
+        Told::Plain => "",
+        Told::Implied => IMPLIED_LINE,
+    };
     Prompt {
         system: with_fragments(NARRATION_RULES, packs),
         stable: format!(
@@ -315,7 +350,10 @@ pub fn narration_prompt_with(
             names_block(view_after, NamesAudience::Narrator)
         ),
         scene: scene(&r),
-        recent: recent(&r, perceived, events, reactions, intent, turn, extra),
+        recent: format!(
+            "{head}{}",
+            recent(&r, perceived, events, reactions, intent, turn, extra)
+        ),
     }
 }
 

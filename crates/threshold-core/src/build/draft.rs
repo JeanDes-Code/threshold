@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use super::BuildFailure;
 use crate::{
     context::{ADVENTURE_BLOCK_MAX_CHARS, adventure_block_chars},
-    domain::{AdventureSeed, EntityKind, OtherName, SeedEntity, alias_key, is_open_key},
+    domain::{
+        AdventureSeed, ConfirmedAges, EntityKind, OtherName, SeedEntity, alias_key, is_open_key,
+    },
     normalize,
 };
 
@@ -474,6 +476,25 @@ pub fn approve(draft: &mut SeedDraft) -> Result<(), Vec<Gap>> {
         draft.state = DraftState::Approved;
     }
     Ok(())
+}
+
+/// The ages the Player confirmed, for the Campaign file (data shape 3.2).
+/// It computes the gaps again and fails on any gap, whatever state the
+/// draft file says: an old file that says `approved` gives no confirmed
+/// age. Each entry is a character's kind, exact main name and the age the
+/// Player confirmed for it.
+pub fn confirmed_ages(draft: &SeedDraft) -> Result<ConfirmedAges, Vec<Gap>> {
+    let found = gaps(draft);
+    if !found.is_empty() {
+        return Err(found);
+    }
+    let entries = characters(&draft.seed)
+        .filter_map(|(row, name, kind, age)| {
+            let age = age.filter(|_| age_confirmed(draft, row, age))?;
+            Some((kind, name.to_owned(), age))
+        })
+        .collect();
+    Ok(ConfirmedAges::new(entries))
 }
 
 /// A Player edit of the draft (the `save_draft` command): it replaces the

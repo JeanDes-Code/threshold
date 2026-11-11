@@ -15,6 +15,8 @@ import {
   type StartSeed,
 } from "../api";
 import {
+  DETAIL_HINT,
+  DETAIL_LEVELS,
   SECTIONS,
   addEntry,
   afterFlush,
@@ -28,6 +30,7 @@ import {
   createSaver,
   cutSections,
   cutSentence,
+  detailOf,
   dropTyped,
   factEditFields,
   fieldId,
@@ -45,8 +48,10 @@ import {
   saveArgs,
   savedName,
   sectionOf,
+  selectedDetail,
   shownName,
   typeName,
+  withDetail,
   withStoredAges,
   type ReviewForm,
   type Row,
@@ -681,6 +686,19 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
         <label htmlFor={fieldId("min_age")}>Minimum age of any character</label>
         <AgeInput path="min_age" label="Minimum age of any character" value={seed.min_age} nullable onChange={(min_age) => setSeed({ min_age })} />
         {toFix("min_age")}
+        <label htmlFor={fieldId("detail")}>Intimate scenes</label>
+        <select
+          id={fieldId("detail")}
+          value={selectedDetail(seed)}
+          onChange={(ev) => update((f) => withDetail(f, detailOf(ev.target.value)), true)}
+        >
+          {DETAIL_LEVELS.map(([level, label]) => (
+            <option key={level} value={level}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <p className="review-hint">{DETAIL_HINT}</p>
       </>
     ),
   };

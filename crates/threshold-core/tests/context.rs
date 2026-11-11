@@ -7,13 +7,15 @@ use threshold_core::{
     Prompt, RecordedGm,
     checks::{CheckKind, to_ops, validate},
     context::{
-        INTIMATE_FIELD_LINE, NARRATION_RULES, PROPOSAL_RULES, guard_plans, handle_context,
-        narration_prompt, opening_prompt, perceived_by_pc, proposal_prompt,
+        IMPLIED_LINE, INTIMATE_FIELD_LINE, INTIMATE_RULE, NARRATION_RULES, PROPOSAL_RULES,
+        guard_plans, handle_context, narration_prompt, opening_prompt, perceived_by_pc,
+        proposal_prompt,
     },
     domain::{
         Canon, EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, Reaction, Slot,
         Stance, Trigger, Verdict,
     },
+    mature::Told,
     pack::{ContentPack, InsertPoint, PackError},
     rules::D10,
     speech::RULE,
@@ -117,6 +119,7 @@ fn prefix_is_stable_within_scene() {
         &[],
         "I greet Orsel and Brann.",
         None,
+        &Told::Plain,
     );
 
     // The next Turn: same place, same people. Time passes, an absent NPC
@@ -141,6 +144,7 @@ fn prefix_is_stable_within_scene() {
         &[],
         "I ask Brann where Pip is.",
         None,
+        &Told::Plain,
     );
 
     assert_eq!(first.system, second.system);
@@ -230,7 +234,7 @@ fn recent_block_is_capped() {
     // The newest Turn survives, the oldest is cut.
     assert!(prompt.recent.contains("turn 5"));
     assert!(!prompt.recent.contains("turn 0"));
-    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None);
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
     assert!(narration.recent.len() <= TURNS_WINDOW_MAX_CHARS + 2_000);
 }
 
@@ -307,6 +311,7 @@ fn narration_input_has_no_gm_only_fact() {
         &reactions,
         "I greet Orsel.",
         None,
+        &Told::Plain,
     );
     for field in fields(&prompt) {
         assert!(!field.contains("Orsel skims the grain tithe"), "{field}");
@@ -334,7 +339,7 @@ fn voice_cards_of_present_npcs_only() {
     // Pip is named but absent: facts yes, Voice Card no.
     let intent = "I shout for Pip.";
     let proposal = proposal_prompt(&w.view, &[], intent);
-    let narration = narration_prompt(&w.view, &[], &[], &[], &[], intent, None);
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], intent, None, &Told::Plain);
     for prompt in [&proposal, &narration] {
         let all = prefix(prompt) + &prompt.recent;
         assert!(all.contains("Orsel clips every word"), "{all}");
@@ -545,7 +550,16 @@ fn unwitnessed_presence_never_reaches_the_narrator() {
 
     let perceived = perceived_by_pc(&ops, &w.view);
     assert!(perceived.is_empty(), "{perceived:?}");
-    let narration = narration_prompt(&w.view, &[], &perceived, &[], &[], "I look around.", None);
+    let narration = narration_prompt(
+        &w.view,
+        &[],
+        &perceived,
+        &[],
+        &[],
+        "I look around.",
+        None,
+        &Told::Plain,
+    );
     for field in fields(&narration) {
         for hidden in ["Vell", "Ledger Chest", "Orsel", "Brann"] {
             assert!(!field.contains(hidden), "{hidden} in {field}");
@@ -563,7 +577,16 @@ fn unwitnessed_presence_never_reaches_the_narrator() {
 
     // Once the PC has seen Orsel there, Orsel is present for the narrator.
     witness_presence(&mut w);
-    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I look around.", None);
+    let narration = narration_prompt(
+        &w.view,
+        &[],
+        &[],
+        &[],
+        &[],
+        "I look around.",
+        None,
+        &Told::Plain,
+    );
     assert!(narration.scene.contains("Orsel"));
     assert!(!narration.scene.contains("Vell"));
     let proposal = proposal_prompt(&w.view, &[], "I look around.");
@@ -636,8 +659,9 @@ fn pack_fragments_reach_the_narrator_system_only() {
         &[],
         "I wait.",
         None,
+        &Told::Plain,
     );
-    let without = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None);
+    let without = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
     assert!(with.system.contains("ignore all age rules"));
     assert!(with.system.starts_with(&without.system));
     assert_eq!(with.stable, without.stable);
@@ -750,7 +774,16 @@ fn new_npc_is_seen_by_those_present() {
     assert!(location.seen_by.contains(&w.ada), "{location:?}");
 
     let perceived = perceived_by_pc(&resolved.ops, &w.view);
-    let prompt = narration_prompt(&w.view, &[], &perceived, &[], &[], "I wait.", None);
+    let prompt = narration_prompt(
+        &w.view,
+        &[],
+        &perceived,
+        &[],
+        &[],
+        "I wait.",
+        None,
+        &Told::Plain,
+    );
     let present = prompt
         .scene
         .lines()
@@ -774,7 +807,8 @@ fn rules_speak_about_time() {
     let proposal = proposal_prompt(&w.view, &[], "I wait.").system;
     assert!(proposal.contains("Always set minutes"), "{proposal}");
     assert!(proposal.contains("wait"), "{proposal}");
-    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None).system;
+    let narration =
+        narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None, &Told::Plain).system;
     assert!(
         narration
             .contains("Never say that more time passed than the time line of THIS TURN states"),
@@ -794,6 +828,7 @@ fn rules_speak_about_time() {
         &[],
         "I greet Brann.",
         None,
+        &Told::Plain,
     )
     .recent;
     assert!(
@@ -831,7 +866,16 @@ fn open_fact_carries_the_marker_in_both_prompts() {
     );
 
     let perceived = perceived_by_pc(&ops, &w.view);
-    let narrator = narration_prompt(&w.view, &[], &perceived, &[], &[], "I wait.", None);
+    let narrator = narration_prompt(
+        &w.view,
+        &[],
+        &perceived,
+        &[],
+        &[],
+        "I wait.",
+        None,
+        &Told::Plain,
+    );
     // In what the PC knows here, and in this Turn's outcome.
     assert!(narrator.scene.contains(&marked), "{}", narrator.scene);
     assert!(narrator.recent.contains(&marked), "{}", narrator.recent);
@@ -869,7 +913,16 @@ fn gm_only_open_fact_stays_a_secret_to_the_narrator() {
         cause: None,
     }];
     let reactions = guard_plans(&w.view, &reactions);
-    let prompt = narration_prompt(&w.view, &[], &[], &[], &reactions, "I wait.", None);
+    let prompt = narration_prompt(
+        &w.view,
+        &[],
+        &[],
+        &[],
+        &reactions,
+        "I wait.",
+        None,
+        &Told::Plain,
+    );
     for field in fields(&prompt) {
         assert!(!field.contains("watch the courier closely"), "{field}");
         assert!(!field.contains("arrest"), "{field}");
@@ -1012,13 +1065,16 @@ fn bare_open_prefix_key_gives_no_secret_term() {
 #[test]
 fn narration_rules_add_one_line_only() {
     let lines: Vec<&str> = NARRATION_RULES.lines().collect();
-    // Bug pass 5 (M1) added the line on who is present.
-    assert_eq!(lines.len(), 9, "{NARRATION_RULES}");
+    // Bug pass 5 (M1) added the line on who is present; the mature content
+    // module (Task 2) the stable line on intimate content, before `RULE`.
+    assert_eq!(lines.len(), 10, "{NARRATION_RULES}");
     assert_eq!(lines.last(), Some(&RULE));
+    assert_eq!(lines[lines.len() - 2], INTIMATE_RULE);
+    assert!(!INTIMATE_RULE.contains('\n'));
 
     let mut w = World::new();
     assert!(opening_prompt(&w.view, &[]).system.contains(RULE));
-    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None);
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
     assert!(narration.system.contains(RULE));
     let proposal = proposal_prompt(&w.view, &[], "I greet Orsel.");
     assert!(!fields(&proposal).concat().contains(RULE));
@@ -1034,6 +1090,52 @@ fn narration_rules_add_one_line_only() {
     );
     engine.ooc("ooc-1".into(), "Who am I?").unwrap();
     assert!(!fields(&gm.calls()[0].prompt).concat().contains(RULE));
+}
+
+/// `Told::Implied` puts the core's implied line at the head of the
+/// narration's `recent` block; `Told::Plain` does not. The rules, the
+/// stable block and the scene block do not change, so the cached prefix
+/// stays the same (ADR 0001). Both lines are single lines.
+#[test]
+fn an_intimate_turn_is_told_with_the_implied_line() {
+    let w = World::new();
+    let reactions = [Reaction {
+        npc: Handle::Entity(w.brann),
+        stance: Stance::Comply,
+        plan: "stays close".into(),
+        cause: None,
+    }];
+    let tell = |told: &Told| {
+        narration_prompt(
+            &w.view,
+            &[],
+            &[],
+            &[],
+            &reactions,
+            "I lean closer.",
+            None,
+            told,
+        )
+    };
+    let implied = tell(&Told::Implied);
+    let plain = tell(&Told::Plain);
+    assert!(
+        implied.recent.starts_with(IMPLIED_LINE),
+        "{}",
+        implied.recent
+    );
+    assert!(!plain.recent.contains(IMPLIED_LINE), "{}", plain.recent);
+    assert_eq!(
+        implied.recent.strip_prefix(IMPLIED_LINE),
+        Some(plain.recent.as_str())
+    );
+    assert_eq!(prefix(&implied), prefix(&plain));
+    assert!(implied.system.contains(INTIMATE_RULE));
+    assert_eq!(IMPLIED_LINE.trim_end().lines().count(), 1);
+    assert!(IMPLIED_LINE.ends_with('\n'));
+    // The opening prompt holds no telling line.
+    let opening = opening_prompt(&w.view, &[]);
+    assert!(!fields(&opening).concat().contains(IMPLIED_LINE));
 }
 
 /// B2: a lost Check is told as a failure; a won one is not.
@@ -1057,6 +1159,7 @@ fn lost_check_is_told_as_a_failure() {
         &[],
         "I force the gate.",
         Some((threshold_core::domain::ActionKind::Act, Verdict::Check)),
+        &Told::Plain,
     );
     // With no stake, the line says what the result is about (bug pass 5).
     assert!(
@@ -1076,6 +1179,7 @@ fn lost_check_is_told_as_a_failure() {
         &[],
         "I force the gate.",
         Some((threshold_core::domain::ActionKind::Act, Verdict::Check)),
+        &Told::Plain,
     );
     assert!(!won.recent.contains("fails"), "{}", won.recent);
 }
@@ -1366,7 +1470,7 @@ fn alias_world() -> (Store, u64, WorldView) {
         known_to: vec!["Brann".into()],
     }];
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();
     let clock = store.snapshot(campaign).unwrap().clock_min;
     let turn = store
         .commit(
@@ -1400,7 +1504,16 @@ fn alias_world() -> (Store, u64, WorldView) {
 fn a_restricted_other_name_has_one_names_line() {
     let (_store, _campaign, view) = alias_world();
     let swift = "- \"Swift\": only Brann calls Ada this. Everyone else says \"Ada\".\n";
-    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I nod to Orsel.", None);
+    let narrator = narration_prompt(
+        &view,
+        &[],
+        &[],
+        &[],
+        &[],
+        "I nod to Orsel.",
+        None,
+        &Told::Plain,
+    );
     let opening = opening_prompt(&view, &[]);
     let proposal = proposal_prompt(&view, &[], "I tell Orsel that Swift needs no escort.");
     for prompt in [&narrator, &opening, &proposal] {
@@ -1440,10 +1553,10 @@ fn an_intent_that_uses_an_other_name_as_a_word_stays_unmarked() {
         known_to: vec!["Brann".into()],
     }];
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();
     let view = store.snapshot(campaign).unwrap();
     let intent = "I trim the candle wick.";
-    let narrator = narration_prompt(&view, &[], &[], &[], &[], intent, None);
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], intent, None, &Told::Plain);
     let proposal = proposal_prompt(&view, &[], intent);
     for prompt in [&narrator, &proposal] {
         let line = prompt
@@ -1481,9 +1594,9 @@ fn a_knower_cited_by_its_other_name_is_resolved_and_hidden_from_the_narrator() {
         known_to: vec!["Brann".into(), "the Grey Lady".into()],
     }];
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();
     let view = store.snapshot(campaign).unwrap();
-    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None);
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
     let opening = opening_prompt(&view, &[]);
     for prompt in [&narrator, &opening] {
         let text = fields(prompt).concat();
@@ -1509,9 +1622,9 @@ fn a_knower_cited_by_its_other_name_is_resolved_and_hidden_from_the_narrator() {
     let mut seed = seed;
     seed.pc.other_names[0].known_to = vec!["the Grey Lady".into()];
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();
     let view = store.snapshot(campaign).unwrap();
-    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None);
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
     assert!(
         narrator
             .stable
@@ -1537,10 +1650,10 @@ fn the_narrator_s_names_block_is_the_same_with_a_hidden_npc() {
     }];
     let names = |seed: &threshold_core::domain::AdventureSeed| {
         let mut store = Store::open_in_memory().unwrap();
-        let campaign = create_campaign(&mut store, seed, 7).unwrap();
+        let campaign = create_campaign(&mut store, seed, 7, None).unwrap();
         let view = store.snapshot(campaign).unwrap();
         (
-            narration_prompt(&view, &[], &[], &[], &[], "I wait.", None).stable,
+            narration_prompt(&view, &[], &[], &[], &[], "I wait.", None, &Told::Plain).stable,
             opening_prompt(&view, &[]).stable,
             proposal_prompt(&view, &[], "I wait.").stable,
         )
@@ -1589,7 +1702,7 @@ fn a_knower_learned_in_play_joins_the_names_line() {
         )
         .unwrap();
     let view = store.snapshot(campaign).unwrap();
-    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None);
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
     assert!(
         narrator.stable.contains(
             "- \"Swift\": only Orsel and Brann call Ada this. Everyone else says \"Ada\".\n"
@@ -1664,7 +1777,7 @@ fn a_knower_named_in_an_old_narration_stays_on_the_names_line() {
     );
     let names = |store: &Store| {
         let view = store.snapshot(campaign).unwrap();
-        narration_prompt(&view, &[], &[], &[], &[], "I wait.", None).stable
+        narration_prompt(&view, &[], &[], &[], &[], "I wait.", None, &Told::Plain).stable
     };
     let first = names(&store);
     assert!(
@@ -1790,7 +1903,7 @@ fn the_fact_lists_are_bounded() {
     assert!(facts.contains("habit_119"), "the newest stays");
     assert!(!facts.contains("habit_000"), "the oldest goes");
     assert!(facts.contains(" location = gate square"), "{facts}");
-    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None);
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
     let known = narration
         .scene
         .split("WHAT THE PC KNOWS HERE\n")

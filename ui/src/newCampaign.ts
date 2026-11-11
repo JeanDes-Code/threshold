@@ -8,6 +8,7 @@ import type {
   BuildProgress,
   BuildStage,
   Cut,
+  DetailLevel,
   DraftState,
   DraftView,
   EntityKind,
@@ -368,6 +369,36 @@ export function formOfView(view: DraftView): ReviewForm {
 /** What `save_draft` receives: never a typed name, never an age list. */
 export function saveArgs(form: ReviewForm): { seed: AdventureSeed; knowledge: KnownFact[] } {
   return { seed: form.seed, knowledge: form.knowledge };
+}
+
+/**
+ * The options of the "Intimate scenes" select (glossary: Detail Level),
+ * `excluded` first: a new Campaign starts there. The level is a setting;
+ * no age rule changes with it.
+ */
+export const DETAIL_LEVELS: readonly (readonly [DetailLevel, string])[] = [
+  ["excluded", "Left out"],
+  ["implied", "Implied, never described"],
+  ["explicit", "Explicit, only with a Content Pack that gives it"],
+];
+
+/** The hint under the "Intimate scenes" select. */
+export const DETAIL_HINT =
+  "Off by default. Only characters whose age you confirmed as 18 or more can take part. Anyone younger, or unconfirmed, in the place stops the scene.";
+
+/** The level a select value names; anything else is the safe default, `excluded`. */
+export function detailOf(value: string): DetailLevel {
+  return DETAIL_LEVELS.find(([level]) => level === value)?.[0] ?? "excluded";
+}
+
+/** The level the select shows: a draft saved before the field existed reads as `excluded`. */
+export function selectedDetail(seed: AdventureSeed): DetailLevel {
+  return detailOf(seed.detail ?? "excluded");
+}
+
+/** The form with the Detail Level the Player chose; `save_draft` carries it unchanged. */
+export function withDetail(form: ReviewForm, detail: DetailLevel): ReviewForm {
+  return { ...form, seed: { ...form.seed, detail } };
 }
 
 /** The key of a row in `typed`, in the path form of a gap. */

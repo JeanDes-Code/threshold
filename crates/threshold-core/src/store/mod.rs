@@ -4,8 +4,8 @@ mod project;
 use std::{fmt, path::Path};
 
 use crate::domain::{
-    AdventureSeed, Canon, ClaimDraft, ClockMin, DetailLevel, Effect, EntityId, EntityKind,
-    EntityRef, FactSource, Handle, Knowing, LedgerOp, OtherName, Slot, Trigger,
+    AdventureSeed, Canon, ClaimDraft, ClockMin, ConfirmedAges, DetailLevel, Effect, EntityId,
+    EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, OtherName, Slot, Trigger,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -422,14 +422,20 @@ impl Store {
         adventure_seed: &AdventureSeed,
         rng_seed: u64,
     ) -> Result<CampaignId, StoreError> {
-        self.create_campaign_with(adventure_seed, rng_seed, |_| Vec::new())
+        self.create_campaign_with(adventure_seed, rng_seed, None, |_| Vec::new())
     }
     /// `create_campaign`, plus the ops `setup` returns for the projected
     /// setup state, in the same Setup Turn and the same transaction.
+    ///
+    /// `ages` are the ages the Player confirmed in a Seed Draft with no gap
+    /// (`build::confirmed_ages`). A seed character's `AddEntity` op has
+    /// `age_confirmed: true` only when `ages` holds its kind, its exact main
+    /// name and its age. `None` (the fixture path) confirms no age.
     pub fn create_campaign_with(
         &mut self,
         adventure_seed: &AdventureSeed,
         rng_seed: u64,
+        ages: Option<&ConfirmedAges>,
         setup: impl FnOnce(&WorldView) -> Vec<LedgerOp>,
     ) -> Result<CampaignId, StoreError> {
         let tx = self.db.transaction()?;
@@ -482,6 +488,11 @@ impl Store {
                     "world is a reserved adventure seed name, main or other (entity {name})"
                 )));
             }
+            // The one writer of a confirmed age at creation: the exact
+            // entry the Player confirmed in a Seed Draft with no gap.
+            let age_confirmed = ages
+                .zip(age)
+                .is_some_and(|(ages, age)| ages.holds(kind, name, age));
             let id = project::append(
                 &tx,
                 campaign,
@@ -492,8 +503,7 @@ impl Store {
                     name: name.to_owned(),
                     age,
                     other_names: other_names.iter().map(|o| o.name.clone()).collect(),
-                    // No path confirms an age at creation yet.
-                    age_confirmed: false,
+                    age_confirmed,
                 },
             )?
             .ok_or_else(|| StoreError::Invalid("missing entity id".into()))?;

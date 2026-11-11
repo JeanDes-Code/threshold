@@ -14,8 +14,8 @@ use std::{
 
 use crate::{
     domain::{
-        AdventureSeed, Canon, Effect, EntityKind, EntityRef, FactSource, LedgerOp, OPEN_KEY_PREFIX,
-        Slot, Trigger, WorldSetup, is_open_key,
+        AdventureSeed, Canon, ConfirmedAges, Effect, EntityKind, EntityRef, FactSource, LedgerOp,
+        OPEN_KEY_PREFIX, Slot, Trigger, WorldSetup, is_open_key,
     },
     normalize,
     store::{CampaignId, CommitError, Store, StoreError, TurnKind, TurnRecord},
@@ -239,11 +239,16 @@ pub fn commit_world(
 /// neither the `.part` file nor an SQLite side file. An existing file at
 /// `path` is refused, never overwritten. A `.part` file left by an earlier
 /// failure is replaced.
+///
+/// `ages` are the ages the Player confirmed in a Seed Draft with no gap
+/// (`build::confirmed_ages`), the only source of an Age Confirmation at
+/// creation. The two-file fixture path gives `None`: no age is confirmed.
 pub fn create_campaign_file(
     path: &Path,
     seed: &AdventureSeed,
     world: &WorldSetup,
     rng_seed: u64,
+    ages: Option<&ConfirmedAges>,
 ) -> Result<(), SetupError> {
     let io = |e: io::Error| SetupError::Io(format!("{}: {e}", path.display()));
     if path.try_exists().map_err(io)? {
@@ -251,8 +256,8 @@ pub fn create_campaign_file(
     }
     let part = with_suffix(path, ".part");
     remove_part(&part);
-    let written =
-        write_part(&part, seed, world, rng_seed).and_then(|()| fs::rename(&part, path).map_err(io));
+    let written = write_part(&part, seed, world, rng_seed, ages)
+        .and_then(|()| fs::rename(&part, path).map_err(io));
     if written.is_err() {
         remove_part(&part);
     }
@@ -266,9 +271,10 @@ fn write_part(
     seed: &AdventureSeed,
     world: &WorldSetup,
     rng_seed: u64,
+    ages: Option<&ConfirmedAges>,
 ) -> Result<(), SetupError> {
     let mut store = Store::open(part)?;
-    let campaign = create_campaign(&mut store, seed, rng_seed)?;
+    let campaign = create_campaign(&mut store, seed, rng_seed, ages)?;
     commit_world(&mut store, campaign, world)
 }
 

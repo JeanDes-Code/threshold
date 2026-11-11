@@ -7,14 +7,18 @@
 //! the only caller of `domain::is_adult`.
 //!
 //! Task 1 of the plan lands the gate before the proposal is committed (G2,
-//! `check`) and the final Refusal. The scene, the telling and the buttons
-//! come in later tasks.
+//! `check`) and the final Refusal. Task 2 adds the same rule after the
+//! World Events of the Turn (G3, `after` and `check_after`) and the
+//! telling of an intimate Turn (`told`, in `text`). The scene and the
+//! buttons come in later tasks.
 
 mod gate;
+mod text;
 
 use serde::Serialize;
 
-pub use gate::{Blocked, Cleared, check, clearance};
+pub use gate::{Blocked, Cleared, Presence, after, check, check_after, clearance};
+pub use text::{Told, stored_intimate, told};
 
 use crate::{
     checks::{CheckKind, Rejection},

@@ -33,7 +33,7 @@ fn town() -> (Store, u64) {
     let dir = town_dir();
     let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed, 11).unwrap();
+    let campaign = create_campaign(&mut store, &seed, 11, None).unwrap();
     load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
     (store, campaign)
 }
@@ -148,7 +148,7 @@ fn town_campaign_file_matches_the_in_memory_campaign() {
     std::fs::create_dir_all(&folder).unwrap();
     let path = folder.join("campaign-1.sqlite");
 
-    create_campaign_file(&path, &seed, &world, 11).unwrap();
+    create_campaign_file(&path, &seed, &world, 11, None).unwrap();
     let file = Store::open_existing(&path).unwrap();
     let from_file = file.snapshot(*file.campaigns().unwrap().last().unwrap());
     drop(file);

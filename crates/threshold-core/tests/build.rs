@@ -10,7 +10,7 @@ use threshold_core::{
         SourceTextProblem, Stage, age_lines, apply_edit, approve, build_world, check_source_text,
         confirm_age, draft_from_text, gaps,
     },
-    domain::{EntityKind, OpenMode, SeedEntity},
+    domain::{DetailLevel, EntityKind, OpenMode, SeedEntity},
 };
 
 /// What one draft returned, reported and logged.
@@ -1353,4 +1353,33 @@ fn a_place_fact_is_kept_as_the_draft_files_it() {
             .all(|c| !c.prompt.recent.contains("does not name its subject")),
         "a repair note was sent"
     );
+}
+
+/// Path 5 of the mature content module: a Source Text cannot turn the
+/// module on. The seed stage's schema has no `detail` field, and a stage
+/// output that holds one still gives a draft at `excluded`. Only the
+/// Player sets the Detail Level, in the review.
+#[test]
+fn the_draft_stage_cannot_set_detail() {
+    let mut seed = seed_out();
+    seed["detail"] = json!("explicit");
+    let outputs = vec![
+        roster_out(),
+        seed,
+        knowledge(&[]),
+        knowledge(&[]),
+        knowledge(&[]),
+    ];
+    let gm = gm(&outputs);
+    let draft = run(&source(), &gm).result.unwrap();
+    assert_eq!(draft.seed.detail, DetailLevel::Excluded);
+    let calls = gm.calls();
+    let schema = &calls[1].schema;
+    assert!(
+        schema["properties"]["premise"].is_object(),
+        "the seed stage"
+    );
+    assert!(schema["properties"].get("detail").is_none(), "{schema}");
+    let text = schema.to_string();
+    assert!(!text.contains("explicit"), "{text}");
 }

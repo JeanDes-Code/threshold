@@ -36,7 +36,7 @@ fn engine_on(store: Store, campaign: u64, gm: &RecordedGm) -> Engine {
 /// A new Campaign: only its Setup Turn, no Play Turn yet.
 fn fresh(seed: &AdventureSeed, gm: &RecordedGm) -> (Engine, u64) {
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, seed, 7).unwrap();
+    let campaign = create_campaign(&mut store, seed, 7, None).unwrap();
     (engine_on(store, campaign, gm), campaign)
 }
 
@@ -237,7 +237,7 @@ fn begin_works_with_an_empty_start() {
 #[test]
 fn begin_moves_no_clock_and_fires_no_event() {
     let mut store = Store::open_in_memory().unwrap();
-    let campaign = create_campaign(&mut store, &seed_with_start(), 7).unwrap();
+    let campaign = create_campaign(&mut store, &seed_with_start(), 7, None).unwrap();
     let view = store.snapshot(campaign).unwrap();
     let orsel = view.entities.iter().find(|e| e.name == "Orsel").unwrap().id;
     // A World Event already due: only a Turn that moves the clock fires it.
