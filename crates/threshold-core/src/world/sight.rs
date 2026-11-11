@@ -484,6 +484,29 @@ fn first_names(entity: &Entity) -> impl Iterator<Item = &str> {
         .map(move |(at, _)| &name[..at])
 }
 
+/// The name parts by which a text names `entity`, cased for a match in
+/// prose (`normalize::name_pattern`, `normalize::name_in`): its main name;
+/// for a character, the leading words of the main name ("Maren" for Maren
+/// Voss), as a speech tag does (`first_names`); and every other name. The
+/// narrator's guards read it (`context::names_unheard`, review of bug pass
+/// 4, M1).
+pub fn name_parts(entity: &Entity) -> Vec<Vec<String>> {
+    let main = normalize::name_pattern(&entity.name);
+    let character = matches!(entity.kind, EntityKind::Npc | EntityKind::Pc);
+    let leading = (1..main.len())
+        .filter(|_| character)
+        .map(|n| main[..n].to_vec());
+    let others = entity
+        .other_names
+        .iter()
+        .map(|n| normalize::name_pattern(n));
+    std::iter::once(main.clone())
+        .chain(leading)
+        .chain(others)
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
 /// True when `tag`, through `normalize::name`, is the main name of `entity`
 /// or its first names (`first_names`).
 fn is_main_name(entity: &Entity, tag: &str) -> bool {

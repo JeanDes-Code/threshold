@@ -846,6 +846,67 @@ fn plan_naming_an_open_key_without_its_prefix_is_dropped() {
     assert!(guarded[0].plan.is_empty(), "{guarded:?}");
 }
 
+/// The gate seed with hidden entries: the NPC Maren Voss, also "the Grey
+/// Lady", the NPC Rose Hale, both at the gate square unseen, and the place
+/// Smugglers Cellar.
+fn hidden_names_world() -> World {
+    use threshold_core::domain::OtherName;
+    let mut seed = adventure_seed();
+    let mut maren = npc("Maren Voss", 40);
+    maren.hidden = true;
+    maren.other_names = vec![OtherName {
+        name: "the Grey Lady".into(),
+        known_to: vec![],
+    }];
+    let mut rose = npc("Rose Hale", 33);
+    rose.hidden = true;
+    let mut cellar = place("Smugglers Cellar");
+    cellar.hidden = true;
+    seed.entities.extend([maren, rose, cellar]);
+    for who in ["Maren Voss", "Rose Hale"] {
+        seed.decided.push(seed_fact(who, "location", "gate square"));
+    }
+    World::with_seed(seed)
+}
+
+/// Review of bug pass 4, M1: the narrator's guard matched a hidden or
+/// unnameable entity by its full main name only, so "Brann whispers to
+/// Maren" reached the narrator. It now uses the name parts of a speech tag
+/// (the leading word of a character's main name, and every other name),
+/// with the name's own capitals, so a common word ("a rose") is no name.
+/// The event guard and the plan guard share it; the plan guard also drops
+/// a place the PC cannot name.
+#[test]
+fn the_guards_drop_a_first_name_an_other_name_and_a_hidden_place() {
+    let w = hidden_names_world();
+    let leaks = [
+        "Brann whispers to Maren",
+        "Brann bows to the Grey Lady",
+        "Brann slips down to the Smugglers Cellar",
+        "Brann nods at Maren Voss",
+    ];
+    let kept = ["Brann picks a rose from the gate", "Brann yawns"];
+    let texts: Vec<String> = leaks.iter().chain(&kept).map(|t| (*t).to_owned()).collect();
+    assert_eq!(
+        threshold_core::context::guard_events(&w.view, &texts),
+        kept.map(str::to_owned)
+    );
+    let plan = |text: &str| Reaction {
+        npc: Handle::Entity(w.brann),
+        stance: Stance::Neutral,
+        plan: text.into(),
+        cause: None,
+    };
+    let reactions: Vec<Reaction> = texts.iter().map(|t| plan(t)).collect();
+    let plans: Vec<String> = guard_plans(&w.view, &reactions)
+        .into_iter()
+        .map(|r| r.plan)
+        .collect();
+    let mut wanted = vec![String::new(); leaks.len()];
+    wanted.extend(kept.map(str::to_owned));
+    assert_eq!(plans, wanted);
+}
+
 /// A key that is the open prefix alone names no secret: it gives no term, so
 /// a plan that says "pending" is kept. The value still counts.
 #[test]

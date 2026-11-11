@@ -27,7 +27,7 @@ use crate::{
     normalize,
     pack::ContentPack,
     store::WorldView,
-    world::{hidden, openly_here, pc_can_name, pc_knowledge},
+    world::{hidden, name_parts, openly_here, pc_can_name, pc_knowledge},
 };
 
 /// The narrator's rules. The last line is `speech::RULE`, the speech mark.
@@ -103,13 +103,17 @@ pub fn perceived_by_pc(ops: &[LedgerOp], view_after: &WorldView) -> Vec<LedgerOp
 /// or value appears in the plan as whole words, after normalization
 /// (case, articles, `_` and punctuation count as word breaks). A key or
 /// value that is an entity name is not a secret word: names are public.
+/// A plan that names an entity the PC must not hear of (`names_unheard`:
+/// a hidden NPC by a part of its name, a place the PC cannot name) is
+/// dropped too, as an event text is (review of bug pass 4, M1).
 pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
     let secrets = secret_terms(view);
+    let unheard = unheard_names(view);
     reactions
         .iter()
         .map(|r| {
             let mut r = r.clone();
-            if quotes(&secrets, &r.plan) {
+            if quotes(&secrets, &r.plan) || names_any(&unheard, &r.plan) {
                 r.plan.clear();
             }
             r
@@ -126,11 +130,11 @@ pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
 /// for his debt" is seen). So is a text that names an entity the PC must
 /// not hear of (`names_unheard`).
 pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
-    let mut forbidden = secret_values(view);
-    forbidden.extend(unheard_names(view));
+    let secrets = secret_values(view);
+    let unheard = unheard_names(view);
     events
         .iter()
-        .filter(|text| !quotes(&forbidden, text))
+        .filter(|text| !quotes(&secrets, text) && !names_any(&unheard, text))
         .cloned()
         .collect()
 }
@@ -145,20 +149,29 @@ pub const QUIET_EVENT_LINE: &str = "Nothing the PC notices happens.";
 /// (`world::openly_here`) nor is known to the PC (seen here, or the subject
 /// of a PC Belief); or a place, a Faction or a thing the PC cannot name
 /// (`world::pc_can_name`, review B1: "Orsel slips down to the Smugglers
-/// Cellar"). `guard_events` drops such a text, and a public event's effect
-/// whose fact text or value names such an entity is not learned
-/// (`world::with_witnessed_events`).
+/// Cellar"). `guard_events` and `guard_plans` drop such a text, and a
+/// public event's effect whose fact text or value names such an entity is
+/// not learned (`world::with_witnessed_events`).
+///
+/// A text names an entity by one of its name parts (`world::name_parts`,
+/// the rule of a speech tag: the main name, its leading words for a
+/// character, every other name), as whole words with the name's own
+/// capitals (`normalize::name_in`): "Brann whispers to Maren" names the
+/// hidden Maren Voss, "a rose" does not name Rose Hale (review of bug pass
+/// 4, M1). A part that is also a name part of an entity the PC may hear of
+/// is left out, so a hidden "Orsel Voss" does not guard the visible Orsel.
 pub fn names_unheard(view: &WorldView, text: &str) -> bool {
-    quotes(&unheard_names(view), text)
+    names_any(&unheard_names(view), text)
 }
 
+/// The name parts of every entity the PC must not hear of, cased
+/// (`normalize::name_pattern`).
 fn unheard_names(view: &WorldView) -> Vec<Vec<String>> {
     let present = seen_present(view);
     let known: HashSet<EntityId> = pc_knowledge(view).into_iter().map(|b| b.subject).collect();
     let named = pc_can_name(view);
-    view.entities
-        .iter()
-        .filter(|e| match e.kind {
+    let (unheard, heard): (Vec<&crate::store::Entity>, Vec<&crate::store::Entity>) =
+        view.entities.iter().partition(|e| match e.kind {
             EntityKind::Npc => {
                 hidden(view, e.id)
                     || !(openly_here(view, e.id)
@@ -167,10 +180,25 @@ fn unheard_names(view: &WorldView) -> Vec<Vec<String>> {
             }
             EntityKind::Place | EntityKind::Faction | EntityKind::Item => !named.contains(&e.id),
             EntityKind::Pc => false,
-        })
-        .map(|e| words(&e.name))
-        .filter(|name| !name.is_empty())
+        });
+    let lower =
+        |part: &[String]| -> Vec<String> { part.iter().map(|w| w.to_lowercase()).collect() };
+    let public: HashSet<Vec<String>> = heard
+        .into_iter()
+        .flat_map(name_parts)
+        .map(|part| lower(&part))
+        .collect();
+    unheard
+        .into_iter()
+        .flat_map(name_parts)
+        .filter(|part| !part.is_empty() && !public.contains(&lower(part)))
         .collect()
+}
+
+/// True when `text` names one of `parts` (`normalize::name_in`).
+fn names_any(parts: &[Vec<String>], text: &str) -> bool {
+    let text = normalize::cased_words(text);
+    parts.iter().any(|part| normalize::name_in(&text, part))
 }
 
 /// The values of `secret_facts`: what an event text must not state.
