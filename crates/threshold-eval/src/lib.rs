@@ -400,8 +400,15 @@ impl Ctx<'_> {
                         *t.leak_tokens.entry(token.clone()).or_default() += 1;
                     }
                 }
+                let minutes = s
+                    .engine
+                    .store()
+                    .turn(o.turn_id)
+                    .ok()
+                    .flatten()
+                    .map_or(0, |t| t.record.clock_after - t.record.clock_before);
                 format!(
-                    "ok {} ms (propose {} ms, narrate {} ms){}",
+                    "ok {} ms (propose {} ms, narrate {} ms, {minutes} game min){}",
                     o.timings.total_ms,
                     o.timings.propose_ms,
                     o.timings.narrate_ms,

@@ -33,6 +33,10 @@ struct Stats {
     judge_errors: usize,
     contests: usize,
     rolled: usize,
+    /// Contests whose Narration tells the contest and its result (judge).
+    told_contest: usize,
+    /// Committed Narrations whose first sentence speaks of the time.
+    time_first: usize,
     accepts: usize,
     closed: usize,
     unknown: usize,
@@ -123,6 +127,17 @@ fn closed_in(s: &Session, pending: &scenario::Pending, turn: TurnId) -> Result<b
         .any(|i| i.subject == subject && i.key == key && i.closed_in == Some(turn)))
 }
 
+/// True when the first sentence of `narration` speaks of the time passing:
+/// it names minutes or hours.
+pub(crate) fn opens_with_time(narration: &str) -> bool {
+    let first = narration
+        .split(['.', '!', '?', '\n'])
+        .find(|s| !s.trim().is_empty())
+        .unwrap_or("")
+        .to_lowercase();
+    ["minute", "hour"].iter().any(|w| first.contains(w))
+}
+
 pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     let sc: scenario::PlayBasics = scenario::load(&ctx.config.root, "play_basics")?;
     let mut st = Stats::default();
@@ -142,6 +157,9 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                 Ok(o) => {
                     st.total_ms.push(o.timings.total_ms);
                     st.committed += 1;
+                    if opens_with_time(&o.narration) {
+                        st.time_first += 1;
+                    }
                     if clock(&s)? > clock_before {
                         st.advanced += 1;
                     }
@@ -195,8 +213,20 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                 }
                 BasicKind::Contest => {
                     st.contests += 1;
-                    if outcome.is_some_and(|o| o.roll.is_some()) {
+                    if let Some(o) = outcome
+                        && let Some(roll) = o.roll
+                    {
                         st.rolled += 1;
+                        let result = if roll.success { "won" } else { "lost" };
+                        let task = format!(
+                            "The player character had a contest with another character, and the player character {result} it.\n\nPlayer intent: {}\n\nThe narration:\n{}\n\nDoes the narration tell the contest and that the player character {result} it (yes), or does it leave the contest or its result out (no)?",
+                            step.intent, o.narration
+                        );
+                        match ctx.ask(&task, &["yes", "no"]).as_deref() {
+                            Some("yes") => st.told_contest += 1,
+                            Some(_) => {}
+                            None => st.judge_errors += 1,
+                        }
                     }
                 }
                 BasicKind::UnknownMove => {
@@ -264,6 +294,16 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         out,
         "- Contests with a Roll: {}",
         ratio(st.rolled, st.contests)
+    );
+    let _ = writeln!(
+        out,
+        "- Contests told with their result (judge): {}",
+        ratio(st.told_contest, st.rolled)
+    );
+    let _ = writeln!(
+        out,
+        "- Narrations that open with the time (committed Turns): {}",
+        ratio(st.time_first, st.committed)
     );
     let _ = writeln!(
         out,

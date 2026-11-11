@@ -1423,6 +1423,8 @@ fn play_basics_counts_each_step() {
         "- Turns with a clock advance > 0 (committed Turns): 8 / 8 (100%)",
         "- Impossible acts narrated as failure (judge): 1 / 1 (100%) (0 judge errors)",
         "- Contests with a Roll: 1 / 1 (100%)",
+        "- Contests told with their result (judge): 1 / 1 (100%)",
+        "- Narrations that open with the time (committed Turns): 0 / 8 (0%)",
         "- Pending items closed: 1 / 1 (100%)",
         "- Moves to an unknown place that left the PC in place: 1 / 1 (100%); told as not arriving (judge): 1 / 1 (100%)",
         "- Turns failed: 0 / 8 (0%)",

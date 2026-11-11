@@ -21,4 +21,4 @@ pub use sight::{
     Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, SightTurn, pc_can_name, pc_sight,
     tagged, unnameable_names,
 };
-pub use wait::{WAIT_DEFAULT_MIN, WAIT_MAX_MIN, wait_minutes};
+pub use wait::{WAIT_DEFAULT_MIN, WAIT_MAX_MIN, asks_to_wait, wait_minutes};

@@ -63,6 +63,7 @@ pub fn to_ops(
         b.ops.push(LedgerOp::RecordRoll {
             seed: roll.seed,
             difficulty: i8::try_from(roll.difficulty).expect("a Ruleset difficulty is at most 10"),
+            against: check.against.map(entity_ref),
             stakes: serde_json::json!({ "win": check.win, "lose": check.lose }),
             factors: serde_json::to_value(&check.factors)
                 .expect("factors are plain data and always serialize"),
@@ -475,7 +476,7 @@ impl Builder<'_> {
             _ => None,
         }
         .unwrap_or_else(|| draft.subject.to_string());
-        format!("{name}: {} = {}", draft.key, draft.value)
+        crate::domain::slot_sentence(&name, &draft.key, &draft.value)
     }
 }
 

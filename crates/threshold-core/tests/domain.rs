@@ -298,3 +298,52 @@ fn alias_key_is_the_one_writer() {
     assert!(is_alias_key(&alias_key("Jade")));
     assert!(!is_alias_key("location"));
 }
+
+/// Bug pass 3: a slot write the model makes has no sentence of its own. The
+/// core builds a plain one: the Player never reads `key = value`.
+#[test]
+fn a_slot_reads_as_a_plain_sentence() {
+    use threshold_core::domain::slot_sentence;
+    for (name, key, value, sentence) in [
+        (
+            "Teodor Brandt",
+            "injury",
+            "bruised_wrist",
+            "Teodor Brandt is injured (bruised wrist).",
+        ),
+        (
+            "Teodor Brandt",
+            "location",
+            "The Copper Kettle",
+            "Teodor Brandt is at The Copper Kettle.",
+        ),
+        (
+            "Tithe archive",
+            "condition",
+            "locked",
+            "Tithe archive is locked.",
+        ),
+        ("Ada", "carrying", "a lantern", "Ada carries a lantern."),
+        (
+            "Doul",
+            "grudge",
+            "Wren",
+            "Doul holds a grudge against Wren.",
+        ),
+        (
+            "Ludo Brenn",
+            "debt",
+            "increased",
+            "Ludo Brenn's debt is now increased.",
+        ),
+        (
+            "Doul",
+            "mood_now",
+            "sore_loser",
+            "Doul's mood now is now sore loser.",
+        ),
+    ] {
+        assert_eq!(slot_sentence(name, key, value), sentence, "{key}");
+        assert!(!sentence.contains(" = "));
+    }
+}

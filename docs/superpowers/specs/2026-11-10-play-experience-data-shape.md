@@ -430,7 +430,7 @@ A review of this shape before the plan is useful. No reviewer has read it yet.
 
 - **Leads.** Design 5.3 lists Leads under Open. The core stores no Lead. The Open list shows Open Items only, by the anti-goal "no state that the core does not hold".
 - **Bubbles after the stream.** See section 5.
-- **Fact text from play.** A fact that a Turn writes has the text `name: key = value` (`checks/ops.rs:420`). `view` has one function that makes its line. The wording is the builder's. A plain sentence for each play fact needs model text, and this project adds none.
+- **Fact text from play.** A fact that a Turn writes had the text `name: key = value`. Changed in bug pass 3 (2026-11-11): the core builds a plain sentence from a fixed template per key (`domain::slot_sentence`, no model text), and `view` reads an old `name: key = value` text as that sentence. A key with no template reads "<name>'s <key words> is now <value words>.".
 
 No question needs the owner before the build. The first two limits are calls that the owner can veto.
 

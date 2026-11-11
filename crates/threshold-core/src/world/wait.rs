@@ -34,3 +34,19 @@ pub fn wait_minutes(view: &WorldView, requested: u32) -> u32 {
         .filter_map(|until| u32::try_from(until).ok())
         .fold(wanted, u32::min)
 }
+
+/// The words by which an Intent asks for a wait (bug pass 3).
+const WAIT_WORDS: &[&str] = &[
+    "wait", "waits", "waiting", "rest", "rests", "resting", "sleep", "sleeps", "sleeping", "nap",
+    "naps", "doze", "dozes", "linger", "lingers", "until", "while", "bide", "idle", "relax",
+];
+
+/// True when `intent` asks for a wait: one of `WAIT_WORDS` as a whole word,
+/// or "pass the time". The model labels a passive act `wait` ("I warm my
+/// hands at the fire" took 60 minutes in QA), so the engine owns the length
+/// of a wait only when the Player asked for one.
+pub fn asks_to_wait(intent: &str) -> bool {
+    let words = crate::normalize::name_words(intent);
+    words.iter().any(|w| WAIT_WORDS.contains(&w.as_str()))
+        || words.windows(3).any(|w| w == ["pass", "the", "time"])
+}

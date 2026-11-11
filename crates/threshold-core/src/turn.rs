@@ -631,13 +631,14 @@ impl Engine {
             let retry = attempt == "propose_retry";
             let parsed = match parse(&raw) {
                 Ok(p) => {
-                    let (mut p, mut notes) = checks::settle(engine_time(p, view), view);
+                    let (mut p, mut notes) = checks::settle(engine_time(p, view, intent), view);
                     // A contested act with no Check: one repair note on the
                     // first attempt, a default Check on the retry (ADR 0007).
                     // A contested `check` verdict gets it at once.
                     if retry || checks::checks_now(&p) {
                         notes.extend(checks::default_check(&mut p, view));
                     }
+                    notes.extend(checks::oppose(&mut p, view));
                     if !notes.is_empty() {
                         self.log(op_id, "settle", &Prompt::default(), &notes.join("\n"), step)?;
                     }
@@ -820,12 +821,21 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
 }
 
 /// The engine owns the time of a Turn, so the model cannot freeze the World
-/// Clock with `minutes: 0`. A wait takes `world::wait_minutes`. A contested
-/// wait is an act, never that engine-owned wait. Any other Turn with no
-/// minutes takes the Ruleset default of its action (`rules::default_minutes`).
-/// It runs before the Commit checks, so they see the final minutes.
-fn engine_time(mut p: DecisionProposal, view: &WorldView) -> DecisionProposal {
-    if p.action == ActionKind::Wait && p.contested {
+/// Clock with `minutes: 0`. A wait takes `world::wait_minutes`, but only when
+/// the Intent asks for one (`world::asks_to_wait`): the model labels a
+/// passive act `wait`, and "I warm my hands at the fire" took 60 minutes
+/// (bug pass 3). Such a wait is an act. A contested wait is an act too, and
+/// so is a contested move with no destination: the QA arm-wrestle came as
+/// `move` with `move_to: null`, and the narrator told a move that did not
+/// happen. Any other Turn with no minutes takes the Ruleset default of its
+/// action (`rules::default_minutes`). It runs before the Commit checks, so
+/// they see the final minutes. Relabelling the action adds no PC act.
+fn engine_time(mut p: DecisionProposal, view: &WorldView, intent: &str) -> DecisionProposal {
+    let not_a_wait = p.contested || !world::asks_to_wait(intent);
+    if p.action == ActionKind::Wait && not_a_wait {
+        p.action = ActionKind::Act;
+    }
+    if p.action == ActionKind::Move && p.contested && p.move_to.is_none() {
         p.action = ActionKind::Act;
     }
     if p.action == ActionKind::Wait {

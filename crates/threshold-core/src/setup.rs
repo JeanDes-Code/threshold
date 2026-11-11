@@ -172,7 +172,7 @@ pub fn commit_world(
                     key: normalize::key(&e.key),
                     value: normalize::value(&e.value),
                 },
-                text: format!("{}: {} = {}", e.subject, e.key, e.value),
+                text: crate::domain::slot_sentence(&e.subject, &e.key, &e.value),
                 seen_by: Vec::new(),
             });
         }

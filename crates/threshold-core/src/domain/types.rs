@@ -50,6 +50,24 @@ pub fn outcome_key(key: &str) -> Option<&str> {
         .filter(|rest| !rest.is_empty())
 }
 
+/// A plain English sentence for a slot write that has no sentence of its
+/// own: a stake, a model fact, a World Event effect (bug pass 3). The
+/// Player never reads `key = value`. A few keys have their own template;
+/// any other reads "<name>'s <key words> is now <value words>.". An `_` in
+/// the key or the value is a space.
+pub fn slot_sentence(name: &str, key: &str, value: &str) -> String {
+    let words = |text: &str| text.trim().replace('_', " ");
+    let (name, value) = (name.trim(), words(value));
+    match crate::normalize::key(key).as_str() {
+        "location" => format!("{name} is at {value}."),
+        "injury" => format!("{name} is injured ({value})."),
+        "condition" => format!("{name} is {value}."),
+        "carrying" => format!("{name} carries {value}."),
+        "grudge" => format!("{name} holds a grudge against {value}."),
+        other => format!("{name}'s {} is now {value}.", words(other)),
+    }
+}
+
 /// The prefix of the key of a fact that gives an entity one more name.
 pub const ALIAS_KEY_PREFIX: &str = "alias_";
 
@@ -323,6 +341,13 @@ pub enum LedgerOp<E = EntityRef> {
     RecordRoll {
         seed: u64,
         difficulty: i8,
+        /// The NPC the Check opposes, if any (bug pass 3): the narrator
+        /// tells the contest against them.
+        #[serde(
+            default = "Option::default",
+            skip_serializing_if = "Option::<E>::is_none"
+        )]
+        against: Option<E>,
         #[serde(default = "empty_json_array")]
         stakes: serde_json::Value,
         #[serde(default = "empty_json_array")]
@@ -535,6 +560,7 @@ impl<E> LedgerOp<E> {
             Self::RecordRoll {
                 seed,
                 difficulty,
+                against,
                 stakes,
                 factors,
                 value,
@@ -542,6 +568,7 @@ impl<E> LedgerOp<E> {
             } => LedgerOp::RecordRoll {
                 seed,
                 difficulty,
+                against: against.map(&mut *f).transpose()?,
                 stakes,
                 factors,
                 value,

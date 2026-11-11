@@ -520,7 +520,9 @@ fn you_card_holds_state_keys_only() {
     assert_eq!(view.you.concept, "Courier");
 }
 
-/// A play fact text `X: key = value` reads as `X key words: value`.
+/// A play fact text `X: key = value`, as Campaign files made before bug
+/// pass 3 hold it, reads as a plain sentence (`domain::slot_sentence`), the
+/// `pending_` prefix left out. The Player never reads `key = value`.
 #[test]
 fn play_fact_text_reads_as_a_line() {
     let mut w = HiddenWorld::new();
@@ -545,7 +547,31 @@ fn play_fact_text_reads_as_a_line() {
         .iter()
         .find(|f| f.belief.key == "pending_meal_promise")
         .unwrap();
-    assert_eq!(line.text, "Ada pending meal promise: tonight");
+    assert_eq!(line.text, "Ada's meal promise is now tonight.");
+    let view = w.view();
+    w.play(
+        "I arm-wrestle Brann.",
+        &record(ActionKind::Act, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            ada,
+            "injury",
+            "bruised_wrist",
+            "Ada: injury = bruised_wrist",
+            &[ada],
+        )],
+    );
+    let sight = w.sight();
+    let character = threshold_core::view::character_view(&sight);
+    assert!(
+        character
+            .facts
+            .iter()
+            .any(|f| f.text == "Ada is injured (bruised wrist)."),
+        "{:?}",
+        character.facts
+    );
     assert!(line.open);
     assert_eq!(line.subject, named(ada, EntityKind::Pc, "Ada"));
 }

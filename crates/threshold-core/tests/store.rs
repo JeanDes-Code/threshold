@@ -711,6 +711,7 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
             LedgerOp::RecordRoll {
                 seed: u64::MAX,
                 difficulty: 4,
+                against: None,
                 stakes: serde_json::json!([]),
                 factors: serde_json::json!([]),
                 value: 6,
@@ -1177,6 +1178,7 @@ fn additional_projections_survive_rebuild() {
                 LedgerOp::RecordRoll {
                     seed: 1,
                     difficulty: 2,
+                    against: None,
                     stakes: serde_json::json!({"win":"open"}),
                     factors: serde_json::json!(["help"]),
                     value: 3,
@@ -1456,6 +1458,7 @@ fn duplicate_and_failed_commits_leave_ledger_untouched_and_debug_survives() {
                 LedgerOp::RecordRoll {
                     seed: u64::MAX,
                     difficulty: 3,
+                    against: None,
                     stakes: serde_json::json!([]),
                     factors: serde_json::json!([]),
                     value: 7,

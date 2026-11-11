@@ -95,3 +95,15 @@ What this does not cover:
 - **An Intent that settles an item without naming it** ("Yes." after an NPC's question) offers nothing, so the item stays open. The Player names it to close it. We chose a missed close over a wrong one.
 - **Near-duplicates with different sentences** (the draft's summary "Osric Fell's daughter's wedding in the spring, and the boundary wall" on the PC, and "Osric Fell's daughter's wedding is planned for the first day of spring at Harrowmere" on Osric) are not merged: no deterministic rule tells them apart from two real matters. Settling one leaves the other open.
 - **Whether the outcome word is right.** The model still picks `done` or `accepted`; the schema only bounds the choice.
+
+## Changed in bug pass 3 (2026-11-11): what the narrator gets after a Check; which Turn is a wait
+
+In the QA Campaign the arm-wrestle showed "Roll 3 vs 7: failure", but the Narration said "fifteen minutes pass in a slow, heavy silence… you remain seated by the fire", and the PC's `injury bruised_wrist` was not in the story. The narrator's outcome block for that Turn was: "The Check result: lose. The attempt fails.", the raw line "Teodor Brandt: injury = bruised_wrist", "15 minutes pass.", and "The move does not happen: the PC does not arrive". The model had labelled the act `move`, with `move_to: null` and `against: null`.
+
+- **A contested move with no destination is an act**, like a contested wait. The narrator is no longer told that a move did not happen.
+- **A contested Check names its opponent.** With no `against`, it opposes the NPC whose reaction has the lowest stance (`checks::oppose`). The Roll op carries `against`, and the narrator's line reads `- Check against <name>: the PC loses. Tell the attempt and how it fails. …` (or `wins`), naming the opponent only when the PC sees them.
+- **A stake reads as a sentence** (`domain::slot_sentence`): "Teodor Brandt is injured (bruised wrist).", never `key = value`.
+- **The time is no outcome item.** It was the first outcome line of nearly every Turn, and most Narrations opened with "N minutes pass". It is now one line after the outcome, `Time this Turn takes: N minutes.`, and the narrator rule says not to open with it.
+- **A wait needs the Intent to ask for one** (`world::asks_to_wait`). "I nod to Sefa and warm my hands at the fire" came back as `wait` with no minutes, and the engine-owned wait took 60 minutes. Any other `wait` is an act, with the act default when the model gives no minutes.
+
+Each change relabels or removes model output, or changes only the narrator's input: no PC act is added. Live numbers: `evals/reports/2026-11-play-basics.md`, attempt 7.

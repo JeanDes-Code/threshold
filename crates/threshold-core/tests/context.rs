@@ -709,9 +709,31 @@ fn rules_speak_about_time() {
     assert!(proposal.contains("wait"), "{proposal}");
     let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None).system;
     assert!(
-        narration.contains("Never say that more time passed than THIS TURN states"),
+        narration
+            .contains("Never say that more time passed than the time line of THIS TURN states"),
         "{narration}"
     );
+    // Bug pass 3: the time is one line after the outcome, never an
+    // outcome item; as the first item, the narrator opened with it.
+    assert!(
+        narration.contains("Do not open with the time"),
+        "{narration}"
+    );
+    let recent = narration_prompt(
+        &w.view,
+        &[],
+        &[LedgerOp::AdvanceClock { minutes: 5 }],
+        &[],
+        &[],
+        "I greet Brann.",
+        None,
+    )
+    .recent;
+    assert!(
+        recent.contains("Time this Turn takes: 5 minutes.\n"),
+        "{recent}"
+    );
+    assert!(!recent.contains("minutes pass"), "{recent}");
 }
 
 /// ADR 0005: no prompt shows an open item without the marker.
@@ -892,6 +914,7 @@ fn lost_check_is_told_as_a_failure() {
     let roll = |outcome: &str| LedgerOp::RecordRoll {
         seed: 1,
         difficulty: 6,
+        against: None,
         stakes: serde_json::json!({}),
         factors: serde_json::json!([]),
         value: 3,
@@ -908,7 +931,7 @@ fn lost_check_is_told_as_a_failure() {
     );
     assert!(
         lost.recent.contains(&format!(
-            "- The Check result: lose.{}",
+            "- Check: the PC loses.{}",
             threshold_core::context::FAILED_CHECK_LINE
         )),
         "{}",

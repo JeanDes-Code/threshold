@@ -190,7 +190,10 @@ fn waiting_in_the_town_hall_ends_with_the_summons() {
         .map(|c| c.prompt.recent)
         .next_back()
         .unwrap();
-    assert!(narration.contains("- 30 minutes pass."), "{narration}");
+    assert!(
+        narration.contains("Time this Turn takes: 30 minutes."),
+        "{narration}"
+    );
     assert!(narration.contains("summons the scribe"), "{narration}");
     // The PC witnessed what the event wrote.
     let pc = id(&view, "Wren");
@@ -349,11 +352,13 @@ fn town_demo_offscreen_consequence() {
         })
         .collect();
     assert_eq!(narrations.len(), 4);
+    // The fact reads as a sentence: "under suspicion", never the raw value.
     for prompt in &narrations[..3] {
+        assert!(!prompt.contains("under suspicion"), "{prompt}");
         assert!(!prompt.contains("under_suspicion"), "{prompt}");
     }
     assert!(
-        narrations[3].contains("under_suspicion"),
+        narrations[3].contains("under suspicion"),
         "{}",
         narrations[3]
     );

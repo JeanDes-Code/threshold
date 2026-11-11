@@ -38,7 +38,7 @@ Narrate only the outcome given under THIS TURN. Never add a fact that changes th
 Never decide the PC's actions, words, or feelings beyond the player's intent.
 NPC intentions tell you how to portray an NPC. Show them through words and manner; never state them as fact.
 Give each NPC the voice of their Voice Card.
-Never say that more time passed than THIS TURN states. If no minutes pass, time does not pass.
+Never say that more time passed than the time line of THIS TURN states. Do not open with the time; tell it only when it matters.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
 ",
     crate::speech::rule_text!(),
@@ -237,7 +237,15 @@ pub const NOT_MOVED_LINE: &str =
 
 /// The words after a lost Check's result line.
 pub const FAILED_CHECK_LINE: &str =
-    " The attempt fails. Nothing changes beyond what is listed here.";
+    " Tell the attempt and how it fails. Nothing changes beyond what is listed here.";
+
+/// The words after a won Check's result line.
+pub const WON_CHECK_LINE: &str = " Tell the attempt and how it succeeds.";
+
+/// The line that gives the narrator the Turn's game time, after the
+/// outcome and never as an outcome item: as the first item, the narrator
+/// opened most Narrations with it (bug pass 3). The minutes follow.
+pub const TIME_LINE: &str = "Time this Turn takes: ";
 
 /// The opening prompt (data shape 3.7): the narration rules with the
 /// opening lines after them, the same stable and scene blocks as a
@@ -343,11 +351,24 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
             fact_text(&claim.slot.key, &claim.text)
         ),
         LedgerOp::AddEntity { name, .. } => format!("- {} is here.\n", one_line(name)),
-        LedgerOp::RecordRoll { outcome, .. } if outcome == "lose" => {
-            format!("- The Check result: {outcome}.{FAILED_CHECK_LINE}\n")
+        LedgerOp::RecordRoll {
+            outcome, against, ..
+        } => {
+            // The opponent is named only when the PC sees them here.
+            let against = against
+                .as_ref()
+                .filter(|a| match a {
+                    EntityRef::Id(id) => r.seen_present.contains(id),
+                    EntityRef::New(_) => true,
+                })
+                .map(|a| format!(" against {}", entity_name(r, a, perceived)))
+                .unwrap_or_default();
+            if outcome == "lose" {
+                format!("- Check{against}: the PC loses.{FAILED_CHECK_LINE}\n")
+            } else {
+                format!("- Check{against}: the PC wins.{WON_CHECK_LINE}\n")
+            }
         }
-        LedgerOp::RecordRoll { outcome, .. } => format!("- The Check result: {outcome}.\n"),
-        LedgerOp::AdvanceClock { minutes } => format!("- {minutes} minutes pass.\n"),
         _ => return None,
     })
 }
@@ -406,6 +427,14 @@ fn recent(
         tail.push_str("Outcome:\n");
         tail.push_str(&outcome.concat());
     }
+    let minutes: u32 = perceived
+        .iter()
+        .filter_map(|op| match op {
+            LedgerOp::AdvanceClock { minutes } => Some(*minutes),
+            _ => None,
+        })
+        .sum();
+    tail.push_str(&format!("{TIME_LINE}{minutes} minutes.\n"));
     if !reactions.is_empty() {
         tail.push_str("NPC intentions (portray, do not state):\n");
         for reaction in reactions {

@@ -6,7 +6,7 @@
 use serde::Serialize;
 
 use crate::{
-    domain::{ClockMin, EntityId, EntityKind, STATE_KEYS, is_open_key},
+    domain::{ClockMin, EntityId, EntityKind, STATE_KEYS, is_open_key, outcome_key, slot_sentence},
     normalize,
     player::{Marks, Note, Target},
     rules::RollResult,
@@ -45,7 +45,7 @@ pub fn character_view(sight: &PcSight) -> CharacterView {
         .filter(|b| b.subject == sight.pc)
         .map(|b| CharacterFact {
             open: is_open_key(&b.key),
-            text: b.text.clone(),
+            text: fact_text(&b.text, &b.key),
         })
         .collect();
     CharacterView {
@@ -746,15 +746,17 @@ fn fact_line(sight: &PcSight, belief: &Belief) -> Option<FactLine> {
     })
 }
 
-/// The line of a fact: a play fact `X: key = value` (the text a Turn
-/// writes) reads as `X key words: value`. Any other text stays.
+/// The line of a fact. A play fact `X: key = value` (the text a Turn wrote
+/// before bug pass 3) reads as a plain sentence (`domain::slot_sentence`),
+/// the `pending_` prefix left out. Any other text stays.
 fn fact_text(text: &str, key: &str) -> String {
     let parts = text
         .split_once(": ")
         .and_then(|(who, rest)| Some((who, rest.split_once(" = ")?)));
     match parts {
         Some((who, (k, value))) if k == key => {
-            format!("{who} {}: {value}", key.replace('_', " "))
+            let key = outcome_key(key).unwrap_or(key);
+            slot_sentence(who, key, value)
         }
         _ => text.to_owned(),
     }

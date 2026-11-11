@@ -171,3 +171,30 @@ Limits:
 
 - The two slow Turns are the machine, not the prompt: see `evals/reports/2026-11-turn-time.md`. Attempt 5 ran on a free machine.
 - One fixture, one phrasing per step and 4 runs: the counts are small.
+
+## Attempt 7: the narrator after a Check, and the time line (bug pass 3, 2026-11-11)
+
+- Code: ADR 0007, section "what the narrator gets after a Check". Two new measures: the judge reads the contest's Narration ("does it tell the contest and that the PC won / lost it?"), and code counts the Narrations whose first sentence names minutes or hours.
+- "Before" is the code of attempt 6 with the two new measures; "after" adds the change. Same command, 4 runs of 8 Turns each.
+
+| Measure | Before | After |
+|---|---|---|
+| Narrations that open with the time | 20 / 31 | 0 / 32 |
+| Contests told with their result (judge) | 3 / 3 | 4 / 4 |
+| Contests with a Roll | 3 / 4 | 4 / 4 |
+| Moves that reached the asked place | 8 / 8 | 8 / 8 |
+| False closes on the negative step | 0 / 4 | 0 / 4 |
+| False moves on the negative step | 0 / 4 | 0 / 4 |
+| Impossible acts told as a failure (judge) | 4 / 4 | 4 / 4 |
+| Pending items closed | 4 / 4 | 4 / 4 |
+| Unknown-place moves told as not arriving (judge) | 4 / 4 | 3 / 4 (1 judge call timed out) |
+| Turns failed | 1 / 32 (timeout) | 0 / 32 |
+| Turn time | p50 7.5 s, p90 8.7 s, max 39.8 s | p50 8.4 s, p90 14.8 s, max 36.7 s |
+
+- The judge found the contest told in every Narration before the change too: the fixture's model labels the arm-wrestle `wait`, which was already an act, so the narrator never got "the move does not happen". The QA Turn had that line. A deterministic test replays the QA shape (`a_contest_reaches_the_narrator_with_its_opponent_and_result`).
+- The p90 rose with 3 slow Turns at the start of runs 1 and 2 (20 to 37 s). The machine had about 12 GB of RAM free and the model 63% on CPU: see `evals/reports/2026-11-turn-time.md`.
+
+Limits:
+
+- One phrasing per step, 4 runs: the counts are small. The judge is the same local model.
+- The wait rule was not measured live: no step of this scenario is a wait. Deterministic tests cover it.

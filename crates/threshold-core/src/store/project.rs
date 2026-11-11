@@ -484,6 +484,7 @@ fn apply(
             factors,
             value,
             outcome,
+            ..
         } => {
             db.execute("INSERT INTO roll(id,turn_id,seed,difficulty,stakes_json,factors_json,value,outcome) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,turn,*seed as i64,difficulty,serde_json::to_string(stakes)?,serde_json::to_string(factors)?,value,outcome])?;
             true

@@ -611,3 +611,29 @@ fn wait_ignores_an_event_elsewhere() {
     schedule_by(&mut w, Trigger::At(130), pip, vec![brann]);
     assert_eq!(wait_minutes(&w.view, 60), 60);
 }
+
+/// Bug pass 3: the model labels a passive act `wait` ("I warm my hands at
+/// the fire" took 60 minutes). An engine-owned wait needs the Intent to ask
+/// for one.
+#[test]
+fn only_an_intent_that_asks_to_wait_is_a_wait() {
+    use threshold_core::world::asks_to_wait;
+    for intent in [
+        "I wait.",
+        "I wait for Orsel to come back.",
+        "I rest by the fire until dawn.",
+        "I sleep in the loft.",
+        "I sit here a while.",
+        "I pass the time with a game of dice.",
+    ] {
+        assert!(asks_to_wait(intent), "{intent}");
+    }
+    for intent in [
+        "I nod to Sefa and warm my hands at the fire.",
+        "I order a mug of ale from Agathe and pay for it.",
+        "I pass the salt to Brann.",
+        "I sharpen my quill and check my ink.",
+    ] {
+        assert!(!asks_to_wait(intent), "{intent}");
+    }
+}

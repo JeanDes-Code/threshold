@@ -801,7 +801,10 @@ fn wait_ends_at_the_next_event_and_fires_it() {
     });
     assert_eq!(clock, 70);
     assert!(fired);
-    assert!(recent.contains("- 30 minutes pass."), "{recent}");
+    assert!(
+        recent.contains("Time this Turn takes: 30 minutes."),
+        "{recent}"
+    );
     assert!(recent.contains("- mood becomes angry\n"), "{recent}");
 }
 
@@ -814,7 +817,10 @@ fn gm_only_event_does_not_cut_a_wait() {
     });
     assert_eq!(clock, 100);
     assert!(fired);
-    assert!(recent.contains("- 60 minutes pass."), "{recent}");
+    assert!(
+        recent.contains("Time this Turn takes: 60 minutes."),
+        "{recent}"
+    );
     assert!(!recent.contains("mood becomes angry"), "{recent}");
 }
 
@@ -1000,7 +1006,10 @@ fn witnessed_event_reaches_the_narrator() {
         recent.contains("- Orsel waves the courier over\n"),
         "{recent}"
     );
-    assert!(recent.contains("- 10 minutes pass."), "{recent}");
+    assert!(
+        recent.contains("Time this Turn takes: 10 minutes."),
+        "{recent}"
+    );
     assert!(knows);
 }
 
@@ -1306,7 +1315,7 @@ fn contested_act_without_a_check_rolls_on_the_retry() {
     );
     let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
     assert!(
-        narration.recent.contains("The Check result:"),
+        narration.recent.contains("- Check: the PC "),
         "{}",
         narration.recent
     );
@@ -1511,5 +1520,112 @@ fn a_contested_wait_is_an_act() {
     assert_eq!(
         stored_action(&stored.record.proposal_json),
         Some((ActionKind::Act, Verdict::Check))
+    );
+}
+
+/// Bug pass 3, M3: the QA arm-wrestle. The model sent action `move` with
+/// `move_to: null`, `contested: true`, a Check with no `against`, and a
+/// lose stake on the PC's injury. The narrator then got "The Check result:
+/// lose", the raw line "Teodor Brandt: injury = bruised_wrist", "15
+/// minutes pass." first, and "The move does not happen", and told the PC
+/// sitting by the fire. Now: a contested act with no destination is an
+/// act; the Check opposes the NPC who resists; the narrator gets the
+/// opponent, the result and the stake as a sentence; the time is no
+/// outcome bullet.
+#[test]
+fn a_contest_reaches_the_narrator_with_its_opponent_and_result() {
+    // The hidden world: the PC sees Brann at the gate square.
+    let w = support::hidden::HiddenWorld::new();
+    let (ada, brann) = (w.ada, w.brann);
+    let mut p = proposal(Verdict::Check);
+    p.action = ActionKind::Move;
+    p.contested = true;
+    p.minutes = 15;
+    p.check = Some(threshold_core::domain::CheckDraft {
+        against: None,
+        win: Some(slot(e(ada), "reputation", "stronger")),
+        lose: Some(slot(e(ada), "injury", "bruised_wrist")),
+        factors: vec![],
+    });
+    p.reactions = vec![Reaction {
+        npc: e(brann),
+        stance: Stance::Resist,
+        plan: "laugh and try to win".into(),
+        cause: None,
+    }];
+    let gm = RecordedGm::new(vec![json(&p)], vec!["Brann slams your hand down.".into()]);
+    let (mut engine, campaign) = w.engine(&gm);
+    let outcome = engine
+        .play_turn(
+            "t1".into(),
+            "I walk over to Brann and challenge him to arm-wrestle.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let roll = outcome.roll.expect("the Check rolls");
+    let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    assert_eq!(
+        stored_action(&stored.record.proposal_json),
+        Some((ActionKind::Act, Verdict::Check))
+    );
+    let recent = prompts(&gm, CallKind::Narrate).pop().unwrap().recent;
+    let (result, stake) = if roll.success {
+        (
+            "- Check against Brann: the PC wins.",
+            "- Ada's reputation is now stronger.\n",
+        )
+    } else {
+        (
+            "- Check against Brann: the PC loses.",
+            "- Ada is injured (bruised wrist).\n",
+        )
+    };
+    assert!(recent.contains(result), "{recent}");
+    assert!(recent.contains(stake), "{recent}");
+    assert!(!recent.contains(" = "), "{recent}");
+    assert!(!recent.contains("does not happen"), "{recent}");
+    assert!(!recent.contains("minutes pass"), "{recent}");
+    assert!(
+        recent.contains("Time this Turn takes: 15 minutes."),
+        "{recent}"
+    );
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert_eq!(
+        view.live_fact(ada, "location").unwrap().slot.value,
+        "gate square"
+    );
+}
+
+/// Bug pass 3, M3: "I nod to Sefa and warm my hands at the fire" came back
+/// as `wait` with no minutes and took 60 minutes. An Intent that asks for
+/// no wait is an act: the act default when the model gives no minutes.
+#[test]
+fn a_wait_the_intent_does_not_ask_for_is_an_act() {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Wait;
+    let (mut engine, w, _) = setup(vec![json(&p), json(&p)], vec!["a", "b"]);
+    let start = snapshot(&engine, &w).clock_min;
+    let warm = engine
+        .play_turn(
+            "t1".into(),
+            "I warm my hands at the fire.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let stored = engine.store().turn(warm.turn_id).unwrap().unwrap();
+    assert_eq!(
+        stored_action(&stored.record.proposal_json).map(|(a, _)| a),
+        Some(ActionKind::Act)
+    );
+    let after = snapshot(&engine, &w).clock_min;
+    assert_eq!(
+        after - start,
+        u64::from(threshold_core::rules::ACT_DEFAULT_MIN)
+    );
+    engine
+        .play_turn("t2".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    assert!(
+        snapshot(&engine, &w).clock_min - after > u64::from(threshold_core::rules::ACT_DEFAULT_MIN)
     );
 }

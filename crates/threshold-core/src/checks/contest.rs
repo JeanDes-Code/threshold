@@ -42,6 +42,33 @@ pub fn checks_now(p: &DecisionProposal) -> bool {
     p.contested && p.verdict == Verdict::Check && p.check.is_none()
 }
 
+/// The NPC who opposes the PC most: the reaction with the lowest stance,
+/// the PC's own left out.
+fn opponent(p: &DecisionProposal, view: &WorldView) -> Option<Handle> {
+    let pc = pc(view).map(Handle::Entity);
+    p.reactions
+        .iter()
+        .filter(|r| Some(r.npc) != pc)
+        .min_by_key(|r| r.stance)
+        .map(|r| r.npc)
+}
+
+/// A contested Check with no `against` opposes the NPC whose reaction has
+/// the lowest stance (bug pass 3): the QA arm-wrestle came with `against:
+/// null`, and the narrator could not name the opponent. Returns the note
+/// for the debug log. It adds no PC act.
+pub fn oppose(p: &mut DecisionProposal, view: &WorldView) -> Option<String> {
+    if !p.contested {
+        return None;
+    }
+    let against = opponent(p, view)?;
+    let check = p.check.as_mut().filter(|c| c.against.is_none())?;
+    check.against = Some(against);
+    Some(format!(
+        "set the Check against {against}: the act is contested and named no opponent"
+    ))
+}
+
 /// On the retry, or on the first attempt when `checks_now`: when the
 /// proposal still lacks the Check it needs, the core builds one and
 /// returns the note for the debug log. The default
@@ -53,13 +80,7 @@ pub fn default_check(p: &mut DecisionProposal, view: &WorldView) -> Option<Strin
     if !lacks_check(p) {
         return None;
     }
-    let pc = pc(view).map(Handle::Entity);
-    let against = p
-        .reactions
-        .iter()
-        .filter(|r| Some(r.npc) != pc)
-        .min_by_key(|r| r.stance)
-        .map(|r| r.npc);
+    let against = opponent(p, view);
     p.verdict = Verdict::Check;
     // The facts were written for an act that simply happens: with the Roll
     // they apply on a win only (`to_ops`).
