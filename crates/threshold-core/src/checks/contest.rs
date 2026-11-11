@@ -4,9 +4,12 @@
 //! the retry the core builds a default Check instead of rejecting. When the
 //! verdict is already `check`, the core builds it on the first attempt.
 
-use super::{CheckKind, Rejection, pc};
+use super::{CheckKind, Rejection};
 use crate::{
-    domain::{CheckDraft, DecisionProposal, Handle, Verdict},
+    domain::{
+        CheckDraft, DecisionProposal, EntityId, EntityKind, Handle, Stance, Verdict, is_alias_key,
+    },
+    normalize,
     store::WorldView,
 };
 
@@ -42,26 +45,90 @@ pub fn checks_now(p: &DecisionProposal) -> bool {
     p.contested && p.verdict == Verdict::Check && p.check.is_none()
 }
 
-/// The NPC who opposes the PC most: the reaction with the lowest stance,
-/// the PC's own left out.
-fn opponent(p: &DecisionProposal, view: &WorldView) -> Option<Handle> {
-    let pc = pc(view).map(Handle::Entity);
-    p.reactions
+/// The NPC a contested act opposes (review M3), in order: the present NPC
+/// the PC perceives that the Intent names (`named_here`), when exactly one;
+/// else the only NPC the PC perceives here whose reaction is below
+/// neutral; else none. Never an NPC the PC cannot perceive: the lowest
+/// stance alone picked a hidden NPC, or a hostile bystander the Intent did
+/// not address. A new NPC of this proposal stands before the PC, so it
+/// counts as perceived.
+fn opponent(p: &DecisionProposal, view: &WorldView, intent: &str) -> Option<Handle> {
+    let here = perceived_npcs(view);
+    if let [one] = named_here(view, intent, &here)[..] {
+        return Some(Handle::Entity(one));
+    }
+    let mut hostile: Vec<Handle> = p
+        .reactions
         .iter()
-        .filter(|r| Some(r.npc) != pc)
-        .min_by_key(|r| r.stance)
+        .filter(|r| r.stance < Stance::Neutral)
+        .filter(|r| match r.npc {
+            Handle::Entity(id) => here.contains(&id),
+            Handle::NewNpc(_) => p.new_npcs.iter().any(|n| n.id == r.npc),
+            _ => false,
+        })
         .map(|r| r.npc)
+        .collect();
+    hostile.dedup();
+    match hostile[..] {
+        [one] => Some(one),
+        _ => None,
+    }
 }
 
-/// A contested Check with no `against` opposes the NPC whose reaction has
-/// the lowest stance (bug pass 3): the QA arm-wrestle came with `against:
-/// null`, and the narrator could not name the opponent. Returns the note
-/// for the debug log. It adds no PC act.
-pub fn oppose(p: &mut DecisionProposal, view: &WorldView) -> Option<String> {
+/// The NPCs the PC perceives here (`context::seen_present`, the PC left
+/// out).
+fn perceived_npcs(view: &WorldView) -> Vec<EntityId> {
+    crate::context::seen_present(view)
+        .into_iter()
+        .filter(|id| {
+            view.entities
+                .iter()
+                .any(|e| e.id == *id && e.kind == EntityKind::Npc)
+        })
+        .collect()
+}
+
+/// Of `here`, the NPCs that `intent` names by a name the PC knows: the main
+/// name or its first word, or an other name the PC holds an `alias_` Belief
+/// for, as whole words, whatever the case. Only NPCs the PC can name
+/// (`world::pc_can_name`) count.
+fn named_here(view: &WorldView, intent: &str, here: &[EntityId]) -> Vec<EntityId> {
+    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
+    let nameable = crate::world::pc_can_name(view, &standing);
+    let said = normalize::name_words(intent);
+    let says = |name: &str| {
+        let words = normalize::name_words(&normalize::name(name));
+        !words.is_empty() && said.windows(words.len()).any(|w| w == words.as_slice())
+    };
+    let aliases = crate::world::pc_knowledge(view);
+    here.iter()
+        .copied()
+        .filter(|id| nameable.contains(id))
+        .filter(|id| {
+            let Some(e) = view.entities.iter().find(|e| e.id == *id) else {
+                return false;
+            };
+            let first = e.name.split_whitespace().next().unwrap_or_default();
+            says(&e.name)
+                || says(first)
+                || aliases
+                    .iter()
+                    .filter(|b| b.subject == *id && is_alias_key(&b.key))
+                    .any(|b| says(&b.value))
+        })
+        .collect()
+}
+
+/// A contested Check with no `against` opposes the NPC of `opponent`
+/// (bug pass 3, changed after review M3): the QA arm-wrestle came with
+/// `against: null`, and the narrator could not name the opponent. With no
+/// such NPC, `against` stays empty and the Check still rolls. Returns the
+/// note for the debug log. It adds no PC act.
+pub fn oppose(p: &mut DecisionProposal, view: &WorldView, intent: &str) -> Option<String> {
     if !p.contested {
         return None;
     }
-    let against = opponent(p, view)?;
+    let against = opponent(p, view, intent)?;
     let check = p.check.as_mut().filter(|c| c.against.is_none())?;
     check.against = Some(against);
     Some(format!(
@@ -71,16 +138,15 @@ pub fn oppose(p: &mut DecisionProposal, view: &WorldView) -> Option<String> {
 
 /// On the retry, or on the first attempt when `checks_now`: when the
 /// proposal still lacks the Check it needs, the core builds one and
-/// returns the note for the debug log. The default
-/// Check opposes the NPC whose reaction has the lowest stance (none when
-/// no NPC reacts). It has no stakes and no factors, so the Ruleset gives
+/// returns the note for the debug log. The default Check opposes the NPC
+/// of `opponent` (none when no NPC fits). It has no stakes and no factors, so the Ruleset gives
 /// its normal difficulty, and the narrator gets only the result. The
 /// proposal's facts then apply on a won Roll only.
-pub fn default_check(p: &mut DecisionProposal, view: &WorldView) -> Option<String> {
+pub fn default_check(p: &mut DecisionProposal, view: &WorldView, intent: &str) -> Option<String> {
     if !lacks_check(p) {
         return None;
     }
-    let against = opponent(p, view);
+    let against = opponent(p, view, intent);
     p.verdict = Verdict::Check;
     // The facts were written for an act that simply happens: with the Roll
     // they apply on a win only (`to_ops`).

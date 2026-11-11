@@ -639,9 +639,9 @@ impl Engine {
                     // first attempt, a default Check on the retry (ADR 0007).
                     // A contested `check` verdict gets it at once.
                     if retry || checks::checks_now(&p) {
-                        notes.extend(checks::default_check(&mut p, view));
+                        notes.extend(checks::default_check(&mut p, view, intent));
                     }
-                    notes.extend(checks::oppose(&mut p, view));
+                    notes.extend(checks::oppose(&mut p, view, intent));
                     if !notes.is_empty() {
                         self.log(op_id, "settle", &Prompt::default(), &notes.join("\n"), step)?;
                     }

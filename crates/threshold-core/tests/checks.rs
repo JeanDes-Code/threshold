@@ -1441,33 +1441,36 @@ fn illegal_pc_stake_is_dropped_and_the_check_still_rolls() {
 #[test]
 fn contested_act_without_a_check_gets_a_note_then_a_default_check() {
     use threshold_core::checks::{contest_note, default_check};
-    let w = World::new();
+    // The hidden world, where the PC sees Orsel and Brann here.
+    let hidden = support::hidden::HiddenWorld::new();
+    let view = hidden.view();
     let mut p = proposal(Verdict::Allowed);
     p.contested = true;
     p.reactions = vec![
-        reaction(e(w.orsel), Stance::Resist, None),
-        reaction(e(w.brann), Stance::Neutral, None),
+        reaction(e(hidden.orsel), Stance::Resist, None),
+        reaction(e(hidden.brann), Stance::Neutral, None),
     ];
     let note = contest_note(&p).expect("a contested act with no check");
     assert_eq!(note.check, CheckKind::Contest);
     let mut built = p.clone();
-    let log = default_check(&mut built, &w.view).expect("the core builds the Check");
-    assert!(log.contains(&format!("E{}", w.orsel)), "{log}");
+    let log =
+        default_check(&mut built, &view, "I shove past them.").expect("the core builds the Check");
+    assert!(log.contains(&format!("E{}", hidden.orsel)), "{log}");
     assert_eq!(built.verdict, Verdict::Check);
     let c = built.check.as_ref().unwrap();
-    assert_eq!(c.against, Some(e(w.orsel)));
+    assert_eq!(c.against, Some(e(hidden.orsel)));
     assert!(c.win.is_none() && c.lose.is_none() && c.factors.is_empty());
     assert!(contest_note(&built).is_none());
-    ok(validate(&built, &w.view));
+    ok(validate(&built, &view));
     // Not contested, or impossible: nothing to do.
     let mut calm = p.clone();
     calm.contested = false;
     assert!(contest_note(&calm).is_none());
-    assert!(default_check(&mut calm, &w.view).is_none());
+    assert!(default_check(&mut calm, &view, "I shove past them.").is_none());
     let mut impossible = p;
     impossible.verdict = Verdict::Impossible;
     assert!(contest_note(&impossible).is_none());
-    assert!(default_check(&mut impossible, &w.view).is_none());
+    assert!(default_check(&mut impossible, &view, "I shove past them.").is_none());
 }
 
 // --- Blockers (ADR 0007) -------------------------------------------------------
@@ -1829,7 +1832,7 @@ fn facts_of_a_default_check_apply_on_a_win_only() {
             Seen::Present,
             vec![],
         )];
-        assert!(default_check(&mut p, &w.view).is_some());
+        assert!(default_check(&mut p, &w.view, "I outstare Brann.").is_some());
         apply(&mut w, &p, Some(roll(success)));
         assert_eq!(
             w.view.live_fact(w.brann, "mood").is_some(),
@@ -1877,4 +1880,61 @@ fn settles_on_a_held_item_that_was_not_offered_closes_nothing() {
     assert!(notes.is_empty(), "{notes:?}");
     apply(&mut w, &settled, None);
     assert!(w.view.live_fact(w.ada, "winter_post").is_some());
+}
+
+/// Review M3 (T5): a contested Check with no `against` opposes, in order,
+/// the present NPC the Intent names; else the only present NPC whose
+/// reaction is below neutral; else nobody. The lowest stance alone picked
+/// a hostile bystander the Intent did not address.
+#[test]
+fn oppose_takes_the_named_npc_then_the_only_hostile_one() {
+    use threshold_core::checks::oppose;
+    // The hidden world: the PC sees Orsel and Brann here; Pip is at the
+    // market.
+    let w = support::hidden::HiddenWorld::new();
+    let view = w.view();
+    let contest = |reactions: Vec<threshold_core::domain::Reaction>| {
+        let mut p = proposal(Verdict::Check);
+        p.contested = true;
+        p.check = Some(threshold_core::domain::CheckDraft {
+            against: None,
+            win: None,
+            lose: None,
+            factors: vec![],
+        });
+        p.reactions = reactions;
+        p
+    };
+    let against = |p: &threshold_core::domain::DecisionProposal| p.check.as_ref().unwrap().against;
+    let two = || {
+        contest(vec![
+            reaction(e(w.orsel), Stance::Neutral, None),
+            reaction(e(w.brann), Stance::Oppose, None),
+        ])
+    };
+    // The Intent names Orsel: Orsel, though Brann's stance is lower.
+    let mut p = two();
+    assert!(oppose(&mut p, &view, "I arm-wrestle Orsel.").is_some());
+    assert_eq!(against(&p), Some(e(w.orsel)));
+    // No name: the only reaction below neutral.
+    let mut p = two();
+    oppose(&mut p, &view, "I challenge the strongest one here.");
+    assert_eq!(against(&p), Some(e(w.brann)));
+    // Two names, and two reactions below neutral: nobody.
+    let mut p = contest(vec![
+        reaction(e(w.orsel), Stance::Resist, None),
+        reaction(e(w.brann), Stance::Oppose, None),
+    ]);
+    assert!(oppose(&mut p, &view, "I race Orsel and Brann to the wall.").is_none());
+    assert_eq!(against(&p), None);
+    let mut p = contest(vec![
+        reaction(e(w.orsel), Stance::Resist, None),
+        reaction(e(w.brann), Stance::Oppose, None),
+    ]);
+    assert!(oppose(&mut p, &view, "I race to the wall.").is_none());
+    assert_eq!(against(&p), None);
+    // An NPC who is not here is never the opponent, named or not.
+    let mut p = contest(vec![reaction(e(w.pip), Stance::Oppose, None)]);
+    assert!(oppose(&mut p, &view, "I arm-wrestle Pip.").is_none());
+    assert_eq!(against(&p), None);
 }

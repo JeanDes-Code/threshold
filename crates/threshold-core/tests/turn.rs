@@ -1329,7 +1329,9 @@ fn contested_act_without_a_check_rolls_on_the_retry() {
 /// spends no retry. The facts apply on a win only.
 #[test]
 fn contested_check_verdict_without_a_check_rolls_on_the_first_attempt() {
-    let w0 = World::new();
+    // The hidden world, where the PC sees Brann here: the default Check
+    // opposes the NPC the Intent names (review M3).
+    let w0 = support::hidden::HiddenWorld::new();
     let mut p = proposal(Verdict::Check);
     p.action = ActionKind::Wait;
     p.contested = true;
@@ -1339,7 +1341,9 @@ fn contested_check_verdict_without_a_check_rolls_on_the_first_attempt() {
         plan: "stares at the hands".into(),
         cause: None,
     }];
-    let (mut engine, _w, gm) = setup(vec![json(&p)], vec!["You strain."]);
+    let brann = w0.brann;
+    let gm = RecordedGm::new(vec![json(&p)], vec!["You strain.".into()]);
+    let (mut engine, _) = w0.engine(&gm);
     let outcome = engine
         .play_turn("t1".into(), "I arm-wrestle Brann.", &mut no_chunks())
         .unwrap();
@@ -1353,7 +1357,7 @@ fn contested_check_verdict_without_a_check_rolls_on_the_first_attempt() {
     let log = steps(&engine, "t1");
     assert!(
         log.iter().any(|(step, raw)| step == "settle"
-            && raw.contains(&format!("default Check against E{}", w0.brann))),
+            && raw.contains(&format!("default Check against E{brann}"))),
         "{log:?}"
     );
     // A Check verdict without `contested` keeps the repair round: the core

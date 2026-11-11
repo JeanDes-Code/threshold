@@ -1236,3 +1236,58 @@ fn a_settles_the_turn_did_not_offer_closes_nothing() {
         "{log:?}"
     );
 }
+
+/// Review M3 (T9): the lowest stance belongs to the hidden Vey, whom the PC
+/// does not perceive. The Intent names Brann, so the Check is against
+/// Brann; with no name, nobody is the opponent and the narrator's line
+/// names nobody. Vey never reaches the narrator.
+#[test]
+fn a_contest_never_opposes_an_npc_the_pc_cannot_perceive() {
+    for (intent, opponent) in [
+        ("I arm-wrestle Brann.", Some("Brann")),
+        ("I arm-wrestle the nearest one.", None),
+    ] {
+        let w = HiddenWorld::new();
+        let (vey, brann) = (w.vey, w.brann);
+        let mut p = proposal(Verdict::Check);
+        p.contested = true;
+        p.check = Some(threshold_core::domain::CheckDraft {
+            against: None,
+            win: None,
+            lose: None,
+            factors: vec![],
+        });
+        p.reactions = vec![
+            reaction(e(brann), threshold_core::domain::Stance::Neutral, None),
+            reaction(e(vey), threshold_core::domain::Stance::Oppose, None),
+        ];
+        let gm = RecordedGm::new(vec![json(&p)], vec!["You strain.".into()]);
+        let (mut engine, _) = w.engine(&gm);
+        let out = engine
+            .play_turn("t-arm".into(), intent, &mut no_chunks())
+            .unwrap();
+        assert!(out.roll.is_some(), "{intent}");
+        let narrate = engine
+            .store()
+            .debug_log("t-arm")
+            .unwrap()
+            .into_iter()
+            .find(|e| e.step == "narrate")
+            .unwrap();
+        assert!(!narrate.prompt.contains("Vey"), "{}", narrate.prompt);
+        match opponent {
+            Some(name) => assert!(
+                narrate
+                    .prompt
+                    .contains(&format!("- Check against {name}: the PC")),
+                "{}",
+                narrate.prompt
+            ),
+            None => assert!(
+                narrate.prompt.contains("- Check: the PC"),
+                "{}",
+                narrate.prompt
+            ),
+        }
+    }
+}
