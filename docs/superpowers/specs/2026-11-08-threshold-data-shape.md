@@ -272,3 +272,11 @@ One rule line says what the blocks mean. The OOC call stays one plain call with 
 QA saw a card for the place "the stone quay" whose only line was "The reeve's inquiry into the missing toll money is pending." The fact that ties the quay to the toll is GM-only. The cause is in the Seed Draft, not in the card rule: the draft's PC Knowledge stage filed the item under the subject "the stone quay" (`pending_inquiry_status`), and the card lists every PC Belief whose subject is the entity. The text names no quay. The card rule already holds: a card lists the PC Beliefs whose subject is the entity, and, for a place or a Faction, the Beliefs whose own text names it (`named_in`, whole words with the name's capitals).
 
 The PC Knowledge stage now checks each fact about a place, a Faction or a thing: its text must name the subject by one of its names (whole words, any case, a leading article dropped), or open with "It", "Its", "They" or "Their". Else the stage gets one repair note that names the field and the subject, never the text; a fact the repair does not fix is dropped, like any other fact with a problem. A person's fact may say "she", so it is not checked. A Campaign built before this change keeps its filing.
+
+## 13. Changed after review (2026-11-11)
+
+A review of bug pass 4 found two blockers, five majors and a list of minors. Nothing in this section was measured on the live model: every rule below is covered by deterministic tests only.
+
+### The draft keeps a fact as the model files it (M4)
+
+The repair of B2 (section 12) is gone. It cost a model call, dropped true facts about places with no trace, and failed on French articles ("la pointe"). The PC Knowledge stage checks a fact's subject as before 618f56d: it must be a roster name. Accepted limit: the draft may file a true fact under the wrong subject (the reeve's inquiry under "the stone quay"), and the Player, who reads and approves every fact in the review, is the one who catches it.

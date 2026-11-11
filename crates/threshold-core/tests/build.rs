@@ -1311,13 +1311,14 @@ fn the_knowledge_prompt_rules_out_the_document_itself() {
     );
 }
 
-/// Bug pass 4, B2: a fact the PC knows, filed under a place whose name its
-/// text never says, gets one repair. QA's draft filed "The reeve's inquiry
-/// into the missing toll money is pending." under the place "the stone
-/// quay", and the place's card showed that line alone. A person's fact may
-/// say "she"; a place's, a Faction's or a thing's names it.
+/// Review of bug pass 4, M4: the draft keeps a fact as the model filed it.
+/// QA's draft filed "The reeve's inquiry into the missing toll money is
+/// pending." under the place "the stone quay". A repair round cost a model
+/// call, dropped true facts about places with no trace and failed on French
+/// articles. The Player reads and approves the draft in the review, so the
+/// filing is an accepted limit: no repair note, no drop, no extra call.
 #[test]
-fn a_place_fact_whose_text_does_not_name_the_place_is_repaired() {
+fn a_place_fact_is_kept_as_the_draft_files_it() {
     let filed = |subject: &str, text: &str| {
         json!({
             "subject": subject, "key": "vote", "value": "pending",
@@ -1326,24 +1327,12 @@ fn a_place_fact_whose_text_does_not_name_the_place_is_repaired() {
     };
     let first = knowledge(&[
         filed("Tide Hall", "The vote on the new pier is pending."),
-        // Named, so it stays: the article and the case do not matter.
-        filed("Gull Point", "The lamp of gull point is to be repaired."),
-        // A pronoun that opens the sentence stands for the place.
-        filed("Tide Hall", "Its doors stay shut until the vote."),
-    ]);
-    let repaired = knowledge(&[
-        filed(
-            "Harbour Council",
-            "The Harbour Council's vote on the new pier is pending.",
-        ),
-        filed("Gull Point", "The lamp of gull point is to be repaired."),
-        filed("Tide Hall", "Its doors stay shut until the vote."),
+        filed("Gull Point", "La lampe de la pointe est à réparer."),
     ]);
     let gm = gm(&[
         roster_out(),
         seed_out(),
         first,
-        repaired,
         knowledge(&[]),
         knowledge(&[]),
     ]);
@@ -1351,15 +1340,17 @@ fn a_place_fact_whose_text_does_not_name_the_place_is_repaired() {
     let subjects: Vec<&str> = draft.knowledge.iter().map(|k| k.subject.as_str()).collect();
     assert_eq!(
         subjects,
-        ["Harbour Council", "Gull Point", "Tide Hall"],
+        ["Tide Hall", "Gull Point"],
         "{:?}",
         draft.knowledge
     );
+    // Roster, seed, and one knowledge call per section: no repair round.
     let calls = gm.calls();
-    let repair = &calls[3].prompt.recent;
+    assert_eq!(calls.len(), 5);
     assert!(
-        repair.contains("facts[0].text does not name its subject \"Tide Hall\""),
-        "{repair}"
+        calls
+            .iter()
+            .all(|c| !c.prompt.recent.contains("does not name its subject")),
+        "a repair note was sent"
     );
-    assert!(!repair.contains("facts[2]"), "{repair}");
 }

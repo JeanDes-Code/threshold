@@ -674,26 +674,7 @@ fn check_knowledge(names: &Names, out: &KnowledgeOut) -> Vec<Problem<usize>> {
                 i,
                 format!("facts[{i}] needs a subject, a key, a value and a text"),
             ));
-        } else if let Some(main) = names.main(&fact.subject) {
-            // Bug pass 4, B2: "The reeve's inquiry into the missing toll
-            // money is pending." came filed under the place "the stone
-            // quay", and the place's card showed it. A fact about a place,
-            // a Faction or a thing names it in its text; a person's fact
-            // may say "she".
-            let thing = matches!(
-                names.kind(main),
-                Some(EntityKind::Place | EntityKind::Faction | EntityKind::Item)
-            );
-            if thing && !names.named_in(main, &fact.text) {
-                problems.push(Problem::optional(
-                    BuildCheck::References,
-                    i,
-                    format!(
-                        "facts[{i}].text does not name its subject \"{main}\": the subject is the ROSTER name the sentence is about, or name {main} in the text"
-                    ),
-                ));
-            }
-        } else {
+        } else if names.main(&fact.subject).is_none() {
             problems.push(Problem::optional(
                 BuildCheck::References,
                 i,
@@ -871,55 +852,23 @@ fn pc_names(pc: &PcOut) -> HashSet<String> {
 
 /// Every name of the PC and the roster, normalized, with the main name it
 /// stands for.
-/// Each name of the roster, normalized, with its main name and its kind.
-struct Names(Vec<(String, String, EntityKind)>);
+struct Names(Vec<(String, String)>);
 
 impl Names {
     fn of(seed: &AdventureSeed) -> Self {
-        let pc = (&seed.pc.name, &seed.pc.other_names, EntityKind::Pc);
-        let entities = seed
-            .entities
-            .iter()
-            .map(|e| (&e.name, &e.other_names, e.kind));
+        let pc = (&seed.pc.name, &seed.pc.other_names);
+        let entities = seed.entities.iter().map(|e| (&e.name, &e.other_names));
         Self(
             std::iter::once(pc)
                 .chain(entities)
-                .flat_map(|(main, others, kind)| {
+                .flat_map(|(main, others)| {
                     std::iter::once(main)
                         .chain(others.iter().map(|o| &o.name))
-                        .map(move |n| (normalize::name(n), main.clone(), kind))
+                        .map(move |n| (normalize::name(n), main.clone()))
                 })
-                .filter(|(n, _, _)| !n.is_empty())
+                .filter(|(n, _)| !n.is_empty())
                 .collect(),
         )
-    }
-
-    /// The kind of the entry whose main name is `main`.
-    fn kind(&self, main: &str) -> Option<EntityKind> {
-        self.0
-            .iter()
-            .find(|(_, m, _)| m == main)
-            .map(|(_, _, kind)| *kind)
-    }
-
-    /// True when `text` names the entry `main` by one of its names, as whole
-    /// words, whatever the case, or opens with a pronoun that stands for it
-    /// ("Its common room has the only big hearth.").
-    fn named_in(&self, main: &str, text: &str) -> bool {
-        let words = normalize::name_words(text);
-        if words
-            .first()
-            .is_some_and(|w| ["it", "its", "they", "their"].contains(&w.as_str()))
-        {
-            return true;
-        }
-        self.0
-            .iter()
-            .filter(|(_, m, _)| m == main)
-            .any(|(name, _, _)| {
-                let name = normalize::name_words(name);
-                !name.is_empty() && words.windows(name.len()).any(|w| w == name.as_slice())
-            })
     }
 
     /// The main name that `name` stands for; the first entry on a tie.
@@ -927,7 +876,7 @@ impl Names {
         let name = normalize::name(name);
         self.0
             .iter()
-            .find(|(n, _, _)| *n == name)
-            .map(|(_, main, _)| main.as_str())
+            .find(|(n, _)| *n == name)
+            .map(|(_, main)| main.as_str())
     }
 }
