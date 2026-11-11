@@ -20,8 +20,8 @@ use serde_json::json;
 use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     context::{
-        QUIET_EVENT_LINE, adventure_block, guard_events, guard_plans, narration_prompt, one_line,
-        opening_prompt, perceived_by_pc, proposal_context, seen_present,
+        QUIET_EVENT_LINE, adventure_block, guard_events, guard_plans, narration_prompt_with,
+        one_line, opening_prompt, perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource,
@@ -171,6 +171,8 @@ struct Committed<'a> {
     /// attempt, or a move the Commit did not make, as one that does not
     /// happen. Never the blockers (GM-only text).
     turn: Option<(ActionKind, Verdict)>,
+    /// Outcome lines the engine adds: a wait cut short (`wait_cut_line`).
+    extra: Vec<String>,
 }
 
 /// The result of the steps before the Commit.
@@ -184,6 +186,8 @@ struct Planned {
     minutes: u32,
     action: ActionKind,
     verdict: Verdict,
+    /// The minutes a wait Intent stated (`world::intent_minutes`), if any.
+    wait_asked: Option<u32>,
 }
 
 pub const OOC_RULES: &str = "\
@@ -418,6 +422,13 @@ impl Engine {
             events: &events,
             reactions: &reactions,
             turn: stored_action(&stored.record.proposal_json),
+            extra: stored_wait_asked(&stored.record.proposal_json)
+                .and_then(|asked| {
+                    let minutes = stored.record.clock_after - stored.record.clock_before;
+                    wait_cut_line(u32::try_from(minutes).unwrap_or(u32::MAX), asked)
+                })
+                .into_iter()
+                .collect(),
         };
         let narration = self.narrate(
             &stored.record.op_id,
@@ -513,6 +524,11 @@ impl Engine {
             events: &planned.events,
             reactions: &planned.reactions,
             turn: Some((planned.action, planned.verdict)),
+            extra: planned
+                .wait_asked
+                .and_then(|asked| wait_cut_line(planned.minutes, asked))
+                .into_iter()
+                .collect(),
         };
         let narration = self
             .narrate(
@@ -579,7 +595,7 @@ impl Engine {
         if !committed.events.is_empty() && events.is_empty() && !event_fact {
             events.push(QUIET_EVENT_LINE.to_owned());
         }
-        let prompt = narration_prompt(
+        let prompt = narration_prompt_with(
             view_after,
             &self.packs,
             &perceived,
@@ -587,6 +603,7 @@ impl Engine {
             &reactions,
             intent,
             committed.turn,
+            &committed.extra,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
@@ -635,6 +652,7 @@ impl Engine {
         let ctx = proposal_context(view, &self.packs, intent);
         let schema = proposal_schema_for(&ctx.handles);
         let mut prompt = ctx.prompt;
+        let mut wait_asked = None;
         for attempt in ["propose", "propose_retry"] {
             let step = Instant::now();
             let raw = self.gm.propose(&prompt, &schema);
@@ -659,7 +677,8 @@ impl Engine {
                     // contested move with no destination is an act for
                     // `engine_time` (review minor).
                     let (p, mut notes) = checks::settle(p, view);
-                    let mut p = engine_time(p, view, intent);
+                    let (mut p, asked) = engine_time(p, view, intent);
+                    wait_asked = asked;
                     // A contested act with no Check: one repair note on the
                     // first attempt, a default Check on the retry (ADR 0007).
                     // A contested `check` verdict gets it at once.
@@ -689,7 +708,7 @@ impl Engine {
             let errs = match checked {
                 Ok(valid) => {
                     self.log(op_id, "validate", &Prompt::default(), "ok", step)?;
-                    return self.resolve(op_id, valid, view, seed, timings);
+                    return self.resolve(op_id, valid, view, seed, wait_asked, timings);
                 }
                 Err(errs) => errs,
             };
@@ -722,6 +741,7 @@ impl Engine {
         valid: Validated<'_>,
         view: &WorldView,
         seed: u64,
+        wait_asked: Option<u32>,
         timings: &mut Timings,
     ) -> Result<Planned, TurnError> {
         let p = valid.proposal();
@@ -756,6 +776,7 @@ impl Engine {
             "reactions": resolved.reactions,
             "events": events,
             "roll": roll,
+            "wait_asked": wait_asked,
         })
         .to_string();
         Ok(Planned {
@@ -767,6 +788,7 @@ impl Engine {
             minutes: p.minutes,
             action: p.action,
             verdict: p.verdict,
+            wait_asked,
         })
     }
 
@@ -875,20 +897,68 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
 /// action (`rules::default_minutes`). It runs after `checks::settle`, which
 /// may drop `move_to`, and before the Commit checks, so they see the final
 /// action and minutes. Relabelling the action adds no PC act.
-fn engine_time(mut p: DecisionProposal, view: &WorldView, intent: &str) -> DecisionProposal {
-    let not_a_wait = p.contested || !world::asks_to_wait(intent);
+///
+/// Bug pass 5 (M3): QA saw "wait 30 minutes" take 60, "sleep for eight
+/// hours" take 10 and a one-line talk take 90. So:
+/// - when a wait Intent states a duration (`world::intent_minutes`), the
+///   Turn is a wait of that many minutes, whatever the model labelled it
+///   or wrote in `minutes`, unless it is contested or moves the PC; the
+///   wait still stops at a World Event the PC witnesses. The second value
+///   is the minutes asked, so the narrator can say that a wait ended early;
+/// - any other action takes at most `rules::max_minutes` of the model's
+///   minutes, or the duration the Intent states when that is longer;
+/// - a move to the place where the PC already stands is an act ("I walk
+///   over to Sefa's corner" came as a move to the inn, and the narrator was
+///   told that the move did not happen).
+fn engine_time(
+    mut p: DecisionProposal,
+    view: &WorldView,
+    intent: &str,
+) -> (DecisionProposal, Option<u32>) {
+    if p.action == ActionKind::Move && p.move_to.is_some_and(|h| world::is_pc_place(view, h)) {
+        p.move_to = None;
+        p.action = ActionKind::Act;
+    }
+    let asks_to_wait = !p.contested && world::asks_to_wait(intent);
+    let stated = if asks_to_wait {
+        world::intent_minutes(intent, view.clock_min)
+    } else {
+        None
+    };
+    if stated.is_some() && p.move_to.is_none() {
+        p.action = ActionKind::Wait;
+    }
+    let not_a_wait = p.contested || !asks_to_wait;
     if p.action == ActionKind::Wait && not_a_wait {
         p.action = ActionKind::Act;
     }
     if p.action == ActionKind::Move && p.contested && p.move_to.is_none() {
         p.action = ActionKind::Act;
     }
+    let mut asked = None;
     if p.action == ActionKind::Wait {
-        p.minutes = world::wait_minutes(view, p.minutes);
+        let requested = stated.unwrap_or(p.minutes);
+        p.minutes = world::wait_minutes(view, requested);
+        asked = stated;
     } else if p.minutes == 0 {
         p.minutes = crate::rules::default_minutes(p.action);
+    } else {
+        // The Player's own duration may be longer than the cap: "I work at
+        // the mill for four days".
+        let stated = world::intent_minutes(intent, view.clock_min).unwrap_or(0);
+        p.minutes = p
+            .minutes
+            .min(crate::rules::max_minutes(p.action).max(stated));
     }
-    p
+    (p, asked)
+}
+
+/// The outcome line of a wait that a World Event (or the longest wait,
+/// `world::WAIT_MAX_MIN`) cut short (bug pass 5, M3): QA asked for an hour,
+/// got 25 minutes, and the story did not say so.
+pub fn wait_cut_line(minutes: u32, asked: u32) -> Option<String> {
+    (minutes < asked)
+        .then(|| format!("- The wait ends early: {minutes} of the {asked} minutes asked pass.\n"))
 }
 
 /// The Roll stored in a Turn's `proposal_json`, if the Turn had a Check.
@@ -906,6 +976,13 @@ pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)> {
     let action = serde_json::from_value(proposal.get("action")?.clone()).ok()?;
     let verdict = serde_json::from_value(proposal.get("verdict")?.clone()).ok()?;
     Some((action, verdict))
+}
+
+/// The minutes a wait Intent stated, stored in a Turn's `proposal_json`
+/// (bug pass 5, M3); `None` for any other Turn and for a Turn stored before.
+pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
+    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
+    serde_json::from_value(record.get("wait_asked")?.clone()).ok()?
 }
 
 /// The `settles` stored in a Turn's `proposal_json`, if its proposal had

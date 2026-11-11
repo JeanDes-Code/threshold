@@ -70,6 +70,21 @@ pub fn known_places(view: &WorldView) -> Vec<EntityId> {
     places
 }
 
+/// True when `place` is the handle of the place where the PC stands now: a
+/// move there is no move (bug pass 5).
+pub fn is_pc_place(view: &WorldView, place: crate::domain::Handle) -> bool {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return false;
+    };
+    let Some(here) = view.live_fact(pc.id, "location") else {
+        return false;
+    };
+    view.entity(place).is_some_and(|e| {
+        e.kind == EntityKind::Place
+            && normalize::value(&e.name) == normalize::value(&here.slot.value)
+    })
+}
+
 /// A location fact a proposal (or a Correction) wrote with no PC witness:
 /// `seen = gm`. Adventure Seed and World Event presence is open by ruling.
 fn placed_unseen(fact: &Fact, pc: u64) -> bool {

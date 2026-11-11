@@ -280,6 +280,31 @@ pub fn narration_prompt(
     intent: &str,
     turn: Option<(ActionKind, Verdict)>,
 ) -> Prompt {
+    narration_prompt_with(
+        view_after,
+        packs,
+        perceived,
+        events,
+        reactions,
+        intent,
+        turn,
+        &[],
+    )
+}
+
+/// `narration_prompt` with outcome lines the engine adds after the
+/// perceived ops: a wait cut short (`turn::wait_cut_line`, bug pass 5).
+#[allow(clippy::too_many_arguments)]
+pub fn narration_prompt_with(
+    view_after: &WorldView,
+    packs: &[ContentPack],
+    perceived: &[LedgerOp],
+    events: &[String],
+    reactions: &[Reaction],
+    intent: &str,
+    turn: Option<(ActionKind, Verdict)>,
+    extra: &[String],
+) -> Prompt {
     let r = Retrieval::new(view_after, "");
     Prompt {
         system: with_fragments(NARRATION_RULES, packs),
@@ -289,7 +314,7 @@ pub fn narration_prompt(
             names_block(view_after, NamesAudience::Narrator)
         ),
         scene: scene(&r),
-        recent: recent(&r, perceived, events, reactions, intent, turn),
+        recent: recent(&r, perceived, events, reactions, intent, turn, extra),
     }
 }
 
@@ -490,6 +515,7 @@ fn recent(
     reactions: &[Reaction],
     intent: &str,
     turn: Option<(ActionKind, Verdict)>,
+    extra: &[String],
 ) -> String {
     let mut tail = format!("THIS TURN\nPlayer intent: {}\n", one_line(intent));
     let verdict = turn.map(|(_, verdict)| verdict);
@@ -502,6 +528,7 @@ fn recent(
                 .filter_map(|op| outcome_line(r, op, perceived)),
         )
         .chain(events.iter().map(|text| format!("- {}\n", one_line(text))))
+        .chain(extra.iter().cloned())
         .collect();
     if let Some(line) = place_line(r, perceived, turn.map(|(action, _)| action)) {
         outcome.push(line);

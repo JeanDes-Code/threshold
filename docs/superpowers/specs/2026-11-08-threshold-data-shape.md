@@ -373,3 +373,13 @@ The narrator's block skipped a name that every other NPC knows. A hidden NPC who
 
 - m8: a secret key in an event text. The event guard drops a text for a secret value only, so a text may still name a secret key ("the debt").
 - m9: a common word as a secret value ("yes", "paid") drops every event text and plan that uses the word.
+
+## 15. Changed in bug pass 5 (2026-11-11)
+
+### The time a Turn takes (M3)
+
+- A wait Intent that states a duration (`world::intent_minutes`: a number or "a", "an", "half an" with minutes, hours or days; "until" a named time of day of `rules::NAMED_TIMES`) is a wait of those minutes, whatever the model's action or `minutes`, unless it is contested or moves the PC. It stops at a World Event the PC witnesses. `world::WAIT_MAX_MIN` is 720.
+- A wait cut short gives the narrator `- The wait ends early: N of the M minutes asked pass.`; the stored proposal JSON keeps `wait_asked` for `renarrate`.
+- `rules::max_minutes`: talk 15, act and observe 30, move 60, unless the Intent states more.
+- A `move` whose `move_to` is the PC's own place is an `act`, with no `move_to`.
+

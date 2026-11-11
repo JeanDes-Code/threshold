@@ -281,10 +281,12 @@ fn town_demo_offscreen_consequence() {
     let event = event.expect("Doul's inquiry is scheduled").id;
     assert!(!knows_reputation(&view));
 
+    // The Intent states the length: the move may take more than the
+    // longest move (bug pass 5, M3).
     let t2 = play(
         &mut engine,
         "t2",
-        "I go to the Varn mill and work there for days.",
+        "I go to the Varn mill and work there for four days.",
     );
     let view = engine.store().snapshot(campaign).unwrap();
     // The inquiry fired during Turn 2, while the PC was at the mill.

@@ -12,7 +12,8 @@ mod sight;
 mod wait;
 
 pub use arrival::{
-    arrival, hidden, known_places, openly_here, pc_witnesses, with_arrival, with_witnessed_events,
+    arrival, hidden, is_pc_place, known_places, openly_here, pc_witnesses, with_arrival,
+    with_witnessed_events,
 };
 pub use beliefs::{
     Belief, beliefs, holders_of, open_item_ref, pc_item_text, pc_knowledge, pc_open_items,
@@ -23,4 +24,4 @@ pub use sight::{
     Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, SightTurn, name_parts, pc_can_name,
     pc_sight, story_names, tagged, unnameable_names,
 };
-pub use wait::{WAIT_DEFAULT_MIN, WAIT_MAX_MIN, asks_to_wait, wait_minutes};
+pub use wait::{WAIT_DEFAULT_MIN, WAIT_MAX_MIN, asks_to_wait, intent_minutes, wait_minutes};

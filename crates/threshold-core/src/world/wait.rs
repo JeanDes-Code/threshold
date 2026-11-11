@@ -1,12 +1,12 @@
 use super::arrival::pc_witnesses;
-use crate::domain::Trigger;
+use crate::domain::{ClockMin, Trigger};
 use crate::store::WorldView;
 
 /// The game minutes a `wait` takes when the player names no duration.
 pub const WAIT_DEFAULT_MIN: u32 = 60;
 
 /// The longest single wait, in game minutes. A longer wait is cut to this.
-pub const WAIT_MAX_MIN: u32 = 480;
+pub const WAIT_MAX_MIN: u32 = 720;
 
 /// The minutes a `wait` Decision Proposal takes, owned by the engine.
 ///
@@ -33,6 +33,143 @@ pub fn wait_minutes(view: &WorldView, requested: u32) -> u32 {
         })
         .filter_map(|until| u32::try_from(until).ok())
         .fold(wanted, u32::min)
+}
+
+/// Number words a duration may use. A ten and a unit add up ("forty five").
+const NUMBER_WORDS: &[(&str, u32)] = &[
+    ("a", 1),
+    ("an", 1),
+    ("one", 1),
+    ("two", 2),
+    ("three", 3),
+    ("four", 4),
+    ("five", 5),
+    ("six", 6),
+    ("seven", 7),
+    ("eight", 8),
+    ("nine", 9),
+    ("ten", 10),
+    ("eleven", 11),
+    ("twelve", 12),
+    ("fifteen", 15),
+    ("twenty", 20),
+    ("thirty", 30),
+    ("forty", 40),
+    ("fifty", 50),
+    ("sixty", 60),
+    ("ninety", 90),
+];
+
+/// The units of a duration, in minutes.
+const UNITS: &[(&str, u32)] = &[
+    ("minute", 1),
+    ("minutes", 1),
+    ("min", 1),
+    ("mins", 1),
+    ("hour", 60),
+    ("hours", 60),
+    ("hr", 60),
+    ("hrs", 60),
+    ("day", 1440),
+    ("days", 1440),
+];
+
+/// The words before a named time of day: "until dawn", "till morning".
+const UNTIL: &[&str] = &["until", "till", "til", "untill"];
+
+fn number(word: &str) -> Option<u32> {
+    word.parse().ok().or_else(|| {
+        NUMBER_WORDS
+            .iter()
+            .find(|(w, _)| *w == word)
+            .map(|(_, n)| *n)
+    })
+}
+
+/// The minutes of the duration whose unit is `words[i]`, read from the
+/// words before it (and "and a half" after it).
+fn duration_at(words: &[String], i: usize, unit: u32) -> Option<u32> {
+    let word = |at: usize| words.get(at).map(String::as_str);
+    let before = |back: usize| i.checked_sub(back).and_then(word);
+    let half = unit / 2;
+    // "half an hour", "half a minute".
+    if before(2) == Some("half") && matches!(before(1), Some("a" | "an")) {
+        return Some(half.max(1));
+    }
+    // "a quarter of an hour".
+    if before(3) == Some("quarter") && before(2) == Some("of") {
+        return Some((unit / 4).max(1));
+    }
+    // "one and a half hours".
+    let mut minutes = if before(3) == Some("and")
+        && before(2) == Some("a")
+        && before(1) == Some("half")
+        && let Some(n) = before(4).and_then(number)
+    {
+        n * unit + half
+    } else {
+        let n = before(1).and_then(number)?;
+        // "forty five minutes": a ten, then a unit.
+        let tens = before(2)
+            .and_then(number)
+            .filter(|t| *t >= 20 && t % 10 == 0 && n < 10 && !matches!(before(2), Some("a" | "an")))
+            .unwrap_or(0);
+        (tens + n) * unit
+    };
+    // "an hour and a half".
+    if word(i + 1) == Some("and") && word(i + 2) == Some("a") && word(i + 3) == Some("half") {
+        minutes += half;
+    }
+    Some(minutes)
+}
+
+/// The game minutes the Intent states for a wait (bug pass 5, M3): a number
+/// or "a", "an" or "half an" with minutes or hours ("for an hour", "30
+/// minutes", "an hour and a half", "eight hours"), or "until" a named time
+/// of day (`rules::NAMED_TIMES`: "until dawn" from 21:00 is 540 minutes),
+/// counted from `clock`. Two durations joined by "and" add up ("two hours
+/// and ten minutes"). `None` when the Intent states none: "I wait a while"
+/// leaves the length to the engine. No model call.
+pub fn intent_minutes(intent: &str, clock: ClockMin) -> Option<u32> {
+    let words = crate::normalize::name_words(intent);
+    for (i, word) in words.iter().enumerate() {
+        if !UNTIL.contains(&word.as_str()) {
+            continue;
+        }
+        let next = words[i + 1..]
+            .iter()
+            .find(|w| !matches!(w.as_str(), "the" | "it" | "is" | "its" | "s"));
+        if let Some(at) = next.and_then(|w| {
+            crate::rules::NAMED_TIMES
+                .iter()
+                .find(|(name, _)| name == w)
+                .map(|(_, at)| *at)
+        }) {
+            let now = u32::try_from(clock % 1440).unwrap_or(0);
+            let until = (at + 1440 - now) % 1440;
+            return Some(if until == 0 { 1440 } else { until });
+        }
+    }
+    let mut total: Option<u32> = None;
+    let mut last_unit: Option<usize> = None;
+    for (i, word) in words.iter().enumerate() {
+        let Some(unit) = UNITS.iter().find(|(w, _)| w == word).map(|(_, u)| *u) else {
+            continue;
+        };
+        let Some(minutes) = duration_at(&words, i, unit) else {
+            continue;
+        };
+        match (total, last_unit) {
+            (None, _) => total = Some(minutes),
+            // A second duration counts when "and" joins it to the first.
+            (Some(t), Some(at)) if words[at + 1..i].iter().any(|w| w == "and") && i - at <= 4 => {
+                total = Some(t + minutes);
+            }
+            _ => break,
+        }
+        last_unit = Some(i);
+    }
+    total.filter(|m| *m > 0)
 }
 
 /// The verbs by which an Intent asks for a wait, as whole words (bug pass

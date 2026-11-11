@@ -1868,3 +1868,148 @@ fn each_model_call_writes_its_server_numbers_to_the_debug_log() {
     );
     assert_eq!(threshold_core::CallStats::parse(&rows[1]), Some(STATS));
 }
+
+// --- Bug pass 5, M3: the time of a Turn --------------------------------------
+
+/// Plays one Turn of `p` with `intent` on the gate world and returns the
+/// game minutes it took, its stored action and the narrator's prompt.
+fn timed(w: World, p: &DecisionProposal, intent: &str) -> (u64, String, Prompt) {
+    let gm = RecordedGm::new(vec![json(p)], vec!["Time passes.".into()]);
+    let campaign = w.campaign;
+    let mut engine = make_engine(w.store, campaign, &gm);
+    let outcome = engine
+        .play_turn("t".into(), intent, &mut no_chunks())
+        .unwrap();
+    let turn = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    let action = stored_action(&turn.record.proposal_json)
+        .map(|(a, _)| format!("{a:?}"))
+        .unwrap_or_default();
+    let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    (
+        turn.record.clock_after - turn.record.clock_before,
+        action,
+        narration,
+    )
+}
+
+/// QA: "I wait here for 30 minutes." took 60, 30, 60, 60. The minutes come
+/// from the Intent, not from the model.
+#[test]
+fn a_stated_wait_takes_the_minutes_of_the_intent() {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Wait;
+    p.minutes = 60;
+    let (minutes, action, narration) = timed(World::new(), &p, "I wait here for 30 minutes.");
+    assert_eq!((minutes, action.as_str()), (30, "Wait"));
+    assert!(
+        !narration.recent.contains("ends early"),
+        "{}",
+        narration.recent
+    );
+}
+
+/// QA: "I take a room upstairs and sleep for eight hours." came as a move
+/// to the PC's own place, and took 10 minutes.
+#[test]
+fn a_stated_sleep_is_a_wait_whatever_the_model_labelled_it() {
+    let mut w = World::new();
+    let here = w.add_place("gate square");
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.move_to = Some(e(here));
+    p.minutes = 10;
+    let (minutes, action, narration) = timed(
+        w,
+        &p,
+        "I take a room upstairs at the inn and sleep for eight hours.",
+    );
+    assert_eq!((minutes, action.as_str()), (480, "Wait"));
+    assert!(
+        !narration.recent.contains("move does not happen"),
+        "{}",
+        narration.recent
+    );
+}
+
+/// QA: a one-line talk took 90 minutes. A talk takes at most 15, an act 30.
+#[test]
+fn the_model_minutes_are_capped_by_action() {
+    for (action, max) in [
+        (ActionKind::Talk, 15),
+        (ActionKind::Act, 30),
+        (ActionKind::Observe, 30),
+    ] {
+        let mut p = proposal(Verdict::Allowed);
+        p.action = action;
+        p.minutes = 90;
+        let (minutes, _, _) = timed(World::new(), &p, "I tell Orsel that his gate is ugly.");
+        assert_eq!(minutes, max, "{action:?}");
+    }
+    let mut w = World::new();
+    let market = w.add_place("Market");
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.move_to = Some(e(market));
+    p.minutes = 200;
+    let (minutes, _, _) = timed(w, &p, "I walk to the market.");
+    assert_eq!(minutes, 60);
+}
+
+/// QA: "I wait here for an hour" took 25 minutes because an event cut it,
+/// and the story did not say so. The narrator now hears it.
+#[test]
+fn a_wait_cut_by_a_witnessed_event_tells_the_narrator() {
+    let mut w = World::new();
+    let (orsel, brann) = (w.orsel, w.brann);
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: "Orsel calls the guard".into(),
+        trigger: threshold_core::domain::Trigger::At(25),
+        actors: vec![EntityRef::Id(orsel)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![],
+        seen_by: vec![EntityRef::Id(brann)],
+        public: false,
+    }]);
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Wait;
+    p.minutes = 25;
+    let (minutes, _, narration) = timed(w, &p, "I wait here for an hour.");
+    assert_eq!(minutes, 25);
+    assert!(
+        narration
+            .recent
+            .contains("- The wait ends early: 25 of the 60 minutes asked pass."),
+        "{}",
+        narration.recent
+    );
+}
+
+/// A wait with no stated length keeps the model's minutes, as before.
+#[test]
+fn a_wait_with_no_stated_length_keeps_the_model_minutes() {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Wait;
+    p.minutes = 20;
+    let (minutes, action, _) = timed(World::new(), &p, "I wait a while.");
+    assert_eq!((minutes, action.as_str()), (20, "Wait"));
+}
+
+/// QA: "Walk to Sefa Lind's corner" came as a move to the inn where the PC
+/// stood, and the narrator was told "the move does not happen". A move to
+/// the PC's own place is an act.
+#[test]
+fn a_move_inside_the_current_place_is_an_act() {
+    let mut w = World::new();
+    let here = w.add_place("gate square");
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.move_to = Some(e(here));
+    let (minutes, action, narration) = timed(w, &p, "I walk over to Brann's corner.");
+    assert_eq!((minutes, action.as_str()), (10, "Act"));
+    assert!(
+        !narration.recent.contains("move does not happen"),
+        "{}",
+        narration.recent
+    );
+}

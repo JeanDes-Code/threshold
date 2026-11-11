@@ -151,3 +151,16 @@ What this does not cover:
 Each change removes model output, changes what the narrator or a screen reads, or adds a field the model fills. None adds a PC act, word or feeling. Details and costs: data shape, sections 13 and 14.
 
 What we do not know yet: whether the model sets `public` sensibly. It is a new required field, untested on the live model. The live checks to run are in the data shape, section 14, and in the run report of this pass.
+
+## Changed in bug pass 5 (2026-11-11): the Intent's duration owns a wait; each action has a longest time
+
+QA pass 4 played a Campaign of 30 Turns. Its ledger shows: "I wait here for 30 minutes" took 60, 30, 60 and 60 minutes, because the model wrote `minutes: 60` and the wait kept it; "I take a room upstairs and sleep for eight hours" came as a `move` to the inn where the PC stood, with `minutes: 10`; a one-line talk came as `act` with `minutes: 90`; "I wait here for an hour" took 25 minutes because the model wrote 25, the time of the next World Event, and the story did not say that the wait ended early. "I walk over to Sefa Lind's corner" came as a `move` to the inn itself, and the narrator read "The move does not happen".
+
+- **A wait Intent that states a duration takes it** (`world::intent_minutes`, `turn::engine_time`). A number or "a", "an", "half an" with minutes, hours or days, "an hour and a half", or "until" a named time of day (`rules::NAMED_TIMES`: dawn 06:00, morning 08:00, noon 12:00, dusk 18:00, nightfall 19:00, midnight 00:00) counted from the clock. When `world::asks_to_wait` holds, the Turn is not contested and does not move the PC, the Turn becomes a wait of those minutes, whatever the model's label or `minutes`. The wait still stops at a World Event the PC witnesses (`world::wait_minutes`), and the longest wait is 720 minutes (was 480), so a night's sleep fits. A wait with no stated duration keeps the model's minutes, as before.
+- **The narrator hears a wait cut short.** When the wait took less than the Intent asked, the outcome block gets `- The wait ends early: N of the M minutes asked pass.` (`turn::wait_cut_line`). The stored proposal keeps `wait_asked`, so `renarrate` gives the same line.
+- **Each action has a longest time** (`rules::max_minutes`): talk 15, act and observe 30, move 60. The model's `minutes` above it is cut to it, unless the Intent states a longer duration ("I work at the mill for four days"). The place data has no travel time yet, so no place raises the move's limit.
+- **A move to the PC's own place is an act** (`world::is_pc_place`): `move_to` goes and the action becomes `act`, so the narrator no longer reads that the move did not happen.
+
+Each change relabels the action or bounds the model's `minutes`; none adds a PC act. The minutes of a stated wait come from the Player's own words. Deterministic tests: `tests/time.rs`, and `a_stated_wait_takes_the_minutes_of_the_intent`, `a_stated_sleep_is_a_wait_whatever_the_model_labelled_it`, `the_model_minutes_are_capped_by_action`, `a_wait_cut_by_a_witnessed_event_tells_the_narrator`, `a_move_inside_the_current_place_is_an_act` in `tests/turn.rs`.
+
+What this does not cover: a duration in words the parser does not know ("a couple of hours", "till the bells ring") leaves the length to the model, as before; "for days" with no number states nothing.
