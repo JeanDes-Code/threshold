@@ -93,3 +93,7 @@ Options, not done:
 - Cut the window of recent Turns in steps (keep 3 to 6 Turns) instead of one Turn at a time, so its start stays the same for several Turns. It changes what the model reads.
 
 Live checks still to run: the per-call `prompt_eval_count` of Ollama on a replay of these Turns, with the server's slot count noted.
+
+## After the review of bug pass 4 (2026-11-11)
+
+Nothing here was measured on the live model. The review removed the inline other-name notes that the rebuilt prompts of the table above carried (about 700 characters), and put one NAMES block at the end of the stable block instead. So the "Rebuilt" rows above no longer describe the code: their prefix lengths include notes that the prompts no longer hold. A narration prompt also gained the departure line of review B1 and, on a guarded event, the line `Nothing the PC notices happens.`; both are in the `recent` block. A replay of the QA Campaign's Turns with Ollama's per-call `prompt_eval_count` is still the live check to run.
