@@ -949,3 +949,323 @@ fn another_place_does_not_block() {
         );
     }
 }
+
+// --- Review of Tasks 1 and 2: every character a tagged proposal names -------
+
+/// B2: one tagged proposal per field that can name a character, each naming
+/// Pip (17, at the market, not here), with its label.
+fn proposals_naming_pip(w: &World) -> Vec<(&'static str, DecisionProposal)> {
+    use threshold_core::domain::{Cancel, Cause, EventDraft, Factor, ItemStatus, Leave, Settle};
+    let pip = e(w.pip);
+    let pip_fact = f(w.view.live_fact(w.pip, "location").unwrap().id);
+    let base = || intimate(w, Stance::Comply);
+    let mut out = Vec::new();
+    let mut with = |label: &'static str, change: &dyn Fn(&mut DecisionProposal)| {
+        let mut p = base();
+        change(&mut p);
+        out.push((label, p));
+    };
+    with("facts.slot.subject", &|p| {
+        p.facts = vec![fact(slot(pip, "mood", "calm"), Seen::Gm, vec![])];
+    });
+    with("facts.said_by", &|p| {
+        let mut said = fact(slot(e(w.orsel), "mood", "calm"), Seen::Pc, vec![]);
+        said.said_by = Some(pip);
+        p.facts = vec![said];
+    });
+    with("facts.because", &|p| {
+        p.facts = vec![fact(
+            slot(e(w.orsel), "mood", "calm"),
+            Seen::Gm,
+            vec![pip_fact],
+        )];
+    });
+    with("check.against", &|p| {
+        p.verdict = Verdict::Check;
+        p.check = Some(check(
+            Some(pip),
+            slot(e(w.orsel), "mood", "calm"),
+            slot(e(w.orsel), "mood", "cross"),
+        ));
+    });
+    with("check.win.subject", &|p| {
+        p.verdict = Verdict::Check;
+        p.check = Some(check(
+            None,
+            slot(pip, "mood", "calm"),
+            slot(e(w.orsel), "mood", "cross"),
+        ));
+    });
+    with("check.lose.subject", &|p| {
+        p.verdict = Verdict::Check;
+        p.check = Some(check(
+            None,
+            slot(e(w.orsel), "mood", "calm"),
+            slot(pip, "mood", "cross"),
+        ));
+    });
+    with("check.factors.fact", &|p| {
+        p.verdict = Verdict::Check;
+        let mut c = check(
+            None,
+            slot(e(w.orsel), "mood", "calm"),
+            slot(e(w.orsel), "mood", "cross"),
+        );
+        c.factors = vec![Factor {
+            fact: pip_fact,
+            helps: true,
+        }];
+        p.check = Some(c);
+    });
+    with("blockers", &|p| p.blockers = vec![pip_fact]);
+    with("reactions.npc", &|p| {
+        p.reactions.push(reaction(pip, Stance::Comply, None));
+    });
+    with("reactions.cause", &|p| {
+        p.reactions[0].cause = Some(Cause::Fact(pip_fact));
+    });
+    with("leaves.npc", &|p| {
+        p.leaves = vec![Leave {
+            npc: pip,
+            to: "away".into(),
+        }];
+    });
+    with("settles.item", &|p| {
+        p.settles = Some(Settle {
+            item: format!("E{} pending_meet", w.pip),
+            outcome: ItemStatus::Done,
+        });
+    });
+    let event = |actor: Handle| EventDraft {
+        in_minutes: 30,
+        actor,
+        goal: None,
+        text: "Someone files a record.".into(),
+        effects: vec![],
+        seen_by: vec![],
+        public: false,
+        moves_actor_to: None,
+    };
+    with("schedule.actor", &|p| p.schedule = Some(event(pip)));
+    with("schedule.seen_by", &|p| {
+        let mut s = event(e(w.orsel));
+        s.seen_by = vec![pip];
+        p.schedule = Some(s);
+    });
+    with("schedule.effects.subject", &|p| {
+        let mut s = event(e(w.orsel));
+        s.effects = vec![slot(pip, "mood", "busy")];
+        p.schedule = Some(s);
+    });
+    with("cancel.because", &|p| {
+        p.cancel = vec![Cancel {
+            event: threshold_core::domain::Handle::WorldEvent(w.bell),
+            because: pip_fact,
+        }];
+    });
+    out
+}
+
+/// B2: a tagged proposal that names a character anywhere, here or not,
+/// needs that character cleared. Pip (17) stands at the market.
+#[test]
+fn a_tagged_proposal_checks_every_character_it_names() {
+    let w = confirmed_gate();
+    assert!(validate(&intimate(&w, Stance::Comply), &w.view).is_ok());
+    for (label, p) in proposals_naming_pip(&w) {
+        let errs = validate(&p, &w.view).expect_err(label);
+        assert!(
+            adults_only(&errs).contains(&Some(e(w.pip))),
+            "{label}: {errs:?}"
+        );
+    }
+    // The same proposals, untagged, are not refused for Pip.
+    for (label, mut p) in proposals_naming_pip(&w) {
+        p.intimate = false;
+        if let Err(errs) = validate(&p, &w.view) {
+            assert!(adults_only(&errs).is_empty(), "{label}: {errs:?}");
+        }
+    }
+}
+
+/// B2: a handle that names no known entity, fact, event or goal is not
+/// cleared: the gate fails closed.
+#[test]
+fn a_tagged_proposal_that_names_an_unknown_handle_is_refused() {
+    let w = confirmed_gate();
+    let mut p = intimate(&w, Stance::Comply);
+    p.facts = vec![fact(slot(e(999), "mood", "calm"), Seen::Gm, vec![])];
+    let errs = validate(&p, &w.view).expect_err("unknown");
+    assert!(adults_only(&errs).contains(&Some(e(999))), "{errs:?}");
+
+    let mut p = intimate(&w, Stance::Comply);
+    p.blockers = vec![f(999)];
+    let errs = validate(&p, &w.view).expect_err("unknown fact");
+    assert!(adults_only(&errs).contains(&Some(f(999))), "{errs:?}");
+}
+
+/// B2, explicit: a Check against a minor who is elsewhere, in a tagged
+/// Turn, is a final Refusal after one proposal call.
+#[test]
+fn a_check_against_a_minor_in_a_tagged_turn_is_refused() {
+    let mut w = confirmed_gate();
+    let mut p = intimate(&w, Stance::Comply);
+    p.verdict = Verdict::Check;
+    p.contested = true;
+    p.check = Some(check(
+        Some(e(w.pip)),
+        slot(e(w.orsel), "mood", "calm"),
+        slot(e(w.orsel), "mood", "cross"),
+    ));
+    let gm = RecordedGm::new(
+        vec![
+            serde_json::to_string(&p).unwrap(),
+            serde_json::to_string(&p).unwrap(),
+        ],
+        vec!["unused".into()],
+    );
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    let err = engine
+        .play_turn("t1".into(), "I lean closer.", &mut |_| {})
+        .expect_err("refused");
+    let TurnError::Refused { kind, blocked } = err else {
+        panic!("expected a refusal, got {err:?}");
+    };
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![w.pip]));
+    assert_eq!(gm.calls().len(), 1, "no retry after a refusal");
+}
+
+/// Every property path of a `DecisionProposal` as its JSON schema spells
+/// it, `[]` for an array item. A `Handle` is a leaf.
+fn schema_paths(
+    schema: &serde_json::Value,
+    defs: &serde_json::Value,
+    at: &str,
+    out: &mut BTreeSet<String>,
+) {
+    if let Some(name) = schema
+        .get("$ref")
+        .and_then(|r| r.as_str())
+        .and_then(|r| r.strip_prefix("#/$defs/"))
+    {
+        if name == "Handle" {
+            out.insert(at.to_owned());
+        } else {
+            schema_paths(&defs[name], defs, at, out);
+        }
+        return;
+    }
+    let mut inner = false;
+    for key in ["anyOf", "oneOf", "allOf"] {
+        for part in schema
+            .get(key)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
+            // The `null` of an `Option` adds no field.
+            if part.get("type").and_then(|t| t.as_str()) == Some("null") {
+                continue;
+            }
+            inner = true;
+            schema_paths(part, defs, at, out);
+        }
+    }
+    if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
+        inner = true;
+        for (key, value) in props {
+            let path = if at.is_empty() {
+                key.clone()
+            } else {
+                format!("{at}.{key}")
+            };
+            schema_paths(value, defs, &path, out);
+        }
+    }
+    if let Some(items) = schema.get("items") {
+        inner = true;
+        schema_paths(items, defs, &format!("{at}[]"), out);
+    }
+    if !inner && !at.is_empty() {
+        out.insert(at.to_owned());
+    }
+}
+
+/// Every field of a Decision Proposal, and whether it can name a
+/// character, directly or through a fact, an event or a goal. The gate's
+/// collector (`mature::check`, `named` in `gate.rs`) reads each `true`
+/// field. A new field fails this test until its author adds it here, and
+/// to the collector when it can name a character: the collector also
+/// destructures the proposal with no `..`, so the compiler asks too.
+const PROPOSAL_FIELDS: &[(&str, bool)] = &[
+    ("action", false),
+    ("blockers[]", true),
+    ("cancel[].because", true),
+    ("cancel[].event", true),
+    ("check.against", true),
+    ("check.factors[].fact", true),
+    ("check.factors[].helps", false),
+    ("check.lose.key", false),
+    ("check.lose.subject", true),
+    ("check.lose.value", false),
+    ("check.win.key", false),
+    ("check.win.subject", true),
+    ("check.win.value", false),
+    ("contested", false),
+    ("facts[].because[]", true),
+    ("facts[].said_by", true),
+    ("facts[].seen", false),
+    ("facts[].slot.key", false),
+    ("facts[].slot.subject", true),
+    ("facts[].slot.value", false),
+    ("intimate", false),
+    ("leaves[].npc", true),
+    ("leaves[].to", false),
+    ("minutes", false),
+    ("move_to", true),
+    ("new_npcs[].age", false),
+    ("new_npcs[].id", true),
+    ("new_npcs[].name", false),
+    ("new_npcs[].voice", false),
+    ("reactions[].cause", false),
+    ("reactions[].cause.fact", true),
+    ("reactions[].npc", true),
+    ("reactions[].plan", false),
+    ("reactions[].stance", false),
+    ("schedule.actor", true),
+    ("schedule.effects[].key", false),
+    ("schedule.effects[].subject", true),
+    ("schedule.effects[].value", false),
+    ("schedule.goal", true),
+    ("schedule.in_minutes", false),
+    ("schedule.moves_actor_to", false),
+    ("schedule.public", false),
+    ("schedule.seen_by[]", true),
+    ("schedule.text", false),
+    ("settles.item", true),
+    ("settles.outcome", false),
+    ("verdict", false),
+];
+
+/// B2: the list above is every field of the proposal schema.
+#[test]
+fn every_proposal_field_is_sorted_for_the_gate() {
+    let schema = serde_json::to_value(schemars::schema_for!(DecisionProposal)).unwrap();
+    let mut found = BTreeSet::new();
+    schema_paths(&schema, &schema["$defs"], "", &mut found);
+    let listed: BTreeSet<String> = PROPOSAL_FIELDS
+        .iter()
+        .map(|(p, _)| (*p).to_owned())
+        .collect();
+    assert_eq!(
+        found, listed,
+        "a proposal field changed: decide whether it names a character, then update the gate's collector and this list"
+    );
+}

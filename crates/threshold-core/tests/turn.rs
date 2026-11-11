@@ -2149,7 +2149,12 @@ fn an_intimate_check_runs_even_when_references_fail() {
     let (mut engine, w, gm) = engine_for(w0, vec![raw.clone(), raw], vec!["never"]);
     let (kind, blocked) =
         refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
-    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![w.pip]));
+    // The unknown subject blocks too: the gate clears no handle the world
+    // does not hold (review B2).
+    assert_eq!(
+        (kind, blocked),
+        (RefusalKind::AdultsOnly, vec![w.pip, 9_999])
+    );
     assert_eq!(kinds(&gm), [CallKind::Propose]);
     let validate = steps(&engine, "t1")
         .into_iter()
