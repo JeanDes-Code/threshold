@@ -98,6 +98,17 @@ export default function SidePanel(props: Props) {
         )}
       </Card>
 
+      {/* Pinned before Open: with five Open Items it fell below the window (QA, bug pass 4). */}
+      {pinned.length > 0 && (
+        <Card title="Pinned">
+          <ul className="play-list">
+            {pinned.map((pin) => (
+              <PinRow key={JSON.stringify(pin.target)} pin={pin} onSelect={onSelect} onPin={onPin} />
+            ))}
+          </ul>
+        </Card>
+      )}
+
       <Card title="Open">
         {open.length === 0 ? (
           <p className="play-empty">Nothing open.</p>
@@ -117,16 +128,6 @@ export default function SidePanel(props: Props) {
           </>
         )}
       </Card>
-
-      {pinned.length > 0 && (
-        <Card title="Pinned">
-          <ul className="play-list">
-            {pinned.map((pin) => (
-              <PinRow key={JSON.stringify(pin.target)} pin={pin} onSelect={onSelect} onPin={onPin} />
-            ))}
-          </ul>
-        </Card>
-      )}
 
       <People known={known} selected={selected} onSelect={onSelect} />
     </>

@@ -29,7 +29,8 @@ export interface PlayScreenProps {
   onAct: (text: string) => Promise<boolean>;
   onAsk: (text: string) => Promise<boolean>;
   onCorrect: (clarified: string, why: string) => Promise<boolean>;
-  onRetry: () => void;
+  /** Sends the failed Turn again; resolves true when it committed. */
+  onRetry: () => Promise<boolean>;
   /** Closes the failure, and forgets the Turn that could be sent again. */
   onDismissFailure: () => void;
   onBegin: () => void;

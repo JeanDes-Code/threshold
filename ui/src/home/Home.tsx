@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { CampaignCard, DraftLine, DraftState } from "../api";
-import { cardLine, fileName, lastPlayedText, unfinishedDrafts } from "./logic";
+import { cardLine, lastPlayedText, problemTitle, startedText, unfinishedDrafts } from "./logic";
 
 interface Props {
   /** null while the cards load. */
@@ -128,12 +128,13 @@ function Card({ card, now, opening, disabled, onOpen, onRemove }: CardProps) {
   if (card.problem !== null) {
     return <ProblemCard card={card} disabled={disabled} onRemove={onRemove} />;
   }
+  const started = startedText(card.db_path);
   return (
     <button
       type="button"
       className="home-card"
       disabled={disabled}
-      aria-label={`Open ${card.pc_name}: ${cardLine(card)}, ${lastPlayedText(card.last_played_ms, now)}`}
+      aria-label={`Open ${card.pc_name}${started ? `, ${started}` : ""}: ${cardLine(card)}, ${lastPlayedText(card.last_played_ms, now)}`}
       onClick={onOpen}
     >
       <span className="home-card__head">
@@ -142,6 +143,7 @@ function Card({ card, now, opening, disabled, onOpen, onRemove }: CardProps) {
         </span>
         <span className="home-card__name">{card.pc_name || "Unnamed"}</span>
       </span>
+      {started !== null && <span className="home-card__started">{started}</span>}
       <span className="home-card__premise">{card.premise}</span>
       <span className="home-card__foot">
         <span className={card.needs_begin ? "home-card__count home-card__count--new" : "home-card__count"}>
@@ -156,11 +158,11 @@ function Card({ card, now, opening, disabled, onOpen, onRemove }: CardProps) {
 /** A file that cannot open. "Remove from list" asks once, then moves the file to the archive folder. */
 function ProblemCard({ card, disabled, onRemove }: { card: CampaignCard; disabled: boolean; onRemove: () => void }) {
   const [confirming, setConfirming] = useState(false);
-  const name = fileName(card.db_path);
+  const name = problemTitle(card.db_path);
   return (
     <article className="home-card home-card--problem" aria-label={`${name}: cannot open`}>
       <p className="play-label">Cannot open</p>
-      <h3 className="home-card__name home-card__name--file">{name}</h3>
+      <h3 className="home-card__name">{name}</h3>
       <p className="home-card__problem">{cardLine(card)}</p>
       {confirming ? (
         <div className="home-card__confirm" role="group" aria-label={`Remove ${name} from the list?`}>

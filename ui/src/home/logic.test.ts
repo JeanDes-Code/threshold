@@ -3,6 +3,9 @@ import type { CampaignCard } from "../api";
 import {
   cardLine,
   fileName,
+  createdMs,
+  startedText,
+  problemTitle,
   lastPlayedText,
   modelState,
   modelText,
@@ -50,6 +53,21 @@ describe("home cards", () => {
   it("a card without a name shows its file name", () => {
     expect(fileName("/data/campaigns/campaign-1.sqlite")).toBe("campaign-1.sqlite");
     expect(fileName("C:\\data\\campaign-2.sqlite")).toBe("campaign-2.sqlite");
+  });
+
+  it("a card says the day its Campaign started, from the file name", () => {
+    const path = "/data/campaigns/campaign-1794363545195843131.sqlite";
+    expect(createdMs(path)).toBe(1794363545195);
+    expect(startedText(path)).toBe(`started ${new Date(1794363545195).getUTCDate()} Nov 2026`);
+    expect(startedText("/data/campaigns/old.sqlite")).toBeNull();
+    expect(createdMs("C:\\data\\campaign-12.sqlite")).toBeNull();
+  });
+
+  it("a card that cannot open shows a plain label, never the file name", () => {
+    const path = "/data/campaigns/campaign-1794363545195843131.sqlite";
+    expect(problemTitle(path)).toMatch(/^A Campaign started \d+ Nov 2026$/);
+    expect(problemTitle(path)).not.toContain("sqlite");
+    expect(problemTitle("/data/x.sqlite")).toBe("A Campaign file");
   });
 
   it("home lists the drafts that are not built", () => {

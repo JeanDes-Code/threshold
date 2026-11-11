@@ -95,6 +95,24 @@ export function intentAfterTurn(sent: string, typed: string, taken: boolean): st
   return `${sent}\n${typed}`;
 }
 
+/**
+ * The Intent field after a Retry commits. The failed Turn gave its sent text
+ * back to the field; once the Retry commits that text is done, so it goes,
+ * and only what the Player typed after it stays (QA, bug pass 4: the next
+ * Intent was glued to the retried one).
+ */
+export function intentAfterRetry(retried: string, typed: string): string {
+  if (retried === "") return typed;
+  if (typed.trim() === retried.trim()) return "";
+  if (typed.startsWith(`${retried}\n`)) return typed.slice(retried.length + 1);
+  return typed;
+}
+
+/** The seconds a running Turn has taken, as the phase line shows them. */
+export function elapsedText(ms: number): string {
+  return `${Math.max(0, Math.floor(ms / 1000))} s`;
+}
+
 /** How many Open Items the side panel shows before "Show all". */
 export const OPEN_CAP = 5;
 

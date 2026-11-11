@@ -14,6 +14,8 @@ import {
   canOpenCorrection,
   streamShown,
   intentAfterTurn,
+  intentAfterRetry,
+  elapsedText,
   openShown,
   OPEN_CAP,
   emphasis,
@@ -112,6 +114,20 @@ describe("Task 5 fixes", () => {
     expect(intentAfterTurn("I wait.", "", false)).toBe("I wait.");
     expect(intentAfterTurn("I wait.", "  ", false)).toBe("I wait.");
     expect(intentAfterTurn("I wait.", "I look", false)).toBe("I wait.\nI look");
+  });
+
+  it("a Retry that commits takes the retried text out of the field", () => {
+    expect(intentAfterRetry("I wait.", "I wait.")).toBe("");
+    expect(intentAfterRetry("I wait.", "I wait.\nI look")).toBe("I look");
+    // The Player rewrote the field: it stays as it is.
+    expect(intentAfterRetry("I wait.", "I run.")).toBe("I run.");
+    expect(intentAfterRetry("", "I look")).toBe("I look");
+  });
+
+  it("a running Turn shows its whole seconds", () => {
+    expect(elapsedText(0)).toBe("0 s");
+    expect(elapsedText(4999)).toBe("4 s");
+    expect(elapsedText(-5)).toBe("0 s");
   });
 
   it("the Open card shows the first items and the rest on demand", () => {

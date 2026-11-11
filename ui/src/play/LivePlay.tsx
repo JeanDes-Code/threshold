@@ -27,10 +27,10 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
 
   const correct = (clarified: string, why: string) => store.run(() => turns.correct(clarified, why), clarified);
 
-  const retry = () => {
+  const retry = async () => {
     const pending = turns.pending();
-    if (!pending) return;
-    void store.run(() => turns.retry(), String(pending.args.text ?? pending.args.clarified ?? ""));
+    if (!pending) return false;
+    return store.run(() => turns.retry(), String(pending.args.text ?? pending.args.clarified ?? ""));
   };
 
   // "Begin": the GM narrates the opening scene, as the Opening Turn.

@@ -23,8 +23,7 @@ export function lastPlayedText(ms: number, now: number): string {
   }
   if (ago < 2 * DAY) return "played yesterday";
   if (ago < 7 * DAY) return `played ${Math.floor(ago / DAY)} days ago`;
-  const date = new Date(ms);
-  return `played on ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+  return `played on ${dayText(ms)}`;
 }
 
 /** The card's count line: "Not begun yet", "1 Turn", "12 Turns", or its problem. */
@@ -37,6 +36,40 @@ export function cardLine(card: CampaignCard): string {
 /** The file name of a card's path, for a card the core could not read. */
 export function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+/**
+ * When a Campaign was created, in ms since the epoch, from its file name
+ * (`campaign-<nanoseconds>.sqlite`, written by the shell); null for any
+ * other name.
+ */
+export function createdMs(path: string): number | null {
+  const found = /^campaign-(\d{10,})\.sqlite$/.exec(fileName(path));
+  if (!found) return null;
+  const ms = Math.floor(Number(found[1]) / 1_000_000);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+/** "11 Nov 2026": a day as the home screen writes it. */
+export function dayText(ms: number): string {
+  const date = new Date(ms);
+  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+/**
+ * What tells two Campaign cards apart beyond the PC's name (QA, bug pass 4:
+ * two cards with one PC differed only by their Turn count): the day the
+ * Campaign was started, when the file name gives it.
+ */
+export function startedText(path: string): string | null {
+  const ms = createdMs(path);
+  return ms === null ? null : `started ${dayText(ms)}`;
+}
+
+/** The title of a card the core could not read: a plain label, never a raw file name. */
+export function problemTitle(path: string): string {
+  const ms = createdMs(path);
+  return ms === null ? "A Campaign file" : `A Campaign started ${dayText(ms)}`;
 }
 
 /** The Seed Drafts the home screen lists: the ones not built yet. */

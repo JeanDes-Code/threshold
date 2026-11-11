@@ -1,7 +1,7 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { SceneState } from "../api";
 import NoteField from "../marks/NoteField";
-import { PHASE_TEXT, intentAfterTurn, isSendKey, type TurnPhase } from "./logic";
+import { PHASE_TEXT, elapsedText, intentAfterRetry, intentAfterTurn, isSendKey, type TurnPhase } from "./logic";
 
 interface Props {
   /** The mature content module decides its buttons from `scene` and `phase`. */
@@ -30,7 +30,8 @@ interface Props {
   onAsk: (text: string) => Promise<boolean>;
   /** Resolves true when the Correction was committed: the fields then clear. */
   onCorrect: (clarified: string, why: string) => Promise<boolean>;
-  onRetry: () => void;
+  /** Sends the failed Turn again; resolves true when it committed. */
+  onRetry: () => Promise<boolean>;
   /** Closes the failure, and forgets the Turn that could be sent again. */
   onDismissFailure: () => void;
   onBegin: () => void;
@@ -57,13 +58,25 @@ export default function ActionBar(props: Props) {
   const fixId = useId();
   const noteId = useId();
   const busy = phase !== "idle";
+  // The text a failed Turn gave back to the field: a Retry that commits
+  // takes it out again.
+  const [returned, setReturned] = useState("");
+  const elapsed = useElapsed(busy);
 
   const act = async () => {
     const text = intent.trim();
     if (!text || busy) return;
     setIntent("");
     const taken = await onAct(text);
+    setReturned(taken ? "" : text);
     setIntent((typed) => intentAfterTurn(text, typed, taken));
+  };
+
+  const retry = async () => {
+    if (await onRetry()) {
+      setIntent((typed) => intentAfterRetry(returned, typed));
+      setReturned("");
+    }
   };
 
   const ask = async () => {
@@ -89,7 +102,7 @@ export default function ActionBar(props: Props) {
           <p>The Turn failed. Nothing was committed.</p>
           <p className="play-alert__detail">{failure}</p>
           {canRetry && (
-            <button type="button" className="play-btn play-btn--outline" disabled={busy} onClick={onRetry}>
+            <button type="button" className="play-btn play-btn--outline" disabled={busy} onClick={() => void retry()}>
               Retry
             </button>
           )}
@@ -119,6 +132,7 @@ export default function ActionBar(props: Props) {
       <p className={busy ? "play-phase play-phase--on" : "play-phase"} role="status">
         {busy && <span className="play-phase__dot" aria-hidden="true" />}
         {PHASE_TEXT[phase]}
+        {busy && <span className="play-phase__time"> · {elapsedText(elapsed)}</span>}
       </p>
 
       {needsBegin ? (
@@ -260,4 +274,19 @@ export default function ActionBar(props: Props) {
       )}
     </footer>
   );
+}
+
+/** The milliseconds since `busy` turned true; 0 while idle. Ticks each second. */
+function useElapsed(busy: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!busy) return;
+    const begun = Date.now();
+    const timer = window.setInterval(() => setElapsed(Date.now() - begun), 1000);
+    return () => {
+      window.clearInterval(timer);
+      setElapsed(0);
+    };
+  }, [busy]);
+  return busy ? elapsed : 0;
 }
