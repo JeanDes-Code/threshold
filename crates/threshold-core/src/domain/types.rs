@@ -87,28 +87,57 @@ pub fn slot_sentence(name: &str, key: &str, value: &str) -> String {
 /// respected."). The Player screens use it for a state of the PC that a
 /// Turn wrote (bug pass 4: "Teodor Brandt's fatigue is now heavy." read like
 /// a machine under "What you learned").
+///
+/// Fatigue reads right for the values it knows ("rested", "tired",
+/// "exhausted"...), and any other value in a neutral form, "Your fatigue:
+/// light." (review minor: "rested" read "You are tired (rested).").
 pub fn you_sentence(key: &str, value: &str) -> String {
     let words = |text: &str| text.trim().replace('_', " ");
     let value = words(value);
-    if ["", "none", "no", "nothing", "n/a"].contains(&crate::normalize::value(&value).as_str()) {
-        return match crate::normalize::key(key).as_str() {
+    let key = crate::normalize::key(key);
+    let none =
+        ["", "none", "no", "nothing", "n/a"].contains(&crate::normalize::value(&value).as_str());
+    if key == "fatigue" {
+        let normal = crate::normalize::value(&value);
+        return if none || FATIGUE_RESTED.contains(&normal.as_str()) {
+            "You are rested.".to_owned()
+        } else if FATIGUE_TIRED.contains(&normal.as_str()) {
+            format!("You are {normal}.")
+        } else {
+            format!("Your fatigue: {value}.")
+        };
+    }
+    if none {
+        return match key.as_str() {
             "location" => "You do not know where you are.".to_owned(),
             "injury" => "You are not injured.".to_owned(),
             "condition" => "You are well.".to_owned(),
-            "fatigue" => "You are not tired.".to_owned(),
             "carrying" => "You carry nothing.".to_owned(),
             other => format!("You have no {}.", words(other)),
         };
     }
-    match crate::normalize::key(key).as_str() {
+    match key.as_str() {
         "location" => format!("You are at {value}."),
         "injury" => format!("You are injured ({value})."),
         "condition" => format!("You are {value}."),
-        "fatigue" => format!("You are tired ({value})."),
         "carrying" => format!("You carry {value}."),
         other => format!("Your {} is now {value}.", words(other)),
     }
 }
+
+/// Fatigue values that mean no fatigue: "You are rested.".
+const FATIGUE_RESTED: &[&str] = &["rested", "fresh", "well rested", "not tired"];
+
+/// Fatigue values that read as "You are <value>.".
+const FATIGUE_TIRED: &[&str] = &[
+    "tired",
+    "weary",
+    "winded",
+    "sleepy",
+    "drained",
+    "exhausted",
+    "spent",
+];
 
 /// The prefix of the key of a fact that gives an entity one more name.
 pub const ALIAS_KEY_PREFIX: &str = "alias_";

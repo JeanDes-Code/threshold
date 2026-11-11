@@ -361,3 +361,34 @@ fn a_slot_reads_as_a_plain_sentence() {
         assert!(!sentence.contains("(none)"), "{sentence}");
     }
 }
+
+/// Review minor: "fatigue = rested" read "You are tired (rested).". A state
+/// sentence of the PC is right for the values it knows, and falls back to a
+/// neutral form for any other.
+#[test]
+fn a_state_of_the_pc_reads_right_for_known_values() {
+    use threshold_core::domain::you_sentence;
+    for (key, value, sentence) in [
+        ("fatigue", "rested", "You are rested."),
+        ("fatigue", "none", "You are rested."),
+        ("fatigue", "", "You are rested."),
+        ("fatigue", "tired", "You are tired."),
+        ("fatigue", "winded", "You are winded."),
+        ("fatigue", "exhausted", "You are exhausted."),
+        ("fatigue", "light", "Your fatigue: light."),
+        ("fatigue", "heavy", "Your fatigue: heavy."),
+        (
+            "injury",
+            "bruised_wrist",
+            "You are injured (bruised wrist).",
+        ),
+        ("injury", "none", "You are not injured."),
+        (
+            "reputation",
+            "respected",
+            "Your reputation is now respected.",
+        ),
+    ] {
+        assert_eq!(you_sentence(key, value), sentence, "{key} {value:?}");
+    }
+}

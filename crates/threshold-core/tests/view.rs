@@ -1730,7 +1730,7 @@ fn what_you_learned_holds_no_machine_line() {
         .flat_map(|s| &s.learned)
         .map(|l| l.text.as_str())
         .collect();
-    assert!(learned.contains(&"You are tired (heavy)."), "{learned:?}");
+    assert!(learned.contains(&"Your fatigue: heavy."), "{learned:?}");
     assert!(learned.contains(&"Orsel wants two coins."), "{learned:?}");
     for machine in ["Accepted:", "Ada is at", "Ada's fatigue"] {
         assert!(
