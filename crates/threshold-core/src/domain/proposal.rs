@@ -179,6 +179,18 @@ impl CloseOutcome {
         }
     }
 
+    /// The outcome as the Player reads it about the PC, in the second
+    /// person: "You refused" (bug pass 5, M2: the OOC sheet).
+    pub fn you(self) -> &'static str {
+        match self {
+            Self::Accepted => "You accepted",
+            Self::Refused => "You refused",
+            Self::Done => "You did it",
+            Self::Failed => "You failed",
+            Self::Dropped => "You gave it up",
+        }
+    }
+
     /// The text of the outcome fact, from a fixed English template and the
     /// Open Item's own stored text.
     pub fn text(self, item_text: &str) -> String {

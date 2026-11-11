@@ -180,7 +180,7 @@ fn a_witnessed_move_to_a_place_the_pc_cannot_name_shows_a_departure_only() {
     );
     let ooc = ooc_sheet(&sight);
     assert!(
-        ooc.contains("- Orsel left; the PC does not know where.\n"),
+        ooc.contains("- Orsel left; you do not know where.\n"),
         "{ooc}"
     );
     assert!(!ooc.contains("leaves"), "{ooc}");

@@ -1614,12 +1614,16 @@ fn the_ooc_prompt_holds_the_play_screen_and_no_hidden_fact() {
     );
     assert_eq!(clock_text(clock), "Day 1, 00:07");
     assert!(
-        all.contains("Here with the PC: Orsel, Brann, someone the PC cannot name"),
+        all.contains("Here with you: Orsel, Brann, someone you cannot name"),
         "{all}"
     );
-    assert!(all.contains("SETTLED ITEMS"), "{all}");
     assert!(
-        all.contains("- Refused: Ada plans to meet Brann at the mill."),
+        all.contains(threshold_core::view::OOC_ANSWERED_HEADING),
+        "{all}"
+    );
+    // Bug pass 5, M2: the outcome is a sentence about "you".
+    assert!(
+        all.contains("- You refused: Ada plans to meet Brann at the mill."),
         "{all}"
     );
     // The closed item is listed once, as settled, never as open.
@@ -1908,4 +1912,27 @@ fn a_stage_note_stays_with_its_bubble() {
         prose(&blocks(&view, other)[0]),
         r#"(low) "Nobody knows my name.""#
     );
+}
+
+/// Bug pass 5, M2: after two refusals QA asked "Which requests have I
+/// answered and how?" and the GM said "You have not answered any
+/// requests.". The sheet uses the Player's words, and an empty block says
+/// that it is empty.
+#[test]
+fn the_ooc_sheet_says_what_is_open_and_what_is_answered_in_the_players_words() {
+    use threshold_core::view::{OOC_ANSWERED_HEADING, OOC_OPEN_HEADING, ooc_sheet};
+    let w = HiddenWorld::new();
+    let before = ooc_sheet(&w.sight());
+    assert!(before.contains(OOC_OPEN_HEADING), "{before}");
+    assert!(
+        before.contains(&format!(
+            "{OOC_ANSWERED_HEADING}\n- None yet: you have answered no request, offer, plan or promise.\n"
+        )),
+        "{before}"
+    );
+    assert!(OOC_OPEN_HEADING.contains("REQUESTS, OFFERS, PLANS AND PROMISES"));
+    assert!(OOC_ANSWERED_HEADING.contains("accepted, refused"));
+    assert!(!before.contains("the PC"), "{before}");
+    // "You" is the PC, by name.
+    assert!(before.starts_with("NOW\nYou are Ada.\n"), "{before}");
 }

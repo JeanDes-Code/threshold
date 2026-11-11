@@ -99,6 +99,13 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
             for (n, phrasing) in question.phrasings.iter().enumerate() {
                 let op_id = format!("{}-q{q}-{n}", s.label);
                 let answer = s.engine.ooc(op_id.clone(), phrasing);
+                if run == 1 && q == 0 && n == 0 {
+                    // The sheet the model read, once, for the person who
+                    // reads the log.
+                    for row in s.engine.store().debug_log(&op_id).unwrap_or_default() {
+                        (ctx.log)(&format!("{op_id} prompt:\n{}", row.prompt));
+                    }
+                }
                 let entry = by_topic.entry(question.topic.clone()).or_default();
                 entry.0 += 1;
                 match answer {

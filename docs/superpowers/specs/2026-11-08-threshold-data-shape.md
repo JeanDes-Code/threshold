@@ -383,3 +383,16 @@ The narrator's block skipped a name that every other NPC knows. A hidden NPC who
 - `rules::max_minutes`: talk 15, act and observe 30, move 60, unless the Intent states more.
 - A `move` whose `move_to` is the PC's own place is an `act`, with no `move_to`.
 
+### What the OOC sheet says, in the Player's words (M2)
+
+QA asked "Which requests have I answered and how?" after two refusals and got "You have not answered any requests.", while "Which proposals did I accept or refuse so far?" got the right answer. The sheet (`view::ooc_sheet`, section 12) now reads:
+
+- `NOW` starts with `You are <PC name>.`, then the place, the time, `Here with you: …` and `People you know of who are not here: …` (the NPCs the PC can name, `PcSight::known`).
+- The open items sit under `REQUESTS, OFFERS, PLANS AND PROMISES STILL OPEN (not answered or not done yet)` (`view::OOC_OPEN_HEADING`); the closed ones under `REQUESTS, OFFERS, PLANS AND PROMISES ALREADY ANSWERED (what you accepted, refused, did, failed or gave up)` (`view::OOC_ANSWERED_HEADING`).
+- A line closed by `settles` is a sentence about "you": `You refused: <item>` (`CloseOutcome::you`). An outcome a public event wrote keeps its fact line.
+- An empty block says so: `- None.`, `- None yet: you have answered no request, offer, plan or promise.`
+- `WHAT THE PC KNOWS` is `WHAT YOU KNOW`; a departure reads `<name> left; you do not know where.`
+- The OOC rules (`turn::OOC_RULES`) answer the Player as "you", name each block, and say that every block counts: an item also tells what the PC knows about the people it names.
+
+The sheet is still made from `PcSight` only. Live numbers: `evals/reports/2026-11-bug-pass-5.md`.
+

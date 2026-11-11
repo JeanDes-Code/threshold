@@ -1087,6 +1087,14 @@ pub fn clock_text(minutes: ClockMin) -> String {
     )
 }
 
+/// The heading of the OOC sheet's block of open items: the words a Player
+/// uses for them (bug pass 5, M2).
+pub const OOC_OPEN_HEADING: &str =
+    "REQUESTS, OFFERS, PLANS AND PROMISES STILL OPEN (not answered or not done yet)";
+
+/// The heading of the OOC sheet's block of answered items.
+pub const OOC_ANSWERED_HEADING: &str = "REQUESTS, OFFERS, PLANS AND PROMISES ALREADY ANSWERED (what you accepted, refused, did, failed or gave up)";
+
 /// What the GM reads to answer an OOC question (bug pass 4, MB): the Play
 /// screen's facts, as text. An OOC answer is a Player screen, so it is made
 /// from `PcSight` only, like every view. QA asked "Who is in the room, what
@@ -1096,11 +1104,21 @@ pub fn clock_text(minutes: ClockMin) -> String {
 /// no clock, no presence, no Turn, and each closed item twice, once open.
 ///
 /// The blocks: NOW (place, clock, who is here by the names the PC knows),
-/// OPEN ITEMS (`open_lines`), SETTLED ITEMS (each closed item with its
-/// outcome line), RECENT TURNS (the Intent and the Narration as the Player
-/// read it), then WHAT THE PC KNOWS (the other Beliefs).
+/// the items still open (`open_lines`), the items already answered (each
+/// with its outcome as a sentence about "you"), RECENT TURNS (the Intent and
+/// the Narration as the Player read it), then WHAT YOU KNOW (the other
+/// Beliefs).
+///
+/// Bug pass 5 (M2): after two refusals QA asked "Which requests have I
+/// answered and how?" and got "You have not answered any requests.": the
+/// block was "SETTLED ITEMS" with lines "Refused: <item>". The headings now
+/// use the Player's words (requests, offers, plans, promises; open,
+/// answered), a settled line reads "You refused: <item>", and an empty
+/// block says so.
 pub fn ooc_sheet(sight: &PcSight) -> String {
     let mut out = String::from("NOW\n");
+    // "You" is the PC: the items and facts below name the PC by name.
+    out.push_str(&format!("You are {}.\n", one_line(&sight.pc_name)));
     let place = sight.place.as_ref().map(|(entity_id, text)| {
         entity_id
             .and_then(|id| name_ref(sight, id)?.name)
@@ -1116,27 +1134,41 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
         .iter()
         .filter(|id| **id != sight.pc)
         .filter_map(|id| name_ref(sight, *id))
-        .map(|who| {
-            who.name
-                .unwrap_or_else(|| "someone the PC cannot name".into())
-        })
+        .map(|who| who.name.unwrap_or_else(|| "someone you cannot name".into()))
         .collect();
     if here.is_empty() {
-        out.push_str("Here with the PC: nobody\n");
+        out.push_str("Here with you: nobody\n");
     } else {
-        out.push_str(&format!("Here with the PC: {}\n", here.join(", ")));
+        out.push_str(&format!("Here with you: {}\n", here.join(", ")));
+    }
+    // Every person the PC can name, so a question about one who is away
+    // finds them (bug pass 5, M2: "What do I know about Tobin?" got "You do
+    // not know anything about Tobin" while an open request named him).
+    let away: Vec<String> = sight
+        .known
+        .iter()
+        .filter(|k| k.kind == EntityKind::Npc && !sight.present.contains(&k.id))
+        .filter_map(|k| k.name.clone())
+        .collect();
+    if !away.is_empty() {
+        out.push_str(&format!(
+            "People you know of who are not here: {}\n",
+            away.join(", ")
+        ));
     }
 
     let open = open_lines(sight);
-    if !open.is_empty() {
-        out.push_str("OPEN ITEMS (not done yet)\n");
-        // The marker of every prompt line of an open item (ADR 0005).
-        for line in &open {
-            out.push_str(&format!("- (open, not done) {}\n", ooc_line(line)));
-        }
+    out.push_str(OOC_OPEN_HEADING);
+    out.push('\n');
+    if open.is_empty() {
+        out.push_str("- None.\n");
     }
-    // Each closed item once, as its outcome line: "Refused: <item>".
-    let settled: Vec<(&OpenItem, Belief)> = sight
+    // The marker of every prompt line of an open item (ADR 0005).
+    for line in &open {
+        out.push_str(&format!("- (open, not done) {}\n", ooc_line(line)));
+    }
+    // Each closed item once, as a sentence: "You refused: <item>".
+    let settled: Vec<String> = sight
         .open_items
         .iter()
         .filter(|item| item.closed_in.is_some())
@@ -1146,17 +1178,21 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
                 .beliefs
                 .iter()
                 .find(|b| b.subject == item.subject && b.key == key)?;
-            Some((item, outcome.clone()))
+            let text = match CloseOutcome::from_word(&outcome.value)
+                .filter(|_| settle_line(sight, outcome))
+            {
+                Some(close) => format!("{}: {}", close.you(), one_line(&item.text)),
+                None => ooc_line(&fact_line(sight, outcome)?),
+            };
+            Some(format!("- {text}\n"))
         })
         .collect();
-    if !settled.is_empty() {
-        out.push_str("SETTLED ITEMS (done, refused or given up)\n");
-        for (_, outcome) in &settled {
-            if let Some(line) = fact_line(sight, outcome) {
-                out.push_str(&format!("- {}\n", ooc_line(&line)));
-            }
-        }
+    out.push_str(OOC_ANSWERED_HEADING);
+    out.push('\n');
+    if settled.is_empty() {
+        out.push_str("- None yet: you have answered no request, offer, plan or promise.\n");
     }
+    out.push_str(&settled.concat());
 
     let turns: Vec<&SightTurn> = sight
         .story
@@ -1214,7 +1250,7 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
             // A departure says that the PC does not know where (m4).
             Some(if departure(sight, b) {
                 format!(
-                    "- {}; the PC does not know where.\n",
+                    "- {}; you do not know where.\n",
                     line.text.trim_end_matches('.')
                 )
             } else {
@@ -1223,7 +1259,7 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
         })
         .collect();
     if !known.is_empty() {
-        out.push_str("WHAT THE PC KNOWS\n");
+        out.push_str("WHAT YOU KNOW\n");
         out.push_str(&known.concat());
     }
     out
