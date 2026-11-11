@@ -107,3 +107,27 @@ In the QA Campaign the arm-wrestle showed "Roll 3 vs 7: failure", but the Narrat
 - **A wait needs the Intent to ask for one** (`world::asks_to_wait`). "I nod to Sefa and warm my hands at the fire" came back as `wait` with no minutes, and the engine-owned wait took 60 minutes. Any other `wait` is an act, with the act default when the model gives no minutes.
 
 Each change relabels or removes model output, or changes only the narrator's input: no PC act is added. Live numbers: `evals/reports/2026-11-play-basics.md`, attempt 7.
+
+## Changed after review (2026-11-11)
+
+A review of bug pass 3 found three blockers, three majors and a list of minors. Each change below removes model output, relabels it, or changes what a screen or the narrator reads. None adds a PC act, word or feeling: the core still writes only `move_to` and a closing `settles` from the Player's Intent.
+
+- **A name in prose keeps its capitals; a hidden seed entry needs a Belief** (B1). The Opening Narration "A circle of lamplight lies on the gate square" named the hidden Adventure Seed Faction "The Circle": it got a card and a story link. A Narration now names an entity only with the name's own capitals (`normalize::name_in`): "the Circle" names it, "a circle" does not, and a leading article may be dropped or lower case. A hidden Adventure Seed entry is never named through a Narration word; it needs a PC Belief. `world::pc_can_name`, `world::known_places` (the `move_to` enum), the story links and a card's "named in" all use this rule. Speech tags keep the match without case.
+- **The World Build merges a restated Open Item on its own subject only** (B2). Two NPCs' debts with one sentence were merged: one NPC lost her fact and became a holder of the other's. The review asked for subject, key and sentence. On the QA Campaign, the World Build restated 7 draft items: 6 on the same subject with a new key, 1 on another subject. Counted on its saved facts, a merge on the sentence alone merges 7, on subject, key and sentence 0, and on subject and sentence 6. The key is the model's label, so the merge needs the subject and the sentence, and the key may differ.
+- **The outcome fact reads the text the PC holds** (B3). `<Word>: <item text>` read the live fact on the open key. A GM-only write can replace that fact, and the PC then held a text it never knew. The outcome fact and the offered items now read the PC's Belief (`world::pc_item_text`). With no text the PC holds, nothing closes and the item is not offered.
+- **`settles` closes only an item this Turn offered** (M1). It was checked against the items the PC holds. With nothing offered the schema has no `settles`, but an answer that still carried one closed the item. The core sets `DecisionProposal::offered` from the Turn's offered items (never parsed); `settle` drops another item with one debug line, `validate` rejects it, and `to_ops` closes no other item.
+- **Everyday words name no item** (M2). "meet", "plans", "time" or "night" offered items that only used the same word. The stop list of `world::items_named_by` gains everyday verbs and nouns of play. An NPC name still counts: "I tell Orsel yes." offers Orsel's request. The live `open_items` scenario gained two steps that name an NPC with items and settle nothing; the model chose `none` in 8 of 8 (`evals/reports/2026-11-open-items.md`, attempt 3). So a name-only match still offers.
+- **A contest opposes the NPC the Intent names** (M3). `checks::oppose` took the reaction with the lowest stance: an NPC the Intent did not address, or a hidden NPC. The opponent is now, in order: the present NPC the PC perceives that the Intent names, when exactly one; else the only perceived NPC whose reaction is below neutral; else none. With none, `against` stays empty, the Check still rolls, and the narrator's line names nobody. `checks::default_check` uses the same rule. A `cause: check` stance of that NPC still passes the NPC-folds check only through the Roll, and a lost Roll clamps it.
+- **Minors.**
+  - `settle` runs before `engine_time`, so a contested move whose `move_to` `settle` drops is an act, and the narrator no longer hears "the move does not happen".
+  - A wait needs a verb of waiting, sleeping or resting ("rest" as the verb, never "the rest of"), a phrase such as "to bed" or "keep watch", or a verb of staying with a duration ("I stay here for two hours"). "while" and "until" alone ask for nothing.
+  - A Turn that closes an Open Item is a Decision whatever its action: Decisions follow `settles`.
+  - The `OPEN ITEMS (for settles)` lines go through `context::fact_text`, so they carry the `(open, not done)` marker.
+  - A slot whose value is "none", "no", "nothing" or empty reads as a plain no ("Ada is not injured.").
+  - The Open Items of the side panel, the Character screen and the Journal list the items about an NPC present first, then the newest.
+
+What this does not cover:
+
+- **A hidden seed entry's name in a Narration** still reaches the Player as text, if the narrator writes it. It is no longer a link, a card or a People and places line.
+- **A restatement on another subject** (1 of the 7 QA items) stays a GM-only Open Item. The proposal prompt can show it as open after the PC settled the first copy.
+- **A word with a capital at the start of a sentence** ("Gate" as the first word of a sentence) still names the place Gate.

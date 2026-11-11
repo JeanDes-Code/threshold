@@ -198,3 +198,32 @@ Limits:
 
 - One phrasing per step, 4 runs: the counts are small. The judge is the same local model.
 - The wait rule was not measured live: no step of this scenario is a wait. Deterministic tests cover it.
+
+## Attempt 8: review fixes (2026-11-11)
+
+- Code: ADR 0007, section "Changed after review (2026-11-11)": the opponent of a contest (M3), `settles` only on an offered item (M1), the stop words of the item match (M2), the wait rule, `settle` before the clock, and the open marker on the offered items.
+- Command: `threshold-eval --scenario play_basics --runs 4 --raw-log <file outside the repository>`, right after the `open_items` run, with the model loaded (19 GB of RAM free).
+
+| Measure | Attempt 7 (after) | Attempt 8 |
+|---|---|---|
+| Moves that reached the asked place | 8 / 8 | 8 / 8 |
+| False closes on the negative step | 0 / 4 | 0 / 4 |
+| False moves on the negative step | 0 / 4 | 0 / 4 |
+| Turns with a clock advance | 32 / 32 | 32 / 32 |
+| Impossible acts told as a failure (judge) | 4 / 4 | 4 / 4 |
+| Contests with a Roll | 4 / 4 | 4 / 4 |
+| Contests told with their result (judge) | 4 / 4 | 4 / 4 |
+| Narrations that open with the time | 0 / 32 | 5 / 32 |
+| Pending items closed | 4 / 4 | 4 / 4 |
+| Unknown-place moves told as not arriving (judge) | 3 / 4 (1 judge call timed out) | 4 / 4 |
+| Turns failed | 0 / 32 | 0 / 32 |
+| Turns that needed the retry | (not counted) | 1 / 32 |
+| Turn time | p50 8.4 s, p90 14.8 s, max 36.7 s | p50 7.2 s, p90 8.2 s, max 9.2 s |
+
+- In every run the model set the contest's `against` itself, so the new opponent rule did not run. Deterministic tests cover it (`oppose_takes_the_named_npc_then_the_only_hostile_one`, `a_contest_never_opposes_an_npc_the_pc_cannot_perceive`).
+- The one retry was an `npc folds` rejection on Hessa, as in `open_items`.
+
+Limits:
+
+- "Narrations that open with the time" rose from 0 to 5 of 32. The eval does not keep the Narrations, so we cannot say which Turns they are. This change does not touch the narrator's time line. One step asks Hessa "how long the walk down to the Varn mill takes": an answer such as "It is an hour's walk." counts as a time opening, and 4 runs of that step could give 4 of the 5. This is not verified.
+- One phrasing per step, 4 runs: the counts are small. The judge is the same local model.

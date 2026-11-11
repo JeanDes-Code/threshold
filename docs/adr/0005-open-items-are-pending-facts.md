@@ -50,3 +50,7 @@ The rule above did not work on the live model: in `play_basics`, 0 of 4 acceptan
 ## Changed in bug pass 3 (2026-11-11): `settles`
 
 A Campaign built from a Source Text held 12 Open Items. With one required status per item, the live model gave all 12 a closing status on one acceptance, and closed an acceptance one Turn late. `open_items` is now `settles`: one choice, `none` or one item that the Player's Intent names, with an outcome (ADR 0007). At most one item closes per Turn. Every other rule above stays.
+
+## Changed after review (2026-11-11)
+
+The outcome fact's text is built from the item's text as the PC holds it (the PC's Belief on the open key), not from the live fact: a GM-only write can replace the live fact, and the PC would then hold a text it never knew. A `settles` closes only an item this Turn offered. See ADR 0007.

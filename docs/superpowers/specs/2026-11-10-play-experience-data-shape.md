@@ -105,6 +105,8 @@ Rejected:
 - its stored `action` is `talk`, `move` or `act`, and its `verdict` is not `impossible`;
 - at least one of: it has a Roll; it wrote a Persistent fact with the source `proposal`, `stake` or `correction`; it wrote or closed an Open Item that the PC knows.
 
+*Changed after review (2026-11-11):* a Turn that closed an Open Item the PC knows is a decision whatever its action. Decisions follow `settles` (ADR 0007), and a close on an `observe` or `wait` Turn was missed.
+
 ```rust
 pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)>;   // turn, next to stored_roll
 ```
@@ -147,8 +149,11 @@ One private function holds the Belief rule (the latest `learned_at` wins; only r
 
 ```rust
 pub fn outcome_key(key: &str) -> Option<&str>;                // domain; None when key is not an open key
-pub struct OpenItem { pub subject: EntityId, pub key: Key, pub text: String, pub closed_in: Option<TurnId> }
+pub struct OpenItem { pub subject: EntityId, pub key: Key, pub text: String, pub closed_in: Option<TurnId>,
+                      pub learned: usize }   // changed after review: the place of the PC's first row on it, in write order
 ```
+
+*Changed after review (2026-11-11):* the Open lists of the views (`open_lines`: the side panel, the Character screen, the Journal) put the items about an NPC present now first, then the newest by `learned`. The side panel shows the first 5, and they came sorted by subject id. Both keys come from PC Knowledge and from what the PC perceives.
 
 **Why.** The Open list must follow what the PC knows. If the world closes an item where the PC cannot perceive it, the item stays open on the screen. To remove it would tell the Player a hidden fact. The rule needs no code at Commit and no model output.
 
@@ -166,6 +171,8 @@ What exists: `Entity.name`, `Entity.other_names`, and one `alias_` fact for each
 2. it is an entry of the Adventure Seed that is not `hidden` (the Player read that name in the review);
 3. the PC holds a Belief about it that is not a witnessed `location`;
 4. its main name is in a Narration of a Turn that stands, as whole words after `normalize::name`.
+
+*Changed after review (2026-11-11):* rule 4 keeps the name's own capitals (`normalize::name_in`: accents and a leading article are dropped, and every capital of the name must be a capital in the text), and it never applies to a `hidden` Adventure Seed entry, which needs a Belief (rule 3). The Opening Narration "A circle of lamplight lies on the gate square" named the hidden Faction "The Circle", and "gate square" linked to the place Gate. The story links and a card's "named in" list use the same match.
 
 ```rust
 pub struct Known { pub id: EntityId, pub kind: EntityKind, pub name: Option<String>, pub other_names: Vec<String> }
