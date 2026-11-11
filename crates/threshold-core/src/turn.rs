@@ -608,17 +608,11 @@ impl Engine {
         Ok(narration?)
     }
 
-    /// The names a speech tag must not print, from the state `now` and the
-    /// Turn rows, as the screens will read them after the Commit (data shape
-    /// 3.1). Store reads only: no model call.
+    /// The names a speech tag must not print, from the state `now`, as the
+    /// screens will read them after the Commit (data shape 3.1). No model
+    /// call.
     fn unnameable_names(&self, now: &WorldView) -> Result<HashSet<String>, TurnError> {
-        let turns = self.store.turns(self.campaign)?;
-        let reverted = self
-            .store
-            .reverted_turns(self.campaign)?
-            .into_iter()
-            .collect();
-        Ok(world::unnameable_names(now, &turns, &reverted))
+        Ok(world::unnameable_names(now))
     }
 
     /// Every step before the Commit, against `view` (the state before the

@@ -355,8 +355,7 @@ fn speech_tag_by_first_name_resolves_or_is_removed() {
     }
     assert_eq!(prose(&got[1]), r#""You do not know me.""#);
 
-    let turns = w.store.turns(w.campaign).unwrap();
-    let set = unnameable_names(&w.view(), &turns, &HashSet::new());
+    let set = unnameable_names(&w.view());
     assert!(
         set.contains("sola") && set.contains("sola brandt"),
         "{set:?}"

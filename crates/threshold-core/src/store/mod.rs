@@ -203,6 +203,13 @@ pub struct WorldView {
     pub turn_seq: u64,
     /// Every Voice Card, ordered by NPC id.
     pub voice_cards: Vec<VoiceCard>,
+    /// The entities whose main name the Narration of a standing Opening,
+    /// Play or Correction Turn prints, a hidden Adventure Seed entry left
+    /// out (rule 4 of "the PC can name", play experience data shape 3.5;
+    /// `world::story_names`). The store reads every standing Narration
+    /// once per snapshot, so every reader of "the PC can name" sees the
+    /// whole story, not the last six Turns (review of bug pass 4, m1).
+    pub story_names: std::collections::HashSet<EntityId>,
 }
 impl WorldView {
     pub fn voice_card(&self, npc: EntityId) -> Option<&VoiceCard> {

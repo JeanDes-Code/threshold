@@ -843,14 +843,7 @@ fn correction_replaces_the_reverted_turn() {
 
 /// The set the stream filter reads, from the store as it is now.
 fn unnameable(store: &threshold_core::store::Store, campaign: u64) -> HashSet<String> {
-    let view = store.snapshot(campaign).unwrap();
-    let turns = store.turns(campaign).unwrap();
-    let reverted: HashSet<TurnId> = store
-        .reverted_turns(campaign)
-        .unwrap()
-        .into_iter()
-        .collect();
-    unnameable_names(&view, &turns, &reverted)
+    unnameable_names(&store.snapshot(campaign).unwrap())
 }
 
 /// A tag is in the stream filter's set exactly when the commit-time rule
@@ -1092,10 +1085,8 @@ fn a_hidden_seed_entry_is_never_named_by_a_narration_word() {
         !story.contains(&format!("\"entity_id\":{circle}")),
         "{story}"
     );
-    let turns = store.turns(campaign).unwrap();
-    let standing: Vec<_> = turns.iter().collect();
-    assert!(!threshold_core::world::pc_can_name(&view, &standing).contains(&circle));
-    assert!(unnameable_names(&view, &turns, &HashSet::new()).contains("circle"));
+    assert!(!threshold_core::world::pc_can_name(&view).contains(&circle));
+    assert!(unnameable_names(&view).contains("circle"));
 
     // A PC Belief about it names it.
     store

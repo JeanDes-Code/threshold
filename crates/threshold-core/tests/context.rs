@@ -1200,7 +1200,7 @@ fn a_place_the_pc_cannot_name_is_no_move_target() {
         "{places}"
     );
     assert!(!threshold_core::world::known_places(&w.view).contains(&cove));
-    let nameable = threshold_core::world::pc_can_name(&w.view, &[]);
+    let nameable = threshold_core::world::pc_can_name(&w.view);
     assert!(!nameable.contains(&cove));
     assert!(nameable.contains(&w.gate));
 }
@@ -1419,6 +1419,91 @@ fn a_knower_learned_in_play_joins_the_names_line() {
         "{}",
         narrator.stable
     );
+}
+
+/// Commits `ops` as one Play Turn of `store` and stores `narration` as its
+/// Narration.
+fn narrated_turn(store: &mut Store, campaign: u64, op: &str, ops: Vec<LedgerOp>, narration: &str) {
+    let clock = store.snapshot(campaign).unwrap().clock_min;
+    let turn = store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: op.into(),
+                kind: TurnKind::Play,
+                intent: "I look around.".into(),
+                proposal_json: "{}".into(),
+                clock_before: clock,
+                clock_after: clock,
+            },
+            ops,
+        )
+        .unwrap();
+    store.set_narration(turn, narration).unwrap();
+}
+
+/// Review of bug pass 4, m1: "the PC can name" read the view's last six
+/// Turns for the narrator, while the screens read every standing Turn. A
+/// knower whom only an old Narration names dropped off the NAMES line at
+/// the seventh Turn, though no knower changed. The line now stays.
+#[test]
+fn a_knower_named_in_an_old_narration_stays_on_the_names_line() {
+    let (mut store, campaign, view) = alias_world();
+    let ada = view.entity_by_name("Ada").unwrap().id;
+    let alias = view.live_fact(ada, "alias_swift").unwrap().id;
+    narrated_turn(
+        &mut store,
+        campaign,
+        "kestrel",
+        vec![LedgerOp::AddEntity {
+            local: None,
+            kind: threshold_core::domain::EntityKind::Npc,
+            name: "Kestrel".into(),
+            age: Some(40),
+            other_names: vec![],
+        }],
+        "Kestrel, a drover, tips her hat to you.",
+    );
+    let kestrel = store
+        .snapshot(campaign)
+        .unwrap()
+        .entity_by_name("Kestrel")
+        .unwrap()
+        .id;
+    narrated_turn(
+        &mut store,
+        campaign,
+        "knows",
+        vec![LedgerOp::Know {
+            holder: EntityRef::Id(kestrel),
+            fact_id: Some(alias),
+            claim_id: None,
+            how: threshold_core::domain::Knowing::Witnessed,
+            arrives_at: view.clock_min,
+        }],
+        "The wind turns.",
+    );
+    let names = |store: &Store| {
+        let view = store.snapshot(campaign).unwrap();
+        narration_prompt(&view, &[], &[], &[], &[], "I wait.", None).stable
+    };
+    let first = names(&store);
+    assert!(
+        first.contains(
+            "- \"Swift\": only Brann and Kestrel call Ada this. Everyone else says \"Ada\".\n"
+        ),
+        "{first}"
+    );
+    for n in 0..6 {
+        narrated_turn(
+            &mut store,
+            campaign,
+            &format!("wait-{n}"),
+            vec![],
+            "The wind turns.",
+        );
+    }
+    assert_eq!(names(&store), first);
 }
 
 /// The NAMES block follows the data, so it does not change between two

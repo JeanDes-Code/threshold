@@ -155,8 +155,7 @@ pub fn names_unheard(view: &WorldView, text: &str) -> bool {
 fn unheard_names(view: &WorldView) -> Vec<Vec<String>> {
     let present = seen_present(view);
     let known: HashSet<EntityId> = pc_knowledge(view).into_iter().map(|b| b.subject).collect();
-    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
-    let named = pc_can_name(view, &standing);
+    let named = pc_can_name(view);
     view.entities
         .iter()
         .filter(|e| match e.kind {

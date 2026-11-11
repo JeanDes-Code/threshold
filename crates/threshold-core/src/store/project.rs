@@ -894,6 +894,8 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
     let turn_seq = rows.first().map_or(0, |r| r.1);
     let mut reverted = HashSet::new();
     let mut recent_turns = Vec::new();
+    // The Narration of every standing story Turn, for `story_names`.
+    let mut narrations: Vec<String> = Vec::new();
     let mut visited = HashSet::new();
     for (id, seq, op_id, kind, intent, proposal_json, clock_before, clock_after, narration, op) in
         rows
@@ -906,29 +908,34 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         {
             reverted.insert(turn_id);
         }
-        if visited.insert(id) && recent_turns.len() < 6 {
-            let kind: TurnKind = enum_parse(kind)?;
-            // An Opening Turn counts: the first play Turn's prompts must read
-            // what the opening Narration already described.
-            if matches!(
-                kind,
-                TurnKind::Play | TurnKind::Correction | TurnKind::Opening
-            ) {
-                recent_turns.push(StoredTurn {
-                    id,
-                    seq,
-                    record: TurnRecord {
-                        campaign_id: c,
-                        op_id,
-                        kind,
-                        intent,
-                        proposal_json,
-                        clock_before,
-                        clock_after,
-                    },
-                    narration,
-                });
-            }
+        if !visited.insert(id) {
+            continue;
+        }
+        let kind: TurnKind = enum_parse(kind)?;
+        // An Opening Turn counts: the first play Turn's prompts must read
+        // what the opening Narration already described.
+        let story = matches!(
+            kind,
+            TurnKind::Play | TurnKind::Correction | TurnKind::Opening
+        );
+        if story && let Some(text) = &narration {
+            narrations.push(text.clone());
+        }
+        if story && recent_turns.len() < 6 {
+            recent_turns.push(StoredTurn {
+                id,
+                seq,
+                record: TurnRecord {
+                    campaign_id: c,
+                    op_id,
+                    kind,
+                    intent,
+                    proposal_json,
+                    clock_before,
+                    clock_after,
+                },
+                narration,
+            });
         }
     }
     recent_turns.reverse();
@@ -954,7 +961,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             })
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
-    Ok(WorldView {
+    let mut view = WorldView {
         clock_min: clock,
         adventure_seed,
         entities,
@@ -969,7 +976,10 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         recent_turns,
         turn_seq,
         voice_cards,
-    })
+        story_names: HashSet::new(),
+    };
+    view.story_names = crate::world::story_names(&view, narrations.iter().map(String::as_str));
+    Ok(view)
 }
 
 pub(super) fn historical(db: &Connection, c: u64, seq: u64) -> Result<WorldView, StoreError> {

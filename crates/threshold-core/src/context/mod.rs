@@ -495,8 +495,7 @@ pub(crate) fn names_block(view: &WorldView, audience: NamesAudience) -> String {
         return String::new();
     };
     let narrator = audience == NamesAudience::Narrator;
-    let standing: Vec<&StoredTurn> = view.recent_turns.iter().collect();
-    let named = pc_can_name(view, &standing);
+    let named = pc_can_name(view);
     let npcs: BTreeSet<EntityId> = view
         .entities
         .iter()

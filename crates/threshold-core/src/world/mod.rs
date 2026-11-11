@@ -21,6 +21,6 @@ pub use clock::{MAX_EVENTS_PER_TURN, advance, written_slots};
 pub use items::items_named_by;
 pub use sight::{
     Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, SightTurn, pc_can_name, pc_sight,
-    tagged, unnameable_names,
+    story_names, tagged, unnameable_names,
 };
 pub use wait::{WAIT_DEFAULT_MIN, WAIT_MAX_MIN, asks_to_wait, wait_minutes};

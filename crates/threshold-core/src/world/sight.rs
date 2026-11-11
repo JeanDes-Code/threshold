@@ -195,7 +195,7 @@ pub fn pc_sight(
         .collect();
     let now = held(view, rows.iter().copied(), view.clock_min);
 
-    let named = named(view, pc.id, &now, &standing);
+    let named = named(view, pc.id, &now);
     let kept = |b: &Belief| named.contains(&b.subject);
 
     let beliefs: Vec<Belief> = now
@@ -436,21 +436,13 @@ pub fn pc_sight(
 /// rule removes it. The stream filter of a Narration reads it
 /// (`speech::TagFilter`); it never reaches a screen. Empty when the
 /// campaign has no PC.
-pub fn unnameable_names(
-    view: &WorldView,
-    turns: &[StoredTurn],
-    reverted: &HashSet<TurnId>,
-) -> HashSet<String> {
+pub fn unnameable_names(view: &WorldView) -> HashSet<String> {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return HashSet::new();
     };
-    let standing: Vec<&StoredTurn> = turns
-        .iter()
-        .filter(|t| is_story(t.record.kind) && !reverted.contains(&t.id))
-        .collect();
     let rows = view.knowledge.iter().filter(|r| r.holder == pc.id);
     let now = held(view, rows, view.clock_min);
-    let named = named(view, pc.id, &now, &standing);
+    let named = named(view, pc.id, &now);
     // The other names the PC holds the Belief for, as `pc_sight` lists them.
     let mut known: Vec<Known> = Vec::new();
     for (b, _) in now
@@ -511,34 +503,27 @@ pub fn tagged<'a>(view: &'a WorldView, tag: &str) -> impl Iterator<Item = &'a En
     })
 }
 
-/// The entities the PC can name (data shape 3.5), from the state `view`
-/// and the standing story Turns. The one copy of that rule outside
-/// `pc_sight`: `world::known_places` reads it for places (ADR 0007, changed
-/// after review).
-pub fn pc_can_name(view: &WorldView, standing: &[&StoredTurn]) -> HashSet<EntityId> {
+/// The entities the PC can name (data shape 3.5), from the state `view`.
+/// The one copy of that rule outside `pc_sight`, which reads the same
+/// `named`: `world::known_places` (the `move_to` enum), the perception of a
+/// World Event, the narrator's guards and NAMES block, and the opponent of
+/// a Check read it. Its Narration rule reads `WorldView::story_names`,
+/// every standing Turn, so it is the same set as the screens' (review of
+/// bug pass 4, m1/m2).
+pub fn pc_can_name(view: &WorldView) -> HashSet<EntityId> {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return HashSet::new();
     };
     let rows = view.knowledge.iter().filter(|r| r.holder == pc.id);
     let now = held(view, rows, view.clock_min);
-    named(view, pc.id, &now, standing)
+    named(view, pc.id, &now)
 }
 
 /// The entities the PC can name (data shape 3.5): the PC; an Adventure Seed
 /// entry that is not hidden; an entity the PC holds a Belief about that is
-/// not a witnessed `location`; an entity whose main name is in the Narration
-/// of a standing Turn, as whole words with the name's own capitals
-/// (`normalize::name_in`), unless the Adventure Seed hides it. The name of
-/// a speech mark does not count: the mark names the speaker for the app,
-/// and a line whose mark cannot resolve must not make its own speaker
-/// resolve. Review B1: a hidden Faction "The Circle" was named by "A circle
-/// of lamplight"; a hidden entry now needs a Belief.
-fn named(
-    view: &WorldView,
-    pc: EntityId,
-    now: &[(Belief, &Knowledge)],
-    standing: &[&StoredTurn],
-) -> HashSet<EntityId> {
+/// not a witnessed `location`; an entity whose main name a standing
+/// Narration prints (`WorldView::story_names`, `story_names`).
+fn named(view: &WorldView, pc: EntityId, now: &[(Belief, &Knowledge)]) -> HashSet<EntityId> {
     let mut named = HashSet::from([pc]);
     if let Some(seed) = &view.adventure_seed {
         for entry in seed.entities.iter().filter(|entry| !entry.hidden) {
@@ -558,27 +543,39 @@ fn named(
             .filter(|b| !(b.how == Knowing::Witnessed && b.key == "location"))
             .map(|b| b.subject),
     );
-    let narrations: Vec<Vec<String>> = standing
-        .iter()
-        .filter_map(|t| t.narration.as_deref())
+    named.extend(view.story_names.iter().copied());
+    named
+}
+
+/// The entities whose main name one of `narrations` prints, as whole words
+/// with the name's own capitals (`normalize::name_in`), unless the
+/// Adventure Seed hides the entity: rule 4 of data shape 3.5. The store
+/// calls it once per snapshot with every standing Narration
+/// (`WorldView::story_names`). The name of a speech mark does not count:
+/// the mark names the speaker for the app, and a line whose mark cannot
+/// resolve must not make its own speaker resolve. Review B1: a hidden
+/// Faction "The Circle" was named by "A circle of lamplight"; a hidden
+/// entry needs a Belief.
+pub fn story_names<'a>(
+    view: &WorldView,
+    narrations: impl Iterator<Item = &'a str>,
+) -> HashSet<EntityId> {
+    let texts: Vec<Vec<String>> = narrations
         .flat_map(speech::parse)
         .map(|line| match line {
             Line::Prose(text) => normalize::cased_words(text),
             Line::Tagged { words, .. } => normalize::cased_words(words),
         })
         .collect();
-    for entity in &view.entities {
-        let pattern = normalize::name_pattern(&entity.name);
-        if !named.contains(&entity.id)
-            && !super::arrival::hidden(view, entity.id)
-            && narrations
-                .iter()
-                .any(|text| normalize::name_in(text, &pattern))
-        {
-            named.insert(entity.id);
-        }
-    }
-    named
+    view.entities
+        .iter()
+        .filter(|entity| !super::arrival::hidden(view, entity.id))
+        .filter(|entity| {
+            let pattern = normalize::name_pattern(&entity.name);
+            texts.iter().any(|text| normalize::name_in(text, &pattern))
+        })
+        .map(|entity| entity.id)
+        .collect()
 }
 
 /// The speaker of a speech mark (data shape 3.1), or `None`: the line then

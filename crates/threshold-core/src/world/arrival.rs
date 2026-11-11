@@ -55,12 +55,11 @@ pub fn hidden(view: &WorldView, entity: EntityId) -> bool {
 }
 
 /// The places the PC knows: every place entity the PC can name, by the
-/// rule of the Player screens (`world::pc_can_name`), in id order. The
-/// standing Turns are the view's recent ones. A Decision Proposal moves
-/// the PC only to one of them (`move_to`, ADR 0007, changed after review).
+/// rule of the Player screens (`world::pc_can_name`), in id order. A
+/// Decision Proposal moves the PC only to one of them (`move_to`, ADR
+/// 0007, changed after review).
 pub fn known_places(view: &WorldView) -> Vec<EntityId> {
-    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
-    let named = super::sight::pc_can_name(view, &standing);
+    let named = super::sight::pc_can_name(view);
     let mut places: Vec<EntityId> = view
         .entities
         .iter()
@@ -249,12 +248,11 @@ pub fn with_witnessed_events(view: &WorldView, ops: Vec<LedgerOp>) -> (Vec<Ledge
     if moves {
         return (ops, Vec::new());
     }
-    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
     let sight = Sight {
         view,
         pc: pc.id,
         here: here.as_deref(),
-        named: super::sight::pc_can_name(view, &standing),
+        named: super::sight::pc_can_name(view),
         items: super::beliefs::pc_open_items(view)
             .into_iter()
             .filter_map(|(subject, key)| {

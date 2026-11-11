@@ -173,6 +173,61 @@ fn a_witnessed_move_to_a_place_the_pc_cannot_name_shows_a_departure_only() {
     );
 }
 
+/// Review of bug pass 4, m2: the departure record named its entity by the
+/// view's last six Turns, the card by every standing Turn. Kestrel, whom
+/// only an old Narration names, left as "Someone" on her own card. The
+/// record now names her, as the card does.
+#[test]
+fn a_departure_names_an_npc_whom_an_old_narration_named() {
+    let mut w = World::new();
+    add_unnamed_place(&mut w, "Smugglers Cellar");
+    let ada = w.ada;
+    w.commit(vec![LedgerOp::AddEntity {
+        local: None,
+        kind: EntityKind::Npc,
+        name: "Kestrel".into(),
+        age: Some(40),
+        other_names: vec![],
+    }]);
+    let kestrel = w.view.entity_by_name("Kestrel").unwrap().id;
+    w.commit(vec![LedgerOp::AddFact {
+        slot: Slot {
+            subject: EntityRef::Id(kestrel),
+            key: "location".into(),
+            value: "gate square".into(),
+        },
+        text: "Kestrel is at the gate square.".into(),
+        canon: Canon::Established,
+        source: threshold_core::domain::FactSource::Proposal,
+        seen_by: vec![EntityRef::Id(ada)],
+        causes: vec![],
+    }]);
+    let narrate = |w: &mut World, text: &str| {
+        let turn = w.store.turns(w.campaign).unwrap().last().unwrap().id;
+        w.store.set_narration(turn, text).unwrap();
+    };
+    narrate(&mut w, "Kestrel, a drover, tips her hat to you.");
+    for _ in 0..6 {
+        w.commit(vec![]);
+        narrate(&mut w, "The wind turns.");
+    }
+    schedule(
+        &mut w,
+        "Orsel sends the drover off",
+        &[(kestrel, "location", "Smugglers Cellar")],
+    );
+    let (engine, campaign, _) = wait(w);
+    let view = view_of(&engine, campaign);
+    let record = view
+        .live_facts
+        .iter()
+        .find(|f| f.slot.subject == kestrel && f.slot.value.is_empty())
+        .expect("the departure record");
+    assert!(record.text.starts_with("Kestrel "), "{}", record.text);
+    let card = entity_card(&sight(engine.store(), campaign), &Marks::default(), kestrel).unwrap();
+    assert_eq!(card.who.name.as_deref(), Some("Kestrel"));
+}
+
 /// A destination the PC can name is seen: the Adventure Seed place Gate.
 #[test]
 fn a_witnessed_move_to_a_place_the_pc_can_name_shows_the_destination() {

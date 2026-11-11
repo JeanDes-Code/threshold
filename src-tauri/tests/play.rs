@@ -79,13 +79,7 @@ fn play_view_builds_within_budget_at_300_turns() {
     let campaign = store.campaigns().unwrap()[0];
     let start = Instant::now();
     let now = store.snapshot(campaign).unwrap();
-    let turns = store.turns(campaign).unwrap();
-    let reverted = store
-        .reverted_turns(campaign)
-        .unwrap()
-        .into_iter()
-        .collect();
-    let hidden = unnameable_names(&now, &turns, &reverted);
+    let hidden = unnameable_names(&now);
     let ms = start.elapsed().as_millis() as u64;
     eprintln!(
         "stream filter names at {TURNS} Turns: {ms} ms, {} names",

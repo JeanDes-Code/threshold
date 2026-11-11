@@ -93,8 +93,7 @@ fn perceived_npcs(view: &WorldView) -> Vec<EntityId> {
 /// for, as whole words, whatever the case. Only NPCs the PC can name
 /// (`world::pc_can_name`) count.
 fn named_here(view: &WorldView, intent: &str, here: &[EntityId]) -> Vec<EntityId> {
-    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
-    let nameable = crate::world::pc_can_name(view, &standing);
+    let nameable = crate::world::pc_can_name(view);
     let said = normalize::name_words(intent);
     let says = |name: &str| {
         let words = normalize::name_words(&normalize::name(name));
