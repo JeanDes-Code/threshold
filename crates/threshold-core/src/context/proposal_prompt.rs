@@ -127,7 +127,10 @@ fn offered(r: &Retrieval<'_>, intent: &str) -> Vec<(EntityId, String, String)> {
         .into_iter()
         .filter_map(|(subject, key)| {
             let text = pc_item_text(r.view, subject, &key)?;
-            Some((subject, key, one_line(&text)))
+            // Every prompt line of an open item goes through `fact_text`,
+            // so it carries the open marker (review minor).
+            let line = fact_text(&key, &text);
+            Some((subject, key, line))
         })
         .collect()
 }

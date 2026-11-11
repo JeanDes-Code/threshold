@@ -1036,8 +1036,10 @@ fn proposal_prompt_offers_the_items_the_intent_names() {
     assert!(list < recent.find("INTENT\n").unwrap(), "{recent}");
     assert!(!prefix(&ctx.prompt).contains("OPEN ITEMS (for settles)"));
     assert!(
+        // Review minor: the line goes through `fact_text`, so it carries
+        // the open marker, like every other prompt line of an open item.
         recent.contains(&format!(
-            "{post}: Brann asked Ada to carry the winter post upriver."
+            "{post}: (open, not done) Brann asked Ada to carry the winter post upriver."
         )),
         "{recent}"
     );
