@@ -634,7 +634,11 @@ impl Engine {
                     // The items the Intent names: the only ones `settles`
                     // may close (review M1).
                     p.offered.clone_from(&ctx.handles.open_items);
-                    let (mut p, mut notes) = checks::settle(engine_time(p, view, intent), view);
+                    // `settle` first: it may drop `move_to`, and a
+                    // contested move with no destination is an act for
+                    // `engine_time` (review minor).
+                    let (p, mut notes) = checks::settle(p, view);
+                    let mut p = engine_time(p, view, intent);
                     // A contested act with no Check: one repair note on the
                     // first attempt, a default Check on the retry (ADR 0007).
                     // A contested `check` verdict gets it at once.
@@ -831,8 +835,9 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
 /// so is a contested move with no destination: the QA arm-wrestle came as
 /// `move` with `move_to: null`, and the narrator told a move that did not
 /// happen. Any other Turn with no minutes takes the Ruleset default of its
-/// action (`rules::default_minutes`). It runs before the Commit checks, so
-/// they see the final minutes. Relabelling the action adds no PC act.
+/// action (`rules::default_minutes`). It runs after `checks::settle`, which
+/// may drop `move_to`, and before the Commit checks, so they see the final
+/// action and minutes. Relabelling the action adds no PC act.
 fn engine_time(mut p: DecisionProposal, view: &WorldView, intent: &str) -> DecisionProposal {
     let not_a_wait = p.contested || !world::asks_to_wait(intent);
     if p.action == ActionKind::Wait && not_a_wait {

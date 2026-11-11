@@ -35,18 +35,82 @@ pub fn wait_minutes(view: &WorldView, requested: u32) -> u32 {
         .fold(wanted, u32::min)
 }
 
-/// The words by which an Intent asks for a wait (bug pass 3).
-const WAIT_WORDS: &[&str] = &[
-    "wait", "waits", "waiting", "rest", "rests", "resting", "sleep", "sleeps", "sleeping", "nap",
-    "naps", "doze", "dozes", "linger", "lingers", "until", "while", "bide", "idle", "relax",
+/// The verbs by which an Intent asks for a wait, as whole words (bug pass
+/// 3). "rest" is in `asks_to_wait`, apart: it is also a noun.
+const WAIT_VERBS: &[&str] = &[
+    "wait",
+    "waits",
+    "waiting",
+    "sleep",
+    "sleeps",
+    "sleeping",
+    "nap",
+    "naps",
+    "napping",
+    "doze",
+    "dozes",
+    "dozing",
+    "linger",
+    "lingers",
+    "lingering",
+    "bide",
+    "idle",
+    "relax",
+    "relaxes",
+    "relaxing",
 ];
 
-/// True when `intent` asks for a wait: one of `WAIT_WORDS` as a whole word,
-/// or "pass the time". The model labels a passive act `wait` ("I warm my
-/// hands at the fire" took 60 minutes in QA), so the engine owns the length
-/// of a wait only when the Player asked for one.
+/// Phrases that ask for a wait, as runs of whole words.
+const WAIT_PHRASES: &[&[&str]] = &[
+    &["pass", "the", "time"],
+    &["to", "bed"],
+    &["keep", "watch"],
+    &["keeps", "watch"],
+];
+
+/// Verbs of staying: a wait only with a duration after them.
+const STAY_VERBS: &[&str] = &[
+    "stay",
+    "stays",
+    "staying",
+    "remain",
+    "remains",
+    "remaining",
+    "sit",
+    "sits",
+    "sitting",
+];
+
+/// The words of a duration after a verb of staying.
+const DURATION_WORDS: &[&str] = &[
+    "minute", "minutes", "hour", "hours", "while", "moment", "night", "day", "days", "dawn",
+    "dusk", "morning", "evening", "noon",
+];
+
+/// True when `intent` asks for a wait (bug pass 3, changed after review):
+/// a verb of waiting, sleeping or resting as a whole word; a phrase such
+/// as "pass the time", "to bed" or "keep watch"; or a verb of staying with
+/// a duration after it ("I stay here for two hours", "I sit here a
+/// while"). "rest" counts as the verb only: "the rest of the story" asks
+/// for nothing. "while" or "until" alone ask for nothing: "I talk with
+/// Orsel while I keep an eye on the gate" is a talk. The model labels a
+/// passive act `wait` ("I warm my hands at the fire" took 60 minutes in
+/// QA), so the engine owns the length of a wait only when the Player asked
+/// for one.
 pub fn asks_to_wait(intent: &str) -> bool {
     let words = crate::normalize::name_words(intent);
-    words.iter().any(|w| WAIT_WORDS.contains(&w.as_str()))
-        || words.windows(3).any(|w| w == ["pass", "the", "time"])
+    let is = |at: usize, set: &[&str]| words.get(at).is_some_and(|w| set.contains(&w.as_str()));
+    let rest = (0..words.len()).any(|i| {
+        is(i, &["rest", "rests", "resting"])
+            && !(i > 0 && is(i - 1, &["the", "a", "any", "some"]))
+            && !is(i + 1, &["of"])
+    });
+    let stays = (0..words.len())
+        .any(|i| is(i, STAY_VERBS) && (i + 1..words.len()).any(|j| is(j, DURATION_WORDS)));
+    words.iter().any(|w| WAIT_VERBS.contains(&w.as_str()))
+        || rest
+        || stays
+        || WAIT_PHRASES
+            .iter()
+            .any(|phrase| words.windows(phrase.len()).any(|w| w == *phrase))
 }

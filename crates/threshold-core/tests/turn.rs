@@ -1633,3 +1633,37 @@ fn a_wait_the_intent_does_not_ask_for_is_an_act() {
         snapshot(&engine, &w).clock_min - after > u64::from(threshold_core::rules::ACT_DEFAULT_MIN)
     );
 }
+
+/// Review minor: `engine_time` ran before `settle`. A contested move whose
+/// `move_to` `settle` drops (not a place the PC knows) stayed a move, and
+/// the narrator heard "the move does not happen". Now `settle` runs first,
+/// so the act is an act.
+#[test]
+fn a_contested_move_whose_destination_is_dropped_is_an_act() {
+    let w0 = World::new();
+    let mut p = proposal(Verdict::Check);
+    p.action = ActionKind::Move;
+    p.contested = true;
+    p.move_to = Some(e(w0.orsel));
+    p.check = Some(check(
+        Some(e(w0.brann)),
+        slot(e(w0.brann), "mood", "beaten"),
+        slot(e(w0.brann), "mood", "smug"),
+    ));
+    let (mut engine, _w, gm) = setup(vec![json(&p)], vec!["You push past."]);
+    let outcome = engine
+        .play_turn("t1".into(), "I push past Brann.", &mut no_chunks())
+        .unwrap();
+    let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    assert_eq!(
+        stored_action(&stored.record.proposal_json),
+        Some((ActionKind::Act, Verdict::Check))
+    );
+    let recent = prompts(&gm, CallKind::Narrate).pop().unwrap().recent;
+    assert!(!recent.contains("does not happen"), "{recent}");
+    assert!(
+        steps(&engine, "t1")
+            .iter()
+            .any(|(step, raw)| step == "settle" && raw.contains("move_to")),
+    );
+}

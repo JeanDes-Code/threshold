@@ -625,6 +625,10 @@ fn only_an_intent_that_asks_to_wait_is_a_wait() {
         "I sleep in the loft.",
         "I sit here a while.",
         "I pass the time with a game of dice.",
+        // Review minor (T6): sleeping and staying with a duration.
+        "I go to bed for the night.",
+        "I stay here for two hours.",
+        "I keep watch through the night.",
     ] {
         assert!(asks_to_wait(intent), "{intent}");
     }
@@ -633,6 +637,11 @@ fn only_an_intent_that_asks_to_wait_is_a_wait() {
         "I order a mug of ale from Agathe and pay for it.",
         "I pass the salt to Brann.",
         "I sharpen my quill and check my ink.",
+        // Review minor (T6): the noun "rest", and "while" as a conjunction.
+        "I tell Brann the rest of the story.",
+        "I talk with Orsel while I keep an eye on the gate.",
+        "I sit on the bench by the window and look around the hall.",
+        "I rested enough; I get up and leave.",
     ] {
         assert!(!asks_to_wait(intent), "{intent}");
     }
