@@ -15,8 +15,8 @@
 use std::collections::HashSet;
 
 use super::{
-    AliasAudience, Retrieval, adventure_block, fact_text, one_line, recent_block, render_voice,
-    seen_present, with_alias_notes, with_fragments,
+    NamesAudience, Retrieval, adventure_block, fact_text, names_block, one_line, recent_block,
+    render_voice, seen_present, with_fragments,
 };
 use crate::{
     domain::{
@@ -252,13 +252,16 @@ pub fn narration_prompt(
     turn: Option<(ActionKind, Verdict)>,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
-    let prompt = Prompt {
+    Prompt {
         system: with_fragments(NARRATION_RULES, packs),
-        stable: adventure_block(view_after, None),
+        stable: format!(
+            "{}{}",
+            adventure_block(view_after, None),
+            names_block(view_after, NamesAudience::Narrator)
+        ),
         scene: scene(&r),
         recent: recent(&r, perceived, events, reactions, intent, turn),
-    };
-    with_alias_notes(prompt, view_after, AliasAudience::Narrator)
+    }
 }
 
 /// The outcome line of an impossible attempt (changed after QA,
@@ -303,13 +306,16 @@ pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt {
             }
         }
     }
-    let prompt = Prompt {
+    Prompt {
         system: with_fragments(&format!("{NARRATION_RULES}{OPENING_RULES}"), packs),
-        stable: adventure_block(view, None),
+        stable: format!(
+            "{}{}",
+            adventure_block(view, None),
+            names_block(view, NamesAudience::Narrator)
+        ),
         scene: scene(&r),
         recent,
-    };
-    with_alias_notes(prompt, view, AliasAudience::Narrator)
+    }
 }
 
 fn scene(r: &Retrieval<'_>) -> String {

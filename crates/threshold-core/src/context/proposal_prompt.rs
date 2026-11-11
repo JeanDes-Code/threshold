@@ -2,8 +2,8 @@
 //! hidden ones included, marked as such.
 
 use super::{
-    AliasAudience, Retrieval, adventure_block, fact_text, one_line, recent_block, render_voice,
-    with_alias_notes, with_fragments,
+    NamesAudience, Retrieval, adventure_block, fact_text, names_block, one_line, recent_block,
+    render_voice, with_fragments,
 };
 use crate::{
     HandleContext,
@@ -80,12 +80,16 @@ pub fn proposal_context(
     let r = Retrieval::new(view, intent);
     let prompt = Prompt {
         system: system(packs),
-        stable: adventure_block(r.view, r.pc),
+        stable: format!(
+            "{}{}",
+            adventure_block(r.view, r.pc),
+            names_block(r.view, NamesAudience::Gm)
+        ),
         scene: scene(&r),
         recent: recent(&r, intent),
     };
     ProposalContext {
-        prompt: with_alias_notes(prompt, view, AliasAudience::Gm),
+        prompt,
         handles: handles(&r, intent),
     }
 }

@@ -24,12 +24,11 @@ pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, pro
 use std::collections::BTreeSet;
 
 use crate::{
-    domain::{AdventureSeed, Canon, EntityId, EntityKind, Trigger, is_open_key},
-    model::Prompt,
+    domain::{AdventureSeed, Canon, EntityId, EntityKind, Trigger, alias_key, is_open_key},
     normalize,
     pack::{ContentPack, InsertPoint},
     store::{Entity, Fact, Goal, StoredTurn, TurnKind, VoiceCard, WorldEvent, WorldView},
-    world::pc_knowledge,
+    world::{hidden, holders_of, pc_can_name, pc_knowledge},
 };
 
 /// At most this many recent Turns go into a prompt.
@@ -322,13 +321,10 @@ pub(crate) fn adventure_block(view: &WorldView, pc: Option<EntityId>) -> String 
 }
 
 /// The length in chars of the stable block that `seed` gives the narrator,
-/// without the PC's handle and with its other-name notes (bug pass 4).
+/// without the PC's handle and with its NAMES block (review M5).
 /// `ADVENTURE_BLOCK_MAX_CHARS` caps it.
 pub fn adventure_block_chars(seed: &AdventureSeed) -> usize {
-    let notes = seed_alias_notes(seed, AliasAudience::Narrator);
-    mark_aliases(&seed_block(seed, None), &notes)
-        .chars()
-        .count()
+    seed_block(seed, None).chars().count() + seed_names_block(seed).chars().count()
 }
 
 /// Premise, the PC line with age and other names, story language,
@@ -428,128 +424,169 @@ pub(crate) fn recent_block(view: &WorldView, head: &str, tail: &str) -> String {
     out
 }
 
-/// Who may say an other name, for the prompts (bug pass 4, MA). QA: Ludo
-/// Brenn called the PC "Wick" in three Narrations, a name the Adventure Seed
-/// gives to Agathe Morrow and Sefa Lind only. The name stood unmarked in the
-/// premise, on the PC line, in the PC's Beliefs and in the recent Turns, and
-/// one prompt serves every NPC of the Scene.
-#[derive(Clone, Debug)]
-pub(crate) struct AliasNote {
-    /// The other name's words (`normalize::name_words`), article left out.
-    words: Vec<String>,
-    /// The note that follows each line that uses the name.
-    note: String,
-}
-
-/// Which prompt the notes are for. The narrator gets only the other names
-/// the PC knows, and never a hidden Adventure Seed entry as a knower.
+/// Who reads a NAMES block (review M5). The narrator reads only the other
+/// names the PC knows, of a bearer the Adventure Seed does not hide, and
+/// only the knowers the PC can name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AliasAudience {
+pub(crate) enum NamesAudience {
     Gm,
     Narrator,
 }
 
-/// One note per other name in the Adventure Seed: the PC's, and each
-/// entry's. Its knowers are the entry's `known_to`, without the bearer. The
-/// narrator's notes leave out a hidden entry (as a bearer and as a knower)
-/// and an NPC's other name that the PC does not know (no `known_to` entry
-/// for the PC): the narrator must not learn that name, or who knows it.
-pub(crate) fn alias_notes(view: &WorldView, audience: AliasAudience) -> Vec<AliasNote> {
-    view.adventure_seed
-        .as_ref()
-        .map_or_else(Vec::new, |seed| seed_alias_notes(seed, audience))
+/// One restricted other name: how it is spelled, its bearer's main name,
+/// and the main names of the others who may say it.
+struct NameLine {
+    other: String,
+    bearer: String,
+    knowers: Vec<String>,
 }
 
-/// `alias_notes` from the Adventure Seed alone: an entry is hidden when the
-/// seed says so, as `world::hidden` reads it.
-fn seed_alias_notes(seed: &AdventureSeed, audience: AliasAudience) -> Vec<AliasNote> {
-    let is_pc = |name: &str| normalize::name(name) == normalize::name(&seed.pc.name);
-    let hidden_name = |name: &str| {
-        seed.entities
-            .iter()
-            .any(|e| e.hidden && normalize::name(&e.name) == normalize::name(name))
-    };
-    let narrator = audience == AliasAudience::Narrator;
-    let bearers = std::iter::once((seed.pc.name.as_str(), &seed.pc.other_names, false)).chain(
-        seed.entities
-            .iter()
-            .map(|e| (e.name.as_str(), &e.other_names, e.hidden)),
-    );
-    let mut notes = Vec::new();
-    for (bearer, other_names, bearer_hidden) in bearers {
-        if narrator && bearer_hidden {
-            continue;
-        }
-        for other in other_names {
-            let pc_knows = is_pc(bearer) || other.known_to.iter().any(|k| is_pc(k));
-            if narrator && !pc_knows {
-                continue;
-            }
-            let words = normalize::name_words(&normalize::name(&other.name));
-            if words.is_empty() {
-                continue;
-            }
-            let knowers: Vec<String> = other
-                .known_to
-                .iter()
-                .filter(|k| normalize::name(k) != normalize::name(bearer))
-                .filter(|k| !(narrator && hidden_name(k)))
-                .map(|k| one_line(k))
-                .collect();
-            let name = one_line(&other.name);
-            let note = if knowers.is_empty() {
-                format!("[{name}: a name no other character knows; nobody says it]")
-            } else {
-                let verb = if knowers.len() == 1 { "knows" } else { "know" };
+impl NameLine {
+    fn render(&self) -> String {
+        let (other, bearer) = (one_line(&self.other), one_line(&self.bearer));
+        match self.knowers.as_slice() {
+            [] => format!("- \"{other}\": nobody in this scene calls {bearer} this.\n"),
+            knowers => {
+                let names = match knowers {
+                    [one] => one.clone(),
+                    [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+                    [] => unreachable!("matched above"),
+                };
+                let verb = if knowers.len() == 1 { "calls" } else { "call" };
                 format!(
-                    "[{name}: a name only {} {verb}; nobody else says it]",
-                    knowers.join(" and ")
+                    "- \"{other}\": only {names} {verb} {bearer} this. Everyone else says \"{bearer}\".\n"
                 )
-            };
-            notes.push(AliasNote { words, note });
-        }
-    }
-    notes
-}
-
-/// `text` with the note of each other name it uses after the line that uses
-/// it, once per line. A line that already holds the note keeps it as it is.
-pub(crate) fn mark_aliases(text: &str, notes: &[AliasNote]) -> String {
-    if notes.is_empty() {
-        return text.to_owned();
-    }
-    let mut out = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        let (body, end) = match line.strip_suffix('\n') {
-            Some(body) => (body, "\n"),
-            None => (line, ""),
-        };
-        out.push_str(body);
-        let words = normalize::name_words(body);
-        for note in notes {
-            let uses = words
-                .windows(note.words.len())
-                .any(|w| w == note.words.as_slice());
-            if uses && !body.contains(&note.note) {
-                out.push(' ');
-                out.push_str(&note.note);
             }
         }
-        out.push_str(end);
+    }
+}
+
+/// The header of the NAMES block.
+const NAMES_HEADER: &str = "NAMES (an other name, and who may say it)\n";
+
+fn render_names(lines: &[NameLine]) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(NAMES_HEADER);
+    for line in lines {
+        out.push_str(&line.render());
     }
     out
 }
 
-/// `prompt` with every use of an other name marked (`mark_aliases`), in
-/// each block but the rules.
-pub(crate) fn with_alias_notes(
-    mut prompt: Prompt,
-    view: &WorldView,
-    audience: AliasAudience,
-) -> Prompt {
-    let notes = alias_notes(view, audience);
-    prompt.stable = mark_aliases(&prompt.stable, &notes);
-    prompt.scene = mark_aliases(&prompt.scene, &notes);
-    prompt.recent = mark_aliases(&prompt.recent, &notes);
-    prompt
+/// The NAMES block (review M5, after bug pass 4 MA): one line per
+/// restricted other name of the PC or of an NPC, with who may say it. QA:
+/// Ludo Brenn called the PC "Wick", a name only Agathe and Sefa use. The
+/// block sits at the end of the stable part, so it changes only when the
+/// knowers change (ADR 0001); no other prompt line is marked, so the model
+/// has no note to copy into the story.
+///
+/// The knowers are data: every holder of a Belief on the name's `alias_`
+/// slot (`world::holders_of`), the Adventure Seed's `known_to` and anyone
+/// who learned it in play, each resolved to its entity, so a knower the
+/// seed cites by an other name ("the Grey Lady") is its entity (review B2).
+/// The bearer and the PC are not listed. A name every other NPC knows has
+/// no restriction and no line. The narrator's block leaves out a hidden
+/// bearer, an other name the PC does not know, and each knower that is
+/// hidden or that the PC cannot name (`world::pc_can_name`).
+pub(crate) fn names_block(view: &WorldView, audience: NamesAudience) -> String {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return String::new();
+    };
+    let narrator = audience == NamesAudience::Narrator;
+    let standing: Vec<&StoredTurn> = view.recent_turns.iter().collect();
+    let named = pc_can_name(view, &standing);
+    let npcs: BTreeSet<EntityId> = view
+        .entities
+        .iter()
+        .filter(|e| e.kind == EntityKind::Npc)
+        .map(|e| e.id)
+        .collect();
+    let mut bearers: Vec<&Entity> = view
+        .entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+        .filter(|e| !(narrator && hidden(view, e.id)))
+        .collect();
+    bearers.sort_by_key(|e| e.id);
+    let mut lines = Vec::new();
+    for bearer in bearers {
+        for other in &bearer.other_names {
+            let holders = holders_of(view, bearer.id, &alias_key(other));
+            let pc_knows = bearer.id == pc.id || holders.contains(&pc.id);
+            if narrator && !pc_knows {
+                continue;
+            }
+            let knowers: Vec<EntityId> = holders
+                .into_iter()
+                .filter(|id| *id != bearer.id && *id != pc.id)
+                .collect();
+            let others: BTreeSet<EntityId> =
+                npcs.iter().copied().filter(|id| *id != bearer.id).collect();
+            if !others.is_empty() && others.iter().all(|id| knowers.contains(id)) {
+                continue;
+            }
+            let knowers = knowers
+                .into_iter()
+                .filter(|id| !(narrator && (hidden(view, *id) || !named.contains(id))))
+                .filter_map(|id| view.entities.iter().find(|e| e.id == id))
+                .map(|e| e.name.clone())
+                .collect();
+            lines.push(NameLine {
+                other: other.clone(),
+                bearer: bearer.name.clone(),
+                knowers,
+            });
+        }
+    }
+    render_names(&lines)
+}
+
+/// The narrator's NAMES block as the Adventure Seed alone gives it, for
+/// `adventure_block_chars`: each `known_to` resolved to its entry by any of
+/// its names, a hidden entry left out.
+fn seed_names_block(seed: &AdventureSeed) -> String {
+    let entry = |name: &str| {
+        let name = normalize::name(name);
+        seed.entities.iter().find(|e| {
+            normalize::name(&e.name) == name
+                || e.other_names
+                    .iter()
+                    .any(|o| normalize::name(&o.name) == name)
+        })
+    };
+    let is_pc = |name: &str| normalize::name(name) == normalize::name(&seed.pc.name);
+    let bearers = std::iter::once((seed.pc.name.as_str(), &seed.pc.other_names, false, true))
+        .chain(
+            seed.entities
+                .iter()
+                .filter(|e| e.kind == EntityKind::Npc)
+                .map(|e| (e.name.as_str(), &e.other_names, e.hidden, false)),
+        );
+    let mut lines = Vec::new();
+    for (bearer, other_names, bearer_hidden, pc) in bearers {
+        if bearer_hidden {
+            continue;
+        }
+        for other in other_names {
+            if !(pc || other.known_to.iter().any(|k| is_pc(k))) {
+                continue;
+            }
+            let mut knowers: Vec<String> = Vec::new();
+            for known in &other.known_to {
+                if let Some(e) = entry(known).filter(|e| !e.hidden && e.name != bearer)
+                    && !knowers.contains(&e.name)
+                {
+                    knowers.push(e.name.clone());
+                }
+            }
+            lines.push(NameLine {
+                other: other.name.clone(),
+                bearer: bearer.to_owned(),
+                knowers,
+            });
+        }
+    }
+    render_names(&lines)
 }

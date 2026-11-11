@@ -85,6 +85,25 @@ pub(super) fn belief(view: &WorldView, row: &Knowledge) -> Option<Belief> {
     }
 }
 
+/// Every holder of a Belief on `(subject, key)`, whatever its value: each
+/// entity with an arrived `knowledge` row on a fact or a Claim of that slot.
+/// Sorted by id. The NAMES block reads who knows an other name so: the
+/// Adventure Seed's `known_to` and every holder who learned it in play
+/// (review M5).
+pub fn holders_of(view: &WorldView, subject: EntityId, key: &str) -> Vec<EntityId> {
+    let key = crate::normalize::key(key);
+    let mut holders: Vec<EntityId> = view
+        .knowledge
+        .iter()
+        .filter(|row| row.arrives_at <= view.clock_min)
+        .filter(|row| belief(view, row).is_some_and(|b| b.subject == subject && b.key == key))
+        .map(|row| row.holder)
+        .collect();
+    holders.sort_unstable();
+    holders.dedup();
+    holders
+}
+
 /// PC Knowledge: the PC's Beliefs. Empty when the campaign has no PC.
 pub fn pc_knowledge(view: &WorldView) -> Vec<Belief> {
     view.entities

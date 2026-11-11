@@ -1252,55 +1252,178 @@ fn alias_world() -> (Store, u64, WorldView) {
     (store, campaign, view)
 }
 
-/// Every line of `text` that uses `name` as a whole word carries `note`.
-fn every_use_marked(text: &str, name: &str, note: &str) {
-    for line in text.lines() {
-        let uses = line
-            .to_lowercase()
-            .split(|c: char| !c.is_alphanumeric())
-            .any(|w| w == name);
-        assert!(!uses || line.contains(note), "unmarked use: {line}");
-    }
-}
-
+/// Review M5: the prompts that need it carry one NAMES block in the stable
+/// part: one line per restricted other name, with who may say it. No
+/// prompt line carries a bracket note any more, so the model cannot copy
+/// one into the story.
 #[test]
-fn a_restricted_other_name_is_marked_with_its_knowers() {
+fn a_restricted_other_name_has_one_names_line() {
     let (_store, _campaign, view) = alias_world();
-    let note = "[Swift: a name only Brann knows; nobody else says it]";
+    let swift = "- \"Swift\": only Brann calls Ada this. Everyone else says \"Ada\".\n";
     let narrator = narration_prompt(&view, &[], &[], &[], &[], "I nod to Orsel.", None);
     let opening = opening_prompt(&view, &[]);
     let proposal = proposal_prompt(&view, &[], "I tell Orsel that Swift needs no escort.");
     for prompt in [&narrator, &opening, &proposal] {
+        assert!(prompt.stable.contains("\nNAMES "), "{}", prompt.stable);
+        assert!(prompt.stable.contains(swift), "{}", prompt.stable);
         let text = fields(prompt).concat();
-        assert!(text.contains(note), "{text}");
-        every_use_marked(&text, "swift", note);
+        assert_eq!(text.matches("\"Swift\":").count(), 1, "{text}");
+        assert!(!text.contains("a name only"), "{text}");
+        assert!(!text.contains("[Swift"), "{text}");
     }
-    // The PC line itself carries the note in every prompt.
+    // The narrator's NAMES block never holds an other name the PC does not
+    // know, nor who knows it; the GM reads it. (The earlier Narration that
+    // the Player read stays in the recent Turns.)
     assert!(
-        narrator
-            .stable
-            .lines()
-            .any(|l| l.starts_with("PC: Ada") && l.contains(note)),
+        !narrator.stable.contains("Toll-Wolf"),
         "{}",
         narrator.stable
     );
-    // The narrator never learns an other name the PC does not know, nor who
-    // knows it; the GM sees it marked.
-    let narration = fields(&narrator).concat();
-    assert!(!narration.contains("only Brann knows; nobody else says it] [the Toll-Wolf"));
-    assert!(!narration.contains("[the Toll-Wolf"), "{narration}");
-    let gm = fields(&proposal).concat();
-    every_use_marked(
-        &gm,
-        "wolf",
-        "[the Toll-Wolf: a name only Brann knows; nobody else says it]",
+    assert!(
+        proposal.stable.contains(
+            "- \"the Toll-Wolf\": only Brann calls Orsel this. Everyone else says \"Orsel\".\n"
+        ),
+        "{}",
+        proposal.stable
     );
 }
 
-/// The notes add no change between two Turns of one Scene: the prefix
-/// stays byte-identical (ADR 0001).
+/// Review M5: "I trim the candle wick." got a note because the PC is also
+/// "Wick". No line of any prompt is marked now: the Intent stays as the
+/// Player wrote it.
 #[test]
-fn alias_notes_keep_the_prefix_stable() {
+fn an_intent_that_uses_an_other_name_as_a_word_stays_unmarked() {
+    use threshold_core::{domain::OtherName, turn::create_campaign};
+    let mut seed = adventure_seed();
+    seed.pc.other_names = vec![OtherName {
+        name: "Wick".into(),
+        known_to: vec!["Brann".into()],
+    }];
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let intent = "I trim the candle wick.";
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], intent, None);
+    let proposal = proposal_prompt(&view, &[], intent);
+    for prompt in [&narrator, &proposal] {
+        let line = prompt
+            .recent
+            .lines()
+            .find(|l| l.contains("candle wick"))
+            .expect("the Intent line");
+        assert!(line.ends_with("I trim the candle wick."), "{line}");
+    }
+}
+
+/// Review B2: a knower cited by its other name ("the Grey Lady", the other
+/// name of the hidden Vey) is resolved to its entity first. A hidden knower,
+/// or one the PC cannot name, never reaches the narrator; the GM reads it
+/// by its main name.
+#[test]
+fn a_knower_cited_by_its_other_name_is_resolved_and_hidden_from_the_narrator() {
+    use threshold_core::{
+        domain::{EntityKind, OtherName, SeedEntity},
+        turn::create_campaign,
+    };
+    let mut seed = adventure_seed();
+    seed.entities.push(SeedEntity {
+        name: "Vey".into(),
+        kind: EntityKind::Npc,
+        age: Some(40),
+        other_names: vec![OtherName {
+            name: "the Grey Lady".into(),
+            known_to: vec![],
+        }],
+        hidden: true,
+    });
+    seed.pc.other_names = vec![OtherName {
+        name: "Swift".into(),
+        known_to: vec!["Brann".into(), "the Grey Lady".into()],
+    }];
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None);
+    let opening = opening_prompt(&view, &[]);
+    for prompt in [&narrator, &opening] {
+        let text = fields(prompt).concat();
+        assert!(!text.contains("Grey Lady"), "{text}");
+        assert!(!text.contains("Vey"), "{text}");
+        assert!(
+            prompt
+                .stable
+                .contains("- \"Swift\": only Brann calls Ada this. Everyone else says \"Ada\".\n"),
+            "{}",
+            prompt.stable
+        );
+    }
+    let gm = proposal_prompt(&view, &[], "I wait.");
+    assert!(
+        gm.stable.contains(
+            "- \"Swift\": only Brann and Vey call Ada this. Everyone else says \"Ada\".\n"
+        ),
+        "{}",
+        gm.stable
+    );
+    // With no knower the narrator may read, the line says so.
+    let mut seed = seed;
+    seed.pc.other_names[0].known_to = vec!["the Grey Lady".into()];
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None);
+    assert!(
+        narrator
+            .stable
+            .contains("- \"Swift\": nobody in this scene calls Ada this.\n"),
+        "{}",
+        narrator.stable
+    );
+}
+
+/// Review M5: knowers learned in play are data (a Belief on the alias
+/// key), so the line reads them, not the Adventure Seed alone.
+#[test]
+fn a_knower_learned_in_play_joins_the_names_line() {
+    let (mut store, campaign, view) = alias_world();
+    let ada = view.entities.iter().find(|e| e.name == "Ada").unwrap().id;
+    let orsel = view.entities.iter().find(|e| e.name == "Orsel").unwrap().id;
+    let alias = view.live_fact(ada, "alias_swift").unwrap().id;
+    store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: "told".into(),
+                kind: TurnKind::Play,
+                intent: "I tell Orsel my road name.".into(),
+                proposal_json: "{}".into(),
+                clock_before: view.clock_min,
+                clock_after: view.clock_min,
+            },
+            vec![LedgerOp::Know {
+                holder: EntityRef::Id(orsel),
+                fact_id: Some(alias),
+                claim_id: None,
+                how: threshold_core::domain::Knowing::Witnessed,
+                arrives_at: view.clock_min,
+            }],
+        )
+        .unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I wait.", None);
+    assert!(
+        narrator.stable.contains(
+            "- \"Swift\": only Orsel and Brann call Ada this. Everyone else says \"Ada\".\n"
+        ),
+        "{}",
+        narrator.stable
+    );
+}
+
+/// The NAMES block follows the data, so it does not change between two
+/// Turns of one Scene: the prefix stays byte-identical (ADR 0001).
+#[test]
+fn the_names_block_keeps_the_prefix_stable() {
     let (_store, _campaign, view) = alias_world();
     let a = proposal_prompt(&view, &[], "I nod to Orsel.");
     let b = proposal_prompt(&view, &[], "I ask Swift's friend Brann for the time.");
