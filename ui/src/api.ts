@@ -47,7 +47,10 @@ export interface CharacterView {
   name: string;
   concept: string;
   clock_min: number;
+  /** What the PC knows about itself: no open item and no outcome of one. */
   facts: CharacterFact[];
+  /** The Open Items the PC knows, as the side panel and the Journal list them. */
+  open: FactLine[];
   /** The state lines of the "You" card: condition, carrying, mood… */
   state: StateLine[];
 }
@@ -55,8 +58,6 @@ export interface CharacterView {
 /** One thing the PC knows about itself. */
 export interface CharacterFact {
   text: string;
-  /** An open item: planned or pending, not done. */
-  open: boolean;
 }
 
 export interface DebugLine {
@@ -115,6 +116,8 @@ export interface StoryTurn {
 export interface StateLine {
   key: string;
   value: string;
+  /** The line as the Player reads it: a plain sentence. */
+  text: string;
 }
 
 export interface YouCard {

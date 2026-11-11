@@ -23,7 +23,12 @@ pub struct CharacterView {
     pub name: String,
     pub concept: String,
     pub clock_min: u64,
+    /// What the PC knows about itself: no open item and no outcome of one
+    /// (bug pass 3).
     pub facts: Vec<CharacterFact>,
+    /// The Open Items the PC knows that are not closed: the side panel's
+    /// and the Journal's list (`open_lines`), about any subject.
+    pub open: Vec<FactLine>,
     /// The state lines of the Play screen's "You" card (`YouCard::state`):
     /// the Character screen shows them too (changed after review).
     pub state: Vec<StateLine>,
@@ -33,18 +38,22 @@ pub struct CharacterView {
 #[derive(Clone, Debug, Serialize)]
 pub struct CharacterFact {
     pub text: String,
-    /// An open item (ADR 0005): planned or pending, not done.
-    pub open: bool,
 }
 
-/// The PC as the PC knows itself: only its own Beliefs about itself.
+/// The PC as the PC knows itself: its own Beliefs about itself, without an
+/// open item or the outcome of one, and the Open Items of the side panel.
 pub fn character_view(sight: &PcSight) -> CharacterView {
+    let outcome = |key: &str| {
+        sight
+            .open_items
+            .iter()
+            .any(|i| i.subject == sight.pc && outcome_key(&i.key).is_some_and(|k| k == key))
+    };
     let facts = sight
         .beliefs
         .iter()
-        .filter(|b| b.subject == sight.pc)
+        .filter(|b| b.subject == sight.pc && !is_open_key(&b.key) && !outcome(&b.key))
         .map(|b| CharacterFact {
-            open: is_open_key(&b.key),
             text: fact_text(&b.text, &b.key),
         })
         .collect();
@@ -53,6 +62,7 @@ pub fn character_view(sight: &PcSight) -> CharacterView {
         concept: sight.concept.clone(),
         clock_min: sight.clock_min,
         facts,
+        open: open_lines(sight),
         state: state_lines(sight),
     }
 }
@@ -72,6 +82,7 @@ fn state_lines(sight: &PcSight) -> Vec<StateLine> {
         .map(|b| StateLine {
             key: b.key.clone(),
             value: b.value.clone(),
+            text: slot_sentence(&sight.pc_name, &b.key, &b.value),
         })
         .collect()
 }
@@ -175,6 +186,9 @@ pub struct YouCard {
 pub struct StateLine {
     pub key: String,
     pub value: String,
+    /// The line as the Player reads it (`domain::slot_sentence`), never
+    /// `key value` as data (bug pass 3).
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

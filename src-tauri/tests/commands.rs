@@ -124,21 +124,18 @@ open = true
     s.new_campaign(&town_dir().join("adventure-seed.toml"), &world, 11)
         .unwrap();
 
-    // The Character view marks an open item about the PC as the Journal does.
+    // The Character view lists the open items of the side panel, about the
+    // PC or not, and none of them among its facts (bug pass 3).
     let character = s.get_character().unwrap();
-    let audience = character
-        .facts
-        .iter()
-        .find(|f| f.text.contains("audience"))
-        .expect("the PC knows its open item");
-    assert!(audience.open);
-    assert!(
-        character
-            .facts
+    for item in ["audience", "shopping trip"] {
+        let line = character
+            .open
             .iter()
-            .filter(|f| !f.text.contains("audience"))
-            .all(|f| !f.open)
-    );
+            .find(|f| f.text.contains(item))
+            .unwrap_or_else(|| panic!("the PC holds the open item {item}"));
+        assert!(line.open);
+        assert!(!character.facts.iter().any(|f| f.text.contains(item)));
+    }
 
     let journal = s.get_journal().unwrap();
     let trip = journal

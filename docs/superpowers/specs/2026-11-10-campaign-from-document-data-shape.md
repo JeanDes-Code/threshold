@@ -114,7 +114,7 @@ pub fn is_open_key(key: &str) -> bool;                             // is_state_k
 - `FactEntry.open = true` makes `setup` write the key `pending_<key>`. A settled entry with that prefix is refused.
 - An open key is a state key. So the fact is never Persistent, and a later Turn can replace it.
 - The outcome slot stays empty. So no check reads the plan as done.
-- `context` puts the marker `(open, not done)` before the text of an open fact, in one function. The proposal prompt also shows the key. `JournalEntry` gains `open: bool`, and so does each fact of the `CharacterView` (`CharacterFact { text, open }`).
+- `context` puts the marker `(open, not done)` before the text of an open fact, in one function. The proposal prompt also shows the key. `JournalEntry` gains `open: bool`, and so does each fact of the `CharacterView` (`CharacterFact { text, open }`). *Changed in bug pass 3 (2026-11-11):* the `CharacterView` lists its Open Items apart, from the side panel's list, so `CharacterFact` is `{ text }`.
 - Possible does not fit. A cited Possible fact becomes Established (`checks/ops.rs:218`). A Possible fact that the PC witnesses becomes Established (`store/project.rs:497`). Each is the false past that the design forbids.
 
 A settled PC Knowledge fact commits as a `decided` fact does, with the PC as holder. The drafted flow leaves `decided` and `proposed` empty.

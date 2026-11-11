@@ -87,14 +87,13 @@ export default function SidePanel(props: Props) {
         <p className="play-you__name">{you.name}</p>
         <p className="play-you__concept">{you.concept}</p>
         {you.state.length > 0 && (
-          <dl className="play-you__state">
+          <ul className="play-list play-you__state">
             {you.state.map((line) => (
-              <div key={line.key} className="play-you__row">
-                <dt>{line.key}</dt>
-                <dd>{line.value}</dd>
-              </div>
+              <li key={line.key} className="play-you__row">
+                {line.text}
+              </li>
             ))}
-          </dl>
+          </ul>
         )}
       </Card>
 

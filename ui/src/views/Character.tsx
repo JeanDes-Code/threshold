@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { clockText, errorText, type CharacterFact, type CharacterView } from "../api";
+import { clockText, errorText, type CharacterView } from "../api";
 import { api } from "../tauri";
 
 /**
@@ -18,8 +18,6 @@ export default function Character({ revision }: { revision: number }) {
 
   if (error) return <p className="error">{error}</p>;
   if (!view) return <p className="play-empty">Loading…</p>;
-  const known = view.facts.filter((f) => !f.open);
-  const open = view.facts.filter((f) => f.open);
   return (
     <div className="character">
       <section className="play-card" aria-label="You">
@@ -34,35 +32,34 @@ export default function Character({ revision }: { revision: number }) {
         {view.state.length === 0 ? (
           <p className="play-empty">Nothing to note.</p>
         ) : (
-          <dl className="play-you__state character__state">
+          <ul className="play-list play-you__state character__state">
             {view.state.map((line) => (
-              <div key={line.key} className="play-you__row">
-                <dt>{line.key}</dt>
-                <dd>{line.value}</dd>
-              </div>
+              <li key={line.key} className="play-you__row">
+                {line.text}
+              </li>
             ))}
-          </dl>
+          </ul>
         )}
       </section>
 
       <section className="play-card" aria-label="What you know about yourself">
         <h2 className="play-label">What you know about yourself</h2>
-        <Facts facts={known} empty="Nothing yet." />
+        <Facts lines={view.facts.map((f) => ({ text: f.text, open: false }))} empty="Nothing yet." />
       </section>
 
       <section className="play-card" aria-label="Open">
         <h2 className="play-label">Open</h2>
-        <Facts facts={open} empty="Nothing open." />
+        <Facts lines={view.open} empty="Nothing open." />
       </section>
     </div>
   );
 }
 
-function Facts({ facts, empty }: { facts: CharacterFact[]; empty: string }) {
-  if (facts.length === 0) return <p className="play-empty">{empty}</p>;
+function Facts({ lines, empty }: { lines: { text: string; open: boolean }[]; empty: string }) {
+  if (lines.length === 0) return <p className="play-empty">{empty}</p>;
   return (
     <ul className="play-list">
-      {facts.map((f, i) => (
+      {lines.map((f, i) => (
         <li key={i} className="play-fact">
           <span className={f.open ? "play-fact__mark play-fact__mark--open" : "play-fact__mark"} aria-hidden="true" />
           <span>

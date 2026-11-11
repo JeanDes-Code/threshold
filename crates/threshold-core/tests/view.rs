@@ -24,10 +24,10 @@ use threshold_core::{
 
 /// The town fixture after one Turn that gave Wren a fact Wren saw and a
 /// fact only the GM knows.
-const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":485,"facts":[{"text":"Wren carries a satchel of quills.","open":false}],"state":[{"key":"carrying","value":"satchel of quills"}]}"#;
+const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":485,"facts":[{"text":"Wren carries a satchel of quills."}],"open":[],"state":[{"key":"carrying","value":"satchel of quills","text":"Wren carries satchel of quills."}]}"#;
 
 /// What it gave for the hidden world, from `WorldView`.
-const HIDDEN_CHARACTER: &str = r#"{"name":"Ada","concept":"Courier","clock_min":5,"facts":[{"text":"Ada plans to meet Brann at the mill.","open":true}],"state":[]}"#;
+const HIDDEN_CHARACTER: &str = r#"{"name":"Ada","concept":"Courier","clock_min":5,"facts":[],"open":[{"belief":{"subject_id":1,"key":"pending_meet"},"subject":{"entity_id":1,"kind":"pc","name":"Ada"},"text":"Ada plans to meet Brann at the mill.","open":true,"told_by":null}],"state":[]}"#;
 
 fn town() -> (Store, u64) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/town");
@@ -1303,4 +1303,96 @@ fn a_seed_place_with_no_belief_has_a_card() {
     // Pip's own card does not list its own fact again.
     let pips = entity_card(&sight, &Marks::default(), pip).unwrap();
     assert!(pips.named_in.is_empty(), "{:?}", pips.named_in);
+}
+
+/// Bug pass 3, M5: the Character screen listed closed outcome facts
+/// ("Done: …", "Accepted: …") under what the PC knows about itself, and the
+/// same items again under Open; it showed 4 open items while the side
+/// panel showed 9, because it kept only the items about the PC. Its Open
+/// list is now the side panel's (`open_lines`), and its facts hold neither
+/// an open key nor the outcome of an Open Item.
+#[test]
+fn character_open_items_are_the_side_panel_s() {
+    let mut w = HiddenWorld::new();
+    let (ada, brann) = (w.ada, w.brann);
+    let view = w.view();
+    w.play(
+        "I promise Brann a meal.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            brann,
+            "pending_meal",
+            "tonight",
+            "Brann expects a meal from Ada tonight.",
+            &[ada],
+        )],
+    );
+    let sight = w.sight();
+    let character = character_view(&sight);
+    let play = play_view(&sight, &Marks::default());
+    assert_eq!(character.open, play.open);
+    assert_eq!(character.open.len(), 2, "{:?}", character.open);
+    // Ada settles her own item: the outcome fact is on Ada.
+    let view = w.view();
+    w.play(
+        "I meet Brann at the mill.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            ada,
+            "meet",
+            "done",
+            "Done: Ada plans to meet Brann at the mill.",
+            &[ada],
+        )],
+    );
+    let sight = w.sight();
+    let character = character_view(&sight);
+    let play = play_view(&sight, &Marks::default());
+    assert_eq!(character.open, play.open);
+    assert_eq!(character.open.len(), 1);
+    let texts: Vec<&str> = character.facts.iter().map(|f| f.text.as_str()).collect();
+    assert!(!texts.iter().any(|t| t.starts_with("Done:")), "{texts:?}");
+    assert!(
+        !texts.iter().any(|t| t.contains("plans to meet")),
+        "{texts:?}"
+    );
+    // The Journal still lists the closed item.
+    let journal = journal_view(&sight, &Marks::default());
+    assert!(
+        journal
+            .closed
+            .iter()
+            .any(|c| c.item.belief.key == "pending_meet")
+    );
+}
+
+/// Bug pass 3: a state line has a sentence for the Player, never
+/// `key value` as data.
+#[test]
+fn a_state_line_reads_as_a_sentence() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let view = w.view();
+    w.play(
+        "I arm-wrestle Brann.",
+        &record(ActionKind::Act, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            ada,
+            "injury",
+            "bruised_wrist",
+            "Ada is injured (bruised wrist).",
+            &[ada],
+        )],
+    );
+    let sight = w.sight();
+    let play = play_view(&sight, &Marks::default());
+    let line = play.you.state.iter().find(|s| s.key == "injury").unwrap();
+    assert_eq!(line.text, "Ada is injured (bruised wrist).");
+    assert_eq!(character_view(&sight).state[0].text, line.text);
 }

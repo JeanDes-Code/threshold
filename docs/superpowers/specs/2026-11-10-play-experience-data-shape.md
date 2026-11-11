@@ -193,7 +193,7 @@ Changed and new commands. Every other command stays as it is.
 | `get_play_view` | none | `PlayView` | view |
 | `get_journal` | none | `JournalView` (new form) | view |
 | `get_entity_card` | `entity_id` | `EntityCard`, or an error for an entity the PC does not know | view |
-| `get_character` | none | `CharacterView` | view; *changed after review (2026-11-10):* it gains `state`, the state lines of `YouCard`, and the screen uses the cards of the Play screen |
+| `get_character` | none | `CharacterView` | view; *changed after review (2026-11-10):* it gains `state`, the state lines of `YouCard`, and the screen uses the cards of the Play screen. *Changed in bug pass 3 (2026-11-11):* it gains `open`, the side panel's Open list (`open_lines`); `facts` holds no open key and no outcome of an Open Item, and `CharacterFact` loses `open` |
 | `add_note` | `body`, `about: Option<Target>` | `Note` | new state (3.7) |
 | `edit_note` | `note_id`, `body` | `Note` | new state |
 | `delete_note` | `note_id` | nothing | new state |
@@ -216,7 +216,7 @@ pub enum TurnBody    { Narration { blocks: Vec<Block> }, Missing }              
 pub enum Block       { Prose { parts: Vec<Part> }, Speech { speaker: NameRef, parts: Vec<Part> } }
 pub enum Part        { Text { text: String }, Name { entity_id: EntityId, text: String } }
 pub struct YouCard   { name: String, concept: String, state: Vec<StateLine> }
-pub struct StateLine { key: String, value: String }                                   // a key of STATE_KEYS, not `location`
+pub struct StateLine { key: String, value: String, text: String }                     // a key of STATE_KEYS, not `location`; text: domain::slot_sentence (bug pass 3)
 pub struct FactLine  { belief: BeliefRef, subject: NameRef, text: String, open: bool, told_by: Option<NameRef> }
 pub struct BeliefRef { subject_id: EntityId, key: String }                            // a token; the UI does not show it
 pub struct KnownLine { who: NameRef, other_names: Vec<String>, here: bool }           // named NPC, place or Faction

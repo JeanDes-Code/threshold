@@ -192,9 +192,9 @@ export const playView: PlayView = {
     name: "Ada Quell",
     concept: "A courier who owes the Salt Guild more than she can pay.",
     state: [
-      { key: "injury", value: "a shallow cut on the left palm" },
-      { key: "carrying", value: "an empty satchel and a broken seal" },
-      { key: "mood", value: "uneasy" },
+      { key: "injury", value: "a shallow cut on the left palm", text: "Ada Quell is injured (a shallow cut on the left palm)." },
+      { key: "carrying", value: "an empty satchel and a broken seal", text: "Ada Quell carries an empty satchel and a broken seal." },
+      { key: "mood", value: "uneasy", text: "Ada Quell's mood is now uneasy." },
     ],
   },
   open: [

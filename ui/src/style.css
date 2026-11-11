@@ -221,9 +221,7 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 .play-you__name { font-weight: 600; }
 .play-you__concept { color: var(--muted); margin-top: var(--space-1); }
 .play-you__state { margin: var(--space-3) 0 0; display: flex; flex-direction: column; gap: var(--space-1); }
-.play-you__row { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: var(--space-2); }
-.play-you__row dt { color: var(--faint); text-transform: capitalize; }
-.play-you__row dd { margin: 0; }
+.play-you__row { margin: 0; }
 .play-fact { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; }
 .play-fact__mark { width: 4px; height: 4px; margin-left: 2px; border-radius: var(--radius-3); background: var(--faint); transform: translateY(-2px); }
 .play-fact__mark--open { width: 8px; height: 8px; margin-left: 0; background: none; border: 1.5px solid var(--accent); transform: translateY(1px); }
