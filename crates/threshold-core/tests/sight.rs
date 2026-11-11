@@ -1200,3 +1200,39 @@ fn the_outcome_text_is_the_text_the_pc_holds() {
         .unwrap();
     assert!(!narrate.prompt.contains("SECRET"), "{}", narrate.prompt);
 }
+
+/// Review M1 (T1): the Intent names no item, so the schema has no
+/// `settles`; the model sends one anyway, for an item the PC holds. The
+/// Turn commits and the item stays open.
+#[test]
+fn a_settles_the_turn_did_not_offer_closes_nothing() {
+    let w = HiddenWorld::new();
+    let ada = w.ada;
+    let intent = "I look up at the sky.";
+    let view = w.view();
+    assert!(threshold_core::world::items_named_by(&view, intent).is_empty());
+    let schema = threshold_core::proposal_schema_for(&threshold_core::context::handle_context(
+        &view, intent,
+    ));
+    assert!(schema.pointer("/properties/settles").is_none());
+    let raw = format!(
+        r#"{{"action":"observe","contested":false,"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"accepted"}},"verdict":"allowed","minutes":3}}"#
+    );
+    let gm = RecordedGm::new(vec![raw], vec!["The sky is grey.".into()]);
+    let (mut engine, campaign) = w.engine(&gm);
+    engine
+        .play_turn("t-sky".into(), intent, &mut no_chunks())
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert!(view.live_fact(ada, "meet").is_none());
+    assert_eq!(
+        meet(&sight_of(engine.store(), campaign), ada).closed_in,
+        None
+    );
+    let log = engine.store().debug_log("t-sky").unwrap();
+    assert!(
+        log.iter()
+            .any(|e| e.step == "settle" && e.raw.contains("not offered")),
+        "{log:?}"
+    );
+}

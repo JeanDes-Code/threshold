@@ -62,22 +62,30 @@ fn drop_pc_acts(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
     }
 }
 
-/// A `settles` that names an item the PC does not hold goes. A fact on the
-/// outcome slot of the item that closes goes too: the core writes that slot
-/// itself (ADR 0007).
+/// A `settles` that names an item the PC does not hold goes, and so does
+/// one that names an item this Turn did not offer (review M1: the Intent
+/// named no item, the schema had no `settles`, and the model's close still
+/// committed). A fact on the outcome slot of the item that closes goes too:
+/// the core writes that slot itself (ADR 0007).
 fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
     let held = world::pc_open_items(view);
     if let Some(s) = p.settles.as_ref()
         && s.item != NO_ITEM
-        && !held
+    {
+        let why = if !held
             .iter()
             .any(|(subject, key)| world::open_item_ref(*subject, key) == s.item)
-    {
-        notes.push(format!(
-            "removed settles {}: not an open item the PC holds",
-            s.item
-        ));
-        p.settles = None;
+        {
+            Some("not an open item the PC holds")
+        } else if !p.offered.contains(&s.item) {
+            Some("not offered this Turn: the Intent does not name it")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            notes.push(format!("removed settles {}: {why}", s.item));
+            p.settles = None;
+        }
     }
     let slots: Vec<(Handle, String)> = closed(p, view)
         .into_iter()

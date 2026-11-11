@@ -54,6 +54,13 @@ pub struct DecisionProposal {
     /// changed after review). Not in the schema and not parsed.
     #[serde(skip)]
     pub facts_on_win: bool,
+    /// Set by the core only, never by the model: the Open Items this Turn
+    /// offered (`HandleContext::open_items`, the items the Intent names).
+    /// `settle` drops, and `validate` rejects, a `settles` whose item is not
+    /// among them; `to_ops` closes no other item (review M1). Not in the
+    /// schema and not parsed.
+    #[serde(skip)]
+    pub offered: Vec<String>,
 }
 
 /// The `item` of a `Settle` that names no Open Item.

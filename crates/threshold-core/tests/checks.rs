@@ -1358,6 +1358,8 @@ fn a_closing_status_writes_the_outcome_of_an_open_item_the_pc_holds() {
         threshold_core::world::pc_open_items(&w.view),
         [(ada, "pending_winter_post".to_owned())]
     );
+    // The Intent names it.
+    p.offered = vec![item.clone()];
     // The model's own outcome fact on the PC is still refused.
     let mut own = proposal(Verdict::Allowed);
     own.facts = vec![fact(
@@ -1565,10 +1567,12 @@ fn settles(item: &str, outcome: ItemStatus) -> Option<threshold_core::domain::Se
     })
 }
 
+/// A proposal that accepts `item`, which this Turn offered.
 fn closing(item: &str, verdict: Verdict) -> threshold_core::domain::DecisionProposal {
     let mut p = proposal(verdict);
     p.action = threshold_core::domain::ActionKind::Talk;
     p.settles = settles(item, ItemStatus::Accepted);
+    p.offered = vec![item.to_owned()];
     p
 }
 
@@ -1633,6 +1637,7 @@ fn an_open_status_keeps_the_item_open() {
     let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Talk;
     p.settles = settles(&item, ItemStatus::Open);
+    p.offered = vec![item.clone()];
     let (settled, notes) = settle(p, &w.view);
     assert!(notes.is_empty(), "{notes:?}");
     apply(&mut w, &settled, None);
@@ -1756,6 +1761,7 @@ fn a_proposal_settles_one_item_the_pc_holds() {
     let mut p = proposal(Verdict::Allowed);
     p.action = threshold_core::domain::ActionKind::Talk;
     p.settles = settles(&items[2], ItemStatus::Done);
+    p.offered.clone_from(&items);
     ok(validate(&p, &w.view));
     apply(&mut w, &p, None);
     let open = threshold_core::world::pc_open_items(&w.view);
@@ -1846,4 +1852,29 @@ fn facts_of_a_default_check_apply_on_a_win_only() {
     )];
     apply(&mut w, &p, Some(roll(false)));
     assert!(w.view.live_fact(w.brann, "mood").is_some());
+}
+
+/// Review M1: `settles` must name an item this Turn offered. The PC holds
+/// the item, but the Intent named none: `validate` rejects the close when
+/// it gets it directly, `settle` drops it with one note, and nothing
+/// closes. Offered, the same close commits.
+#[test]
+fn settles_on_a_held_item_that_was_not_offered_closes_nothing() {
+    let mut w = World::new();
+    let item = held_item(&mut w, "pending_winter_post");
+    let mut p = proposal(Verdict::Allowed);
+    p.action = threshold_core::domain::ActionKind::Talk;
+    p.settles = settles(&item, ItemStatus::Accepted);
+    rejected(validate(&p, &w.view), CheckKind::References);
+    let (settled, notes) = settle(p.clone(), &w.view);
+    assert_eq!(settled.settles, None);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("not offered"), "{notes:?}");
+    apply(&mut w, &settled, None);
+    assert!(w.view.live_fact(w.ada, "winter_post").is_none());
+    p.offered = vec![item];
+    let (settled, notes) = settle(p, &w.view);
+    assert!(notes.is_empty(), "{notes:?}");
+    apply(&mut w, &settled, None);
+    assert!(w.view.live_fact(w.ada, "winter_post").is_some());
 }

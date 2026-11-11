@@ -273,8 +273,9 @@ pub(super) struct Closed<'a> {
     pub text: String,
 }
 
-/// The Open Item that `settles` closes (any outcome but `open`), when the PC
-/// holds it and holds a text for it. At most one. With no text the PC
+/// The Open Item that `settles` closes (any outcome but `open`), when this
+/// Turn offered it (`DecisionProposal::offered`, review M1), the PC holds it
+/// and holds a text for it. At most one. With no text the PC
 /// holds, nothing closes: the outcome fact is built from that text, never
 /// from the live fact, which a GM-only write may have replaced (review B3).
 pub(super) fn closed<'a>(p: &'a DecisionProposal, view: &WorldView) -> Vec<Closed<'a>> {
@@ -282,6 +283,7 @@ pub(super) fn closed<'a>(p: &'a DecisionProposal, view: &WorldView) -> Vec<Close
     p.settles
         .as_ref()
         .and_then(|s| s.closing())
+        .filter(|(item, _)| p.offered.iter().any(|o| o == item))
         .and_then(|(item, outcome)| {
             let (subject, key) = held
                 .iter()

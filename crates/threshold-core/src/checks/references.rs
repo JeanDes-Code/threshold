@@ -194,14 +194,21 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
     let held = crate::world::pc_open_items(view);
     if let Some(s) = &p.settles
         && s.item != crate::domain::NO_ITEM
-        && !held
+    {
+        if !held
             .iter()
             .any(|(subject, key)| crate::world::open_item_ref(*subject, key) == s.item)
-    {
-        err(
-            None,
-            format!("settles: {} is not an open item the PC holds", s.item),
-        );
+        {
+            err(
+                None,
+                format!("settles: {} is not an open item the PC holds", s.item),
+            );
+        } else if !p.offered.contains(&s.item) {
+            err(
+                None,
+                format!("settles: {} is not an item this Turn offered", s.item),
+            );
+        }
     }
     for close in super::closed(p, view) {
         if written.contains(&(Handle::Entity(close.subject), normalize::key(close.key))) {

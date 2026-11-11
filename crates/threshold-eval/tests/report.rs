@@ -1510,8 +1510,9 @@ fn raw_log_goes_to_a_file_outside_the_repository_only() {
 }
 
 /// Bug pass 3: the open-items counts, on recorded answers. The acceptance
-/// closes its item; the refusal closes nothing; an unrelated step closes
-/// another item, which is a wrong close.
+/// closes its item; the refusal closes nothing; a keep step closes another
+/// item it offers, which is a wrong close. A close of an item the step did
+/// not offer is dropped by the core (review M1), so it is no close at all.
 #[test]
 fn open_items_counts_right_and_wrong_closes() {
     use threshold_core::{
@@ -1528,6 +1529,7 @@ fn open_items_counts_right_and_wrong_closes() {
     let view = store.snapshot(campaign).unwrap();
     let id = |name: &str| view.entity_by_name(name).unwrap().id;
     let (orsel, tobin) = (id("Orsel"), id("Tobin"));
+    let wren = id("Wren");
     let talk = r#"{"action":"talk","verdict":"allowed","minutes":2}"#.to_owned();
     let settle = |item: String| {
         format!(
@@ -1539,9 +1541,11 @@ fn open_items_counts_right_and_wrong_closes() {
             talk.clone(),
             talk.clone(),
             settle(format!("E{orsel} pending_copy_tithe_roll")),
+            // Not offered by "the walk down to the Varn mill": dropped.
             settle(format!("E{tobin} pending_millstone_sale")),
             talk.clone(),
-            talk.clone(),
+            // Offered by "the flour", and wrong on a keep step.
+            settle(format!("E{wren} pending_flour_debt")),
             talk,
         ],
         vec!["It happens.".to_owned(); 7],
@@ -1562,10 +1566,10 @@ fn open_items_counts_right_and_wrong_closes() {
     for line in [
         "| Accept | 1 | 1 / 1 | 0 | 0 |",
         "| Refuse | 1 | 0 / 1 | 0 | 0 |",
-        "| Keep | 2 | (none asked) | 0 | 0 |",
-        "| Unrelated | 3 | (none asked) | 1 | 0 |",
+        "| Keep | 2 | (none asked) | 1 | 0 |",
+        "| Unrelated | 3 | (none asked) | 0 | 0 |",
         "- Wrong closes in total: 1",
-        "- Wrong closes by item: millstone 1",
+        "- Wrong closes by item: flour_debt 1",
     ] {
         assert!(report.contains(line), "missing {line}:\n{report}");
     }

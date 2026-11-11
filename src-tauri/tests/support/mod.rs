@@ -36,6 +36,7 @@ pub fn base() -> DecisionProposal {
         minutes: 0,
         intimate: false,
         facts_on_win: false,
+        offered: vec![],
     }
 }
 

@@ -630,7 +630,10 @@ impl Engine {
             let step = Instant::now();
             let retry = attempt == "propose_retry";
             let parsed = match parse(&raw) {
-                Ok(p) => {
+                Ok(mut p) => {
+                    // The items the Intent names: the only ones `settles`
+                    // may close (review M1).
+                    p.offered.clone_from(&ctx.handles.open_items);
                     let (mut p, mut notes) = checks::settle(engine_time(p, view, intent), view);
                     // A contested act with no Check: one repair note on the
                     // first attempt, a default Check on the retry (ADR 0007).
