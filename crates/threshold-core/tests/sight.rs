@@ -1367,6 +1367,7 @@ fn an_item_whose_outcome_the_pc_never_saw_stays_open_and_can_be_settled() {
     use threshold_core::world::{beliefs, items_named_by, pc_knowledge, pc_open_items};
     let mut w = HiddenWorld::new();
     let (ada, brann) = (w.ada, w.brann);
+    let (w_orsel, w_vey) = (w.orsel, w.vey);
     let view = w.view();
     w.play(
         "I wait.",
@@ -1403,12 +1404,29 @@ fn an_item_whose_outcome_the_pc_never_saw_stays_open_and_can_be_settled() {
         )
         .unwrap();
     let view = engine.store().snapshot(campaign).unwrap();
-    assert_eq!(view.live_fact(ada, "meet").unwrap().slot.value, "cancelled");
+    let world = view.live_fact(ada, "meet").unwrap();
+    assert_eq!(world.slot.value, "cancelled", "the world keeps its fact");
     assert!(
-        beliefs(&view, brann)
+        view.knowledge
             .iter()
-            .any(|b| b.subject == ada && b.key == "meet" && b.value == "cancelled"),
-        "Brann keeps the world's fact"
+            .any(|k| k.holder == brann && k.fact_id == Some(world.id)),
+        "Brann keeps his row on the world's fact"
+    );
+    // Review of bug pass 4, m6: the PC said its decision in front of the
+    // NPCs it perceives here, so they hear the PC's Claim too; the hidden
+    // Vey, there unseen, is no listener.
+    for npc in [brann, w_orsel] {
+        assert!(
+            beliefs(&view, npc)
+                .iter()
+                .any(|b| b.subject == ada && b.key == "meet" && b.value == "accepted"),
+            "{npc} did not hear the PC accept"
+        );
+    }
+    assert!(
+        !beliefs(&view, w_vey)
+            .iter()
+            .any(|b| b.subject == ada && b.key == "meet")
     );
     assert!(
         pc_knowledge(&view)
@@ -1436,4 +1454,72 @@ fn an_item_whose_outcome_the_pc_never_saw_stays_open_and_can_be_settled() {
     let journal =
         serde_json::to_string(&threshold_core::view::journal_view(&sight, &marks)).unwrap();
     assert!(!journal.contains("\"told_by\":{"), "{journal}");
+}
+
+/// Review of bug pass 4, m7: a Possible fact on an item's outcome slot (a
+/// rumor nobody committed) does not fill it. `settles` writes the outcome
+/// fact, witnessed by everyone present, as on an empty slot; the PC's own
+/// Claim is only for a slot the world filled with canon.
+#[test]
+fn a_possible_fact_on_the_outcome_slot_does_not_fill_it() {
+    use threshold_core::domain::{Canon, FactSource, Slot};
+    use threshold_core::world::{beliefs, pc_open_items};
+    let mut w = HiddenWorld::new();
+    let (ada, brann) = (w.ada, w.brann);
+    w.play(
+        "I wait.",
+        &record(ActionKind::Wait, Verdict::Allowed, None),
+        1,
+        vec![LedgerOp::AddFact {
+            slot: Slot {
+                subject: EntityRef::Id(ada),
+                key: "meet".into(),
+                value: "postponed".into(),
+            },
+            text: "The meeting at the mill may be postponed.".into(),
+            canon: Canon::Possible,
+            source: FactSource::AdventureSeed,
+            seen_by: vec![],
+            causes: vec![],
+        }],
+    );
+    let possible = w
+        .view()
+        .live_facts
+        .iter()
+        .find(|f| f.slot.subject == ada && f.slot.key == "meet")
+        .cloned()
+        .unwrap();
+    assert_eq!(possible.canon, Canon::Possible);
+    let mut accept = proposal(Verdict::Allowed);
+    accept.action = ActionKind::Talk;
+    accept.settles = Some(threshold_core::domain::Settle {
+        item: format!("E{ada} pending_meet"),
+        outcome: threshold_core::domain::ItemStatus::Accepted,
+    });
+    let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
+    let (mut engine, campaign) = w.engine(&gm);
+    let outcome = engine
+        .play_turn(
+            "t-accept".into(),
+            "Yes, I will meet Brann.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let ops = engine.store().turn_ops(outcome.turn_id).unwrap();
+    assert!(
+        !ops.iter().any(|op| matches!(op, LedgerOp::AddClaim { .. })),
+        "{ops:?}"
+    );
+    let view = engine.store().snapshot(campaign).unwrap();
+    let fact = view.live_fact(ada, "meet").unwrap();
+    assert_eq!(fact.slot.value, "accepted");
+    assert_eq!(fact.canon, Canon::Established);
+    assert!(fact.seen_by.contains(&brann), "{fact:?}");
+    assert!(
+        beliefs(&view, brann)
+            .iter()
+            .any(|b| b.subject == ada && b.key == "meet" && b.value == "accepted")
+    );
+    assert!(pc_open_items(&view).is_empty());
 }

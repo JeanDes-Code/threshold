@@ -88,13 +88,26 @@ pub fn to_ops(
     //
     // An item whose outcome slot the world already filled, unseen by the PC
     // (review M2): the core does not overwrite the world's fact for those
-    // who know it. The PC's outcome is a Claim of the PC, told to the PC
-    // alone, stored as a told Claim is: it closes the item for the PC
-    // (`world::pc_open_items`), and the slot keeps its fact.
+    // who know it. The PC's outcome is a Claim of the PC, stored as a told
+    // Claim is: it closes the item for the PC (`world::pc_open_items`), and
+    // the slot keeps its fact. It is the PC's own stated decision, so the
+    // NPCs the PC perceives here hear it too (review of bug pass 4, m6).
+    // Only a canon fact fills the slot: a Possible fact is a rumor nobody
+    // committed (`Builder::current`; m7).
     for close in super::closed(p, view).into_iter().filter(|_| lets_happen) {
         let text = close.outcome.text(&close.text);
-        let filled = view.live_fact(close.subject, close.key).is_some();
+        let filled = b.current(close.subject, close.key).is_some();
         if let (true, Some(pc)) = (filled, pc(view)) {
+            let listeners = std::iter::once(EntityRef::Id(pc))
+                .chain(
+                    view.entities
+                        .iter()
+                        .filter(|e| {
+                            e.kind == EntityKind::Npc && crate::world::openly_here(view, e.id)
+                        })
+                        .map(|e| EntityRef::Id(e.id)),
+                )
+                .collect();
             b.ops.push(LedgerOp::AddClaim {
                 claim: ClaimDraft {
                     speaker: EntityRef::Id(pc),
@@ -105,7 +118,7 @@ pub fn to_ops(
                     },
                     text,
                 },
-                listeners: vec![EntityRef::Id(pc)],
+                listeners,
                 delay_min: 0,
             });
             continue;
