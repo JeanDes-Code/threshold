@@ -98,7 +98,13 @@ export type Part = { kind: "text"; text: string } | { kind: "name"; entity_id: n
 
 export type Block =
   | { kind: "prose"; parts: Part[] }
-  | { kind: "speech"; speaker: NameRef; parts: Part[] };
+  | {
+      kind: "speech";
+      speaker: NameRef;
+      parts: Part[];
+      /** The stage note written before the words, without its parentheses: a quiet line. */
+      stage: Part[] | null;
+    };
 
 export type TurnBody = { kind: "narration"; blocks: Block[] } | { kind: "missing" };
 

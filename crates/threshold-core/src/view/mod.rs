@@ -154,10 +154,12 @@ pub enum Block {
         parts: Vec<Part>,
     },
     /// A line spoken by a present NPC whom the PC can name; the words
-    /// without the quote marks.
+    /// without the quote marks, and the stage note before them as a quiet
+    /// line, without its parentheses (review minor).
     Speech {
         speaker: NameRef,
         parts: Vec<Part>,
+        stage: Option<Vec<Part>>,
     },
 }
 
@@ -843,10 +845,15 @@ fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {
                 .lines
                 .iter()
                 .map(|line| match line {
-                    SightLine::Speech { speaker, words } => match name_ref(sight, *speaker) {
+                    SightLine::Speech {
+                        speaker,
+                        note,
+                        words,
+                    } => match name_ref(sight, *speaker) {
                         Some(speaker) => Block::Speech {
                             speaker,
                             parts: links.parts(words),
+                            stage: note.as_deref().map(|note| links.parts(note)),
                         },
                         None => Block::Prose {
                             parts: links.parts(words),
@@ -1130,11 +1137,19 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
                 .iter()
                 .map(|line| match line {
                     SightLine::Prose(text) => one_line(text),
-                    SightLine::Speech { speaker, words } => {
+                    SightLine::Speech {
+                        speaker,
+                        note,
+                        words,
+                    } => {
                         let name = name_ref(sight, *speaker)
                             .and_then(|who| who.name)
                             .unwrap_or_else(|| "Someone".into());
-                        format!("{name}: \"{}\"", one_line(words))
+                        let note = note
+                            .as_deref()
+                            .map(|n| format!("({}) ", one_line(n)))
+                            .unwrap_or_default();
+                        format!("{name}: {note}\"{}\"", one_line(words))
                     }
                 })
                 .filter(|line| !line.is_empty())

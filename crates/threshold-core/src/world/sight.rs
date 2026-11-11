@@ -97,8 +97,13 @@ pub enum SightLine {
     /// holds the quoted words only (ADR 0006).
     Prose(String),
     /// A line spoken by an NPC who is present in the Turn and whom the PC
-    /// can name: the words without the quote marks.
-    Speech { speaker: EntityId, words: String },
+    /// can name: the words without the quote marks, and the stage note
+    /// before them, if any.
+    Speech {
+        speaker: EntityId,
+        note: Option<String>,
+        words: String,
+    },
 }
 
 /// The world as the PC knows it. Each field comes from PC Knowledge, from
@@ -360,11 +365,13 @@ pub fn pc_sight(
                         Line::Tagged {
                             line,
                             name,
+                            note,
                             words,
                             said,
                         } => match speaker(view, name, present, &named, &known) {
                             Some(speaker) => SightLine::Speech {
                                 speaker,
+                                note: note.map(str::to_owned),
                                 words: words.to_owned(),
                             },
                             None if hides_a_name(view, name, &named, &known) => {

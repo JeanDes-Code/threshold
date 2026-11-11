@@ -237,7 +237,7 @@ fn speech_line_without_a_certain_speaker_stays_prose() {
     for (block, (line, shown)) in got.iter().zip(&lines[..lines.len() - 1]) {
         assert_eq!(prose(block), *shown, "{line}");
     }
-    let Block::Speech { speaker, parts } = &got[lines.len() - 1] else {
+    let Block::Speech { speaker, parts, .. } = &got[lines.len() - 1] else {
         panic!("Orsel speaks: {:?}", got[lines.len() - 1]);
     };
     assert_eq!(*speaker, named(w.orsel, EntityKind::Npc, "Orsel"));
@@ -347,7 +347,7 @@ fn speech_tag_by_first_name_resolves_or_is_removed() {
     let got = blocks(&view, said);
     assert_eq!(got.len(), 3, "{got:?}");
     for (block, words) in [(&got[0], "Fresh bread."), (&got[2], "Still warm.")] {
-        let Block::Speech { speaker, parts } = block else {
+        let Block::Speech { speaker, parts, .. } = block else {
             panic!("Marta speaks: {block:?}");
         };
         assert_eq!(*speaker, named(marta, EntityKind::Npc, "Marta Holt"));
@@ -386,7 +386,7 @@ fn speech_tags_and_links_match_through_normalize() {
     );
     let view = view_of(&w);
     let got = blocks(&view, said);
-    let Block::Speech { speaker, parts } = &got[0] else {
+    let Block::Speech { speaker, parts, .. } = &got[0] else {
         panic!("Chloé speaks: {got:?}");
     };
     assert_eq!(*speaker, named(chloe, EntityKind::Npc, "Chloé"));
@@ -678,7 +678,7 @@ fn every_entity_the_view_links_has_a_card() {
             for block in blocks {
                 let parts = match block {
                     Block::Prose { parts } => parts,
-                    Block::Speech { speaker, parts } => {
+                    Block::Speech { speaker, parts, .. } => {
                         linked.push(speaker.entity_id);
                         parts
                     }
@@ -1829,5 +1829,51 @@ fn news_on_an_open_item_s_outcome_is_learned() {
     assert!(
         sheet.contains("meet: moved to dawn (told by Brann)"),
         "{sheet}"
+    );
+}
+
+/// Review minor: a stage note before the quote was lost after the Commit
+/// (`Agathe: (hands you the sealed letter from the reeve) "Take it."` kept
+/// "Take it." only). The bubble now carries the note as a quiet stage line,
+/// so the stored view shows the text the stream showed.
+#[test]
+fn a_stage_note_stays_with_its_bubble() {
+    let mut w = HiddenWorld::new();
+    let said = w.play("I listen.", &observe(), 0, vec![]);
+    let line = r#"Orsel: (hands you the sealed letter from Brann) "Take it.""#;
+    w.narrate(said, line);
+    let view = view_of(&w);
+    let got = blocks(&view, said);
+    let [
+        Block::Speech {
+            speaker,
+            parts,
+            stage,
+        },
+    ] = got
+    else {
+        panic!("one bubble: {got:?}");
+    };
+    assert_eq!(speaker.entity_id, w.orsel);
+    assert_eq!(text(parts), "Take it.");
+    let stage = stage.as_ref().expect("the stage line");
+    assert_eq!(text(stage), "hands you the sealed letter from Brann");
+    // A name the PC knows in the note is a link, as in prose.
+    assert!(
+        stage
+            .iter()
+            .any(|p| matches!(p, Part::Name { entity_id, .. } if *entity_id == w.brann))
+    );
+    // The stream passes the line unchanged (Orsel's tag is a name the PC
+    // knows); the bubble shows the same words: tag, note, quote.
+    let shown = format!("Orsel: ({}) \"{}\"", text(stage), text(parts));
+    assert_eq!(shown, line);
+    // A line whose tag must go keeps its note in the prose.
+    let other = w.play("I listen.", &observe(), 0, vec![]);
+    w.narrate(other, r#"Kestrel: (low) "Nobody knows my name.""#);
+    let view = view_of(&w);
+    assert_eq!(
+        prose(&blocks(&view, other)[0]),
+        r#"(low) "Nobody knows my name.""#
     );
 }

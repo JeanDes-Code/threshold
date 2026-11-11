@@ -90,6 +90,7 @@ export const playView: PlayView = {
           {
             kind: "speech",
             speaker: maren,
+            stage: [text("taps the manifest without opening it")],
             parts: [
               text("The Gull has not docked. Nobody has seen her since the morning tide, and "),
               name(hale),
@@ -154,6 +155,7 @@ export const playView: PlayView = {
           {
             kind: "speech",
             speaker: maren,
+            stage: null,
             parts: [text("Read it here. It does not leave the counter, and neither do you until I say so.")],
           },
           {
@@ -169,6 +171,7 @@ export const playView: PlayView = {
           {
             kind: "speech",
             speaker: orsel,
+            stage: null,
             parts: [
               text("Late. Everyone is late tonight. "),
               name(maren),

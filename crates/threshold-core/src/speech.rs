@@ -37,12 +37,16 @@ pub enum Line<'a> {
     /// A line with no mark, as the Narration wrote it.
     Prose(&'a str),
     /// A speech mark. `line` is the whole line as written, for the case
-    /// where the mark does not resolve and the line shows as prose. `said`
-    /// is the spoken words with their quote marks, for the case where the
-    /// tag is a name the PC cannot name and must not show (ADR 0006).
+    /// where the mark does not resolve and the line shows as prose. `note`
+    /// is a short stage note before the quote, without its parentheses.
+    /// `said` is everything after the colon (the note, then the spoken
+    /// words with their quote marks), for the case where the tag is a name
+    /// the PC cannot name and must not show (ADR 0006): the stream shows
+    /// that text too.
     Tagged {
         line: &'a str,
         name: &'a str,
+        note: Option<&'a str>,
         words: &'a str,
         said: &'a str,
     },
@@ -50,7 +54,7 @@ pub enum Line<'a> {
 
 /// The lines of `narration`, blank lines left out. A line is a mark when
 /// the whole line is a name of one to four words, a colon, an optional short
-/// stage note in parentheses (dropped), then the spoken words in `"…"`,
+/// stage note in parentheses (kept apart), then the spoken words in `"…"`,
 /// `“…”` or `«…»`, with nothing after the closing quote. Any other line is
 /// prose, with its text unchanged.
 pub fn parse(narration: &str) -> Vec<Line<'_>> {
@@ -70,11 +74,12 @@ fn mark(line: &str) -> Option<Line<'_>> {
     {
         return None;
     }
-    let said = without_stage_note(said.trim());
+    let said = said.trim();
+    let (note, quoted) = stage_note(said);
     let (open, close) = QUOTES
         .into_iter()
-        .find(|&(open, _)| said.starts_with(open))?;
-    let inner = said.strip_prefix(open)?.strip_suffix(close)?;
+        .find(|&(open, _)| quoted.starts_with(open))?;
+    let inner = quoted.strip_prefix(open)?.strip_suffix(close)?;
     let inner_words = inner.trim();
     if inner_words.is_empty() || inner.contains(close) {
         return None;
@@ -82,6 +87,7 @@ fn mark(line: &str) -> Option<Line<'_>> {
     Some(Line::Tagged {
         line,
         name,
+        note,
         words: inner_words,
         said,
     })
@@ -91,23 +97,25 @@ fn mark(line: &str) -> Option<Line<'_>> {
 /// parentheses included, in characters.
 pub const MAX_STAGE_NOTE_CHARS: usize = 60;
 
-/// `said` without a short stage note before the quote: QA saw
-/// `Agathe Morrow: (Wiping the bar) "…"` shown as a script line (bug pass
-/// 4). The note is dropped; the words stay. A note that is long, holds a
-/// quote mark or never closes leaves `said` as it is.
-fn without_stage_note(said: &str) -> &str {
+/// A short stage note before the quote, without its parentheses, and the
+/// text after it: QA saw `Agathe Morrow: (Wiping the bar) "…"` shown as a
+/// script line (bug pass 4). The note is kept for the bubble's stage line
+/// (review minor: "hands you the sealed letter" was lost after the
+/// Commit). A note that is long, holds a quote mark or never closes is no
+/// note: `said` comes back whole.
+fn stage_note(said: &str) -> (Option<&str>, &str) {
     let Some(rest) = said.strip_prefix('(') else {
-        return said;
+        return (None, said);
     };
     let Some(end) = rest.find(')') else {
-        return said;
+        return (None, said);
     };
     let note = &rest[..end];
     let quoted = note.contains(|c| QUOTES.iter().any(|&(open, close)| c == open || c == close));
-    if quoted || note.chars().count() + 2 > MAX_STAGE_NOTE_CHARS {
-        return said;
+    if quoted || note.chars().count() + 2 > MAX_STAGE_NOTE_CHARS || note.trim().is_empty() {
+        return (None, said);
     }
-    rest[end + 1..].trim_start()
+    (Some(note.trim()), rest[end + 1..].trim_start())
 }
 
 /// The longest text the stream filter holds back at the start of a line,

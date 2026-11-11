@@ -193,7 +193,8 @@
               "entity_id": 2,
               "kind": "npc",
               "name": "Orsel"
-            }
+            },
+            "stage": null
           },
           {
             "kind": "prose",

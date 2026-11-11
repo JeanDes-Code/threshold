@@ -9,6 +9,7 @@ fn tagged<'a>(name: &'a str, words: &'a str, line: &'a str) -> Line<'a> {
     Line::Tagged {
         line,
         name,
+        note: None,
         words,
         said,
     }
@@ -207,17 +208,19 @@ fn stream_with_no_hidden_name_is_unchanged() {
 }
 
 /// Bug pass 4: a short stage note between the tag and the quote is still a
-/// mark. The note is dropped; the words and the quote stay.
+/// mark. Review minor: the note is kept, apart from the words, and `said`
+/// holds the note and the quote, as the stream shows them.
 #[test]
-fn parse_drops_a_short_stage_note_before_the_quote() {
+fn parse_keeps_a_short_stage_note_before_the_quote() {
     let line = "Orsel: (wiping the bar) \"You are late.\"";
     assert_eq!(
         parse(line),
         [Line::Tagged {
             line,
             name: "Orsel",
+            note: Some("wiping the bar"),
             words: "You are late.",
-            said: "\"You are late.\"",
+            said: "(wiping the bar) \"You are late.\"",
         }]
     );
     // A long note, a note with a quote, or one that never closes: prose.

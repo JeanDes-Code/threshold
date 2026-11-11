@@ -148,6 +148,11 @@ function BlockView({ block, onName, tabbable }: { block: Block } & Links) {
         >
           {who}
         </button>
+        {block.stage && (
+          <p className="play-speech__stage">
+            (<Parts parts={block.stage} onName={onName} tabbable={tabbable} />)
+          </p>
+        )}
         <p className="play-speech__words">
           <Parts parts={block.parts} onName={onName} tabbable={tabbable} />
         </p>

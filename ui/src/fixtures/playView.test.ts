@@ -62,7 +62,7 @@ describe("the core's PlayView", () => {
     const ui = shapes(playView);
     const missing = [...core].filter((shape) => !ui.has(shape));
     expect(missing).toEqual([]);
-    expect(core.has(".story[].body.blocks[] {kind,parts,speaker}")).toBe(true);
+    expect(core.has(".story[].body.blocks[] {kind,parts,speaker,stage}")).toBe(true);
     expect(core.has(".story[].body.blocks[].parts[] {entity_id,kind,text}")).toBe(true);
     expect(core.has(".story[].body {kind}")).toBe(true);
   });

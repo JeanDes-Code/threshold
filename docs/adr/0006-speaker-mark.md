@@ -43,3 +43,7 @@ What this does not cover:
 ## Changed in bug pass 4 (2026-11-11): a short stage note before the quote
 
 QA saw `Agathe Morrow: (Wiping the bar) "…"` shown as a script line: the parser wanted the quote right after the colon. A mark may now hold one stage note in parentheses between the colon and the quote, of at most 60 characters with the parentheses (`speech::MAX_STAGE_NOTE_CHARS`) and with no quote mark inside. `speech::parse` drops the note and keeps the words. The bubble rule is unchanged: exactly one present NPC whom the PC can name. A longer note, a note with a quote mark, or one that never closes leaves the line as prose. The stream filter is unchanged: it reads only the text before the colon.
+
+## Changed after the review of bug pass 4 (2026-11-11): the stage note stays
+
+The note of a mark was dropped after the Commit: `Agathe: (hands you the sealed letter from the reeve) "Take it."` stored only "Take it.", though the stream had shown the note. `speech::parse` now keeps the note apart (`Line::Tagged::note`, without its parentheses), and `said` holds the note and the quote, as the stream shows them. The bubble carries the note as a quiet stage line (`Block::Speech::stage`, with name links as in prose), and the OOC sheet writes it back in parentheses. A line whose tag must go keeps its note in the prose. The bubble rule and the stream filter are unchanged.
