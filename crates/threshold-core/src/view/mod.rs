@@ -439,6 +439,16 @@ fn open_lines(sight: &PcSight) -> Vec<FactLine> {
         .collect()
 }
 
+/// True when `belief` is the open line of an Open Item that closed: the
+/// item's outcome line stands for it (bug pass 4, MC). The side panel, the
+/// Journal and the cards read open and closed from `PcSight::open_items`.
+fn closed_item(sight: &PcSight, belief: &Belief) -> bool {
+    is_open_key(&belief.key)
+        && sight.open_items.iter().any(|item| {
+            item.subject == belief.subject && item.key == belief.key && item.closed_in.is_some()
+        })
+}
+
 /// The line of an Open Item: the PC Belief on its open key.
 fn item_line(sight: &PcSight, item: &OpenItem) -> Option<FactLine> {
     sight
@@ -490,7 +500,7 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
         facts: sight
             .beliefs
             .iter()
-            .filter(|b| named && b.subject == entity)
+            .filter(|b| named && b.subject == entity && !closed_item(sight, b))
             .filter_map(|b| fact_line(sight, b))
             .collect(),
         people_here: if named && known.kind == EntityKind::Place {
@@ -526,7 +536,7 @@ fn named_in(sight: &PcSight, entity: &crate::world::Known) -> Vec<FactLine> {
     sight
         .beliefs
         .iter()
-        .filter(|b| b.subject != entity.id)
+        .filter(|b| b.subject != entity.id && !closed_item(sight, b))
         .filter(|b| {
             let text = normalize::cased_words(&b.text);
             names.iter().any(|name| normalize::name_in(&text, name))

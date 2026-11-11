@@ -1602,3 +1602,65 @@ fn the_ooc_prompt_holds_the_play_screen_and_no_hidden_fact() {
         assert!(!all.contains(hidden), "{hidden} leaks: {all}");
     }
 }
+
+/// Bug pass 4, MC: a closed item shows on a card once, as closed, with its
+/// outcome: the card reads open and closed from the same source as the side
+/// panel (`PcSight::open_items`). QA saw the open marker on the cards of the
+/// Bargemen's Guild, Agathe Morrow and the Lamplighters after a refusal,
+/// with the "Refused:" line under it.
+#[test]
+fn a_card_shows_a_closed_item_once_as_closed() {
+    let mut w = HiddenWorld::new();
+    let (ada, orsel, gate) = (w.ada, w.orsel, w.gate);
+    let view = w.view();
+    w.play(
+        "I ask Orsel the price of passage.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            orsel,
+            "pending_toll",
+            "two coins at dusk",
+            "Orsel wants two coins at the Gate at dusk.",
+            &[ada],
+        )],
+    );
+    let card = |w: &HiddenWorld, id: u64| entity_card(&w.sight(), &Marks::default(), id).unwrap();
+    let open_now = card(&w, orsel);
+    assert!(
+        open_now
+            .facts
+            .iter()
+            .any(|f| f.open && f.belief.key == "pending_toll")
+    );
+    let view = w.view();
+    w.play(
+        "I tell Orsel no.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            orsel,
+            "toll",
+            "refused",
+            "Refused: Orsel wants two coins at the Gate at dusk.",
+            &[ada],
+        )],
+    );
+    for (who, lines) in [
+        (orsel, card(&w, orsel).facts),
+        (gate, card(&w, gate).named_in),
+    ] {
+        let about: Vec<_> = lines
+            .iter()
+            .filter(|f| f.text.contains("two coins"))
+            .collect();
+        assert_eq!(about.len(), 1, "card {who}: {about:?}");
+        assert!(!about[0].open, "card {who}: {about:?}");
+        assert!(
+            about[0].text.starts_with("Refused: "),
+            "card {who}: {about:?}"
+        );
+    }
+}

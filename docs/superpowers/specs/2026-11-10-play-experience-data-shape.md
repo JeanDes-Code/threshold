@@ -161,6 +161,8 @@ pub struct OpenItem { pub subject: EntityId, pub key: Key, pub text: String, pub
 
 A closed item still reaches the prompts with its `(open, not done)` marker, as today. This project does not change that (section 5).
 
+*Changed in bug pass 4 (2026-11-11):* an entity card reads open and closed from `PcSight::open_items`, the source of `open_lines`. QA saw a refused item on the cards of the Bargemen's Guild, Agathe Morrow and the Lamplighters with the open marker, and the "Refused:" line under it: `entity_card` listed every Belief about the entity, and marked each one on an open key as open. A card's `facts` and `named_in` now leave out the open line of an item that closed (`view::closed_item`); the item shows once, as its outcome line, not open.
+
 ### 3.5 The name the PC knows (5)
 
 What exists: `Entity.name`, `Entity.other_names`, and one `alias_` fact for each other name, held by the characters in `known_to`. Nothing records that the PC knows a main name. The narrator prompt gets the main name of each present character (`narration_prompt.rs:247`).
