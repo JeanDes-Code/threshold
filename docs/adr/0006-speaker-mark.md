@@ -39,3 +39,7 @@ What this does not cover:
 - A model that drops the mark gives prose and no error. A model that tags the wrong present NPC gives a wrong bubble, and code cannot see it. The evaluation measures both.
 - The name in a mark does not count as a Narration naming the speaker: a line whose mark cannot resolve must not make its own speaker resolve. A hidden other name never resolves.
 - It is easy to reverse: the parser stops, and the mark reads as plain text.
+
+## Changed in bug pass 4 (2026-11-11): a short stage note before the quote
+
+QA saw `Agathe Morrow: (Wiping the bar) "…"` shown as a script line: the parser wanted the quote right after the colon. A mark may now hold one stage note in parentheses between the colon and the quote, of at most 60 characters with the parentheses (`speech::MAX_STAGE_NOTE_CHARS`) and with no quote mark inside. `speech::parse` drops the note and keeps the words. The bubble rule is unchanged: exactly one present NPC whom the PC can name. A longer note, a note with a quote mark, or one that never closes leaves the line as prose. The stream filter is unchanged: it reads only the text before the colon.

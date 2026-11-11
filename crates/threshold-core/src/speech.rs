@@ -49,9 +49,10 @@ pub enum Line<'a> {
 }
 
 /// The lines of `narration`, blank lines left out. A line is a mark when
-/// the whole line is a name of one to four words, a colon, then the spoken
-/// words in `"…"`, `“…”` or `«…»`, with nothing after the closing quote.
-/// Any other line is prose, with its text unchanged.
+/// the whole line is a name of one to four words, a colon, an optional short
+/// stage note in parentheses (dropped), then the spoken words in `"…"`,
+/// `“…”` or `«…»`, with nothing after the closing quote. Any other line is
+/// prose, with its text unchanged.
 pub fn parse(narration: &str) -> Vec<Line<'_>> {
     narration
         .lines()
@@ -69,7 +70,7 @@ fn mark(line: &str) -> Option<Line<'_>> {
     {
         return None;
     }
-    let said = said.trim();
+    let said = without_stage_note(said.trim());
     let (open, close) = QUOTES
         .into_iter()
         .find(|&(open, _)| said.starts_with(open))?;
@@ -84,6 +85,29 @@ fn mark(line: &str) -> Option<Line<'_>> {
         words: inner_words,
         said,
     })
+}
+
+/// The longest stage note a mark may hold between its colon and its quote,
+/// parentheses included, in characters.
+pub const MAX_STAGE_NOTE_CHARS: usize = 60;
+
+/// `said` without a short stage note before the quote: QA saw
+/// `Agathe Morrow: (Wiping the bar) "…"` shown as a script line (bug pass
+/// 4). The note is dropped; the words stay. A note that is long, holds a
+/// quote mark or never closes leaves `said` as it is.
+fn without_stage_note(said: &str) -> &str {
+    let Some(rest) = said.strip_prefix('(') else {
+        return said;
+    };
+    let Some(end) = rest.find(')') else {
+        return said;
+    };
+    let note = &rest[..end];
+    let quoted = note.contains(|c| QUOTES.iter().any(|&(open, close)| c == open || c == close));
+    if quoted || note.chars().count() + 2 > MAX_STAGE_NOTE_CHARS {
+        return said;
+    }
+    rest[end + 1..].trim_start()
 }
 
 /// The longest text the stream filter holds back at the start of a line,

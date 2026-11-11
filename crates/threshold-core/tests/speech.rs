@@ -205,3 +205,28 @@ fn stream_with_no_hidden_name_is_unchanged() {
     out.push_str(&filter.finish());
     assert_eq!(out, STORED);
 }
+
+/// Bug pass 4: a short stage note between the tag and the quote is still a
+/// mark. The note is dropped; the words and the quote stay.
+#[test]
+fn parse_drops_a_short_stage_note_before_the_quote() {
+    let line = "Orsel: (wiping the bar) \"You are late.\"";
+    assert_eq!(
+        parse(line),
+        [Line::Tagged {
+            line,
+            name: "Orsel",
+            words: "You are late.",
+            said: "\"You are late.\"",
+        }]
+    );
+    // A long note, a note with a quote, or one that never closes: prose.
+    let long = format!("Orsel: ({}) \"Late.\"", "slowly ".repeat(10));
+    for text in [
+        long.as_str(),
+        "Orsel: (says \"no\") \"Late.\"",
+        "Orsel: (wiping the bar \"Late.\"",
+    ] {
+        assert_eq!(parse(text), [Line::Prose(text)], "{text}");
+    }
+}
