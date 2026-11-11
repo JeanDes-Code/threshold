@@ -29,6 +29,7 @@ const card = (entityId: number, facts: (subject: NameRef) => FactLine[], people_
     here: playView.here.some((h) => h.entity_id === entityId) || (line?.here ?? false),
     facts: facts(ref),
     people_here,
+    whereabouts: null,
     named_in: [],
     notes: [],
     pinned: false,

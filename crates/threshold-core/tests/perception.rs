@@ -159,18 +159,60 @@ fn a_witnessed_move_to_a_place_the_pc_cannot_name_shows_a_departure_only() {
         "the PC learned the destination"
     );
     assert!(!seen_present(&view).contains(&orsel), "Orsel is still here");
-    assert!(recent.contains("- Orsel leaves.\n"), "{recent}");
+    assert!(recent.contains("- Orsel left.\n"), "{recent}");
     assert!(!recent.to_lowercase().contains("cellar"), "{recent}");
     let all = screens(engine.store(), campaign, orsel);
     assert!(!all.to_lowercase().contains("cellar"), "{all}");
     let sight = sight(engine.store(), campaign);
     let here = play_view(&sight, &Marks::default()).here;
     assert!(here.iter().all(|who| who.entity_id != orsel), "{here:?}");
+    // Review of bug pass 4, m4: the card shows the departure as where
+    // Orsel is, in the past, never as a fact in the present tense.
     let card = entity_card(&sight, &Marks::default(), orsel).unwrap();
-    assert!(
-        card.facts.iter().any(|f| f.text == "Orsel leaves."),
+    assert_eq!(
+        card.whereabouts.as_deref(),
+        Some("Left; you do not know where."),
         "{card:?}"
     );
+    assert!(
+        card.facts.iter().all(|f| f.belief.key != "location"),
+        "{card:?}"
+    );
+    let ooc = ooc_sheet(&sight);
+    assert!(
+        ooc.contains("- Orsel left; the PC does not know where.\n"),
+        "{ooc}"
+    );
+    assert!(!ooc.contains("leaves"), "{ooc}");
+}
+
+/// Review of bug pass 4, m4: a departure record stored before this change
+/// says "Orsel leaves."; the card and the OOC sheet read it by its rule (a
+/// location with no place), so they say it in the past too.
+#[test]
+fn an_old_departure_record_reads_in_the_past() {
+    let mut w = World::new();
+    let (ada, orsel) = (w.ada, w.orsel);
+    w.commit(vec![LedgerOp::AddFact {
+        slot: Slot {
+            subject: EntityRef::Id(orsel),
+            key: "location".into(),
+            value: String::new(),
+        },
+        text: "Orsel leaves.".into(),
+        canon: Canon::Possible,
+        source: threshold_core::domain::FactSource::WorldEvent,
+        seen_by: vec![EntityRef::Id(ada)],
+        causes: vec![],
+    }]);
+    let sight = sight(&w.store, w.campaign);
+    let card = entity_card(&sight, &Marks::default(), orsel).unwrap();
+    assert_eq!(
+        card.whereabouts.as_deref(),
+        Some("Left; you do not know where.")
+    );
+    let all = screens(&w.store, w.campaign, orsel);
+    assert!(!all.contains("Orsel leaves."), "{all}");
 }
 
 /// Review of bug pass 4, m2: the departure record named its entity by the
@@ -354,7 +396,7 @@ fn a_witnessed_move_to_a_place_the_pc_can_name_shows_the_destination() {
         pc_knowledge(&view)
     );
     assert!(!seen_present(&view).contains(&orsel));
-    assert!(!recent.contains("Orsel leaves."), "{recent}");
+    assert!(!recent.contains("Orsel left."), "{recent}");
 }
 
 /// The departure record is no world truth: the GM's prompt never shows it,
@@ -374,7 +416,7 @@ fn the_departure_record_stays_out_of_the_gm_prompt() {
     let record = view
         .live_facts
         .iter()
-        .find(|f| f.slot.subject == orsel && f.text == "Orsel leaves.")
+        .find(|f| f.slot.subject == orsel && f.text == "Orsel left.")
         .expect("the departure record");
     assert_eq!(record.canon, Canon::Possible);
     let prompt = threshold_core::context::proposal_prompt(&view, &[], "I ask Orsel where he went.");
@@ -386,7 +428,7 @@ fn the_departure_record_stays_out_of_the_gm_prompt() {
     ]
     .map(|s| s.as_str())
     .concat();
-    assert!(!text.contains("Orsel leaves."), "{text}");
+    assert!(!text.contains("Orsel left."), "{text}");
     assert!(text.to_lowercase().contains("smugglers cellar"), "{text}");
 }
 

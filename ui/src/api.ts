@@ -238,6 +238,8 @@ export interface EntityCard {
   facts: FactLine[];
   /** A place only: who the PC believes is located there. A name is null when the PC cannot name them. */
   people_here: NameRef[];
+  /** A character the PC saw leave for a place it cannot name: "Left; you do not know where." Null otherwise. */
+  whereabouts: string | null;
   /** A place or a Faction only: facts the PC holds about others that name it. */
   named_in: FactLine[];
   notes: Note[];

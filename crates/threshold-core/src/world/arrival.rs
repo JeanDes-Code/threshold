@@ -440,14 +440,16 @@ impl Sight<'_> {
     }
 
     /// The departure record of `subject` (review B1): a fact on its
-    /// `location` with no place, the text "<name> leaves.", witnessed by
+    /// `location` with no place, the text "<name> left." (past, so it stays
+    /// true on a card and in the OOC sheet; review of bug pass 4, m4),
+    /// witnessed by
     /// the PC alone. It is Possible, so it never takes the slot from the
     /// event's own fact, which stays world truth; the store never makes it
     /// Established while that fact holds the slot, and no GM prompt shows
     /// it (`context::Retrieval`). The PC's Belief on it puts the entity
     /// nowhere the PC knows: the side panel's Here and the narrator's
     /// Present leave it out, and the narrator's outcome reads "<name>
-    /// leaves.". An entity the PC cannot name is "Someone".
+    /// left.". An entity the PC cannot name is "Someone".
     fn departure(&self, subject: EntityRef) -> LedgerOp {
         let name = match subject {
             EntityRef::Id(id) if self.named.contains(&id) => self
@@ -464,7 +466,7 @@ impl Sight<'_> {
                 key: "location".into(),
                 value: String::new(),
             },
-            text: format!("{} leaves.", name.as_deref().unwrap_or("Someone")),
+            text: format!("{} left.", name.as_deref().unwrap_or("Someone")),
             canon: Canon::Possible,
             source: FactSource::WorldEvent,
             seen_by: vec![EntityRef::Id(self.pc)],

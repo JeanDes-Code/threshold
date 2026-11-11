@@ -260,6 +260,12 @@ function CardView({ who: listed, card, refusal, onClose, pins, onPin, onNote }: 
               Also known as <span>{card.other_names.join(", ")}</span>
             </p>
           )}
+          {card.whereabouts !== null && (
+            <>
+              <h4 className="play-label play-entity__part">Where</h4>
+              <p className="play-entity__where">{card.whereabouts}</p>
+            </>
+          )}
           {card.people_here.length > 0 && (
             <>
               <h4 className="play-label play-entity__part">Who you know is here</h4>

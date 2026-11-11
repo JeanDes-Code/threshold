@@ -557,6 +557,10 @@ pub struct EntityCard {
     /// the PC's `location` Beliefs (QA, 2026-11-10). One the PC cannot
     /// name has no name. Empty for any other entity.
     pub people_here: Vec<NameRef>,
+    /// A character the PC saw leave for a place the PC cannot name: "Left;
+    /// you do not know where." (`DEPARTED_TEXT`). The departure is not
+    /// among `facts` (review of bug pass 4, m4). `None` otherwise.
+    pub whereabouts: Option<String>,
     /// The Player's Notes about it.
     pub notes: Vec<Note>,
     pub pinned: bool,
@@ -571,7 +575,13 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
     let who = name_ref(sight, entity)?;
     let named = known.name.is_some();
     let target = Target::Entity { entity_id: entity };
+    let departed = named
+        && sight
+            .beliefs
+            .iter()
+            .any(|b| b.subject == entity && departure(sight, b));
     Some(EntityCard {
+        whereabouts: departed.then(|| DEPARTED_TEXT.to_owned()),
         other_names: if named {
             known.other_names.clone()
         } else {
@@ -582,6 +592,7 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
             .beliefs
             .iter()
             .filter(|b| named && b.subject == entity && !closed_item(sight, b))
+            .filter(|b| !departure(sight, b))
             .filter_map(|b| fact_line(sight, b))
             .collect(),
         people_here: if named && known.kind == EntityKind::Place {
@@ -885,8 +896,26 @@ fn name_ref(sight: &PcSight, id: EntityId) -> Option<NameRef> {
     })
 }
 
+/// The card's `whereabouts` of a character the PC saw leave for a place it
+/// cannot name (review of bug pass 4, m4).
+pub const DEPARTED_TEXT: &str = "Left; you do not know where.";
+
+/// True when `belief` is a departure record (`world::with_witnessed_events`):
+/// the `location` of another character, with no place.
+fn departure(sight: &PcSight, belief: &Belief) -> bool {
+    belief.subject != sight.pc && belief.key == "location" && belief.value.trim().is_empty()
+}
+
 fn fact_line(sight: &PcSight, belief: &Belief) -> Option<FactLine> {
     let mut text = fact_text(&belief.text, &belief.key);
+    // A departure reads in the past, whatever its stored text: a record
+    // written before review m4 says "Orsel leaves.".
+    if departure(sight, belief) {
+        let name = name_ref(sight, belief.subject)
+            .and_then(|who| who.name)
+            .unwrap_or_else(|| "Someone".into());
+        text = format!("{name} left.");
+    }
     // A state of the PC that a Turn wrote reads in the second person; a
     // sentence the Adventure Seed wrote stays as it is (bug pass 4).
     if belief.subject == sight.pc
@@ -1171,8 +1200,18 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
         .iter()
         .filter(|b| !item_keys.contains(&(b.subject, b.key.clone())))
         .filter(|b| closed_by(sight, b).is_none())
-        .filter_map(|b| fact_line(sight, b))
-        .map(|line| format!("- {}\n", ooc_line(&line)))
+        .filter_map(|b| {
+            let line = fact_line(sight, b)?;
+            // A departure says that the PC does not know where (m4).
+            Some(if departure(sight, b) {
+                format!(
+                    "- {}; the PC does not know where.\n",
+                    line.text.trim_end_matches('.')
+                )
+            } else {
+                format!("- {}\n", ooc_line(&line))
+            })
+        })
         .collect();
     if !known.is_empty() {
         out.push_str("WHAT THE PC KNOWS\n");
