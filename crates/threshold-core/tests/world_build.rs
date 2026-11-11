@@ -872,10 +872,11 @@ fn open_items_trap() {
 }
 
 /// Bug pass 3: the QA World Build wrote 7 Open Items of the draft again,
-/// with the same sentence on a new key or another subject, held by no one
-/// but the GM. The proposal prompt then showed an item the PC had settled
-/// as still open. An open fact whose sentence is the sentence of an
-/// accepted open fact is that fact: it adds its holders and no fact.
+/// with the same sentence on a new key (6) or another subject (1), held by
+/// no one but the GM. The proposal prompt then showed an item the PC had
+/// settled as still open. An open fact whose subject and sentence are
+/// those of an accepted open fact is that fact: it adds its holders and no
+/// fact (changed after review B2: the subject must match).
 #[test]
 fn an_open_item_the_build_restates_is_merged() {
     let restated = |subject: &str, key: &str| {
@@ -893,7 +894,6 @@ fn an_open_item_the_build_restates_is_merged() {
     let first = run(&draft(), &outputs);
     let world = first.world();
     assert!(facts_on(&world, "Harbour Council", "pier_vote").is_empty());
-    assert!(facts_on(&world, "Tobin Reed", "council_vote").is_empty());
     let vote = facts_on(&world, "Harbour Council", "vote");
     assert_eq!(vote.len(), 1);
     assert!(vote[0].open);
@@ -902,6 +902,11 @@ fn an_open_item_the_build_restates_is_merged() {
         "{:?}",
         vote[0].known_by
     );
+    // Review B2: on another subject the same sentence is another matter.
+    // It stays a fact of its own, and no holder moves.
+    let other = facts_on(&world, "Tobin Reed", "council_vote");
+    assert_eq!(other.len(), 1);
+    assert_eq!(other[0].known_by, ["Tobin Reed"]);
     // A settled fact with the sentence of an open one is no duplicate.
     let mut settled = plain();
     settled[0] = hidden(&[json!({
@@ -1620,4 +1625,33 @@ fn a_shared_first_name_does_not_trigger_world_autonomy() {
     assert_eq!(run.gm.calls().len(), 6);
     assert!(!run.log.iter().any(|e| e.step.contains("autonomy")));
     assert_eq!(world.goals.len(), 2);
+}
+
+/// Review B2 (T7): two NPCs owe different sums, and the World Build writes
+/// both with one sentence. They are two matters: each fact stays, with its
+/// own value and its own holder. Merging on the sentence alone gave Ada
+/// Venn's holders to Tobin Reed's debt and lost hers.
+#[test]
+fn two_matters_with_one_sentence_stay_two_facts() {
+    let debt = |subject: &str, value: &str| {
+        json!({
+            "subject": subject, "key": "levy", "value": value,
+            "text": "A debt to the Harbour Council is due at midwinter.",
+            "open": true, "known_by": [subject],
+        })
+    };
+    let mut outputs = plain();
+    outputs[0] = hidden(&[
+        debt("Tobin Reed", "40 marks"),
+        debt("Ada Venn", "900 marks"),
+    ]);
+    let world = run(&draft(), &outputs).world();
+    let tobin = facts_on(&world, "Tobin Reed", "levy");
+    assert_eq!(tobin.len(), 1);
+    assert_eq!(tobin[0].value, "40 marks");
+    assert_eq!(tobin[0].known_by, ["Tobin Reed"]);
+    let ada = facts_on(&world, "Ada Venn", "levy");
+    assert_eq!(ada.len(), 1, "{:?}", world.facts);
+    assert_eq!(ada[0].value, "900 marks");
+    assert_eq!(ada[0].known_by, ["Ada Venn"]);
 }
