@@ -574,7 +574,8 @@ impl Builder<'_> {
 
     fn text(&self, draft: &SlotDraft) -> String {
         let name = self.text_name(draft.subject);
-        crate::domain::slot_sentence(&name, &draft.key, &draft.value)
+        let value = cased_names(self.view, &draft.value.replace('_', " "));
+        crate::domain::slot_sentence(&name, &draft.key, &value)
     }
 
     fn text_name(&self, subject: Handle) -> String {
@@ -590,6 +591,31 @@ impl Builder<'_> {
         }
         .unwrap_or_else(|| subject.to_string())
     }
+}
+
+/// `value` with each word that is a one-word name part of a character
+/// (`world::name_parts`) written with the name's own capitals: the model
+/// writes values in snake_case, and QA read "loyal to teodor" (bug pass 5).
+/// Places and things keep their case: a place named "Gate" must not turn
+/// "the gate" into a name.
+fn cased_names(view: &WorldView, value: &str) -> String {
+    let parts: Vec<Vec<String>> = view
+        .entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+        .flat_map(crate::world::name_parts)
+        .filter(|part| part.len() == 1 && part[0].chars().count() >= 3)
+        .collect();
+    value
+        .split(' ')
+        .map(|word| {
+            parts
+                .iter()
+                .find(|part| part[0].to_lowercase() == word.to_lowercase())
+                .map_or_else(|| word.to_owned(), |part| part[0].clone())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn add_fact(new: FactDraft) -> LedgerOp {

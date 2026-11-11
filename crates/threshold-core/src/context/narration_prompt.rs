@@ -337,6 +337,10 @@ pub const NOT_MOVED_LINE: &str =
 pub const FAILED_CHECK_LINE: &str =
     " Tell the attempt and how it fails. Nothing changes beyond what is listed here.";
 
+/// The words after a Check's result line when the Check named no stake
+/// (bug pass 5): the result is about what the player intended.
+pub const NO_STAKE_LINE: &str = " The result is about what the player intent tries to do.";
+
 /// The words after a won Check's result line.
 pub const WON_CHECK_LINE: &str = " Tell the attempt and how it succeeds.";
 
@@ -524,7 +528,10 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
         ),
         LedgerOp::AddEntity { name, .. } => format!("- {} is here.\n", one_line(name)),
         LedgerOp::RecordRoll {
-            outcome, against, ..
+            outcome,
+            against,
+            stakes,
+            ..
         } => {
             // The opponent is named only when the PC sees them here.
             let against = against
@@ -535,10 +542,17 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
                 })
                 .map(|a| format!(" against {}", entity_name(r, a, perceived)))
                 .unwrap_or_default();
+            // QA (bug pass 5): a won Roll with no stake that the PC
+            // perceives was told as nothing at all. The line says what the
+            // result is about: the player's intent.
+            let named = ["win", "lose"]
+                .iter()
+                .any(|k| stakes.get(k).is_some_and(|v| !v.is_null()));
+            let about = if named { "" } else { NO_STAKE_LINE };
             if outcome == "lose" {
-                format!("- Check{against}: the PC loses.{FAILED_CHECK_LINE}\n")
+                format!("- Check{against}: the PC loses.{about}{FAILED_CHECK_LINE}\n")
             } else {
-                format!("- Check{against}: the PC wins.{WON_CHECK_LINE}\n")
+                format!("- Check{against}: the PC wins.{about}{WON_CHECK_LINE}\n")
             }
         }
         _ => return None,

@@ -595,7 +595,8 @@ fn play_fact_text_reads_as_a_line() {
         character
             .facts
             .iter()
-            .any(|f| f.text == "Ada is injured (bruised wrist)."),
+            // The PC's own state reads in the second person (bug pass 5).
+            .any(|f| f.text == "You are injured (bruised wrist)."),
         "{:?}",
         character.facts
     );
@@ -634,13 +635,15 @@ fn entity_card_shows_pc_knowledge_only() {
         card.other_names.is_empty(),
         "the PC does not know the Toll-Wolf"
     );
-    // Its facts are the PC Beliefs about Orsel, open items marked.
+    // Its facts are the PC Beliefs about Orsel, open items marked; his
+    // place is the card's "Where" line, not a fact (bug pass 5).
     let mut want: Vec<&str> = sight
         .beliefs
         .iter()
-        .filter(|b| b.subject == orsel)
+        .filter(|b| b.subject == orsel && b.key != "location")
         .map(|b| b.key.as_str())
         .collect();
+    assert_eq!(card.whereabouts.as_deref(), Some("At gate square."));
     let mut got: Vec<&str> = card.facts.iter().map(|f| f.belief.key.as_str()).collect();
     want.sort_unstable();
     got.sort_unstable();
@@ -1935,4 +1938,25 @@ fn the_ooc_sheet_says_what_is_open_and_what_is_answered_in_the_players_words() {
     assert!(!before.contains("the PC"), "{before}");
     // "You" is the PC, by name.
     assert!(before.starts_with("NOW\nYou are Ada.\n"), "{before}");
+}
+
+/// Bug pass 5: the Character tab read "Teodor Brandt is at The Copper
+/// Kettle."; the PC's own place reads in the second person, with the
+/// place's capitals.
+#[test]
+fn the_character_tab_says_where_you_are() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let view = w.view();
+    w.play(
+        "I walk to the gate.",
+        &record(ActionKind::Move, Verdict::Allowed, None),
+        5,
+        vec![set(&view, ada, "location", "gate", "Ada is at Gate.", &[ada])],
+    );
+    let sight = w.sight();
+    let character = threshold_core::view::character_view(&sight);
+    let texts: Vec<&str> = character.facts.iter().map(|f| f.text.as_str()).collect();
+    assert!(texts.contains(&"You are at Gate."), "{texts:?}");
+    assert!(!texts.iter().any(|t| t.starts_with("Ada is at")), "{texts:?}");
 }

@@ -54,7 +54,9 @@ pub fn character_view(sight: &PcSight) -> CharacterView {
         .iter()
         .filter(|b| b.subject == sight.pc && !is_open_key(&b.key) && closed_by(sight, b).is_none())
         .map(|b| CharacterFact {
-            text: fact_text(&b.text, &b.key),
+            // "You are at The Copper Kettle.", not "Teodor Brandt is at
+            // The Copper Kettle." (bug pass 5).
+            text: pc_state_text(sight, b).unwrap_or_else(|| fact_text(&b.text, &b.key)),
             told_by: teller(sight, b),
         })
         .collect();
@@ -579,13 +581,13 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
     let who = name_ref(sight, entity)?;
     let named = known.name.is_some();
     let target = Target::Entity { entity_id: entity };
-    let departed = named
-        && sight
-            .beliefs
-            .iter()
-            .any(|b| b.subject == entity && departure(sight, b));
+    let character = matches!(known.kind, EntityKind::Npc | EntityKind::Pc);
     Some(EntityCard {
-        whereabouts: departed.then(|| DEPARTED_TEXT.to_owned()),
+        whereabouts: if named && character && entity != sight.pc {
+            whereabouts(sight, entity)
+        } else {
+            None
+        },
         other_names: if named {
             known.other_names.clone()
         } else {
@@ -596,7 +598,8 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
             .beliefs
             .iter()
             .filter(|b| named && b.subject == entity && !closed_item(sight, b))
-            .filter(|b| !departure(sight, b))
+            // A character's place is its "Where" line, not a fact.
+            .filter(|b| !(character && entity != sight.pc && b.key == "location"))
             .filter_map(|b| fact_line(sight, b))
             .collect(),
         people_here: if named && known.kind == EntityKind::Place {
@@ -922,12 +925,8 @@ fn fact_line(sight: &PcSight, belief: &Belief) -> Option<FactLine> {
     }
     // A state of the PC that a Turn wrote reads in the second person; a
     // sentence the Adventure Seed wrote stays as it is (bug pass 4).
-    if belief.subject == sight.pc
-        && is_state_key(&belief.key)
-        && !is_open_key(&belief.key)
-        && text == slot_sentence(&sight.pc_name, &belief.key, &belief.value)
-    {
-        text = you_sentence(&belief.key, &belief.value);
+    if let Some(you) = pc_state_text(sight, belief) {
+        text = you;
     }
     Some(FactLine {
         belief: BeliefRef {
@@ -939,6 +938,41 @@ fn fact_line(sight: &PcSight, belief: &Belief) -> Option<FactLine> {
         open: is_open_key(&belief.key),
         told_by: teller(sight, belief),
     })
+}
+
+/// A state of the PC that a Turn wrote, in the second person: "You are at
+/// The Copper Kettle." (`domain::you_sentence`). `None` for any other
+/// Belief, and for a sentence the Adventure Seed wrote. The text matches
+/// the core's sentence whatever its case: the slot value is stored in lower
+/// case, the text keeps the place's capitals (bug pass 5: the Character tab
+/// read "Teodor Brandt is at The Copper Kettle.").
+fn pc_state_text(sight: &PcSight, belief: &Belief) -> Option<String> {
+    let core = slot_sentence(&sight.pc_name, &belief.key, &belief.value);
+    let ours = belief.subject == sight.pc
+        && is_state_key(&belief.key)
+        && !is_open_key(&belief.key)
+        && fact_text(&belief.text, &belief.key).to_lowercase() == core.to_lowercase();
+    ours.then(|| {
+        if belief.key == "location" && !belief.value.trim().is_empty() {
+            format!("You are at {}.", place_name(sight, &belief.value))
+        } else {
+            you_sentence(&belief.key, &belief.value)
+        }
+    })
+}
+
+/// Where a character is, as a card's "Where" line: "At The Copper Kettle."
+/// from the PC's `location` Belief, or the departure text. QA (bug pass 5)
+/// read "Sefa Lind is at The Copper Kettle." among the card's facts.
+fn whereabouts(sight: &PcSight, entity: EntityId) -> Option<String> {
+    let belief = sight
+        .beliefs
+        .iter()
+        .find(|b| b.subject == entity && b.key == "location")?;
+    if departure(sight, belief) {
+        return Some(DEPARTED_TEXT.to_owned());
+    }
+    Some(format!("At {}.", place_name(sight, &belief.value)))
 }
 
 /// Who told `belief`: the speaker of a Claim, as the PC knows them. The

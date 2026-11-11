@@ -1035,9 +1035,11 @@ fn lost_check_is_told_as_a_failure() {
         "I force the gate.",
         Some((threshold_core::domain::ActionKind::Act, Verdict::Check)),
     );
+    // With no stake, the line says what the result is about (bug pass 5).
     assert!(
         lost.recent.contains(&format!(
-            "- Check: the PC loses.{}",
+            "- Check: the PC loses.{}{}",
+            threshold_core::context::NO_STAKE_LINE,
             threshold_core::context::FAILED_CHECK_LINE
         )),
         "{}",
@@ -1772,4 +1774,40 @@ fn the_fact_lists_are_bounded() {
     assert!(known.len() <= PC_KNOWS_MAX_CHARS, "{}", known.len());
     assert!(known.contains("number 119"), "{known}");
     assert!(!known.contains("number 000"), "{known}");
+}
+
+/// Bug pass 5: a stake's sentence reads as a state when its value starts
+/// with the key's word, and a character's name keeps its capitals. QA read
+/// "Pim Quast's loyalty is now loyal to teodor.".
+#[test]
+fn a_stake_reads_as_a_plain_sentence() {
+    use threshold_core::domain::slot_sentence;
+    assert_eq!(
+        slot_sentence("Pim Quast", "loyalty", "loyal to Teodor"),
+        "Pim Quast is now loyal to Teodor."
+    );
+    assert_eq!(
+        slot_sentence("Pim Quast", "fear", "scared of the river"),
+        "Pim Quast's fear is now scared of the river."
+    );
+    let mut w = World::new();
+    witness_presence(&mut w);
+    let brann = w.brann;
+    let mut p = proposal(Verdict::Check);
+    p.check = Some(check(
+        Some(Handle::Entity(brann)),
+        slot(Handle::Entity(brann), "loyalty", "loyal_to_ada"),
+        slot(Handle::Entity(brann), "mood", "sour"),
+    ));
+    let valid = threshold_core::checks::validate(&p, &w.view).unwrap();
+    let resolved = threshold_core::checks::to_ops(valid, Some(&roll(true)), &w.view);
+    let text = resolved
+        .ops
+        .iter()
+        .find_map(|op| match op {
+            LedgerOp::AddFact { slot, text, .. } if slot.key == "loyalty" => Some(text.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(text, "Brann is now loyal to Ada.");
 }

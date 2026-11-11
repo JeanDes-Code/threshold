@@ -408,3 +408,11 @@ The sheet is still made from `PcSight` only. Live numbers: `evals/reports/2026-1
 
 ADR 0001 has the measurements. In both prompts the past Turns open the `recent` part (`context::turns_window`): a window of 3 to 5 Turns whose first Turn moves three at a time, at most `TURNS_WINDOW_MAX_CHARS`; the narration's window stops before the Turn it narrates. The proposal's `NOW` / `Minute N`, `MENTIONED`, `OPEN ITEMS (for settles)` and `INTENT` follow it; the narration's `THIS TURN` follows it. The GM's FACTS block is bounded by `GM_FACTS_MAX_CHARS` and the narrator's WHAT THE PC KNOWS HERE by `PC_KNOWS_MAX_CHARS`. `context::RECENT_TURNS`, `RECENT_MAX_CHARS` and `recent_block` are gone. Each model call writes a `metrics` debug row (`turn::METRICS_STEP`) with Ollama's `prompt_eval_count` (the whole prompt), `prompt_eval_duration`, `eval_count` and `eval_duration`.
 
+### Minors
+
+- A slot sentence whose value starts with the key's word reads as a state: "Pim Quast is now loyal to Teodor.", not "Pim Quast's loyalty is now loyal to teodor." (`domain::slot_sentence`). The core writes a character's one-word name parts in a model value with their capitals (`checks::ops`, `cased_names`); places and things keep their case.
+- A stake on an NPC's attitude or another inner state stays witnessed by everyone present, the PC included: it is the declared result of a Check the PC took part in, and the Check's stakes are the one place where the model names what the contest decides. We did not add a list of "inner" keys: that would be a word rule on model labels, which ADR 0007 rejects. The narrator reads it as an outcome line and shows it through the NPC's manner.
+- The PC's own state that a Turn wrote reads in the second person on the Character tab too, matched whatever the case: "You are at The Copper Kettle." (`view::pc_state_text`).
+- A character's card shows its place as its "Where" line ("At The Copper Kettle.", or the departure text), not among its facts (`EntityCard::whereabouts`).
+- A Check whose stakes are both empty gives the narrator `context::NO_STAKE_LINE` after its result: the result is about what the Intent tries to do.
+

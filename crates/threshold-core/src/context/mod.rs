@@ -15,10 +15,10 @@ mod narration_prompt;
 mod proposal_prompt;
 
 pub use narration_prompt::{
-    FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPOSSIBLE_LINE, NARRATION_RULES, NOBODY_HERE_LINE,
-    NOT_MOVED_LINE, PC_PLACE_LINE, QUIET_EVENT_LINE, TIME_LINE, WON_CHECK_LINE, guard_events,
-    guard_plans, names_unheard, narration_prompt, narration_prompt_with, opening_prompt,
-    perceived_by_pc,
+    FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPOSSIBLE_LINE, NARRATION_RULES, NO_STAKE_LINE,
+    NOBODY_HERE_LINE, NOT_MOVED_LINE, PC_PLACE_LINE, QUIET_EVENT_LINE, TIME_LINE, WON_CHECK_LINE,
+    guard_events, guard_plans, names_unheard, narration_prompt, narration_prompt_with,
+    opening_prompt, perceived_by_pc,
 };
 pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, proposal_prompt};
 

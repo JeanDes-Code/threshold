@@ -78,8 +78,28 @@ pub fn slot_sentence(name: &str, key: &str, value: &str) -> String {
         "condition" => format!("{name} is {value}."),
         "carrying" => format!("{name} carries {value}."),
         "grudge" => format!("{name} holds a grudge against {value}."),
+        // QA (bug pass 5): "Pim Quast's loyalty is now loyal to teodor.".
+        // A value that starts with the key's own word reads as a state.
+        other if same_stem(other, &value) => format!("{name} is now {value}."),
         other => format!("{name}'s {} is now {value}.", words(other)),
     }
+}
+
+/// True when the first word of `value` and the key share a stem of at
+/// least 4 letters: "loyalty" and "loyal to Teodor", "anger" and "angry".
+fn same_stem(key: &str, value: &str) -> bool {
+    let first = value
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+    let key = key.replace('_', " ").to_lowercase();
+    let shared = first
+        .chars()
+        .zip(key.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    shared >= 4 && first.chars().count() >= 4
 }
 
 /// The text of a `location` fact the core writes for an NPC who goes
