@@ -1134,3 +1134,69 @@ fn a_narration_names_an_entity_with_its_own_capitals() {
         );
     }
 }
+
+/// Review B3 (T4): a GM-only write replaced the live text of the PC's Open
+/// Item with a secret. The PC still holds its own text, and accepts. The
+/// outcome fact is built from the text as the PC holds it: the secret
+/// reaches no Player screen and no narrator prompt.
+#[test]
+fn the_outcome_text_is_the_text_the_pc_holds() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let view = w.view();
+    w.commit(
+        TurnKind::Setup,
+        "",
+        "{}",
+        0,
+        vec![set(
+            &view,
+            ada,
+            "pending_meet",
+            "ambush",
+            "SECRET: Brann plans to ambush Ada at the mill.",
+            &[],
+        )],
+    );
+    let mut accept = proposal(Verdict::Allowed);
+    accept.action = ActionKind::Talk;
+    accept.settles = Some(threshold_core::domain::Settle {
+        item: format!("E{ada} pending_meet"),
+        outcome: threshold_core::domain::ItemStatus::Accepted,
+    });
+    let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
+    let (mut engine, campaign) = w.engine(&gm);
+    engine
+        .play_turn(
+            "t-yes".into(),
+            "Yes, I will meet Brann at the mill.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    let outcome = view.live_fact(ada, "meet").expect("the item closes");
+    assert_eq!(
+        outcome.text,
+        "Accepted: Ada plans to meet Brann at the mill."
+    );
+    let sight = sight_of(engine.store(), campaign);
+    let screens = format!(
+        "{}{}{}",
+        serde_json::to_string(&play_view(&sight, &Marks::default())).unwrap(),
+        serde_json::to_string(&threshold_core::view::character_view(&sight)).unwrap(),
+        serde_json::to_string(&threshold_core::view::journal_view(
+            &sight,
+            &Marks::default()
+        ))
+        .unwrap(),
+    );
+    assert!(!screens.contains("SECRET"), "{screens}");
+    let narrate = engine
+        .store()
+        .debug_log("t-yes")
+        .unwrap()
+        .into_iter()
+        .find(|e| e.step == "narrate")
+        .unwrap();
+    assert!(!narrate.prompt.contains("SECRET"), "{}", narrate.prompt);
+}

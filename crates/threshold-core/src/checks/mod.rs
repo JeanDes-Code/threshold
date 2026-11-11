@@ -251,11 +251,11 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             Origin::Move,
         );
     }
-    for (subject, key, outcome) in closed(p, view).into_iter().filter(|_| happens) {
+    for close in closed(p, view).into_iter().filter(|_| happens) {
         push(
-            Handle::Entity(subject),
-            key,
-            outcome.word(),
+            Handle::Entity(close.subject),
+            close.key,
+            close.outcome.word(),
             &[],
             Origin::Close,
         );
@@ -263,13 +263,21 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
     out
 }
 
+/// The Open Item that a closing `settles` closes.
+pub(super) struct Closed<'a> {
+    pub subject: EntityId,
+    /// The outcome key: the open key without its prefix (ADR 0005).
+    pub key: &'a str,
+    pub outcome: crate::domain::CloseOutcome,
+    /// The item's text as the PC holds it (`world::pc_item_text`).
+    pub text: String,
+}
+
 /// The Open Item that `settles` closes (any outcome but `open`), when the PC
-/// holds it: its subject, outcome key (the open key without its prefix,
-/// ADR 0005) and outcome. At most one.
-pub(super) fn closed<'a>(
-    p: &'a DecisionProposal,
-    view: &WorldView,
-) -> Vec<(EntityId, &'a str, crate::domain::CloseOutcome)> {
+/// holds it and holds a text for it. At most one. With no text the PC
+/// holds, nothing closes: the outcome fact is built from that text, never
+/// from the live fact, which a GM-only write may have replaced (review B3).
+pub(super) fn closed<'a>(p: &'a DecisionProposal, view: &WorldView) -> Vec<Closed<'a>> {
     let held = crate::world::pc_open_items(view);
     p.settles
         .as_ref()
@@ -279,10 +287,16 @@ pub(super) fn closed<'a>(
                 .iter()
                 .find(|(subject, key)| crate::world::open_item_ref(*subject, key) == item)?;
             let outcome_key = crate::domain::outcome_key(key)?;
+            let text = crate::world::pc_item_text(view, *subject, key)?;
             // The item text ends with the open key, so it ends with the
             // outcome key too: borrow it from there.
             let at = item.len() - outcome_key.len();
-            Some((*subject, &item[at..], outcome))
+            Some(Closed {
+                subject: *subject,
+                key: &item[at..],
+                outcome,
+                text,
+            })
         })
         .into_iter()
         .collect()

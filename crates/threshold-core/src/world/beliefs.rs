@@ -116,6 +116,19 @@ pub fn pc_open_items(view: &WorldView) -> Vec<(EntityId, Key)> {
     items
 }
 
+/// The text of an Open Item as the PC holds it: the text of the PC's Belief
+/// on `(subject, open key)`. `None` when the PC holds no Belief there or
+/// its text is blank. The live fact may say more: a GM-only write can
+/// replace it, and the PC never learns that text (review B3). The prompt's
+/// offered items and the outcome fact read this text, never the live one.
+pub fn pc_item_text(view: &WorldView, subject: EntityId, key: &str) -> Option<String> {
+    pc_knowledge(view)
+        .into_iter()
+        .find(|b| b.subject == subject && b.key == key)
+        .map(|b| b.text)
+        .filter(|text| !text.trim().is_empty())
+}
+
 /// How the proposal prompt and `settles.item` name an Open Item: the
 /// subject's handle, a space, and the open key, as a fact line shows them.
 pub fn open_item_ref(subject: EntityId, key: &str) -> String {

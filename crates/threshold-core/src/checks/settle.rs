@@ -81,7 +81,7 @@ fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Str
     }
     let slots: Vec<(Handle, String)> = closed(p, view)
         .into_iter()
-        .map(|(subject, key, _)| (Handle::Entity(subject), key.to_owned()))
+        .map(|close| (Handle::Entity(close.subject), close.key.to_owned()))
         .collect();
     let before = p.facts.len();
     p.facts.retain(|f| {

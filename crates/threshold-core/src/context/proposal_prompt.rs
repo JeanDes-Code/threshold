@@ -10,7 +10,7 @@ use crate::{
     model::Prompt,
     pack::ContentPack,
     store::{Entity, Fact},
-    world::{items_named_by, known_places, open_item_ref, pc_knowledge},
+    world::{items_named_by, known_places, open_item_ref, pc_item_text},
 };
 
 /// The rules part of the system prompt. Its first lines are the wording
@@ -119,17 +119,15 @@ fn handles(r: &Retrieval<'_>, intent: &str) -> HandleContext {
 }
 
 /// The Open Items the Intent names (`world::items_named_by`), each with its
-/// text as the PC knows it: the values of `settles.item` (bug pass 3).
+/// text as the PC holds it (`world::pc_item_text`): the values of
+/// `settles.item` (bug pass 3). An item the PC holds no text for is not
+/// offered: it could not close (review B3).
 fn offered(r: &Retrieval<'_>, intent: &str) -> Vec<(EntityId, String, String)> {
-    let known = pc_knowledge(r.view);
     items_named_by(r.view, intent)
         .into_iter()
-        .map(|(subject, key)| {
-            let text = known
-                .iter()
-                .find(|b| b.subject == subject && b.key == key)
-                .map_or_else(String::new, |b| one_line(&b.text));
-            (subject, key, text)
+        .filter_map(|(subject, key)| {
+            let text = pc_item_text(r.view, subject, &key)?;
+            Some((subject, key, one_line(&text)))
         })
         .collect()
 }

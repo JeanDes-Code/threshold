@@ -203,11 +203,14 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
             format!("settles: {} is not an open item the PC holds", s.item),
         );
     }
-    for (subject, key, _) in super::closed(p, view) {
-        if written.contains(&(Handle::Entity(subject), normalize::key(key))) {
+    for close in super::closed(p, view) {
+        if written.contains(&(Handle::Entity(close.subject), normalize::key(close.key))) {
             err(
-                Some(Handle::Entity(subject)),
-                format!("a fact and the close in settles both write the slot {key}"),
+                Some(Handle::Entity(close.subject)),
+                format!(
+                    "a fact and the close in settles both write the slot {}",
+                    close.key
+                ),
             );
         }
     }
