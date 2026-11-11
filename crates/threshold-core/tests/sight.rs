@@ -1291,3 +1291,40 @@ fn a_contest_never_opposes_an_npc_the_pc_cannot_perceive() {
         }
     }
 }
+
+/// Review minor: Decisions follow `settles` (ADR 0007). A close on an
+/// `observe` or `wait` Turn was no Decision, because the action filter ran
+/// first.
+#[test]
+fn a_close_on_an_observe_turn_is_a_decision() {
+    for action in [ActionKind::Observe, ActionKind::Wait] {
+        let w = HiddenWorld::new();
+        let ada = w.ada;
+        let mut p = proposal(Verdict::Allowed);
+        p.action = action;
+        p.minutes = 5;
+        p.settles = Some(threshold_core::domain::Settle {
+            item: format!("E{ada} pending_meet"),
+            outcome: threshold_core::domain::ItemStatus::Done,
+        });
+        let gm = RecordedGm::new(vec![json(&p)], vec!["Brann is there.".into()]);
+        let (mut engine, campaign) = w.engine(&gm);
+        let outcome = engine
+            .play_turn(
+                "t-mill".into(),
+                "I wait for Brann at the mill, as planned.",
+                &mut no_chunks(),
+            )
+            .unwrap();
+        let sight = sight_of(engine.store(), campaign);
+        assert_eq!(
+            meet(&sight, ada).closed_in,
+            Some(outcome.turn_id),
+            "{action:?}"
+        );
+        assert!(
+            moment(&sight, outcome.turn_id).is_some_and(|m| m.decision),
+            "{action:?}"
+        );
+    }
+}

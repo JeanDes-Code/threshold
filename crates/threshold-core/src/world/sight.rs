@@ -700,9 +700,12 @@ fn present_at(
 }
 
 /// A decision of the PC (data shape 3.2): a standing Play or Correction
-/// Turn whose stored action is `talk`, `move` or `act`, not impossible, that
-/// has a Roll, wrote a Persistent fact from the proposal, its Check or a
-/// Correction, or wrote or closed an Open Item the PC knows.
+/// Turn that closed an Open Item the PC knows, whatever its action
+/// (Decisions follow `settles`, ADR 0007; changed after review: a close on
+/// an `observe` or `wait` Turn was missed); or one whose stored action is
+/// `talk`, `move` or `act`, not impossible, that has a Roll, wrote a
+/// Persistent fact from the proposal, its Check or a Correction, or wrote
+/// an Open Item the PC knows.
 fn decision(
     turn: &StoredTurn,
     view: &WorldView,
@@ -711,6 +714,9 @@ fn decision(
 ) -> bool {
     if !matches!(turn.record.kind, TurnKind::Play | TurnKind::Correction) {
         return false;
+    }
+    if open_items.iter().any(|i| i.closed_in == Some(turn.id)) {
+        return true;
     }
     let Some((action, verdict)) = stored_action(&turn.record.proposal_json) else {
         return false;
@@ -733,7 +739,6 @@ fn decision(
         })
         || written()
             .any(|f| is_open_key(&f.slot.key) && rows.iter().any(|r| r.fact_id == Some(f.id)))
-        || open_items.iter().any(|i| i.closed_in == Some(turn.id))
 }
 
 /// `value` as `text` spells it: "the Toll-Wolf" in "Orsel is also called
