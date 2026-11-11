@@ -81,3 +81,56 @@ export function storyItems(view: PlayView, stream: string | null): StoryItem[] {
   if (stream !== null) items.push({ kind: "stream", text: stream });
   return items;
 }
+
+/**
+ * The Intent field after a Turn ends. The field clears when the Intent is
+ * sent, and the Player may type the next one while the Turn runs: that text
+ * stays. When the Turn was not taken, the sent text comes back, unless the
+ * Player typed something meanwhile.
+ */
+export function intentAfterTurn(sent: string, typed: string, taken: boolean): string {
+  if (taken || typed.trim() !== "") return typed;
+  return sent;
+}
+
+/** How many Open Items the side panel shows before "Show all". */
+export const OPEN_CAP = 5;
+
+/** The Open Items the side panel shows: the first `OPEN_CAP`, or all. */
+export function openShown<T>(lines: T[], all: boolean): T[] {
+  return all ? lines : lines.slice(0, OPEN_CAP);
+}
+
+/**
+ * A Narration's text cut at `*…*` marks: the words between a pair are
+ * emphasis, and any other asterisk goes. The Player never reads a raw
+ * asterisk.
+ */
+export function emphasis(text: string): { text: string; em: boolean }[] {
+  const out: { text: string; em: boolean }[] = [];
+  const push = (part: string, em: boolean) => {
+    if (part !== "") out.push({ text: part, em });
+  };
+  let rest = text;
+  for (;;) {
+    // As in Markdown: a pair holds words with no blank right inside it.
+    const match = /\*+([^\s*](?:[^*\n]*[^\s*])?)\*+/.exec(rest);
+    if (!match) break;
+    push(rest.slice(0, match.index).replaceAll("*", ""), false);
+    push(match[1] ?? "", true);
+    rest = rest.slice(match.index + match[0].length);
+  }
+  push(rest.replaceAll("*", ""), false);
+  return out.length === 0 ? [{ text: "", em: false }] : out;
+}
+
+/**
+ * The Turn whose name links are in the tab order: the last committed Turn,
+ * while no stream runs. Older names stay links for the mouse, so the
+ * keyboard reaches the side panel without walking the whole story.
+ */
+export function tabbableTurn(items: StoryItem[]): number | null {
+  const last = items.at(-1);
+  return last?.kind === "turn" ? last.turn.turn_id : null;
+}
+

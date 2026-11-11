@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { rollText, type Block, type Part, type StoryTurn } from "../api";
-import { nameText, npcColor, shouldFollow, streamShown, type StoryItem } from "./logic";
+import { emphasis, nameText, npcColor, shouldFollow, streamShown, tabbableTurn, type StoryItem } from "./logic";
 
 interface Props {
   items: StoryItem[];
@@ -26,6 +26,8 @@ export default function Story({ items, pendingIntent, onName, onRenarrate, busy 
     if (el) follow.current = shouldFollow(el.scrollTop, el.clientHeight, el.scrollHeight);
   };
 
+  const tabbable = tabbableTurn(items);
+
   return (
     <div className="play-story" ref={scroller} onScroll={onScroll}>
       <div className="play-story__measure">
@@ -37,6 +39,7 @@ export default function Story({ items, pendingIntent, onName, onRenarrate, busy 
               onName={onName}
               onRenarrate={onRenarrate}
               busy={busy}
+              tabbable={item.turn.turn_id === tabbable}
             />
           ) : (
             <article key="stream" className="play-turn play-turn--live" aria-live="polite">
@@ -78,9 +81,11 @@ interface TurnProps {
   onName: (entityId: number) => void;
   onRenarrate: (turnId: number) => void;
   busy: boolean;
+  /** Its name links are in the tab order: only the last Turn's are. */
+  tabbable: boolean;
 }
 
-function Turn({ turn, onName, onRenarrate, busy }: TurnProps) {
+function Turn({ turn, onName, onRenarrate, busy, tabbable }: TurnProps) {
   const classes = ["play-turn"];
   if (turn.reverted) classes.push("play-turn--reverted");
   return (
@@ -89,7 +94,9 @@ function Turn({ turn, onName, onRenarrate, busy }: TurnProps) {
       {turn.kind !== "opening" && <Intent text={turn.intent} correction={turn.kind === "correction"} />}
       {turn.reverted && <p className="play-turn__tag">Reverted by the Correction below</p>}
       {turn.body.kind === "narration" ? (
-        turn.body.blocks.map((block, i) => <BlockView key={i} block={block} onName={onName} />)
+        turn.body.blocks.map((block, i) => (
+          <BlockView key={i} block={block} onName={onName} tabbable={tabbable} />
+        ))
       ) : (
         <div className="play-missing">
           <span>The Narration of this Turn is missing. The Turn itself is committed.</span>
@@ -112,11 +119,16 @@ function Turn({ turn, onName, onRenarrate, busy }: TurnProps) {
   );
 }
 
-function BlockView({ block, onName }: { block: Block; onName: (entityId: number) => void }) {
+interface Links {
+  onName: (entityId: number) => void;
+  tabbable: boolean;
+}
+
+function BlockView({ block, onName, tabbable }: { block: Block } & Links) {
   if (block.kind === "prose") {
     return (
       <p className="play-prose">
-        <Parts parts={block.parts} onName={onName} />
+        <Parts parts={block.parts} onName={onName} tabbable={tabbable} />
       </p>
     );
   }
@@ -128,23 +140,36 @@ function BlockView({ block, onName }: { block: Block; onName: (entityId: number)
         {who.charAt(0).toUpperCase()}
       </span>
       <div className="play-speech__body">
-        <button type="button" className="play-speech__name" onClick={() => onName(block.speaker.entity_id)}>
+        <button
+          type="button"
+          className="play-speech__name"
+          tabIndex={tabbable ? undefined : -1}
+          onClick={() => onName(block.speaker.entity_id)}
+        >
           {who}
         </button>
         <p className="play-speech__words">
-          <Parts parts={block.parts} onName={onName} />
+          <Parts parts={block.parts} onName={onName} tabbable={tabbable} />
         </p>
       </div>
     </div>
   );
 }
 
-function Parts({ parts, onName }: { parts: Part[]; onName: (entityId: number) => void }) {
+function Parts({ parts, onName, tabbable }: { parts: Part[] } & Links) {
   return parts.map((part, i) =>
     part.kind === "text" ? (
-      <span key={i}>{part.text}</span>
+      <span key={i}>
+        {emphasis(part.text).map((piece, j) => (piece.em ? <em key={j}>{piece.text}</em> : piece.text))}
+      </span>
     ) : (
-      <button key={i} type="button" className="play-name" onClick={() => onName(part.entity_id)}>
+      <button
+        key={i}
+        type="button"
+        className="play-name"
+        tabIndex={tabbable ? undefined : -1}
+        onClick={() => onName(part.entity_id)}
+      >
         {part.text}
       </button>
     ),

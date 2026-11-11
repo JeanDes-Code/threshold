@@ -3,7 +3,7 @@ import type { EntityCard, EntityKind, FactLine, KnownLine, NameRef, PinLine, Tar
 import { factTarget, isPinned, notesNewestFirst } from "../marks/logic";
 import NoteField from "../marks/NoteField";
 import PinButton from "../marks/PinButton";
-import { filterKnown, nameText, npcColor } from "./logic";
+import { OPEN_CAP, filterKnown, nameText, npcColor, openShown } from "./logic";
 
 interface Props {
   here: NameRef[];
@@ -46,6 +46,7 @@ const KIND_TEXT: Record<EntityKind, string> = {
 export default function SidePanel(props: Props) {
   const { here, you, open, pinned, known, selected, onSelect, onPin } = props;
   const pins = pinned.map((pin) => pin.target);
+  const [allOpen, setAllOpen] = useState(false);
   return (
     <>
       {selected !== null && (
@@ -101,7 +102,19 @@ export default function SidePanel(props: Props) {
         {open.length === 0 ? (
           <p className="play-empty">Nothing open.</p>
         ) : (
-          <Facts lines={open} pins={pins} onPin={onPin} />
+          <>
+            <Facts lines={openShown(open, allOpen)} pins={pins} onPin={onPin} />
+            {open.length > OPEN_CAP && (
+              <button
+                type="button"
+                className="play-btn play-btn--text"
+                aria-expanded={allOpen}
+                onClick={() => setAllOpen((all) => !all)}
+              >
+                {allOpen ? "Show fewer" : `Show all ${open.length}`}
+              </button>
+            )}
+          </>
         )}
       </Card>
 

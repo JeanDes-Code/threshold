@@ -13,6 +13,11 @@ import {
   PHASE_TEXT,
   canOpenCorrection,
   streamShown,
+  intentAfterTurn,
+  openShown,
+  OPEN_CAP,
+  emphasis,
+  tabbableTurn,
 } from "./logic";
 
 describe("play logic", () => {
@@ -98,4 +103,45 @@ describe("Task 5 fixes", () => {
     expect(streamShown("")).toEqual({ text: "…", waiting: true });
     expect(streamShown("Orsel")).toEqual({ text: "Orsel", waiting: false });
   });
+
+  it("the Intent field clears on send and keeps what the Player types during the Turn", () => {
+    // Taken: the field keeps what was typed meanwhile, empty or not.
+    expect(intentAfterTurn("I wait.", "", true)).toBe("");
+    expect(intentAfterTurn("I wait.", "I look", true)).toBe("I look");
+    // Not taken: the sent text comes back, unless the Player typed meanwhile.
+    expect(intentAfterTurn("I wait.", "", false)).toBe("I wait.");
+    expect(intentAfterTurn("I wait.", "  ", false)).toBe("I wait.");
+    expect(intentAfterTurn("I wait.", "I look", false)).toBe("I look");
+  });
+
+  it("the Open card shows the first items and the rest on demand", () => {
+    const lines = Array.from({ length: 9 }, (_, i) => i);
+    expect(OPEN_CAP).toBe(5);
+    expect(openShown(lines, false)).toEqual([0, 1, 2, 3, 4]);
+    expect(openShown(lines, true)).toEqual(lines);
+    expect(openShown(lines.slice(0, 3), false)).toEqual([0, 1, 2]);
+  });
+
+  it("asterisks in a Narration become emphasis or go", () => {
+    expect(emphasis("The blade goes *swish-swish* past you.")).toEqual([
+      { text: "The blade goes ", em: false },
+      { text: "swish-swish", em: true },
+      { text: " past you.", em: false },
+    ]);
+    expect(emphasis("A lone * star and **loud**.")).toEqual([
+      { text: "A lone  star and ", em: false },
+      { text: "loud", em: true },
+      { text: ".", em: false },
+    ]);
+    expect(emphasis("No marks.")).toEqual([{ text: "No marks.", em: false }]);
+  });
+
+  it("only the last Turn's names are in the tab order", () => {
+    const items = storyItems(playView, null);
+    const turnsOnly = items.filter((i) => i.kind === "turn");
+    const last = turnsOnly.at(-1);
+    expect(last && last.kind === "turn" && tabbableTurn(items)).toBe(last && last.kind === "turn" ? last.turn.turn_id : null);
+    expect(tabbableTurn(storyItems(playView, "Orsel"))).toBe(null);
+  });
 });
+

@@ -181,6 +181,9 @@ By the QA role, on the live model: the full flow from home to ten Turns, with sc
 - Campaign files made before this project are not migrated when the schema changes. The owner imports his Campaign again. The Journal of a new Campaign is built from its first Turn.
 - An OOC answer lives for the session only. It is not saved and is not in the Journal.
 - A character or place that the Player adds in the review is the Player's word, like any edit of the Seed Draft. Its age follows the same rule as the others: the Player confirms it through the core.
+- *Bug pass 3 (2026-11-11).* The eight NPC colours spread over the hue circle, at least 30 degrees apart and away from the blue accent: two warm tones that QA saw as one (#d9a46b, #d6b07a) gave way. This drops "warm" from 5 and 8.
+- *Bug pass 3.* Only the last Turn's name links are in the tab order; older ones stay links for the mouse. Before, the keyboard walked every name of the whole story before it reached the side panel.
+- *Bug pass 3.* The Open card shows 5 items and a "Show all" button, so Pinned stays in view. The Intent field clears when the Intent is sent, and keeps what the Player types while the Turn runs. "Ask the GM" puts the focus in its field. `*word*` in a Narration reads as emphasis; any other asterisk is dropped.
 
 ## 13. Decisions from the owner
 

@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import type { SceneState } from "../api";
 import NoteField from "../marks/NoteField";
-import { PHASE_TEXT, isSendKey, type TurnPhase } from "./logic";
+import { PHASE_TEXT, intentAfterTurn, isSendKey, type TurnPhase } from "./logic";
 
 interface Props {
   /** The mature content module decides its buttons from `scene` and `phase`. */
@@ -22,7 +22,10 @@ interface Props {
   /** The Correction fields are open: the Campaign menu opens them. */
   fixing: boolean;
   onFixing: (open: boolean) => void;
-  /** Resolves true when the Intent was taken: the field then clears. */
+  /**
+   * Resolves true when the Intent was taken. The field clears on send, and
+   * what the Player types while the Turn runs stays.
+   */
   onAct: (text: string) => Promise<boolean>;
   onAsk: (text: string) => Promise<boolean>;
   /** Resolves true when the Correction was committed: the fields then clear. */
@@ -58,7 +61,9 @@ export default function ActionBar(props: Props) {
   const act = async () => {
     const text = intent.trim();
     if (!text || busy) return;
-    if (await onAct(text)) setIntent("");
+    setIntent("");
+    const taken = await onAct(text);
+    setIntent((typed) => intentAfterTurn(text, typed, taken));
   };
 
   const ask = async () => {
@@ -230,6 +235,7 @@ export default function ActionBar(props: Props) {
       {asking && (
         <div className="play-bar__row play-bar__row--ooc" id={oocId}>
           <input
+            autoFocus
             className="play-ooc-field"
             aria-label="Question for the GM, out of character"
             placeholder="Ask the GM a question outside the story"
