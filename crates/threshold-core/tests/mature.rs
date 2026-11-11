@@ -1269,3 +1269,70 @@ fn every_proposal_field_is_sorted_for_the_gate() {
         "a proposal field changed: decide whether it names a character, then update the gate's collector and this list"
     );
 }
+
+// --- Review of Tasks 1 and 2: the sticky tag reads the raw text -------------
+
+/// Plays one Turn on `w` whose first answer is `first` and whose retry is
+/// an untagged proposal with Brann complying.
+fn play_with_first(mut w: World, first: String) -> Result<(), TurnError> {
+    let mut retry = intimate(&w, Stance::Comply);
+    retry.intimate = false;
+    let gm = RecordedGm::new(
+        vec![first, serde_json::to_string(&retry).unwrap()],
+        vec!["Brann nods.".into()],
+    );
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(store, Box::new(gm), Box::new(D10), vec![], w.campaign);
+    engine
+        .play_turn("t1".into(), "I lean closer.", &mut |_| {})
+        .map(|_| ())
+}
+
+/// M2: a first answer that says `intimate` is true keeps the tag on the
+/// retry even when it is not valid JSON: cut, fenced, with trailing text,
+/// or with the key twice. Pip (17) stands here, so the tagged retry is
+/// refused; an untagged retry would commit.
+#[test]
+fn a_malformed_first_answer_keeps_the_tag() {
+    let gate = || {
+        let mut w = confirmed_gate();
+        let pip = w.pip;
+        bring(&mut w, pip, "Gate Square");
+        w
+    };
+    let tagged = serde_json::to_string(&intimate(&gate(), Stance::Comply)).unwrap();
+    let mut untagged = intimate(&gate(), Stance::Comply);
+    untagged.intimate = false;
+    let untagged = serde_json::to_string(&untagged).unwrap();
+    let cut = tagged[..tagged.find("\"intimate\":true").unwrap() + 15].to_owned();
+    let shapes = [
+        ("cut", cut),
+        ("fenced", format!("```json\n{tagged}\n```")),
+        ("trailing text", format!("{tagged} That is the answer.")),
+        (
+            "duplicate key",
+            untagged.replacen('{', "{\"intimate\":true,", 1),
+        ),
+        (
+            "spaces and quotes",
+            "{ \"intimate\" : \"true\", \"action\": ".to_owned(),
+        ),
+    ];
+    for (shape, first) in shapes {
+        let err = play_with_first(gate(), first).expect_err(shape);
+        assert!(
+            matches!(
+                err,
+                TurnError::Refused {
+                    kind: RefusalKind::AdultsOnly,
+                    ..
+                }
+            ),
+            "{shape}: {err:?}"
+        );
+    }
+
+    // A malformed first answer that says false does not tag the retry.
+    let first = format!("```json\n{untagged}\n```");
+    play_with_first(gate(), first).expect("an untagged Turn commits");
+}

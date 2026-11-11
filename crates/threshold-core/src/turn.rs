@@ -668,10 +668,10 @@ impl Engine {
     ///
     /// The adults-only gate (ADR 0008): a final rejection
     /// (`CheckKind::is_final`) ends the Turn at once as a Refusal, with no
-    /// retry prompt and no second proposal call. When the first attempt
-    /// said `intimate: true`, the retry is checked as intimate too, even
-    /// when the first attempt did not parse, so a retry cannot drop the tag
-    /// (plan deviation 4). A retry that
+    /// retry prompt and no second proposal call. When the raw text of the
+    /// first attempt says `intimate` is true (`states_intimate`, no
+    /// parsing), the retry is checked as intimate too, so a retry cannot
+    /// drop the tag (plan deviation 4, review M2). A retry that
     /// fails the stance rule only is an `Unwilling` Refusal.
     fn plan(
         &mut self,
@@ -701,8 +701,9 @@ impl Engine {
 
             let step = Instant::now();
             let retry = attempt == "propose_retry";
-            // The tag of the first attempt sticks, even when that attempt
-            // did not parse.
+            // The tag sticks once any attempt's raw text says it, valid
+            // JSON or not: cut, fenced, with trailing text, or with the key
+            // twice (review M2). The retry is then checked as intimate.
             tagged |= states_intimate(&raw);
             let parsed = match parse(&raw) {
                 Ok(mut p) => {
@@ -967,11 +968,23 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
     Ok(p)
 }
 
-/// True when the model text is a JSON object whose `intimate` is `true`,
-/// whether or not the rest of it parses as a proposal.
+/// True when the raw model text says `intimate` is true anywhere, read
+/// without parsing (review M2): the word `intimate`, then any quotes,
+/// spaces, `:` or `=`, then `true`, in any case. A text that holds the key
+/// twice with two values says it. The tag then sticks: a wrong tag only
+/// refuses a Turn, a lost tag skips the age rule.
 fn states_intimate(raw: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(raw.trim())
-        .is_ok_and(|v| v.get("intimate") == Some(&serde_json::Value::Bool(true)))
+    let text = raw.to_lowercase();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("intimate") {
+        rest = &rest[at + "intimate".len()..];
+        let value = rest
+            .trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ':' | '='));
+        if value.starts_with("true") {
+            return true;
+        }
+    }
+    false
 }
 
 /// The engine owns the time of a Turn, so the model cannot freeze the World
