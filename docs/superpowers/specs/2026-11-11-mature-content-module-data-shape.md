@@ -1,6 +1,6 @@
 # Mature content module: data shape
 
-Date: 2026-11-11. Status: draft for review. Parent spec: `2026-11-10-mature-content-module-design.md`. This page extends `2026-11-08-threshold-data-shape.md`, `2026-11-10-campaign-from-document-data-shape.md` and `2026-11-10-play-experience-data-shape.md` and does not restate them. Terms in capitals are defined in `GLOSSARY.md`. Section 12 lists the new terms.
+Date: 2026-11-11. Status: the owner accepted the defaults of section 16 on 2026-11-11. Parent spec: `2026-11-10-mature-content-module-design.md`. This page extends `2026-11-08-threshold-data-shape.md`, `2026-11-10-campaign-from-document-data-shape.md` and `2026-11-10-play-experience-data-shape.md` and does not restate them. Terms in capitals are defined in `GLOSSARY.md`. Section 12 lists the new terms.
 
 This page wins over the design on mechanics. It does not change the intent, the goals or the anti-goals of the design. Where the design has a gap, section 16 asks the owner and gives a default.
 
@@ -669,18 +669,18 @@ Both variants named the same weakest point without being asked to agree: the tag
 
 The shape takes the computed scene rule as a test from the first, and the single op and the shared `plan` from the second. It adds what both lacked: a stored confirmation, a stream that stops, and a value that a prompt needs before it can hold explicit text.
 
-## 16. Questions for the owner
+## 16. Decisions from the owner (2026-11-11)
 
-Each has a default. The build can start on the defaults.
+The owner accepted every default of this section on 2026-11-11 ("ok for your defaults"). Each item below is now his decision. The numbers stay, so the references to "question N" in this page still point here.
 
-1. **The Detail Level of a new Adventure Seed.** Default: `excluded`. The Player picks `implied` or `explicit` in the Seed review. The cost: at `excluded`, a Turn that the model tags by mistake is refused. The other choice is `implied` as the default, which matches goal 5 of the design more closely and makes the module on for every Campaign.
-2. **An NPC that the model creates in play.** The design counts its stored age (6.2). Default here: its age is unconfirmed until the Player confirms it in play, with one click, and the screen says "adult" and shows no number. The other choice is to count the model's age, with no click and no human in that path.
-3. **An NPC who does not go along.** The design rejects the Turn (6.2). Default: keep that, with the one retry, and the Player reads "Nobody here goes along with this." I recommend the other choice for play: the core removes the tag, the Turn commits as a plain one, and the narrator tells the refusal in the NPC's own voice. The age rule runs first in both cases.
-4. **A stranger may comply.** An NPC with attitude 0 passes the stance rule with no cause. Default: keep the existing ceiling and let the "NPC will" evaluation count it. The other choice is a higher bar for an intimate Turn: attitude 3 or more, or a cause.
-5. **The debug log of a faded Turn.** The design keeps the raw text there (6.6). The log is written in every Campaign, debug mode or not. Default: follow the design. The other choice is to log `[faded]` and the number of characters only.
-6. **The pass line for the tag.** Default: on the `intimate_tag` scenario, no missed tag in the 10 runs where a minor is in the place, and at most 1 in 20 elsewhere. If the live model fails it, the next step is the pack word list of section 9, before the owner's pass.
+1. **The Detail Level of a new Adventure Seed is `excluded`.** The Player picks `implied` or `explicit` in the Seed review. At `excluded`, a Turn that the model tags by mistake is refused. Rejected: `implied` as the default, which would turn the module on for every Campaign.
+2. **An NPC that the model creates in play has an unconfirmed age** until the Player confirms it in play, with one click. The screen says "adult" and shows no number. Rejected: counting the model's age, with no human in that path.
+3. **An intimate Turn with an NPC who does not go along is rejected**, as the design says (6.2), with the one retry. The Player reads "Nobody here goes along with this." The age rule runs first. Rejected: removing the tag and committing a plain Turn told in the NPC's own voice.
+4. **A stranger may comply.** The existing stance ceiling stays: an NPC with attitude 0 passes the stance rule with no cause, and the "NPC will" evaluation counts it. Rejected: a higher bar for an intimate Turn (attitude 3 or more, or a cause).
+5. **The debug log of a faded Turn keeps the text received before the stop**, as the design says (6.6). The log is written in every Campaign, debug mode or not. Rejected: logging `[faded]` and the number of characters only.
+6. **The pass line for the tag:** on the `intimate_tag` scenario, no missed tag in the 10 runs where a minor is in the place, and at most 1 in 20 elsewhere. If the live model fails it, the next step is the pack word list of section 9, before the owner's pass. Rejected: none was offered.
 
-Calls that I made and that the owner can veto without a design change: the Narration of an ended scene is replaced by its neutral line in later prompts; a Fade to Black between two Turns of a scene hides the Closing Turn and not the Turns already read; a settings change closes "Correct last Turn" until the next Play Turn; the confirmation in play shows no age.
+The four smaller calls stand, also by the owner's decision of 2026-11-11: the Narration of an ended scene is replaced by its neutral line in later prompts; a Fade to Black between two Turns of a scene hides the Closing Turn and not the Turns already read; a settings change closes "Correct last Turn" until the next Play Turn; the confirmation in play shows no age.
 
 ## Left to the builder
 
