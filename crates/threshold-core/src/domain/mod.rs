@@ -10,14 +10,15 @@ pub use adventure_seed::{
 };
 pub use handle::{Handle, HandleError};
 pub use proposal::{
-    ActionKind, Cancel, Cause, CheckDraft, CloseOutcome, DecisionProposal, EventDraft, Factor,
-    ItemStatus, NO_ITEM, NewFact, NewNpc, Reaction, Seen, Settle, SlotDraft, Verdict,
+    AWAY, ActionKind, Cancel, Cause, CheckDraft, CloseOutcome, DecisionProposal, EventDraft,
+    Factor, ItemStatus, Leave, NO_ITEM, NewFact, NewNpc, Reaction, Seen, Settle, SlotDraft,
+    Verdict,
 };
 pub use types::{
     ALIAS_KEY_PREFIX, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,
     FactDraft, FactSource, GoalStatus, Key, Knowing, LedgerOp, OPEN_KEY_PREFIX, STATE_KEYS, Slot,
-    Stance, Trigger, Value, alias_key, is_alias_key, is_open_key, is_state_key, outcome_key,
-    slot_sentence, you_sentence,
+    Stance, Trigger, Value, alias_key, is_alias_key, is_open_key, is_state_key, location_sentence,
+    outcome_key, slot_sentence, you_sentence,
 };
 pub use world_setup::{
     AttitudeEntry, EffectEntry, EventEntry, FactEntry, GoalEntry, ObstacleEntry, VoiceCardEntry,

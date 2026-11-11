@@ -18,6 +18,13 @@ pub struct DecisionProposal {
     /// schema makes it required, with the known places' handles and `null`.
     #[serde(default)]
     pub move_to: Option<Handle>,
+    /// The NPCs who walk out of the PC's place in this Turn, and where to
+    /// (bug pass 5, M1). The core writes each one's `location`. The per-Turn
+    /// schema makes it required, with the present NPCs the PC perceives and
+    /// the place handles plus `away`; an NPC who is not listed stays.
+    #[serde(default)]
+    #[schemars(length(max = 2))]
+    pub leaves: Vec<Leave>,
     /// The one Open Item that the Player's Intent settles in this Turn, and
     /// how (ADR 0007, changed in bug pass 3). Its `item` is `none` or an
     /// Open Item the Intent names (`world::items_named_by`), as the prompt
@@ -61,6 +68,18 @@ pub struct DecisionProposal {
     /// schema and not parsed.
     #[serde(skip)]
     pub offered: Vec<String>,
+}
+
+/// The `to` of a `Leave`, or the `moves_actor_to` of an event, that names
+/// no place: the NPC goes somewhere the world has no place for.
+pub const AWAY: &str = "away";
+
+/// One NPC who walks out of the PC's place in this Turn (bug pass 5, M1).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Leave {
+    pub npc: Handle,
+    /// A place handle (`E12`), or `away`.
+    pub to: String,
 }
 
 /// The `item` of a `Settle` that names no Open Item.
@@ -317,4 +336,10 @@ pub struct EventDraft {
     /// proposal without it reads as not public.
     #[serde(default)]
     pub public: bool,
+    /// The place where the actor is when the event happens: a place handle,
+    /// or `away` (bug pass 5, M1). The core adds the actor's `location`
+    /// effect. `None`: the actor stays where they are. Required and
+    /// nullable in the per-Turn schema.
+    #[serde(default)]
+    pub moves_actor_to: Option<String>,
 }

@@ -38,6 +38,7 @@ Narrate only the outcome given under THIS TURN. Never add a fact that changes th
 Never decide the PC's actions, words, or feelings beyond the player's intent.
 NPC intentions tell you how to portray an NPC. Show them through words and manner; never state them as fact.
 Give each NPC the voice of their Voice Card.
+Only the people the outcome lists as here are present. Nobody comes or goes unless the outcome says so.
 Never say that more time passed than the time line of THIS TURN states. Do not open with the time; tell it only when it matters.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
 ",
@@ -440,7 +441,70 @@ fn new_name(local: u8, perceived: &[LedgerOp]) -> String {
         .unwrap_or_else(|| "a newcomer".into())
 }
 
+/// The outcome line of an NPC who leaves the PC's place (bug pass 5, M1):
+/// "- Ludo Brenn leaves." or "- Ludo Brenn leaves for the stone quay.",
+/// built from the slot, never from the fact's text. `None` for any other
+/// write.
+fn leave_line(
+    r: &Retrieval<'_>,
+    slot: &crate::domain::Slot,
+    perceived: &[LedgerOp],
+) -> Option<String> {
+    if normalize::key(&slot.key) != "location"
+        || r.pc.is_some_and(|pc| slot.subject == EntityRef::Id(pc))
+    {
+        return None;
+    }
+    let to = normalize::value(&slot.value);
+    if r.location.as_deref().map(normalize::value) == Some(to.clone()) {
+        return None;
+    }
+    let name = entity_name(r, &slot.subject, perceived);
+    if to.is_empty() {
+        return Some(format!("- {name} leaves.\n"));
+    }
+    let place = r
+        .view
+        .entities_by_name(&slot.value)
+        .find(|e| e.kind == EntityKind::Place)
+        .map_or_else(|| one_line(&slot.value), |e| e.name.clone());
+    Some(format!("- {name} leaves for {place}.\n"))
+}
+
+/// Who the PC knows is here after the Turn, besides the PC, and that nobody
+/// else comes or goes (bug pass 5, M1: the narrator sent NPCs out of the
+/// room with no trace in the world).
+pub const HERE_AFTER_LINE: &str = "- Here after this Turn besides the PC: ";
+
+/// `HERE_AFTER_LINE` when nobody else is here.
+pub const NOBODY_HERE_LINE: &str = "- Nobody else is here after this Turn.";
+
+fn here_line(r: &Retrieval<'_>) -> String {
+    let others: Vec<String> = r
+        .seen_present
+        .iter()
+        .filter(|id| Some(**id) != r.pc)
+        .map(|id| r.name(*id))
+        .collect();
+    if others.is_empty() {
+        format!("{NOBODY_HERE_LINE}\n")
+    } else {
+        format!(
+            "{HERE_AFTER_LINE}{}. Nobody else comes or goes.\n",
+            others.join(", ")
+        )
+    }
+}
+
 fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Option<String> {
+    let slot = match op {
+        LedgerOp::AddFact { slot, .. } => Some(slot),
+        LedgerOp::SupersedeFact { new, .. } => Some(&new.slot),
+        _ => None,
+    };
+    if let Some(line) = slot.and_then(|slot| leave_line(r, slot, perceived)) {
+        return Some(line);
+    }
     Some(match op {
         LedgerOp::AddFact { slot, text, .. } => format!("- {}\n", fact_text(&slot.key, text)),
         LedgerOp::SupersedeFact { new, .. } => {
@@ -533,6 +597,7 @@ fn recent(
     if let Some(line) = place_line(r, perceived, turn.map(|(action, _)| action)) {
         outcome.push(line);
     }
+    outcome.push(here_line(r));
     if !outcome.is_empty() {
         tail.push_str("Outcome:\n");
         tail.push_str(&outcome.concat());

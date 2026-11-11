@@ -980,6 +980,7 @@ done = ["owns ferry", "bought ferry"]
                     }],
                     seen_by: vec![],
                     public: false,
+                    moves_actor_to: None,
                 },
                 EventEntry {
                     at: 600,
@@ -988,6 +989,7 @@ done = ["owns ferry", "bought ferry"]
                     effects: vec![],
                     seen_by: vec![],
                     public: false,
+                    moves_actor_to: None,
                 },
             ],
             ..WorldSetup::default()

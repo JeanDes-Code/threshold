@@ -164,7 +164,10 @@ fn fact_bends(view: &WorldView, writes: &[Write], errs: &mut Vec<Rejection>) {
 
 /// `cancel` needs a valid cause. A write that changes the `When` slot of a
 /// scheduled event, or the `alive` or `location` of its actor, counts as a
-/// cancel and needs one too.
+/// cancel and needs one too. A departure the core writes from `leaves` or
+/// `moves_actor_to` does not (bug pass 5, M1): a scheduled event fires
+/// wherever its actor is, and in QA every NPC had a scheduled event, so
+/// every departure would have been a cancel.
 fn tension(p: &DecisionProposal, view: &WorldView, writes: &[Write], errs: &mut Vec<Rejection>) {
     for c in &p.cancel {
         if valid_cause(view, c.because).is_none() {
@@ -180,7 +183,7 @@ fn tension(p: &DecisionProposal, view: &WorldView, writes: &[Write], errs: &mut 
     }
     for event in &view.events_scheduled {
         let hit = writes.iter().any(|w| {
-            if has_valid_cause(view, w.because) {
+            if w.origin == Origin::Leave || has_valid_cause(view, w.because) {
                 return false;
             }
             if !changes(view, w.subject, w.key, w.value) {

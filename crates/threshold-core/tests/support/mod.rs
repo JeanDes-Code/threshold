@@ -271,6 +271,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         verdict,
         contested: false,
         move_to: None,
+        leaves: vec![],
         settles: None,
         blockers: vec![],
         check: None,

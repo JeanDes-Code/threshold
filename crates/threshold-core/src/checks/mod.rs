@@ -189,6 +189,9 @@ pub(super) enum Origin {
     /// An outcome fact that the core writes from a closing `settles`
     /// (ADR 0007).
     Close,
+    /// An NPC's `location` that the core writes from `leaves`, or from a
+    /// scheduled event's `moves_actor_to` (bug pass 5, M1).
+    Leave,
 }
 
 /// A slot write of the proposal on an entity that exists before this Turn:
@@ -251,6 +254,27 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             Origin::Move,
         );
     }
+    // Bug pass 5 (M1): each NPC who leaves, and the actor of a scheduled
+    // event that `moves_actor_to` places.
+    for leave in &p.leaves {
+        if let Some(to) = destination(view, &leave.to) {
+            push(
+                leave.npc,
+                "location",
+                location_value(to),
+                &[],
+                Origin::Leave,
+            );
+        }
+    }
+    if let Some(s) = &p.schedule
+        && let Some(to) = s
+            .moves_actor_to
+            .as_deref()
+            .and_then(|to| destination(view, to))
+    {
+        push(s.actor, "location", location_value(to), &[], Origin::Leave);
+    }
     // A close whose outcome slot the world already filled writes no slot:
     // the core tells the PC a Claim instead (`to_ops`, review M2).
     for close in closed(p, view)
@@ -306,6 +330,45 @@ pub(super) fn closed<'a>(p: &'a DecisionProposal, view: &WorldView) -> Vec<Close
             })
         })
         .into_iter()
+        .collect()
+}
+
+/// Where a `Leave` or an event's `moves_actor_to` goes (bug pass 5, M1):
+/// `Some(None)` for `away`, `Some(Some(place))` for a place entity's
+/// handle, `None` for anything else.
+pub(crate) fn destination<'a>(
+    view: &'a WorldView,
+    to: &str,
+) -> Option<Option<&'a crate::store::Entity>> {
+    if normalize::value(to) == crate::domain::AWAY {
+        return Some(None);
+    }
+    let place = Handle::parse(to.trim())
+        .ok()
+        .and_then(|h| view.entity(h))
+        .filter(|e| e.kind == EntityKind::Place)?;
+    Some(Some(place))
+}
+
+/// The `location` value of a destination: the place's main name, or no
+/// value for `away` (a place the world has no entity for).
+pub(crate) fn location_value(to: Option<&crate::store::Entity>) -> &str {
+    to.map_or("", |place| place.name.as_str())
+}
+
+/// The NPCs who may leave the PC's place this Turn (`leaves.npc`): the
+/// present NPCs the PC perceives here. The proposal prompt offers the same
+/// list (`HandleContext::leavers`).
+pub(crate) fn leavers(view: &WorldView) -> Vec<EntityId> {
+    let present = view.present();
+    crate::context::seen_present(view)
+        .into_iter()
+        .filter(|id| present.contains(id))
+        .filter(|id| {
+            view.entities
+                .iter()
+                .any(|e| e.id == *id && e.kind == EntityKind::Npc)
+        })
         .collect()
 }
 

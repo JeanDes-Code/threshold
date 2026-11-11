@@ -396,3 +396,11 @@ QA asked "Which requests have I answered and how?" after two refusals and got "Y
 
 The sheet is still made from `PcSight` only. Live numbers: `evals/reports/2026-11-bug-pass-5.md`.
 
+### Exits (M1)
+
+- `DecisionProposal::leaves: Vec<Leave>` (`Leave { npc: Handle, to: String }`, `to` a place handle or `domain::AWAY`), at most 2, required in the per-Turn schema while a present NPC the PC perceives exists. The core writes each NPC's `location` (`checks::to_ops`, `Builder::leave`): the place's main name, or no value for `away`, with the text of `domain::location_sentence`, witnessed by everyone present; to a place the PC cannot name, the others witness the world's fact and the PC gets a Possible departure record. For the Shortcut checks the write is `Origin::Leave`: the coincidence check reads it like a fact, the tension check skips it.
+- `EventDraft::moves_actor_to` and the World Build's `EventOut::moves_actor_to` / `EventEntry::moves_actor_to`: required and nullable; a place, `away`, or null. The core adds the actor's `location` effect, last.
+- The store keeps a Possible fact that a Turn writes (only the departure record does), and the departure record retires at the next canon write on its slot whatever its source.
+- The narrator's THIS TURN block gets `- <name> leaves.` / `- <name> leaves for <place>.` for a departure, and ends its outcome with `context::HERE_AFTER_LINE` and the names in `seen_present` after the Commit, or `context::NOBODY_HERE_LINE`. `NARRATION_RULES` has one more line.
+- The proposal prompt's scene has `ALL PLACES (for leaves and moves_actor_to)`, and two rule lines name the fields.
+

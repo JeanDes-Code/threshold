@@ -186,6 +186,38 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         }
     }
 
+    if p.leaves.len() > 2 {
+        err(
+            None,
+            format!("leaves has {} items; the cap is 2", p.leaves.len()),
+        );
+    }
+    let leavers = super::leavers(view);
+    for leave in &p.leaves {
+        if !matches!(leave.npc, Handle::Entity(id) if leavers.contains(&id)) {
+            err(
+                Some(leave.npc),
+                "leaves.npc: not an NPC the PC perceives here".into(),
+            );
+        }
+        if super::destination(view, &leave.to).is_none() {
+            err(
+                Some(leave.npc),
+                format!("leaves.to: {} is not a place handle or away", leave.to),
+            );
+        }
+    }
+    if let Some(to) = p
+        .schedule
+        .as_ref()
+        .and_then(|s| s.moves_actor_to.as_deref())
+        && super::destination(view, to).is_none()
+    {
+        err(
+            None,
+            format!("schedule.moves_actor_to: {to} is not a place handle or away"),
+        );
+    }
     if let Some(place) = p.move_to
         && !is_known_place(view, place)
     {

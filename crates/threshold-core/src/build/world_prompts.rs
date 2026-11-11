@@ -46,6 +46,7 @@ Rules:
 - effects: zero to two changes to the world, as data. subject: a name from the ROSTER. key: a short English word in snake_case. value: a few words.
 - seen_by: at most two NPC names who witness the event. Never the PC, never the actor. Empty when nobody sees it.
 - public: true when everyone at the place sees or hears what the event changes (an announcement, a public act). false when only the people in seen_by notice it.
+- moves_actor_to: the place from the ROSTER where the actor is when the event happens, spelled as written there; away when the actor leaves for a place that is not listed; null when the actor stays where they are.
 - in_minutes: minutes after play starts, from 10 to 20160 (two weeks). Spread them: some within a day, some later.
 - Never schedule what must wait for a choice of the Player. Never decide what the PC does.
 - Write every text in the story language.";
@@ -320,6 +321,23 @@ pub(super) fn events_call(
         &all,
         false,
     );
+    // Bug pass 5 (M1): an event whose text makes its actor leave or come
+    // carries the actor's place, as a required enum.
+    let mut places = names(roster, |m| m.kind == EntityKind::Place);
+    places.push(crate::domain::AWAY);
+    name_field(
+        &mut schema,
+        "/$defs/EventOut/properties/moves_actor_to",
+        &places,
+        true,
+    );
+    if let Some(required) = schema
+        .pointer_mut("/$defs/EventOut/required")
+        .and_then(serde_json::Value::as_array_mut)
+        && !required.iter().any(|k| k == "moves_actor_to")
+    {
+        required.push(serde_json::json!("moves_actor_to"));
+    }
     StageCall {
         stage: Stage::WorldEvents,
         step: "world_events".into(),

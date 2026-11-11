@@ -159,7 +159,8 @@ fn a_witnessed_move_to_a_place_the_pc_cannot_name_shows_a_departure_only() {
         "the PC learned the destination"
     );
     assert!(!seen_present(&view).contains(&orsel), "Orsel is still here");
-    assert!(recent.contains("- Orsel left.\n"), "{recent}");
+    // Bug pass 5 (M1): the narrator reads "leaves", built from the slot.
+    assert!(recent.contains("- Orsel leaves.\n"), "{recent}");
     assert!(!recent.to_lowercase().contains("cellar"), "{recent}");
     let all = screens(engine.store(), campaign, orsel);
     assert!(!all.to_lowercase().contains("cellar"), "{all}");

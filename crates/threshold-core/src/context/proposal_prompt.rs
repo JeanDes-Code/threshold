@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     HandleContext,
-    domain::{Canon, EntityId, Handle, Trigger, is_open_key},
+    domain::{Canon, EntityId, EntityKind, Handle, Trigger, is_open_key},
     model::Prompt,
     pack::ContentPack,
     store::{Entity, Fact},
@@ -36,12 +36,13 @@ VERDICT
 - If either part is missing, do not use check: choose allowed or impossible. Include check only when verdict is check. Never set a numeric difficulty.
 LATER ACTIONS
 - reactions: what each affected NPC intends right now, as a short plan, not prose.
-- When an NPC decides to act later (revenge, a report, a visit, fetching someone), use schedule: actor = that NPC, in_minutes = minutes until it happens, text = what happens, effects = the slot writes it causes, seen_by = the NPCs who will witness it (never the PC; omit when nobody does), public = true when everyone at the place will see or hear what it changes (an announcement, a public act), false when only seen_by notice it. Never record such a plan as a fact.
+- When an NPC decides to act later (revenge, a report, a visit, fetching someone), use schedule: actor = that NPC, in_minutes = minutes until it happens, text = what happens, effects = the slot writes it causes, seen_by = the NPCs who will witness it (never the PC; omit when nobody does), public = true when everyone at the place will see or hear what it changes (an announcement, a public act), false when only seen_by notice it, moves_actor_to = the place under ALL PLACES where the actor is when it happens, away for a place not listed, null when the actor stays where they are. Never record such a plan as a fact.
 - An NPC who is insulted, threatened or wronged, and who would hit back later rather than now, gets a schedule.
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
 - move_to: when the player moves the PC to a place listed under PLACES, that place's handle; else null, and the PC stays. Never write the PC's location in facts or stakes.
+- leaves: each NPC who walks out of the PC's place in this Turn, with to = the handle of the place under ALL PLACES they go to, or away. Empty when nobody leaves. An NPC not listed stays here, whatever their plan says.
 - settles: what the player's intent of THIS Turn does to one item under OPEN ITEMS. item none when the intent settles none of them. Else that item, with outcome accepted, refused, done, failed or dropped when this intent accepts, refuses, does, fails or gives it up; outcome open when it only asks about it, talks about it or asks for more time. An item settled in an earlier Turn is not listed.
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.
@@ -117,11 +118,38 @@ fn handles(r: &Retrieval<'_>, intent: &str) -> HandleContext {
         goals: r.goals.iter().map(|g| Handle::Goal(g.id)).collect(),
         new_slots: 1,
         places: places.into_iter().map(Handle::Entity).collect(),
+        leavers: leavers(r).into_iter().map(Handle::Entity).collect(),
+        destinations: destinations(r).into_iter().map(Handle::Entity).collect(),
         open_items: offered(r, intent)
             .into_iter()
             .map(|(subject, key, _)| open_item_ref(subject, &key))
             .collect(),
     }
+}
+
+/// The NPCs who may leave this Turn (`leaves.npc`, bug pass 5): the present
+/// NPCs the PC perceives here.
+fn leavers(r: &Retrieval<'_>) -> Vec<EntityId> {
+    r.seen_present
+        .iter()
+        .copied()
+        .filter(|id| r.present.contains(id))
+        .filter(|id| r.entity(*id).is_some_and(|e| e.kind == EntityKind::Npc))
+        .collect()
+}
+
+/// Every place entity, in id order: where a leaving NPC or an event's actor
+/// may go (`leaves.to`, `schedule.moves_actor_to`).
+fn destinations(r: &Retrieval<'_>) -> Vec<EntityId> {
+    let mut places: Vec<EntityId> = r
+        .view
+        .entities
+        .iter()
+        .filter(|e| e.kind == EntityKind::Place)
+        .map(|e| e.id)
+        .collect();
+    places.sort_unstable();
+    places
 }
 
 /// The Open Items the Intent names (`world::items_named_by`), each with its
@@ -229,6 +257,16 @@ fn scene(r: &Retrieval<'_>) -> String {
         .collect();
     if !places.is_empty() {
         out.push_str(&format!("PLACES (for move_to): {}\n", places.join(", ")));
+    }
+    let all: Vec<String> = destinations(r)
+        .into_iter()
+        .map(|id| format!("E{id} {}", r.known(id).name))
+        .collect();
+    if !all.is_empty() {
+        out.push_str(&format!(
+            "ALL PLACES (for leaves and moves_actor_to): {}\n",
+            all.join(", ")
+        ));
     }
     out.push_str("ENTITIES\n");
     for id in &r.scene_entities {

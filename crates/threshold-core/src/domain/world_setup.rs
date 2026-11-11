@@ -87,6 +87,11 @@ pub struct EventEntry {
     pub seen_by: Vec<String>,
     #[serde(default)]
     pub public: bool,
+    /// The place where the actor is when the event happens (a place's name,
+    /// or `away`), or `None`: the actor stays (bug pass 5, M1). The setup
+    /// adds the actor's `location` effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moves_actor_to: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

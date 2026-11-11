@@ -1118,6 +1118,7 @@ fn a_scheduled_event_from_play_keeps_its_hidden_effect_from_the_pc() {
         effects: vec![slot(e(w0.orsel), "debt", "partially paid")],
         seen_by: vec![e(w0.brann)],
         public: false,
+        moves_actor_to: None,
     });
     let mut wait = proposal(Verdict::Allowed);
     wait.action = ActionKind::Wait;
@@ -1155,6 +1156,7 @@ fn a_public_event_from_play_teaches_the_pc_its_effect() {
         effects: vec![slot(e(w0.orsel), "plan", "close the gate")],
         seen_by: vec![e(w0.brann)],
         public: true,
+        moves_actor_to: None,
     });
     let mut wait = proposal(Verdict::Allowed);
     wait.action = ActionKind::Wait;
@@ -1330,6 +1332,7 @@ fn pc_reaction_and_pc_witness_are_removed_not_rejected() {
         effects: vec![],
         seen_by: vec![e(w0.ada)],
         public: false,
+        moves_actor_to: None,
     });
     p.minutes = 2;
     let (mut engine, w, gm) = setup(vec![json(&p)], vec!["Brann shrugs."]);
@@ -1371,6 +1374,7 @@ fn event_with_the_pc_as_actor_is_removed_not_rejected() {
         effects: vec![],
         seen_by: vec![],
         public: false,
+        moves_actor_to: None,
     });
     let (mut engine, w, _gm) = setup(vec![json(&p)], vec!["Time passes."]);
     let before = snapshot(&engine, &w).events_scheduled.len();

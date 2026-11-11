@@ -147,43 +147,59 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
+            // The Narration, for the person who reads the log.
+            (ctx.log)(&format!(
+                "{} narration: {}",
+                played.op_id,
+                outcome.narration.replace('\n', " ")
+            ));
+            // One question per person: this model judges one name at a
+            // time far better than a list.
             if !after.is_empty() {
                 c.judged += 1;
-                let task = format!(
-                    "The people here with the player character after this turn are: {}.\n\nThe narration:\n{}\n\nDoes the narration say that one of these people leaves, has left, or is no longer here (yes), or not (no)?",
-                    list(&after),
-                    outcome.narration
-                );
-                match ctx.ask(&task, &["yes", "no"]).as_deref() {
-                    Some("yes") => {
-                        c.told_unrecorded += 1;
-                        (ctx.log)(&format!(
-                            "{} judge: a departure told, none recorded",
-                            played.op_id
-                        ));
+                let mut told = Vec::new();
+                for name in &after {
+                    let task = format!(
+                        "{name} is still here with the player character after this turn.\n\nThe narration:\n{}\n\nDoes the narration say that {name} leaves this place, has left it, or is no longer here (yes), or not (no)? Someone else leaving is no.",
+                        outcome.narration
+                    );
+                    match ctx.ask(&task, &["yes", "no"]).as_deref() {
+                        Some("yes") => told.push(name.clone()),
+                        Some(_) => {}
+                        None => c.judge_errors += 1,
                     }
-                    Some(_) => {}
-                    None => c.judge_errors += 1,
+                }
+                if !told.is_empty() {
+                    c.told_unrecorded += 1;
+                    (ctx.log)(&format!(
+                        "{} judge: told as leaving, not recorded: {}",
+                        played.op_id,
+                        told.join(", ")
+                    ));
                 }
             }
             let earlier: BTreeSet<String> = gone.difference(&after).cloned().collect();
             if !earlier.is_empty() {
                 c.gone_judged += 1;
-                let task = format!(
-                    "These people left earlier and are not here: {}.\n\nThe narration:\n{}\n\nDoes the narration show one of them here, in this place: seen, heard, speaking, sleeping or acting here (yes), or not (no)? Being mentioned as absent or elsewhere is no.",
-                    list(&earlier),
-                    outcome.narration
-                );
-                match ctx.ask(&task, &["yes", "no"]).as_deref() {
-                    Some("yes") => {
-                        c.gone_shown += 1;
-                        (ctx.log)(&format!(
-                            "{} judge: a departed NPC shown here",
-                            played.op_id
-                        ));
+                let mut shown = Vec::new();
+                for name in &earlier {
+                    let task = format!(
+                        "{name} left this place in an earlier turn.\n\nThe narration:\n{}\n\nDoes the narration show {name} here now: {name} speaks, acts, sleeps or is seen in this place (yes)? If the narration only says that {name} is gone, left or is elsewhere, or does not mention {name}, answer no.",
+                        outcome.narration
+                    );
+                    match ctx.ask(&task, &["yes", "no"]).as_deref() {
+                        Some("yes") => shown.push(name.clone()),
+                        Some(_) => {}
+                        None => c.judge_errors += 1,
                     }
-                    Some(_) => {}
-                    None => c.judge_errors += 1,
+                }
+                if !shown.is_empty() {
+                    c.gone_shown += 1;
+                    (ctx.log)(&format!(
+                        "{} judge: shown here after leaving: {}",
+                        played.op_id,
+                        shown.join(", ")
+                    ));
                 }
             }
             gone.extend(left.into_iter().cloned());

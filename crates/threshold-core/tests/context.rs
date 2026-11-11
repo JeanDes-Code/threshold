@@ -946,7 +946,8 @@ fn bare_open_prefix_key_gives_no_secret_term() {
 #[test]
 fn narration_rules_add_one_line_only() {
     let lines: Vec<&str> = NARRATION_RULES.lines().collect();
-    assert_eq!(lines.len(), 8, "{NARRATION_RULES}");
+    // Bug pass 5 (M1) added the line on who is present.
+    assert_eq!(lines.len(), 9, "{NARRATION_RULES}");
     assert_eq!(lines.last(), Some(&RULE));
 
     let mut w = World::new();
@@ -1246,8 +1247,16 @@ fn a_place_the_pc_cannot_name_is_no_move_target() {
     let cove = w.view.entity_by_name("Smugglers Cove").unwrap().id;
     let ctx = threshold_core::context::proposal_context(&w.view, &[], "I go to the cove.");
     assert!(!ctx.handles.places.contains(&Handle::Entity(cove)));
+    // The GM may still send an NPC there (`leaves`, bug pass 5): only the
+    // `move_to` line leaves it out.
+    let move_line = ctx
+        .prompt
+        .scene
+        .lines()
+        .find(|l| l.starts_with("PLACES (for move_to)"))
+        .unwrap_or_default();
     assert!(
-        !ctx.prompt.scene.contains("Smugglers Cove"),
+        !move_line.contains("Smugglers Cove"),
         "{}",
         ctx.prompt.scene
     );

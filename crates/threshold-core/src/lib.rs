@@ -38,6 +38,12 @@ pub struct HandleContext {
     /// `world::open_item_ref` names them: the values of `settles.item`
     /// besides `none`.
     pub open_items: Vec<String>,
+    /// The NPCs who may leave the PC's place this Turn: the present NPCs the
+    /// PC perceives (bug pass 5, M1). The values of `leaves.npc`.
+    pub leavers: Vec<domain::Handle>,
+    /// Every place entity, in id order: the values of `leaves.to` and of
+    /// `schedule.moves_actor_to` besides `away` (bug pass 5, M1).
+    pub destinations: Vec<domain::Handle>,
 }
 
 pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
@@ -180,6 +186,50 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
             public.remove("default");
         }
         require(&mut schema, "/$defs/EventDraft", "public");
+    }
+    // Bug pass 5 (M1): who walks out of the PC's place is a required field,
+    // so the narrator never has to invent a departure. With no NPC here to
+    // leave, the field is absent.
+    let destinations: Vec<String> = ctx
+        .destinations
+        .iter()
+        .filter(|h| matches!(h, Handle::Entity(_)))
+        .map(ToString::to_string)
+        .chain([domain::AWAY.to_owned()])
+        .collect();
+    let leavers: Vec<String> = ctx
+        .leavers
+        .iter()
+        .filter(|h| matches!(h, Handle::Entity(_)))
+        .map(ToString::to_string)
+        .collect();
+    if leavers.is_empty() {
+        omit(&mut schema, "/properties", "leaves");
+    } else {
+        schema["properties"]["leaves"] = json!({
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "npc": {"type": "string", "enum": leavers},
+                    "to": {"type": "string", "enum": destinations},
+                },
+                "required": ["npc", "to"],
+                "additionalProperties": false,
+            },
+        });
+        require(&mut schema, "", "leaves");
+    }
+    if schema.pointer("/$defs/EventDraft/properties").is_some() {
+        let moves: Vec<serde_json::Value> = destinations
+            .iter()
+            .map(|d| json!(d))
+            .chain([serde_json::Value::Null])
+            .collect();
+        schema["$defs"]["EventDraft"]["properties"]["moves_actor_to"] =
+            json!({"type": ["string", "null"], "enum": moves});
+        require(&mut schema, "/$defs/EventDraft", "moves_actor_to");
     }
     schema["properties"]["contested"] = json!({"type": "boolean"});
     require(&mut schema, "", "contested");

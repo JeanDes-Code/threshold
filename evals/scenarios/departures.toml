@@ -6,6 +6,10 @@
 # PC waits while a seeded World Event makes Doul leave, then the PC looks
 # around and talks. The judge reads each Narration with the people the PC
 # knows are here after its Turn.
+#
+# The event carries `moves_actor_to`, as the World Build writes events since
+# bug pass 5. The "before" run of the report left it out: the QA world's
+# event had no location effect.
 fixture = "town"
 steps = [
     "I give Hessa my sealed letter and ask her to take it down to Tobin at the Varn mill right away.",
@@ -20,3 +24,4 @@ actor = "Doul"
 text = "Doul leaves the hall to walk the river road."
 in_minutes = 30
 seen_by = ["Orsel"]
+moves_actor_to = "away"

@@ -242,6 +242,7 @@ fn town_demo_offscreen_consequence() {
         effects: vec![slot(e(pc), "reputation", "under_suspicion")],
         seen_by: vec![e(hessa)],
         public: false,
+        moves_actor_to: None,
     });
     insult.minutes = 5;
 

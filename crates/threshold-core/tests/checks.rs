@@ -362,6 +362,7 @@ fn bad_handles_rejected() {
                 text: "x".into(),
                 effects: vec![],
                 public: false,
+                moves_actor_to: None,
             })
         }),
         Box::new(move |p| {
@@ -408,6 +409,7 @@ fn event_effects_writing_one_slot_twice_rejected() {
             slot(e(w.orsel), second_key, "angry"),
         ],
         public: false,
+        moves_actor_to: None,
     };
     let mut p = proposal(Verdict::Allowed);
     p.schedule = Some(draft("Mood"));
@@ -463,6 +465,7 @@ fn pc_cannot_react_act_or_speak() {
         text: "Ada leaves".into(),
         effects: vec![],
         public: false,
+        moves_actor_to: None,
     });
     rejected(validate(&p, &w.view), CheckKind::Agency);
 
@@ -654,6 +657,7 @@ fn claims_blockers_rolls_schedule_and_clock_commit() {
         text: "Brann fetches the captain".into(),
         effects: vec![slot(e(w.brann), "errand", "captain")],
         public: false,
+        moves_actor_to: None,
     });
     p.minutes = 5;
     ok(validate(&p, &w.view));
@@ -712,6 +716,8 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         new_slots: 1,
         places: vec![Handle::Entity(7)],
         open_items: vec!["E1 pending_trip".into()],
+        leavers: vec![Handle::Entity(2)],
+        destinations: vec![Handle::Entity(7), Handle::Entity(8)],
     };
     let schema = proposal_schema_for(&ctx);
     let validator = jsonschema::validator_for(&schema).unwrap();
@@ -720,6 +726,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "verdict": "allowed",
         "contested": false,
         "move_to": null,
+        "leaves": [],
         "settles": {"item": "none", "outcome": "open"},
         "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}}],
         "facts": [{"slot": {"subject": "N1", "key": "mood", "value": "calm"}, "seen": "pc", "because": ["F40"]}],
@@ -786,6 +793,43 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let none = jsonschema::validator_for(&none).unwrap();
     assert!(none.is_valid(&missing), "{:?}", none.validate(&missing));
     assert!(!none.is_valid(&good));
+    // Bug pass 5 (M1): `leaves` is required while an NPC here may leave:
+    // an NPC the PC perceives here, to a place handle or away.
+    let mut leaving = good.clone();
+    leaving["leaves"] = serde_json::json!([{"npc": "E2", "to": "E8"}]);
+    assert!(
+        validator.is_valid(&leaving),
+        "{:?}",
+        validator.validate(&leaving)
+    );
+    leaving["leaves"] = serde_json::json!([{"npc": "E2", "to": "away"}]);
+    assert!(validator.is_valid(&leaving));
+    leaving["leaves"] = serde_json::json!([{"npc": "E1", "to": "away"}]);
+    assert!(!validator.is_valid(&leaving), "E1 is not a leaver");
+    leaving["leaves"] = serde_json::json!([{"npc": "E2", "to": "the moon"}]);
+    assert!(!validator.is_valid(&leaving), "not a place");
+    let mut unsaid_leaves = good.clone();
+    unsaid_leaves.as_object_mut().unwrap().remove("leaves");
+    assert!(!validator.is_valid(&unsaid_leaves));
+    // A scheduled event says where its actor is, or null.
+    let event = |to: serde_json::Value| {
+        let mut p = good.clone();
+        p["schedule"] = serde_json::json!({"in_minutes": 30, "actor": "E2", "text": "Kett leaves", "effects": [], "seen_by": [], "public": false, "moves_actor_to": to});
+        p
+    };
+    assert!(
+        validator.is_valid(&event("away".into())),
+        "{:?}",
+        validator.validate(&event("away".into()))
+    );
+    assert!(validator.is_valid(&event(serde_json::Value::Null)));
+    assert!(!validator.is_valid(&event("E2".into())));
+    let mut silent_event = event(serde_json::Value::Null);
+    silent_event["schedule"]
+        .as_object_mut()
+        .unwrap()
+        .remove("moves_actor_to");
+    assert!(!validator.is_valid(&silent_event));
 }
 
 // --- Fix round 1 -----------------------------------------------------------
@@ -810,6 +854,7 @@ fn agency_applies_to_stakes_and_effects() {
         text: "Brann shouts".into(),
         effects: vec![slot(e(w.ada), "intends", "flee")],
         public: false,
+        moves_actor_to: None,
     });
     rejected(validate(&p, &w.view), CheckKind::Agency);
 }
@@ -1066,6 +1111,7 @@ fn schedule_effect_may_set_pc_reputation() {
         text: "Orsel files a complaint".into(),
         effects: vec![slot(e(w.ada), "reputation", "under_suspicion")],
         public: false,
+        moves_actor_to: None,
     });
     ok(validate(&p, &w.view));
 }
@@ -1114,6 +1160,7 @@ fn schedule_seen_by_lists_npc_witnesses_only() {
             text: "Orsel files a complaint".into(),
             effects: vec![slot(e(w.ada), "reputation", "under_suspicion")],
             public: false,
+            moves_actor_to: None,
         });
         p
     };
@@ -1246,6 +1293,7 @@ fn settle_removes_the_three_pc_shapes_and_keeps_the_rest() {
         effects: vec![],
         seen_by: vec![e(w.ada), e(w.brann)],
         public: false,
+        moves_actor_to: None,
     });
     rejected(validate(&p, &w.view), CheckKind::Agency);
 
@@ -1266,6 +1314,7 @@ fn settle_removes_the_three_pc_shapes_and_keeps_the_rest() {
         effects: vec![],
         seen_by: vec![],
         public: false,
+        moves_actor_to: None,
     });
     let (settled, notes) = settle(p, &w.view);
     assert!(settled.schedule.is_none());

@@ -82,6 +82,17 @@ pub fn slot_sentence(name: &str, key: &str, value: &str) -> String {
     }
 }
 
+/// The text of a `location` fact the core writes for an NPC who goes
+/// somewhere (bug pass 5, M1): "Ludo Brenn left." with no place, "Ludo
+/// Brenn went to the stone quay." with one. Past, so it stays true on a
+/// card.
+pub fn location_sentence(name: &str, place: Option<&str>) -> String {
+    match place.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(place) => format!("{} went to {place}.", name.trim()),
+        None => format!("{} left.", name.trim()),
+    }
+}
+
 /// `slot_sentence` for the PC, as the Player reads it: in the second person
 /// ("You are injured (bruised wrist).", "Your reputation is now
 /// respected."). The Player screens use it for a state of the PC that a

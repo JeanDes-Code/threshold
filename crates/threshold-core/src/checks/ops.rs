@@ -5,9 +5,9 @@ use std::collections::HashSet;
 use super::{handle_ceiling, pc};
 use crate::{
     domain::{
-        ActionKind, Canon, Cause, ClaimDraft, DecisionProposal, Effect, EntityKind, EntityRef,
-        FactDraft, FactSource, Handle, Knowing, LedgerOp, NewFact, Reaction, Seen, Slot, SlotDraft,
-        Trigger, Verdict,
+        ActionKind, Canon, Cause, ClaimDraft, DecisionProposal, Effect, EntityId, EntityKind,
+        EntityRef, FactDraft, FactSource, Handle, Knowing, LedgerOp, NewFact, Reaction, Seen, Slot,
+        SlotDraft, Trigger, Verdict,
     },
     normalize,
     rules::RollResult,
@@ -164,6 +164,13 @@ pub fn to_ops(
             b.write(&fact.slot, FactSource::Proposal, holders, causes);
         }
     }
+    // Bug pass 5 (M1): each NPC who walks out of the PC's place. NPC acts
+    // are the GM's, so they apply whatever the verdict.
+    for leave in &p.leaves {
+        if let (Handle::Entity(npc), Some(to)) = (leave.npc, super::destination(view, &leave.to)) {
+            b.leave(npc, to);
+        }
+    }
     b.open_blockers();
     for cancel in &p.cancel {
         if let (Handle::WorldEvent(event_id), Some(cause)) = (cancel.event, fact_id(cancel.because))
@@ -176,7 +183,7 @@ pub fn to_ops(
     }
     if let Some(s) = &p.schedule {
         let at = view.clock_min + u64::from(p.minutes) + u64::from(s.in_minutes);
-        let effects = s
+        let mut effects: Vec<Effect> = s
             .effects
             .iter()
             .map(|e| Effect::SetFact {
@@ -185,6 +192,24 @@ pub fn to_ops(
                 seen_by: Vec::new(),
             })
             .collect();
+        // Bug pass 5 (M1): where the actor is when the event happens. It
+        // comes last, so it wins over an effect on the same slot.
+        if let Some(to) = s
+            .moves_actor_to
+            .as_deref()
+            .and_then(|to| super::destination(view, to))
+        {
+            let name = b.name(s.actor);
+            effects.push(Effect::SetFact {
+                slot: Slot {
+                    subject: entity_ref(s.actor),
+                    key: "location".into(),
+                    value: normalize::value(super::location_value(to)),
+                },
+                text: crate::domain::location_sentence(&name, to.map(|p| p.name.as_str())),
+                seen_by: Vec::new(),
+            });
+        }
         b.ops.push(LedgerOp::ScheduleEvent {
             text: s.text.clone(),
             trigger: Trigger::At(at),
@@ -498,19 +523,72 @@ impl Builder<'_> {
         }
     }
 
+    /// Writes the `location` of an NPC who walks out of the PC's place
+    /// (bug pass 5, M1), witnessed by everyone present, the PC included.
+    /// When the destination is a place the PC cannot name, the PC does not
+    /// learn it: the world's fact goes to the others present, and the PC
+    /// gets a departure record, as for a World Event (data shape 13, B1).
+    fn leave(&mut self, npc: EntityId, to: Option<&crate::store::Entity>) {
+        let name = self.name(Handle::Entity(npc));
+        let pc = pc(self.view);
+        let witnesses = self.holders(Seen::Present);
+        let named = to.is_none_or(|place| {
+            self.moved_to.as_deref().map(normalize::value) == Some(normalize::value(&place.name))
+                || crate::world::pc_can_name(self.view).contains(&place.id)
+        });
+        let draft = SlotDraft {
+            subject: Handle::Entity(npc),
+            key: "location".into(),
+            value: super::location_value(to).to_owned(),
+        };
+        let text = crate::domain::location_sentence(&name, to.map(|p| p.name.as_str()));
+        if named {
+            self.write_text(&draft, text, FactSource::Proposal, witnesses, Vec::new());
+            return;
+        }
+        let others = witnesses
+            .into_iter()
+            .filter(|w| Some(*w) != pc.map(EntityRef::Id))
+            .collect();
+        self.write_text(&draft, text, FactSource::Proposal, others, Vec::new());
+        if let Some(pc) = pc {
+            self.ops.push(LedgerOp::AddFact {
+                slot: Slot {
+                    subject: EntityRef::Id(npc),
+                    key: "location".into(),
+                    value: String::new(),
+                },
+                text: crate::domain::location_sentence(&name, None),
+                canon: Canon::Possible,
+                source: FactSource::Proposal,
+                seen_by: vec![EntityRef::Id(pc)],
+                causes: Vec::new(),
+            });
+        }
+    }
+
+    /// The main name of an entity handle, or the handle.
+    fn name(&self, handle: Handle) -> String {
+        self.text_name(handle)
+    }
+
     fn text(&self, draft: &SlotDraft) -> String {
-        let name = match draft.subject {
-            Handle::Entity(_) => self.view.entity(draft.subject).map(|e| e.name.clone()),
+        let name = self.text_name(draft.subject);
+        crate::domain::slot_sentence(&name, &draft.key, &draft.value)
+    }
+
+    fn text_name(&self, subject: Handle) -> String {
+        match subject {
+            Handle::Entity(_) => self.view.entity(subject).map(|e| e.name.clone()),
             Handle::NewNpc(_) => self
                 .p
                 .new_npcs
                 .iter()
-                .find(|n| n.id == draft.subject)
+                .find(|n| n.id == subject)
                 .map(|n| n.name.clone()),
             _ => None,
         }
-        .unwrap_or_else(|| draft.subject.to_string());
-        crate::domain::slot_sentence(&name, &draft.key, &draft.value)
+        .unwrap_or_else(|| subject.to_string())
     }
 }
 

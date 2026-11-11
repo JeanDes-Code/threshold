@@ -176,6 +176,32 @@ pub fn commit_world(
                 seen_by: Vec::new(),
             });
         }
+        // Bug pass 5 (M1): the actor's place when the event happens. Last,
+        // so it wins over an effect on the same slot.
+        if let Some(to) = &ev.moves_actor_to {
+            let place = (normalize::value(to) != crate::domain::AWAY)
+                .then(|| {
+                    view.entities_by_name(to)
+                        .find(|e| e.kind == EntityKind::Place)
+                        .map(|e| e.name.clone())
+                        .ok_or_else(|| {
+                            SetupError::Invalid(format!(
+                                "the event of {} moves its actor to {to}, which is no place",
+                                ev.actor
+                            ))
+                        })
+                })
+                .transpose()?;
+            effects.push(Effect::SetFact {
+                slot: Slot {
+                    subject: EntityRef::Id(id(&ev.actor)?),
+                    key: "location".into(),
+                    value: normalize::value(place.as_deref().unwrap_or("")),
+                },
+                text: crate::domain::location_sentence(&ev.actor, place.as_deref()),
+                seen_by: Vec::new(),
+            });
+        }
         ops.push(LedgerOp::ScheduleEvent {
             text: ev.text.clone(),
             // `at` counts from the campaign's start, not from minute 0.

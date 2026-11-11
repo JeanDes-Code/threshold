@@ -330,6 +330,14 @@ fn world_events(
                 .collect(),
             seen_by: e.seen_by.iter().map(|n| roster.main(n)).collect(),
             public: e.public,
+            // A place spelled as the ROSTER spells it; `away` stays.
+            moves_actor_to: e.moves_actor_to.map(|to| {
+                if crate::normalize::value(&to) == crate::domain::AWAY {
+                    crate::domain::AWAY.to_owned()
+                } else {
+                    roster.main(&to)
+                }
+            }),
         })
         .collect())
 }
@@ -546,6 +554,12 @@ pub(super) struct EventOut {
     /// changes (an announcement, a public act). False when only the people
     /// in seen_by notice it.
     pub public: bool,
+    /// The place where the actor is when the event happens, as the ROSTER
+    /// spells it, `away` for a place not listed, or null when the actor
+    /// stays where they are (bug pass 5, M1). Required and nullable in the
+    /// stage schema.
+    #[serde(default)]
+    pub moves_actor_to: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]

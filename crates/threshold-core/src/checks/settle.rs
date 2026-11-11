@@ -33,6 +33,7 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
         ));
     }
     settle_closes(&mut p, view, &mut notes);
+    settle_leaves(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
 }
@@ -103,6 +104,71 @@ fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Str
             "removed a fact on the outcome of the item that settles closes: the core writes it"
                 .into(),
         );
+    }
+}
+
+/// `leaves` (bug pass 5, M1): an entry whose NPC the PC does not perceive
+/// here, that names the NPC twice, whose `to` is no place or `away`, or
+/// that sends the NPC where it already is goes; so does a
+/// `moves_actor_to` that is no place. A fact on the `location` of an NPC who
+/// leaves goes too: the core writes that slot itself. Each removal only
+/// takes model output away.
+fn settle_leaves(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
+    let leavers = super::leavers(view);
+    let mut listed = Vec::new();
+    p.leaves.retain(|leave| {
+        let why = match (leave.npc, super::destination(view, &leave.to)) {
+            (Handle::Entity(id), _) if !leavers.contains(&id) => {
+                Some("not an NPC the PC perceives here")
+            }
+            (_, None) => Some("not a place handle or away"),
+            (npc, _) if listed.contains(&npc) => Some("the NPC is listed twice"),
+            (Handle::Entity(id), Some(to)) => {
+                let now = view
+                    .live_fact(id, "location")
+                    .map(|f| normalize::value(&f.slot.value));
+                (now.as_deref() == Some(normalize::value(super::location_value(to)).as_str()))
+                    .then_some("the NPC is already there")
+            }
+            _ => Some("not an NPC"),
+        };
+        match why {
+            Some(why) => {
+                notes.push(format!(
+                    "removed leaves {} to {}: {why}",
+                    leave.npc, leave.to
+                ));
+                false
+            }
+            None => {
+                listed.push(leave.npc);
+                true
+            }
+        }
+    });
+    if p.leaves.len() > 2 {
+        notes.push(format!(
+            "removed {} leaves past the cap of 2",
+            p.leaves.len() - 2
+        ));
+        p.leaves.truncate(2);
+    }
+    if let Some(s) = p.schedule.as_mut()
+        && let Some(to) = s.moves_actor_to.clone()
+        && super::destination(view, &to).is_none()
+    {
+        s.moves_actor_to = None;
+        notes.push(format!(
+            "removed schedule.moves_actor_to {to}: not a place handle or away"
+        ));
+    }
+    let before = p.facts.len();
+    p.facts.retain(|f| {
+        f.said_by.is_some()
+            || !(listed.contains(&f.slot.subject) && same_key(&f.slot.key, "location"))
+    });
+    if p.facts.len() < before {
+        notes.push("removed a location fact of an NPC who leaves: the core writes it".into());
     }
 }
 
