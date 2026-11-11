@@ -32,6 +32,59 @@ pub fn name_words(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The words of `text` as `name_words` splits them, accents dropped, but
+/// with their case kept: the input of a name match in prose
+/// (`name_in`). "Chloé's" gives `["Chloe", "s"]`.
+pub fn cased_words(text: &str) -> Vec<String> {
+    text.nfkc()
+        .collect::<String>()
+        .replace(['\u{2018}', '\u{2019}'], "'")
+        .nfd()
+        .filter(|c| !('\u{300}'..='\u{36f}').contains(c))
+        .nfc()
+        .collect::<String>()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The words a prose text must hold to name `name` (`name_in`): its
+/// `cased_words`, a leading article left out ("The Circle" gives
+/// `["Circle"]`). Empty for a name that is only an article.
+pub fn name_pattern(name: &str) -> Vec<String> {
+    let mut words = cased_words(name);
+    if words.len() > 1 && ["the", "a", "an"].contains(&words[0].to_lowercase().as_str()) {
+        words.remove(0);
+    }
+    words
+}
+
+/// True when the prose word `word` is the name word `pattern`: the same
+/// word whatever the case, and a capital wherever the name has one. "Gate"
+/// is not "gate"; "Gate" is "GATE"; "mill" is "Mill".
+pub fn same_name_word(pattern: &str, word: &str) -> bool {
+    pattern.chars().count() == word.chars().count()
+        && pattern.to_lowercase() == word.to_lowercase()
+        && pattern
+            .chars()
+            .zip(word.chars())
+            .all(|(p, w)| !p.is_uppercase() || w.is_uppercase())
+}
+
+/// True when the prose words `text` (`cased_words`) hold the name words
+/// `pattern` (`name_pattern`) as a run of whole words (review B1, bug pass
+/// 3). A name in prose keeps its own capitals, so the place "Gate" is not
+/// named by "the gate square", nor "The Circle" by "a circle of lamplight".
+pub fn name_in(text: &[String], pattern: &[String]) -> bool {
+    !pattern.is_empty()
+        && text.windows(pattern.len()).any(|run| {
+            run.iter()
+                .zip(pattern)
+                .all(|(word, p)| same_name_word(p, word))
+        })
+}
+
 pub fn key(input: &str) -> String {
     normalized(input).replace(' ', "_")
 }

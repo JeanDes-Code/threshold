@@ -503,14 +503,14 @@ pub fn entity_card(sight: &PcSight, marks: &Marks, entity: EntityId) -> Option<E
 }
 
 /// The PC Beliefs about another subject whose text names `entity` by its
-/// main name or an other name the PC knows, as whole words after
-/// `normalize::name_words`. In Belief order.
+/// main name or an other name the PC knows, as whole words with the name's
+/// own capitals (`normalize::name_in`, review B1). In Belief order.
 fn named_in(sight: &PcSight, entity: &crate::world::Known) -> Vec<FactLine> {
     let names: Vec<Vec<String>> = entity
         .name
         .iter()
         .chain(&entity.other_names)
-        .map(|n| normalize::name_words(&normalize::name(n)))
+        .map(|n| normalize::name_pattern(n))
         .filter(|words| !words.is_empty())
         .collect();
     sight
@@ -518,10 +518,8 @@ fn named_in(sight: &PcSight, entity: &crate::world::Known) -> Vec<FactLine> {
         .iter()
         .filter(|b| b.subject != entity.id)
         .filter(|b| {
-            let text = normalize::name_words(&b.text);
-            names
-                .iter()
-                .any(|name| text.windows(name.len()).any(|w| w == name.as_slice()))
+            let text = normalize::cased_words(&b.text);
+            names.iter().any(|name| normalize::name_in(&text, name))
         })
         .filter_map(|b| fact_line(sight, b))
         .collect()
@@ -811,10 +809,12 @@ fn fact_text(text: &str, key: &str) -> String {
 }
 
 /// The names the story links: the main name of each named NPC, place and
-/// Faction the PC knows, as whole words after `normalize::name`. A name two
-/// of them share links to neither.
+/// Faction the PC knows, as whole words with the name's own capitals
+/// (`normalize::name_in`, review B1: "gate square" is no link to the place
+/// Gate). A name two of them share links to neither.
 struct Links {
-    /// The words of each name, longest first, and its entity.
+    /// The words of each name (`normalize::name_pattern`), longest first,
+    /// and its entity.
     names: Vec<(Vec<String>, EntityId)>,
 }
 
@@ -830,16 +830,22 @@ impl Links {
                 )
             })
             .filter_map(|k| {
-                let words = normalize::name_words(&normalize::name(k.name.as_deref()?));
+                let words = normalize::name_pattern(k.name.as_deref()?);
                 (!words.is_empty()).then_some((words, k.id))
             })
             .collect();
+        let folded =
+            |words: &[String]| -> Vec<String> { words.iter().map(|w| w.to_lowercase()).collect() };
         let shared: Vec<Vec<String>> = names
             .iter()
-            .filter(|(words, id)| names.iter().any(|(w, other)| w == words && other != id))
-            .map(|(words, _)| words.clone())
+            .filter(|(words, id)| {
+                names
+                    .iter()
+                    .any(|(w, other)| folded(w) == folded(words) && other != id)
+            })
+            .map(|(words, _)| folded(words))
             .collect();
-        names.retain(|(words, _)| !shared.contains(words));
+        names.retain(|(words, _)| !shared.contains(&folded(words)));
         names.sort_by_key(|(words, _)| std::cmp::Reverse(words.len()));
         Self { names }
     }
@@ -850,7 +856,7 @@ impl Links {
         let words = word_spans(text);
         let folded: Vec<String> = words
             .iter()
-            .map(|&(start, end)| normalize::name_words(&text[start..end]).concat())
+            .map(|&(start, end)| normalize::cased_words(&text[start..end]).concat())
             .collect();
         let mut parts = Vec::new();
         let mut written = 0;
@@ -859,7 +865,7 @@ impl Links {
             let found = self.names.iter().find(|(name, _)| {
                 folded
                     .get(i..i + name.len())
-                    .is_some_and(|run| run == name.as_slice())
+                    .is_some_and(|run| normalize::name_in(run, name))
             });
             let Some((name, entity_id)) = found else {
                 i += 1;
@@ -888,7 +894,7 @@ impl Links {
 }
 
 /// The byte spans of the words of `text`: runs of letters, digits and
-/// combining accents, as `normalize::name_words` splits them.
+/// combining accents, as `normalize::cased_words` splits them.
 fn word_spans(text: &str) -> Vec<(usize, usize)> {
     let is_word = |c: char| c.is_alphanumeric() || ('\u{300}'..='\u{36f}').contains(&c);
     let mut spans = Vec::new();

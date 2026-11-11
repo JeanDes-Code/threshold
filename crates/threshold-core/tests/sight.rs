@@ -9,9 +9,15 @@ use support::{hidden::*, *};
 use threshold_core::{
     RecordedGm,
     context::seen_present,
-    domain::{ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Verdict},
+    domain::{
+        ActionKind, DecisionProposal, EntityKind, EntityRef, FactSource, Knowing, LedgerOp,
+        SeedEntity, Verdict,
+    },
     normalize,
-    store::{TurnId, TurnKind},
+    player::Marks,
+    store::{Store, TurnId, TurnKind, TurnRecord},
+    turn::{BEGIN_OP_ID, create_campaign},
+    view::{entity_card, play_view},
     world::{Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, unnameable_names},
 };
 
@@ -216,7 +222,7 @@ fn pc_names_by_seed_belief_or_narration() {
     let view = w.view();
     let (rose, chloe) = (id_of(&view, "Rose"), id_of(&view, "Chloé"));
     let said = w.play("I look around.", &action(ActionKind::Observe), 0, vec![]);
-    w.narrate(said, "Roseanne waves from the wall. chloe nods.");
+    w.narrate(said, "Roseanne waves from the wall. Chloe nods.");
     let sight = w.sight();
     assert_eq!(name(&sight, rose), Some(None), "Rose is not Roseanne");
     assert_eq!(name(&sight, chloe), Some(Some("Chloé".into())));
@@ -994,4 +1000,137 @@ fn an_intent_that_asks_for_time_leaves_the_open_item_open() {
     assert_eq!(meet(&sight, ada).closed_in, None);
     assert!(moment(&sight, outcome.turn_id).is_none_or(|m| !m.decision));
     assert_eq!(gm.calls().len(), 2, "one proposal, one Narration");
+}
+
+/// The Opening Turn of a new Campaign made from `seed`, with `narration`.
+fn opened(seed: &threshold_core::domain::AdventureSeed, narration: &str) -> (Store, u64) {
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, seed, 7).unwrap();
+    let opening = store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: BEGIN_OP_ID.to_owned(),
+                kind: TurnKind::Opening,
+                intent: String::new(),
+                proposal_json: "{}".into(),
+                clock_before: 0,
+                clock_after: 0,
+            },
+            vec![],
+        )
+        .unwrap();
+    store.set_narration(opening, narration).unwrap();
+    (store, campaign)
+}
+
+/// Review B1 (T3): a hidden Adventure Seed Faction whose name is a common
+/// word. The Opening Narration says "A circle of lamplight", and even "the
+/// Circle": a hidden entry is never named through a Narration word. It is
+/// on no screen, has no card and no link. A PC Belief names it.
+#[test]
+fn a_hidden_seed_entry_is_never_named_by_a_narration_word() {
+    let mut seed = adventure_seed();
+    seed.entities.push(SeedEntity {
+        name: "The Circle".into(),
+        kind: EntityKind::Faction,
+        age: None,
+        other_names: vec![],
+        hidden: true,
+    });
+    let (mut store, campaign) = opened(
+        &seed,
+        "Dusk falls. A circle of lamplight lies on the gate square. The Circle meets tonight, they say.",
+    );
+    let view = store.snapshot(campaign).unwrap();
+    let circle = id_of(&view, "The Circle");
+    let ada = id_of(&view, "Ada");
+    let sight = sight_of(&store, campaign);
+    assert!(known(&sight, circle).is_none(), "{:?}", sight.known);
+    let play = play_view(&sight, &Marks::default());
+    assert!(!play.known.iter().any(|k| k.who.entity_id == circle));
+    assert!(entity_card(&sight, &Marks::default(), circle).is_none());
+    let story = serde_json::to_string(&play.story).unwrap();
+    assert!(
+        !story.contains(&format!("\"entity_id\":{circle}")),
+        "{story}"
+    );
+    let turns = store.turns(campaign).unwrap();
+    let standing: Vec<_> = turns.iter().collect();
+    assert!(!threshold_core::world::pc_can_name(&view, &standing).contains(&circle));
+    assert!(unnameable_names(&view, &turns, &HashSet::new()).contains("circle"));
+
+    // A PC Belief about it names it.
+    store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: "told".into(),
+                kind: TurnKind::Play,
+                intent: "I ask about the lamps.".into(),
+                proposal_json: action(ActionKind::Talk),
+                clock_before: 0,
+                clock_after: 0,
+            },
+            vec![set(
+                &view,
+                circle,
+                "meets",
+                "at dusk",
+                "The Circle meets at dusk.",
+                &[ada],
+            )],
+        )
+        .unwrap();
+    let sight = sight_of(&store, campaign);
+    assert_eq!(name(&sight, circle), Some(Some("The Circle".into())));
+}
+
+/// Review B1: a Narration names an entity only with the name's own
+/// capitals; a leading article may be dropped or lower case. "a mill" or
+/// "the mill wheel" does not name the place Mill; "the Mill" and "MILL" do.
+/// `known_places` follows the same rule.
+#[test]
+fn a_narration_names_an_entity_with_its_own_capitals() {
+    let mut w = HiddenWorld::new();
+    w.play(
+        "I wait.",
+        &action(ActionKind::Observe),
+        0,
+        vec![LedgerOp::AddEntity {
+            local: None,
+            kind: EntityKind::Place,
+            name: "Mill".into(),
+            age: None,
+            other_names: vec![],
+        }],
+    );
+    let mill = id_of(&w.view(), "Mill");
+    let quiet = w.play("I listen.", &action(ActionKind::Observe), 0, vec![]);
+    w.narrate(quiet, "The mill wheel turns somewhere. A mill, perhaps.");
+    assert!(known(&w.sight(), mill).is_none());
+    assert!(!threshold_core::world::known_places(&w.view()).contains(&mill));
+    for text in ["Brann points to the Mill.", "MILL, says the sign."] {
+        let mut w = HiddenWorld::new();
+        w.play(
+            "I wait.",
+            &action(ActionKind::Observe),
+            0,
+            vec![LedgerOp::AddEntity {
+                local: None,
+                kind: EntityKind::Place,
+                name: "Mill".into(),
+                age: None,
+                other_names: vec![],
+            }],
+        );
+        let mill = id_of(&w.view(), "Mill");
+        let said = w.play("I listen.", &action(ActionKind::Observe), 0, vec![]);
+        w.narrate(said, text);
+        assert_eq!(name(&w.sight(), mill), Some(Some("Mill".into())), "{text}");
+        assert!(
+            threshold_core::world::known_places(&w.view()).contains(&mill),
+            "{text}"
+        );
+    }
 }

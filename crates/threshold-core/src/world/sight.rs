@@ -539,9 +539,12 @@ pub fn pc_can_name(view: &WorldView, standing: &[&StoredTurn]) -> HashSet<Entity
 /// The entities the PC can name (data shape 3.5): the PC; an Adventure Seed
 /// entry that is not hidden; an entity the PC holds a Belief about that is
 /// not a witnessed `location`; an entity whose main name is in the Narration
-/// of a standing Turn, as whole words. The name of a speech mark does not
-/// count: the mark names the speaker for the app, and a line whose mark
-/// cannot resolve must not make its own speaker resolve.
+/// of a standing Turn, as whole words with the name's own capitals
+/// (`normalize::name_in`), unless the Adventure Seed hides it. The name of
+/// a speech mark does not count: the mark names the speaker for the app,
+/// and a line whose mark cannot resolve must not make its own speaker
+/// resolve. Review B1: a hidden Faction "The Circle" was named by "A circle
+/// of lamplight"; a hidden entry now needs a Belief.
 fn named(
     view: &WorldView,
     pc: EntityId,
@@ -572,16 +575,17 @@ fn named(
         .filter_map(|t| t.narration.as_deref())
         .flat_map(speech::parse)
         .map(|line| match line {
-            Line::Prose(text) => normalize::name_words(text),
-            Line::Tagged { words, .. } => normalize::name_words(words),
+            Line::Prose(text) => normalize::cased_words(text),
+            Line::Tagged { words, .. } => normalize::cased_words(words),
         })
         .collect();
     for entity in &view.entities {
-        let words = normalize::name_words(&normalize::name(&entity.name));
-        if !words.is_empty()
+        let pattern = normalize::name_pattern(&entity.name);
+        if !named.contains(&entity.id)
+            && !super::arrival::hidden(view, entity.id)
             && narrations
                 .iter()
-                .any(|text| text.windows(words.len()).any(|w| w == words.as_slice()))
+                .any(|text| normalize::name_in(text, &pattern))
         {
             named.insert(entity.id);
         }

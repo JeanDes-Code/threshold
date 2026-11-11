@@ -82,16 +82,7 @@
             "parts": [
               {
                 "kind": "text",
-                "text": "Dusk falls on the "
-              },
-              {
-                "entity_id": 5,
-                "kind": "name",
-                "text": "gate"
-              },
-              {
-                "kind": "text",
-                "text": " square. "
+                "text": "Dusk falls on the gate square. "
               },
               {
                 "entity_id": 2,

@@ -380,7 +380,10 @@ fn speech_tags_and_links_match_through_normalize() {
     );
     let chloe = id_of(&w.view(), "Chloé");
     let said = w.play("I greet the newcomer.", &observe(), 0, vec![]);
-    w.narrate(said, "CHLOÉ: \"Bonjour.\"\n\nchloe smiles at orsel.");
+    w.narrate(
+        said,
+        "CHLOÉ: \"Bonjour.\"\n\nChloe smiles at orsel and Orsel.",
+    );
     let view = view_of(&w);
     let got = blocks(&view, said);
     let Block::Speech { speaker, parts } = &got[0] else {
@@ -394,14 +397,15 @@ fn speech_tags_and_links_match_through_normalize() {
             parts: vec![
                 Part::Name {
                     entity_id: chloe,
-                    text: "chloe".into()
+                    text: "Chloe".into()
                 },
+                // Review B1: a link needs the name's own capitals.
                 Part::Text {
-                    text: " smiles at ".into()
+                    text: " smiles at orsel and ".into()
                 },
                 Part::Name {
                     entity_id: w.orsel,
-                    text: "orsel".into()
+                    text: "Orsel".into()
                 },
                 Part::Text { text: ".".into() },
             ]
@@ -1395,4 +1399,25 @@ fn a_state_line_reads_as_a_sentence() {
     let line = play.you.state.iter().find(|s| s.key == "injury").unwrap();
     assert_eq!(line.text, "Ada is injured (bruised wrist).");
     assert_eq!(character_view(&sight).state[0].text, line.text);
+}
+
+/// Review B1: "gate" in "gate square" is no link to the place Gate; "the
+/// Gate" is.
+#[test]
+fn a_link_needs_the_name_s_own_capitals() {
+    let mut w = HiddenWorld::new();
+    let said = w.play("I look around.", &observe(), 0, vec![]);
+    w.narrate(said, "Rain falls on the gate square. The Gate stays shut.");
+    let view = view_of(&w);
+    let links: Vec<(u64, String)> = blocks(&view, said)
+        .iter()
+        .flat_map(|b| match b {
+            Block::Prose { parts } | Block::Speech { parts, .. } => parts.clone(),
+        })
+        .filter_map(|p| match p {
+            Part::Name { entity_id, text } => Some((entity_id, text)),
+            Part::Text { .. } => None,
+        })
+        .collect();
+    assert_eq!(links, [(w.gate, "Gate".to_owned())]);
 }
