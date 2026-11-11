@@ -244,3 +244,33 @@ Limits:
 - One unknown-place move reached a place in 1 run of 4; attempt 8 had 4 of 4.
 - No scenario counts how the model sets `public` on an event: in `offscreen` the model scheduled no event.
 - The fixture is small. A QA pass on a larger world on the same day measured a median Turn of 13.8 s, with 6 of 30 Turns over 15 s.
+
+## Attempt 10: after bug pass 5 (2026-11-11)
+
+- Code: commit f76a19a (`leaves` and `moves_actor_to`, the OOC sheet, the time rules, the prompt layout with the Turn window first). 4 runs per scenario, model loaded with one small request, 10 to 11 GB of RAM available. The run started right after a release build.
+- Command: `threshold-eval --scenario play_basics,open_items,speech,departures,ooc --runs 4 --raw-log <file outside the repository>`; speech was run a second time on its own, with no build before it.
+
+| Scenario | Attempt 9 | Attempt 10 |
+|---|---|---|
+| play_basics: moves to the asked place | 8 / 8 | 8 / 8 |
+| play_basics: false closes, false moves | 0 / 4, 0 / 4 | 0 / 4, 0 / 4 |
+| play_basics: contests with a Roll, told with their result | 4 / 4, 4 / 4 | 4 / 4, 4 / 4 |
+| play_basics: pending items closed | 4 / 4 | 4 / 4 |
+| play_basics: impossible acts told as a failure | 4 / 4 | 4 / 4 |
+| play_basics: unknown-place moves that left the PC in place | 3 / 4 | 3 / 4 |
+| play_basics: Narrations that open with the time | 1 / 32 | 6 / 32 |
+| play_basics: Turns failed; time p50 / p90 / max | 0 / 32; 7.1 / 8.7 / 15.0 s | 0 / 32; 8.0 / 10.3 / 10.7 s |
+| open_items: wrong closes; accepts and refusals closed | 0; (not listed) | 0; 4 / 4 and 4 / 4 |
+| open_items: Turns failed; time p50 / p90 | 0; 7.0 / 7.6 s | 0; 8.0 / 9.7 s |
+| speech: mark rate | 47 / 47 | 42 / 42 (first run), 41 / 43 (second run) |
+| speech: wrong marks (judge) | 0 / 37 | 1 / 34 (first run), 0 / 30 (second run) |
+| speech: Turns failed | 1 / 40 (npc folds) | 2 / 40 (first Turn timed out after the build; npc folds), 1 / 40 (npc folds) |
+| departures: departures told with no record | (scenario new) | 0 / 20 |
+| ooc: right answers | (scenario new) | 60 / 72 |
+
+- Worse than attempt 9: Narrations that open with the time (6 of 32, from 1), and in speech two unmarked quoted spans in the second run and one wrong mark in the first. The eval keeps no Narration, so we cannot say which lines they are. The narrator prompt changed in this pass (the Turn window comes after the scene, the outcome block ends with who is here, one more rule line), and that may explain them; this is not verified.
+- Every npc folds failure is the known one on Hessa (a stance `help` above her ceiling `comply`).
+- The first Turn of the run timed out: the model was loaded, but the first proposal after the build read slowly (`evals/reports/2026-11-turn-time.md`, the swapped runner).
+- Turn times are about 1 s higher than attempt 9 at p50 on this small fixture. The small fixture's prompts gain the `ALL PLACES` line, the rule lines of `leaves` and the here line; the large world's replay is faster (p50 13.0 s to 9.0 s).
+
+Limits: one fixture, one phrasing per step, 4 runs; the judge is the same local model.
