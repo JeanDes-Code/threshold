@@ -26,7 +26,7 @@ start() {
 
   # The driver starts the app, and the app inherits this environment:
   # X11 only (no Wayland socket), software rendering inside Xvfb.
-  env -u WAYLAND_DISPLAY DISPLAY=$DISP GDK_BACKEND=x11 \
+  env -u WAYLAND_DISPLAY DISPLAY=$DISP GDK_BACKEND=x11 GDK_SCALE=1 \
       WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 \
       LIBGL_ALWAYS_SOFTWARE=1 \
       TAURI_WEBVIEW_AUTOMATION=true TAURI_AUTOMATION=true \

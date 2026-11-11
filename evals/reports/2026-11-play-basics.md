@@ -227,3 +227,20 @@ Limits:
 
 - "Narrations that open with the time" rose from 0 to 5 of 32. The eval does not keep the Narrations, so we cannot say which Turns they are. This change does not touch the narrator's time line. One step asks Hessa "how long the walk down to the Varn mill takes": an answer such as "It is an hour's walk." counts as a time opening, and 4 runs of that step could give 4 of the 5. This is not verified.
 - One phrasing per step, 4 runs: the counts are small. The judge is the same local model.
+
+## Attempt 9: after bug pass 4 and its reviews (2026-11-11)
+
+- Code: commit 22043fd (the `public` field on World Events, the NAMES block, the prompt order). 4 runs per scenario on a free machine, model loaded before the run.
+
+| Scenario | Result |
+|---|---|
+| play_basics | moves 8 / 8; false closes 0 / 4; false moves 0 / 4; contests with a Roll 4 / 4, told with their result 4 / 4; pending items closed 4 / 4; impossible acts told as a failure 4 / 4; unknown-place moves that left the PC in place 3 / 4; Narrations that open with the time 1 / 32; Turns failed 0 / 32; retries 1 / 32; p50 7.1 s, p90 8.7 s, max 15.0 s |
+| open_items | wrong closes 0 in 36 Turns; Turns failed 0; p50 7.0 s, p90 7.6 s; proposal prompt p50 2720 tokens |
+| speech | mark rate 47 / 47; wrong marks 0 of 37 judged; 1 of 40 Turns failed (npc folds, twice); p90 7.8 s |
+| offscreen | 2 of 16 Turns failed (a PC write on a refused key; npc folds); the model scheduled an event on the provocation Turn in 0 of 4 runs |
+
+Limits:
+
+- One unknown-place move reached a place in 1 run of 4; attempt 8 had 4 of 4.
+- No scenario counts how the model sets `public` on an event: in `offscreen` the model scheduled no event.
+- The fixture is small. A QA pass on a larger world on the same day measured a median Turn of 13.8 s, with 6 of 30 Turns over 15 s.
