@@ -404,3 +404,7 @@ The sheet is still made from `PcSight` only. Live numbers: `evals/reports/2026-1
 - The narrator's THIS TURN block gets `- <name> leaves.` / `- <name> leaves for <place>.` for a departure, and ends its outcome with `context::HERE_AFTER_LINE` and the names in `seen_present` after the Commit, or `context::NOBODY_HERE_LINE`. `NARRATION_RULES` has one more line.
 - The proposal prompt's scene has `ALL PLACES (for leaves and moves_actor_to)`, and two rule lines name the fields.
 
+### Prompt layout and budgets (M4)
+
+ADR 0001 has the measurements. In both prompts the past Turns open the `recent` part (`context::turns_window`): a window of 3 to 5 Turns whose first Turn moves three at a time, at most `TURNS_WINDOW_MAX_CHARS`; the narration's window stops before the Turn it narrates. The proposal's `NOW` / `Minute N`, `MENTIONED`, `OPEN ITEMS (for settles)` and `INTENT` follow it; the narration's `THIS TURN` follows it. The GM's FACTS block is bounded by `GM_FACTS_MAX_CHARS` and the narrator's WHAT THE PC KNOWS HERE by `PC_KNOWS_MAX_CHARS`. `context::RECENT_TURNS`, `RECENT_MAX_CHARS` and `recent_block` are gone. Each model call writes a `metrics` debug row (`turn::METRICS_STEP`) with Ollama's `prompt_eval_count` (the whole prompt), `prompt_eval_duration`, `eval_count` and `eval_duration`.
+

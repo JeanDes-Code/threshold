@@ -15,8 +15,8 @@
 use std::collections::HashSet;
 
 use super::{
-    NamesAudience, Retrieval, adventure_block, fact_text, names_block, one_line, recent_block,
-    render_voice, seen_present, with_fragments,
+    NamesAudience, PC_KNOWS_MAX_CHARS, PC_KNOWS_STEP, Retrieval, adventure_block, bounded,
+    fact_text, names_block, one_line, render_voice, seen_present, turns_window, with_fragments,
 };
 use crate::{
     domain::{
@@ -415,7 +415,7 @@ fn scene(r: &Retrieval<'_>) -> String {
         .collect();
     if !known.is_empty() {
         out.push_str("WHAT THE PC KNOWS HERE\n");
-        out.push_str(&known.concat());
+        out.push_str(&bounded(&known, PC_KNOWS_MAX_CHARS, PC_KNOWS_STEP).concat());
     }
     out
 }
@@ -632,5 +632,7 @@ fn recent(
             }
         }
     }
-    recent_block(r.view, "", &tail)
+    // The Turn being narrated is the last of the view: THIS TURN tells it,
+    // so the window stops before it (bug pass 5, M4).
+    format!("{}{tail}", turns_window(r.view, r.view.turn_seq))
 }

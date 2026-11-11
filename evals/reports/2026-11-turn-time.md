@@ -97,3 +97,33 @@ Live checks still to run: the per-call `prompt_eval_count` of Ollama on a replay
 ## After the review of bug pass 4 (2026-11-11)
 
 Nothing here was measured on the live model. The review removed the inline other-name notes that the rebuilt prompts of the table above carried (about 700 characters), and put one NAMES block at the end of the stable block instead. So the "Rebuilt" rows above no longer describe the code: their prefix lengths include notes that the prompts no longer hold. A narration prompt also gained the departure line of review B1 and, on a guarded event, the line `Nothing the PC notices happens.`; both are in the `recent` block. A replay of the QA Campaign's Turns with Ollama's per-call `prompt_eval_count` is still the live check to run.
+
+## Bug pass 5 (2026-11-11): a replay of the QA Campaign, per call
+
+- Command: `threshold-eval --scenario replay --runs 1 --campaign <copy of the QA Campaign after Begin> --intents <its 28 Intents>`; both files stay outside the repository. Each model call writes a `metrics` debug row with Ollama's numbers; the eval reads them.
+- Machine: 10 to 11 GB of RAM available before each run, the model loaded, 63% CPU and 37% GPU.
+- "Prompt read" is `prompt_eval_duration`. Ollama 0.32.15 reports `prompt_eval_count` as the whole prompt, cache included, so it does not show the cache; a call counts as reused when its prompt is read in under 400 µs per token (a cold read takes about 1,000).
+
+| Measure | Before (ca1fc37) | One shared block (tried, removed) | After (window first, clock after) |
+|---|---|---|---|
+| Turn time p50 / p90 / max | 13.0 / 15.2 / 17.1 s | 12.6 / 15.2 / 41.8 s | 9.0 / 13.1 / 13.6 s |
+| Turns over 15 s | 4 / 28 | 4 / 27 | 0 / 28 |
+| First word of the Narration, p50 / p90 | 9.9 / 11.0 s | 9.4 / 11.0 s | 5.3 / 9.7 s |
+| Proposal prompt, tokens p50 | 4,558 | 5,210 | 4,437 |
+| Proposal prompt read, p50 / p90 | 4,732 / 5,146 ms | 3,856 / 5,484 ms | 1,191 / 4,645 ms |
+| Proposals reused from the cache | 0 / 28 | not counted | 15 / 28 |
+| Narration prompt, tokens p50 | 2,602 | 2,540 | 2,425 |
+| Narration prompt read, p50 / p90 | 2,968 / 3,045 ms | 2,688 / 3,073 ms | 1,142 / 2,585 ms |
+| Proposal answer, tokens p50 / generation p50 | 60 / 1,473 ms | 75 / 1,778 ms | 75 / 1,725 ms |
+| Narration answer, tokens p50 / generation p50 | 171 / 3,367 ms | 167 / 3,205 ms | 162 / 3,077 ms |
+| Turns failed | 0 | 1 (timeout, first Turn) | 0 |
+
+- A first run of the "after" layout right after a `cargo` build had one Turn time out (the first, 17 s of prompt read, as in the section on the swapped runner above), one narration read in 6.5 s, and p50 10.3 s; the run in the table followed it with no build in between.
+- In the "after" run, the proposal was read in full on 13 of 28 Turns: every third Turn, when the window of past Turns steps, and on Turns after one that changed the scene. A narration read in about 1.1 s reused its cache in part (the newest Turn and THIS TURN, about 600 tokens, were read); the count of reused calls uses the stricter 400 µs per token.
+- Probes behind the layout (scripts outside the repository): a 4,608-token prompt changed 500 tokens before its end was read in about 700 ms, changed 550 or more tokens before its end in about 4,700 ms; three different prompts sent in turn all stayed in the cache.
+
+Limits:
+
+- One run of 28 Turns per layout, one world, one machine. The "before" run started after a model load, the "after" run in the table on a warm model.
+- The scene still comes before the Turns, so a Turn that changes it costs the next proposal a full read.
+- Owner's options, not measured: none of the server settings named in bug pass 4 is the limit. A model with no sliding window, or a larger one, would reuse more; that is a model choice.

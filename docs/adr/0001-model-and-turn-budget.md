@@ -44,3 +44,27 @@ The prompt cache does not explain the rest of the QA numbers. From Turn 6 on, a 
 - **`MENTIONED ENTITIES` keeps the one-line form** (`context/proposal_prompt.rs`, `recent`). It sits in the `recent` block, after `Minute N`, the first line that changes on every Turn, so a split there would save no prefix and would add a header to the part the model reads fresh each Turn. The model reads two forms of an entity line; the evaluation would show if that confuses it.
 - **The NAMES block** (data shape, section 13, review M5) sits at the end of the stable block of the narrator, Begin and proposal prompts. It follows the data, so it changes only when a knower of an other name changes. It replaces the inline notes of bug pass 4, which marked lines in every block, the `recent` block included.
 - None of the review's changes was measured on the live model.
+
+## Changed in bug pass 5 (2026-11-11): the sliding window decides what the cache can reuse
+
+QA pass 4: median Turn 13.8 s, 6 of 30 Turns over 15 s, and the first word of a Narration came later after Turn 10. A replay of the QA Campaign's 28 Intents on a copy of its file (`threshold-eval --scenario replay`, numbers in `evals/reports/2026-11-turn-time.md`) gave the same picture before this change: every proposal read its prompt in about 4.7 s and every narration in about 3.0 s, so nothing came from the cache.
+
+Probes on the live server (scripts outside the repository) showed that the reading of bug pass 4 was wrong on two points:
+
+- **`prompt_eval_count` counts the whole prompt** on Ollama 0.32.15, cached part included. The same 4,608-token prompt sent twice reports 4,608 both times, read in 4,700 ms and then in 260 ms. Only `prompt_eval_duration` shows the cache. The "4,500 tokens read fresh" of bug pass 4 was the prompt's size.
+- **The server keeps several cache slots.** Three different prompts A, B, C, then A and B again: A and B were read from the cache. One slot was not the limit; `OLLAMA_NUM_PARALLEL` is not the owner's lever here.
+- **The limit is the model's sliding window.** `gemma4:26b-a4b-it-qat` has attention layers with a sliding window. A prompt that parts from a cached one 500 tokens or less before its end was read in about 700 ms; one that parts 550 tokens or more before the end was read in full, about 4,700 ms, however long the shared start. So a prompt is reused only when it differs from the cached sequence (the previous prompt and its answer) in its last ~500 tokens.
+
+So the old layout could never be reused: the first line of the `recent` block was `Minute N`, which changes every Turn, and the window of recent Turns dropped its oldest Turn every Turn, both about 1,500 tokens before the end.
+
+We first tried what bug pass 4 proposed: both prompts start with one shared block (the Adventure Seed, the PC's scene, the past Turns). Measured on the replay, it was worse: the narration then shared a long start with the proposal, Ollama gave it the proposal's slot, could not reuse it past the window, and read it in full; proposals read 3.9 s and narrations 2.7 s, with 0 of 27 narrations reused. We removed it.
+
+The layout now:
+
+- **The past Turns come first in `recent`, the clock and the Intent after them** (`context::turns_window`). Proposal: RECENT TURNS, then NOW (`Minute N`), MENTIONED, OPEN ITEMS (for settles), INTENT. Narration: RECENT TURNS (the Turns before the one it narrates; THIS TURN tells that one), then THIS TURN. The two prompts still start differently ("You are the Game Master" / "You are the narrator"), so each finds its own slot.
+- **The window of past Turns moves in steps.** Its first Turn is the latest step boundary (`seq` 1, 4, 7, …) that leaves at least 3 Turns (`TURNS_WINDOW_MIN`, `TURNS_WINDOW_STEP`), so it holds 3 to 5 Turns and keeps its start for three Turns in a row. Over 5,000 chars (`TURNS_WINDOW_MAX_CHARS`) it starts one step later. Between two steps, the next proposal differs from the cached one only after the newest Turn.
+- **What grows is bounded.** The GM's FACTS block is at most 4,500 chars (`GM_FACTS_MAX_CHARS`): over it, the oldest facts that are not a `location` or an open item go, Established ones first. The narrator's WHAT THE PC KNOWS HERE is at most 3,000 chars (`PC_KNOWS_MAX_CHARS`), its oldest lines going 5 at a time. The QA world stays under both.
+
+A proposal is still read in full when the window steps (one Turn in three) or when the Turn before changed the scene (a fact, a key, an attitude, who is here), because the scene comes before the Turns. Putting the scene after the Turns would put about 900 tokens after the point where two prompts part, past the window.
+
+Replay of the 28 QA Intents, warm model (`evals/reports/2026-11-turn-time.md`): Turn time p50 13.0 s → 9.0 s, p90 15.2 s → 13.1 s, max 17.1 s → 13.6 s, Turns over 15 s 4 → 0; first word of the Narration p50 9.9 s → 5.3 s; 15 of 28 proposals and most narrations read from the cache.

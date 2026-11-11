@@ -32,10 +32,27 @@ use crate::{
     world::{hidden, holders_of, pc_can_name, pc_knowledge},
 };
 
-/// At most this many recent Turns go into a prompt.
-pub const RECENT_TURNS: usize = 6;
-/// Oldest Turns are cut until the `recent` block is at most this long.
-pub const RECENT_MAX_CHARS: usize = 6_000;
+/// The fewest past Turns a prompt holds, when that many exist (ADR 0001,
+/// bug pass 5, M4).
+pub const TURNS_WINDOW_MIN: u64 = 3;
+/// The window of past Turns moves by this many Turns at once: its first
+/// Turn stays the same for this many Turns in a row, so the prompt of the
+/// next Turn differs from the cached one only near its end. The window
+/// holds 3 to 5 Turns.
+pub const TURNS_WINDOW_STEP: u64 = 3;
+/// The longest window of past Turns, in chars (about 1,250 tokens). Over
+/// it, the window starts one step later.
+pub const TURNS_WINDOW_MAX_CHARS: usize = 5_000;
+/// The longest list of what the PC knows here in the narrator's scene, in
+/// chars (about 750 tokens). Over it, the oldest lines go, `PC_KNOWS_STEP`
+/// at a time, so the list keeps its start for a while.
+pub const PC_KNOWS_MAX_CHARS: usize = 3_000;
+/// See `PC_KNOWS_MAX_CHARS`.
+pub const PC_KNOWS_STEP: usize = 5;
+/// The longest FACTS block of the proposal prompt, in chars (about 1,100
+/// tokens). Over it, the oldest facts that are not Persistent, not a
+/// `location` and not an open item go first.
+pub const GM_FACTS_MAX_CHARS: usize = 4_500;
 /// Entities named in this many of the latest Turns are retrieved.
 pub const NAMED_TURNS: usize = 3;
 /// The longest stable block an Adventure Seed may give (data shape 3.1),
@@ -399,30 +416,61 @@ fn render_turn(turn: &StoredTurn) -> String {
     out
 }
 
-/// Builds the `recent` block: `head`, the recent Turns, then `tail`. The
-/// last `RECENT_TURNS` Turns are kept, then the oldest are cut until the
-/// block is at most `RECENT_MAX_CHARS` long (or no Turn is left).
-pub(crate) fn recent_block(view: &WorldView, head: &str, tail: &str) -> String {
-    let turns = &view.recent_turns;
-    let mut rendered: Vec<String> = turns[turns.len().saturating_sub(RECENT_TURNS)..]
+/// The past Turns before Turn `before_seq`, as the first block of a
+/// prompt's `recent` part (ADR 0001, bug pass 5, M4).
+///
+/// The model's attention layers with a sliding window (about 512 tokens on
+/// `gemma4:26b-a4b-it-qat`) let Ollama reuse a cached prompt only when the
+/// new prompt parts from it within the last ~500 tokens of the cached
+/// sequence, the answer included. The old window dropped its oldest Turn on
+/// every Turn and sat after the clock line, so every proposal and every
+/// narration was read again in full (QA replay: about 4,700 ms and 3,000
+/// ms of prompt reading per Turn). Now the clock and the Intent come after
+/// the Turns, and the window's first Turn is the latest step boundary
+/// (`seq` 1, 4, 7, …, `TURNS_WINDOW_STEP` apart) that leaves at least
+/// `TURNS_WINDOW_MIN` Turns: it keeps its start for three Turns in a row,
+/// so the next prompt differs only after the newest Turn. Over
+/// `TURNS_WINDOW_MAX_CHARS` it starts one step later, down to the last
+/// Turn alone.
+pub(crate) fn turns_window(view: &WorldView, before_seq: u64) -> String {
+    let past: Vec<&StoredTurn> = view
+        .recent_turns
         .iter()
-        .map(render_turn)
+        .filter(|t| t.seq < before_seq)
         .collect();
-    let build = |rendered: &[String]| {
-        let mut out = head.to_owned();
-        if !rendered.is_empty() {
-            out.push_str("RECENT TURNS\n");
-            out.push_str(&rendered.concat());
-        }
-        out.push_str(tail);
-        out
+    let Some(last) = past.last().map(|t| t.seq) else {
+        return String::new();
     };
-    let mut out = build(&rendered);
-    while out.len() > RECENT_MAX_CHARS && !rendered.is_empty() {
-        rendered.remove(0);
-        out = build(&rendered);
+    let mut first = if last > TURNS_WINDOW_MIN {
+        ((last - TURNS_WINDOW_MIN) / TURNS_WINDOW_STEP) * TURNS_WINDOW_STEP + 1
+    } else {
+        1
+    };
+    loop {
+        let rendered: String = past
+            .iter()
+            .filter(|t| t.seq >= first)
+            .map(|t| render_turn(t))
+            .collect();
+        if rendered.len() <= TURNS_WINDOW_MAX_CHARS || first >= last {
+            return if rendered.is_empty() {
+                String::new()
+            } else {
+                format!("RECENT TURNS\n{rendered}")
+            };
+        }
+        first = (first + TURNS_WINDOW_STEP).min(last);
     }
-    out
+}
+
+/// `lines` with its oldest lines left out, `step` at a time, until it is
+/// at most `max` chars long or one line is left (bug pass 5, M4).
+pub(crate) fn bounded(lines: &[String], max: usize, step: usize) -> &[String] {
+    let mut from = 0;
+    while lines.len() - from > 1 && lines[from..].concat().len() > max {
+        from = (from + step).min(lines.len() - 1);
+    }
+    &lines[from..]
 }
 
 /// Who reads a NAMES block (review M5). The narrator reads only the other

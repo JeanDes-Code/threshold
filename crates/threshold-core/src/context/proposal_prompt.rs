@@ -2,8 +2,8 @@
 //! hidden ones included, marked as such.
 
 use super::{
-    NamesAudience, Retrieval, adventure_block, fact_text, names_block, one_line, recent_block,
-    render_voice, with_fragments,
+    GM_FACTS_MAX_CHARS, NamesAudience, Retrieval, adventure_block, fact_text, names_block,
+    one_line, render_voice, turns_window, with_fragments,
 };
 use crate::{
     HandleContext,
@@ -304,8 +304,28 @@ fn scene(r: &Retrieval<'_>) -> String {
             .scene_facts
             .iter()
             .partition(|f| f.canon == Canon::Persistent);
-        for f in fixed.into_iter().chain(open) {
-            out.push_str(&fact_line(r, f));
+        // Bug pass 5 (M4): the block is bounded. Over the budget, the oldest
+        // facts that are not a `location` or an open item go: Established
+        // ones first, then Persistent ones, each in id order.
+        let may_go = |f: &Fact| f.slot.key != "location" && !is_open_key(&f.slot.key);
+        let mut lines: Vec<(u8, String)> = fixed
+            .into_iter()
+            .map(|f| (if may_go(f) { 2 } else { 0 }, fact_line(r, f)))
+            .chain(
+                open.into_iter()
+                    .map(|f| (if may_go(f) { 1 } else { 0 }, fact_line(r, f))),
+            )
+            .collect();
+        for rank in [1, 2] {
+            while lines.iter().map(|(_, l)| l.len()).sum::<usize>() > GM_FACTS_MAX_CHARS {
+                let Some(at) = lines.iter().position(|(r, _)| *r == rank) else {
+                    break;
+                };
+                lines.remove(at);
+            }
+        }
+        for (_, line) in lines {
+            out.push_str(&line);
         }
     }
     if !r.obstacles.is_empty() {
@@ -373,5 +393,8 @@ fn recent(r: &Retrieval<'_>, intent: &str) -> String {
         }
     }
     tail.push_str(&format!("INTENT\n{}\n", intent.trim()));
-    recent_block(r.view, &head, &tail)
+    // The past Turns first, then the clock and the Intent: the next Turn's
+    // prompt differs from this one only after the newest Turn (bug pass 5,
+    // M4).
+    format!("{}{head}{tail}", turns_window(r.view, r.view.turn_seq + 1))
 }

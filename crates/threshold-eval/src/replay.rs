@@ -1,8 +1,9 @@
 //! The replay scenario (bug pass 5, M4): plays a list of Intents on a copy
 //! of a Campaign file, and reports Turn time with the model server's numbers
-//! for each call: the prompt tokens read fresh (Ollama's
-//! `prompt_eval_count`, which leaves out the cached prefix), the time to
-//! read them, and the tokens generated.
+//! for each call: the prompt's tokens (Ollama's `prompt_eval_count`; Ollama
+//! 0.32.15 counts the whole prompt, cached part included), the time to read
+//! the prompt (`prompt_eval_duration`, which shows the cache), and the
+//! tokens generated.
 //!
 //! The Campaign file and the Intents file are given on the command line
 //! (`--campaign`, `--intents`) and must lie outside the repository: they
@@ -29,6 +30,15 @@ struct TurnNumbers {
     first_word_ms: u64,
     proposal: Vec<CallStats>,
     narration: Option<CallStats>,
+}
+
+/// Read faster than this, in microseconds per prompt token, a prompt came
+/// mostly from the cache: a cold read takes about 1,000 µs per token on the
+/// target machine, a cached prefix almost nothing.
+const REUSED_US_PER_TOKEN: u64 = 400;
+
+fn reused(c: &CallStats) -> bool {
+    c.prompt_tokens > 0 && c.prompt_ms * 1_000 < c.prompt_tokens * REUSED_US_PER_TOKEN
 }
 
 /// The `metrics` rows of one operation, as `(call, stats)`.
@@ -113,21 +123,31 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                 narration,
             };
             (ctx.log)(&format!(
-                "{} replay: total {} ms, first word {} ms, proposal fresh {:?} tok, narration fresh {} tok",
+                "{} replay: total {} ms, first word {} ms, proposal read {:?} ms of {:?} tok, narration read {} ms of {} tok",
                 played.op_id,
                 numbers.total_ms,
                 numbers.first_word_ms,
                 numbers
                     .proposal
                     .iter()
+                    .map(|p| p.prompt_ms)
+                    .collect::<Vec<_>>(),
+                numbers
+                    .proposal
+                    .iter()
                     .map(|p| p.prompt_tokens)
                     .collect::<Vec<_>>(),
+                narration.map_or(0, |n| n.prompt_ms),
                 narration.map_or(0, |n| n.prompt_tokens)
             ));
             turns.push(numbers);
         }
         drop(s);
-        let _ = fs::remove_file(&copy);
+        // `THRESHOLD_KEEP_REPLAY` keeps the copy, with its debug log, for a
+        // person to read.
+        if std::env::var_os("THRESHOLD_KEEP_REPLAY").is_none() {
+            let _ = fs::remove_file(&copy);
+        }
     }
     let total: Vec<u64> = turns.iter().map(|t| t.total_ms).collect();
     let first: Vec<u64> = turns.iter().map(|t| t.first_word_ms).collect();
@@ -142,7 +162,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{} Intents per run on a copy of a Campaign file outside the repository, {} run(s). Fresh tokens are Ollama's `prompt_eval_count`: the prompt tokens the server read, without the cached prefix. Only the first proposal call of a Turn is counted below; a retry is counted apart.\n",
+        "{} Intents per run on a copy of a Campaign file outside the repository, {} run(s). Prompt tokens are Ollama's `prompt_eval_count`, which counts the whole prompt; the prompt read time shows the cache. A call counts as reused when its prompt read takes under {REUSED_US_PER_TOKEN} µs per token. Only the first proposal call of a Turn is counted below; a retry is counted apart.\n",
         intents.len(),
         ctx.config.runs
     );
@@ -158,7 +178,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         out,
         "{}",
         line(
-            "Proposal: fresh prompt tokens",
+            "Proposal: prompt tokens",
             &pick(|c| c.prompt_tokens, &first_proposals),
             ""
         )
@@ -194,7 +214,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         out,
         "{}",
         line(
-            "Narration: fresh prompt tokens",
+            "Narration: prompt tokens",
             &pick(|c| c.prompt_tokens, &narrations),
             ""
         )
@@ -228,7 +248,15 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     );
     let _ = writeln!(
         out,
-        "\n- Turns committed: {} of {}; failed: {failed}; Turns with a retry: {retries}",
+        "\n- Calls that reused the cache: proposals {} of {}, narrations {} of {}",
+        first_proposals.iter().filter(|c| reused(c)).count(),
+        first_proposals.len(),
+        narrations.iter().filter(|c| reused(c)).count(),
+        narrations.len()
+    );
+    let _ = writeln!(
+        out,
+        "- Turns committed: {} of {}; failed: {failed}; Turns with a retry: {retries}",
         turns.len(),
         intents.len() * ctx.config.runs
     );

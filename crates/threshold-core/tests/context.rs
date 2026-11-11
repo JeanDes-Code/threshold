@@ -199,10 +199,13 @@ fn proposal_prompt_shows_retrieved_handles_and_keys() {
     assert!(named.entities.contains(&Handle::Entity(w.pip)));
 }
 
+/// Bug pass 5 (M4): the past Turns come first in `recent`, in a window
+/// that stays under its budget. The clock and the Intent come after them.
 #[test]
 fn recent_block_is_capped() {
+    use threshold_core::context::TURNS_WINDOW_MAX_CHARS;
     let mut w = World::new();
-    let long = "x".repeat(2_500);
+    let long = "x".repeat(2_000);
     for i in 0..6 {
         play_turn(
             &mut w,
@@ -213,12 +216,52 @@ fn recent_block_is_capped() {
         );
     }
     let prompt = proposal_prompt(&w.view, &[], "I wait.");
-    assert!(prompt.recent.len() <= 6_000, "{}", prompt.recent.len());
+    assert!(
+        prompt.recent.starts_with("RECENT TURNS\n"),
+        "{}",
+        prompt.recent
+    );
+    let window = &prompt.recent[..prompt.recent.find("NOW\nMinute").unwrap()];
+    assert!(
+        window.len() <= TURNS_WINDOW_MAX_CHARS + 20,
+        "{}",
+        window.len()
+    );
     // The newest Turn survives, the oldest is cut.
     assert!(prompt.recent.contains("turn 5"));
     assert!(!prompt.recent.contains("turn 0"));
     let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None);
-    assert!(narration.recent.len() <= 6_000);
+    assert!(narration.recent.len() <= TURNS_WINDOW_MAX_CHARS + 2_000);
+}
+
+/// Bug pass 5 (M4): Ollama reuses a cached prompt only when the new one
+/// parts from it near its end (the model's sliding window). The window of
+/// past Turns keeps its first Turn for three Turns in a row, so the next
+/// proposal starts with the whole of this one up to the clock line.
+#[test]
+fn the_next_proposal_differs_only_after_the_newest_turn() {
+    let mut w = World::new();
+    for i in 0..4 {
+        play_turn(
+            &mut w,
+            &format!("t-{i}"),
+            &format!("step {i}"),
+            "Short.",
+            vec![],
+        );
+    }
+    let first = proposal_prompt(&w.view, &[], "I wait.");
+    play_turn(&mut w, "t-4", "step 4", "Short.", vec![]);
+    let second = proposal_prompt(&w.view, &[], "I look around.");
+    let head = |p: &Prompt| format!("{}{}{}", p.system, p.stable, p.scene);
+    assert_eq!(head(&first), head(&second));
+    let turns = &first.recent[..first.recent.find("NOW\nMinute").unwrap()];
+    assert!(
+        second.recent.starts_with(turns),
+        "{}\n----\n{}",
+        first.recent,
+        second.recent
+    );
 }
 
 #[test]
@@ -1683,4 +1726,50 @@ fn a_changed_npc_keeps_most_of_the_proposal_prefix() {
         state.contains(&format!("E{orsel}: attitude to PC")),
         "{state}"
     );
+}
+
+/// Bug pass 5 (M4): the fact lists that grow with play are bounded. The
+/// GM's FACTS block leaves out its oldest plain facts first and keeps every
+/// `location`; the narrator's list of what the PC knows here leaves out its
+/// oldest lines.
+#[test]
+fn the_fact_lists_are_bounded() {
+    use threshold_core::context::{GM_FACTS_MAX_CHARS, PC_KNOWS_MAX_CHARS};
+    let mut w = World::new();
+    witness_presence(&mut w);
+    let (ada, brann) = (w.ada, w.brann);
+    let ops: Vec<LedgerOp> = (0..120)
+        .map(|i| {
+            add_fact(
+                brann,
+                &format!("habit_{i:03}"),
+                "whistles a long tune at dusk",
+                &format!("Brann whistles tune number {i:03} at dusk, every evening."),
+                vec![ada],
+            )
+        })
+        .collect();
+    w.commit(ops);
+    let proposal = proposal_prompt(&w.view, &[], "I wait.");
+    let facts = proposal
+        .scene
+        .split("FACTS\n")
+        .nth(1)
+        .unwrap()
+        .split("OPEN OBSTACLES")
+        .next()
+        .unwrap();
+    assert!(facts.len() <= GM_FACTS_MAX_CHARS, "{}", facts.len());
+    assert!(facts.contains("habit_119"), "the newest stays");
+    assert!(!facts.contains("habit_000"), "the oldest goes");
+    assert!(facts.contains(" location = gate square"), "{facts}");
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None);
+    let known = narration
+        .scene
+        .split("WHAT THE PC KNOWS HERE\n")
+        .nth(1)
+        .unwrap();
+    assert!(known.len() <= PC_KNOWS_MAX_CHARS, "{}", known.len());
+    assert!(known.contains("number 119"), "{known}");
+    assert!(!known.contains("number 000"), "{known}");
 }
