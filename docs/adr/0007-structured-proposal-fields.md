@@ -136,4 +136,18 @@ What this does not cover:
 
 - **`settles` on an item whose outcome the world already wrote.** An event could fill an item's outcome slot without the PC learning it. The item now stays open for the PC and is offered (ADR 0005, one rule for "open"). When the PC settles it, the core does not overwrite the world's fact for those who know it: the outcome `<Word>: <item text>` becomes a Claim of the PC, told to the PC alone. It closes the item for the PC. The leniency rule holds: the Claim comes from the Player's Intent, through `settles`.
 - **Decisions follow `settles` alone, or a Check whose stake changed a slot**, won or lost alike (data shape, section 13).
-- **What the narrator gets of a witnessed event** changed too (data shape, section 13: a departure to a place the PC cannot name, an effect the event's text states, a neutral line when every part of an event is guarded away). None of it was measured on the live model.
+- **What the narrator gets of a witnessed event** changed too (data shape, section 13: a departure to a place the PC cannot name, the effects of a public event, a neutral line when every part of an event is guarded away). The first version read an effect from the event's text; the next section replaced that. None of it was measured on the live model.
+
+## Changed after the second review of bug pass 4 (2026-11-11): `public` on a World Event
+
+**The text rule is gone.** After the first review, the PC learned an effect of a witnessed event when the event's text held every content word of the effect's value (`world::arrival::states`). That is a bag of words, and no word rule can judge meaning: "Orsel paid no attention to the crowd" taught the PC `Orsel.debt_status = paid`, "Orsel has not paid the reeve" too, "says yes to another ale" taught `guilty = yes`, and "stares with dead eyes" taught `Pip.status = dead`. We removed it and everything that read it.
+
+**What replaces it is this ADR's own rule:** what the code needs is a required, typed field the model fills, not a meaning the code guesses from prose. A World Event gets a required boolean `public` in both schemas that write events, the World Build's world events stage and a proposal's `schedule`: "everyone at the place sees or hears what this event changes (an announcement, a public act). False when only the people in seen_by notice it." The PC who witnesses a public event learns each effect on an entity it can name that is not hidden, and the outcome of an Open Item it holds; never a feeling or a choice of its own. A private event teaches only the perceptible effects (a move here, what happens to the PC on an involuntary key). Events stored without the field read as not public; the store keeps schema 3 and reads the flag from the event's ledger op.
+
+**An arrival is perceptible.** An event whose effect moves one of its actors, not hidden, to the PC's place is witnessed: the wait stops at it, the PC sees the NPC come back, and the store retires the departure record at that write.
+
+**One source for "the PC can name".** The store reads every standing Narration once per snapshot (`WorldView::story_names`); every rule that feeds the narrator or a screen reads it, instead of the last six Turns.
+
+Each change removes model output, changes what the narrator or a screen reads, or adds a field the model fills. None adds a PC act, word or feeling. Details and costs: data shape, sections 13 and 14.
+
+What we do not know yet: whether the model sets `public` sensibly. It is a new required field, untested on the live model. The live checks to run are in the data shape, section 14, and in the run report of this pass.

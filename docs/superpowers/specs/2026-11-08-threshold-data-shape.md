@@ -220,7 +220,7 @@ A QA pass on the live model found game bugs. These rules changed to fix them. Th
 
 The live `play_basics` evaluation showed that the model does not follow the prompt rules of section 10 for a move, a contest or an Open Item. What the code needs is now a required, enum-typed field of the proposal, and the code writes the facts.
 
-- **`move_to`.** Required and nullable in the per-Turn schema. Its enum is the handles of the places the PC knows (`world::known_places`: every place entity the PC can name by the rule of 3.5, `world::pc_can_name`, reading the view's recent standing Turns; changed after review; since review B1 a Narration names a place only with the name's own capitals, and never a hidden Adventure Seed entry) and `null`. The scene block lists them on one `PLACES (for move_to)` line. When the action is `move` (changed after review: `settle` drops `move_to` on any other action) and the verdict is allowed, or a Check succeeds, `to_ops` writes the PC's `location` with the place's main name, witnessed by the PC. An impossible verdict or a lost Check moves nobody. A move with `move_to: null` commits, and the PC stays. For the Shortcut checks this write counts like a proposal fact, or like the win stake on a Check. The `move` check and `checks::move_note` are gone.
+- **`move_to`.** Required and nullable in the per-Turn schema. Its enum is the handles of the places the PC knows (`world::known_places`: every place entity the PC can name by the rule of 3.5, `world::pc_can_name`, reading every standing Turn through `WorldView::story_names` since the second review of bug pass 4; changed after review; since review B1 a Narration names a place only with the name's own capitals, and never a hidden Adventure Seed entry) and `null`. The scene block lists them on one `PLACES (for move_to)` line. When the action is `move` (changed after review: `settle` drops `move_to` on any other action) and the verdict is allowed, or a Check succeeds, `to_ops` writes the PC's `location` with the place's main name, witnessed by the PC. An impossible verdict or a lost Check moves nobody. A move with `move_to: null` commits, and the PC stays. For the Shortcut checks this write counts like a proposal fact, or like the win stake on a Check. The `move` check and `checks::move_note` are gone.
 - **`settles`** (was `closes`, then `open_items`; changed in bug pass 3, 2026-11-11, see ADR 0007). One object `{item, outcome}`, required in the per-Turn schema while an item is offered, absent when none is. `item` is `none` or one Open Item that the Intent names (`world::items_named_by`), named `E<subject> pending_<x>` (`world::open_item_ref`). `outcome` is from a closed enum: `open`, `accepted`, `refused`, `done`, `failed`, `dropped`. `items_named_by` keeps each Open Item the PC holds (`world::pc_open_items`) when a content word of the Intent (at least 4 letters, not a stop word, not a name of the PC; the stop words are function words, verbs of speech and thought, and everyday verbs and nouns of play such as meet, plan, time, offer, town and night, as the Intent spells them; changed after review M2) matches a word of the item's text as the PC knows it, of its open key without the prefix, or of its subject's main name. Words match through a short stem; a stem of 5 letters or more also matches the start of a longer word. The offered items are listed with their text in the proposal prompt's tail, under `OPEN ITEMS (for settles)`, before the Intent; each line goes through `context::fact_text` and carries the `(open, not done)` marker (changed after review). So at most one item closes per Turn, and only one the Intent names. `outcome: open` and `item: none` close nothing; a proposal with no `settles` closes nothing. When the outcome closes the item and the verdict lets the action happen (allowed, or a Check that succeeds), `to_ops` writes the fact on `x` with the enum word as its value and the text `<Word>: <the Open Item's text as the PC holds it>` (`world::pc_item_text`; changed after review B3: it read the live fact, which a GM-only write may replace), witnessed by everyone present, the PC included (ADR 0005). With no text the PC holds, nothing closes and the item is not offered. No model text reaches that fact. The store keeps it Established, never Persistent, so a wrong close stays repairable in play. A proposal fact on the PC's outcome key is an agency error; a fact on the slot of the item that `settles` closes is dropped. `validate` rejects, and `settle` removes, a `settles` whose item the PC does not hold, or that this Turn did not offer (`DecisionProposal::offered`, set by the core from `HandleContext::open_items`; changed after review M1: with nothing offered, a close the model sent anyway committed).
 - **The narrator is told where the PC is.** The outcome block gets one line from the Commit: `context::PC_PLACE_LINE` and the place, or `context::NOT_MOVED_LINE` and the place when the action was a move and the Commit wrote no PC `location`. No narrator rule line is added.
 - **Stakes are optional for the core.** `CheckDraft.win` and `lose` stay required in the schema. The core drops a stake on the PC on a key outside `PC_INVOLUNTARY_KEYS` (and a PC `location` stake), and a Check with no stake still rolls; the narrator gets the result line.
@@ -286,21 +286,30 @@ The repair of B2 (section 12) is gone. It cost a model call, dropped true facts 
 An event moved Orsel, in front of the PC, to the hidden place "Smugglers Cellar". The PC got the Belief "Orsel is at Smugglers Cellar", and Orsel's card, the OOC sheet and the narrator's outcome showed it. The rule of section 12 now reads:
 
 - A witnessed location change gives the PC the destination only when the destination is the PC's own place, or a place entity the PC can name (`world::pc_can_name`). A location text that names no place entity counts as a place the PC cannot name.
-- Otherwise the PC sees the entity leave. The core writes a departure record: a fact on the entity's `location` with an empty value and the text "<name> leaves." ("Someone leaves." for an entity the PC cannot name), witnessed by the PC alone. The PC's Belief on it puts the entity nowhere the PC knows, so Here and the narrator's Present leave it out, and the narrator's outcome block reads "- Orsel leaves.".
+- Otherwise the PC sees the entity leave. The core writes a departure record: a fact on the entity's `location` with an empty value and the text "<name> left." ("Someone left." for an entity the PC cannot name), witnessed by the PC alone. The PC's Belief on it puts the entity nowhere the PC knows, so Here and the narrator's Present leave it out, and the narrator's outcome block reads "- Orsel left.". (The first version said "Orsel leaves.", and the card and the OOC sheet kept it in the present tense; see "A departure, a return" below.)
 - The record is Possible. The slot model holds one live Established value per slot, and the event's own fact stays world truth. A Possible fact never takes the slot: the store makes a witnessed Possible fact Established only when no Established fact holds the slot, and no prompt shows a Possible fact whose slot an Established fact holds (`context::Retrieval`). This is the one Possible fact play writes (section 9 said play writes none).
 - `context::guard_events` also drops an event text that names a place, a Faction or a thing the PC cannot name ("Orsel slips down to the Smugglers Cellar").
 - `PC_FELT_KEYS` is gone: the effect on the PC reads `checks::PC_INVOLUNTARY_KEYS`, the one list.
 
-### What the PC learns from an event that states its effect (M1)
+### What the PC learns from a public event (M1, changed after the second review)
 
-Since bug pass 4 an event that states its own effect in front of the PC was lost: "Orsel announces his plan to close the gate" with `Orsel.plan = close the gate` gave the narrator nothing, and the PC learned nothing. One deterministic rule now joins the two of section 12:
+Since bug pass 4 an event that changes something in front of the PC was lost: "Orsel announces his plan to close the gate" with `Orsel.plan = close the gate` gave the narrator nothing, and the PC learned nothing.
 
-- The PC who witnesses an event (present with its actor, `world::pc_witnesses`, as before) learns an effect of that event when the event's own text states the effect's value (`world::arrival::states`): every content word of the value is a word of the text, through a short stem ("closes" states "close"); function words (articles, prepositions, pronouns, auxiliaries) do not count, and "not" and "no" do. A value with no content word must stand whole in the text.
-- The rule does not cover a `location` (B1 rules it), the PC's own keys (only `PC_INVOLUNTARY_KEYS`: the text never gives the PC a feeling or a choice), an entity the PC cannot name, a hidden entity, or an event whose text names something the PC must not hear of (`context::names_unheard`, the name part of `guard_events`).
-- "Ludo retreats to a dark corner to count his remaining silver" does not state `debt_status = partially paid`: the PC does not learn it, as section 12 decided.
-- A fact the PC learns so is Persistent when its key is no state key, like any fact the PC witnesses (`world::with_witnessed_events` sets it; the store keeps state keys Established). Its key and value are then PC Knowledge, so they are no secret for the guards.
-- `context::guard_events` now drops an event text only when it holds a secret value, or names something the PC must not hear of. A secret key alone no longer drops it: "Ludo counts the silver for his debt" is told while the debt's value stays hidden. `guard_plans` keeps keys and values.
-- When a witnessed event stopped the clock and every part of it is guarded away (its text dropped, no effect reached the PC), the narrator gets the outcome line `- Nothing the PC notices happens.` (`context::QUIET_EVENT_LINE`). We chose this over a wait that does not stop: the wait's length is set before the Commit, and the guards read the state after it.
+The first fix was a word rule, `world::arrival::states`: the PC learned an effect when every content word of its value stood in the event's text. The second review showed that no word rule can judge meaning. "Orsel paid no attention to the crowd" taught the PC `Orsel.debt_status = paid`, and so did "Orsel has not paid the reeve"; "Orsel says yes to another ale" taught `guilty = yes`; "Orsel stares with dead eyes" taught `Pip.status = dead`. `states` and everything that read it are gone.
+
+The visibility of an effect is now data that the model declares, as ADR 0007 decided for every field the code needs:
+
+- A World Event has a boolean `public`: everyone at the place sees or hears what the event changes (an announcement, a public act). False when only the people in `seen_by` notice it. It is required in the two schemas that write events: the World Build's world events stage (`EventOut`) and a proposal's `schedule` (`EventDraft`, required by `proposal_schema_for`). Each schema description and one prompt rule line say so. The glossary term is **Public Event**.
+- The PC who witnesses an event (`world::pc_witnesses`) learns, when the event is public, each effect on an entity the PC can name that is not hidden, when the fact's text and value name nothing the PC must not hear of (`context::names_unheard`). On the PC itself a public event gives only the outcome slot of an Open Item the PC holds: never a feeling or a choice. The PC's involuntary keys (`checks::PC_INVOLUNTARY_KEYS`) are learned from any witnessed event, as in section 12.
+- When the event is not public, the PC learns only the perceptible effects of section 12 and of the departure rule above.
+- In both cases the event's text reaches the narrator through `context::guard_events`.
+- A fact the PC learns so is Persistent when its key is no state key, like any fact the PC witnesses. Its key and value are then PC Knowledge, so they are no secret for the guards.
+- `context::guard_events` drops an event text only when it holds a secret value, or names something the PC must not hear of. A secret key alone does not drop it: "Ludo counts the silver for his debt" is told while the debt's value stays hidden.
+- When a witnessed event stopped the clock and every part of it is guarded away (its text dropped, no effect reached the PC), the narrator gets the outcome line `- Nothing the PC notices happens.` (`context::QUIET_EVENT_LINE`).
+
+Where the flag lives. `LedgerOp::ScheduleEvent` and `WorldEvent` carry `public`; the world file's `EventEntry` has it with a default. The store keeps schema version 3: the `world_event` projection has no column for the flag, and the snapshot reads it from the event's ledger op (only the ops of the Turns that scheduled a live event are parsed). An op without the field (an old Campaign file) and a world file without it read as not public. A private event serializes as before, with no `public` key.
+
+What this does not cover: whether the model sets `public` sensibly. Nothing here was measured on the live model.
 
 ### Open for the PC: one rule (M2)
 
@@ -308,7 +317,8 @@ An event could write the outcome slot of an Open Item without the PC learning it
 
 - An item is open for the PC while the PC holds the Belief on its `pending_` key and no later PC row closes it. A row closes it when it comes from a fact on the outcome slot, or from the PC's own Claim on that slot. Another speaker's Claim is news, never an outcome. The world's facts do not count.
 - When the PC settles an item whose outcome slot the world already filled, the core does not overwrite the world's fact for those who know it: the slot model holds one live value. The PC's outcome becomes a Claim of the PC, `<Word>: <item text>`, told to the PC alone and stored as a told Claim is. It closes the item for the PC; the world's fact and its knowers stay. The narrator reads it as an outcome line, and no screen shows the PC as its own teller.
-- With M1, an event that states the outcome aloud ("Orsel reads out his ruling: the toll is raised") closes the item in that Turn. On the PC itself the text rule covers the outcome slot of an item the PC holds, never another key of the PC.
+- A public event that writes the outcome ("Orsel reads out his ruling: the toll is raised", `public: true`) closes the item in that Turn. On the PC itself a public event covers the outcome slot of an item the PC holds, never another key of the PC.
+- Changed after the second review (m6, m7): the PC's Claim is told to the NPCs the PC perceives here too (`world::openly_here`), since it is the PC's own stated decision; the world's fact stays. And only a canon fact fills the slot: a Possible fact (a seeded rumor) does not, so over it the core writes the outcome fact as on an empty slot.
 
 ### Who may say an other name: the NAMES block (M5, B2)
 
@@ -322,3 +332,44 @@ Bug pass 4 appended a bracket note, `[Wick: a name only … know; nobody else sa
 ### Which Turn is a Decision (minor)
 
 A Turn is a Decision when it closes an Open Item through `settles` (its stored proposal settles that item, and the item closed for the PC in that Turn), or when it is a Check, won or lost alike, whose stake changed a slot. A won Check used to count through its Persistent stake while a lost one, on a state key, did not. The play experience data shape (3.2, section 9) holds the rule's detail.
+
+## 14. Changed after the second review of bug pass 4 (2026-11-11)
+
+A second review found one blocker (the word rule, see "What the PC learns from a public event" in section 13), two majors and a list of minors. Nothing here was measured on the live model; deterministic tests cover each rule.
+
+### A departure, a return (M2, m4)
+
+Orsel left for a place the PC cannot name, then walked back in alone. The PC never witnessed it: the wait did not stop, the PC kept the departure record, the card kept "Orsel leaves.", and at the next departure a second Possible record piled up on the slot.
+
+- An arrival is perceptible. `world::pc_witnesses` also holds for an event whose effect moves one of its actors, not hidden, to the PC's place, whatever `seen_by` says. The wait stops at it, and the PC witnesses the location fact (the PC's own place is nameable), so Here lists the NPC again.
+- The store supersedes a live departure record (a Possible World Event `location` with no value) at the next canon write on its slot. A return retires it, and a slot never holds two live records.
+- The record says "<name> left.". The card shows a departure under "Where" as "Left; you do not know where." (`EntityCard::whereabouts`, `view::DEPARTED_TEXT`), not among the facts. The OOC sheet reads "Orsel left; the PC does not know where.". The views read a departure by its rule (a location with no value), so a record stored as "Orsel leaves." reads in the past too.
+
+### One source for "the PC can name" (m1, m2)
+
+`world::pc_can_name` read the view's last six Turns, while `pc_sight` read every standing Turn. A NAMES line lost a knower at the seventh Turn with no knower change, and a departure record called an NPC "Someone" whose card had her name. The store now reads every standing Narration once per snapshot and keeps the entities they name, hidden Adventure Seed entries left out, in `WorldView::story_names` (`world::story_names`). `pc_sight`, `pc_can_name`, `known_places`, the event perception, the narrator's guards and NAMES block, the Check opponent and the stream filter (`world::unnameable_names`, which now takes the view alone) all read it.
+
+Cost, release build, town fixture at 300 Turns: a snapshot takes 8.7 ms instead of 7.1 ms. The stream filter's names take 9 ms instead of 21 ms, and the play view stays at 26 ms (budget 50 ms). A Turn takes three or four snapshots, so about 5 to 6 ms more per Turn at 300 Turns.
+
+### The narrator's guards know name parts (M1)
+
+`context::names_unheard` matched a hidden or unnameable entity by its full main name, so "Brann whispers to Maren" reached the narrator while Maren Voss is hidden. A text now names an entity by the parts a speech tag uses (`world::name_parts`: the main name, a character's leading words, every other name), with the name's own capitals (`normalize::name_in`), so "a rose" does not name Rose Hale. A part that an entity the PC may hear of shares is left out. `guard_plans` gets the same check, and with it the guard on places, Factions and things the PC cannot name.
+
+### The NAMES block and hidden NPCs (m3)
+
+The narrator's block skipped a name that every other NPC knows. A hidden NPC who did not know it made the line appear. The narrator's block (and `adventure_block_chars`) now counts only the NPCs the PC can name when it decides that a name is restricted, so it is the same with and without a hidden NPC. The GM's block counts every NPC.
+
+### A told fact about the PC (m5)
+
+`view::CharacterFact` carries `told_by`, by the rule of the Journal's lines, and the Character screen shows "told by <name>".
+
+### Live checks still to run
+
+- **World Build.** Does the model set `public` sensibly on the world events stage? The `world_build` evaluation (`threshold-eval`, `evals/scenarios/world_build.toml`) counts events and events with an effect per built world; it should also count public events and list each event's text with its flag, for a person to judge (an announcement or a public act true; a secret or a private act false).
+- **Proposals.** Does the model set `public` on a `schedule`, and does it ever leave it out (a parse error now)? The `offscreen` and `play_basics` scenarios schedule events; their reports should show the flag and the repair count.
+- **Play.** One run where an NPC leaves and walks back in, to see the wait stop and the narrator tell the return.
+
+### Left open
+
+- m8: a secret key in an event text. The event guard drops a text for a secret value only, so a text may still name a secret key ("the debt").
+- m9: a common word as a secret value ("yes", "paid") drops every event text and plan that uses the word.
