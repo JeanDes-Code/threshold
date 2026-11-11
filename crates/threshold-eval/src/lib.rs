@@ -7,9 +7,12 @@
 //! what code cannot read. The model is not deterministic, so the report
 //! gives counts, never a pass/fail, except the latency pass line.
 
+mod departures;
 mod judge;
+mod ooc;
 mod open_items;
 mod play_basics;
+mod replay;
 pub mod scan;
 mod scenario;
 pub mod speech;
@@ -38,7 +41,7 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 10] = [
+pub const SCENARIOS: [&str; 13] = [
     "latency",
     "memory",
     "voices",
@@ -49,6 +52,9 @@ pub const SCENARIOS: [&str; 10] = [
     "speech",
     "play_basics",
     "open_items",
+    "ooc",
+    "departures",
+    "replay",
 ];
 
 /// The latency pass line (design §10): p90 at or under 15 s, warm.
@@ -86,6 +92,10 @@ pub struct Config {
     /// check results. They can hold GM-only facts, so `run` refuses a path
     /// inside `root`: they never reach a committed report.
     pub raw_log: Option<PathBuf>,
+    /// The replay scenario's Campaign file and Intents file (one Intent per
+    /// line). Both must lie outside `root`.
+    pub campaign: Option<PathBuf>,
+    pub intents: Option<PathBuf>,
 }
 
 /// Refuses a raw log path inside the repository root (`Config::raw_log`).
@@ -171,6 +181,9 @@ pub fn run(
             "speech" => speech::scenario(&mut ctx)?,
             "play_basics" => play_basics::scenario(&mut ctx)?,
             "open_items" => open_items::scenario(&mut ctx)?,
+            "ooc" => ooc::scenario(&mut ctx)?,
+            "departures" => departures::scenario(&mut ctx)?,
+            "replay" => replay::scenario(&mut ctx)?,
             _ => unreachable!("checked above"),
         };
         sections.insert(name, section);

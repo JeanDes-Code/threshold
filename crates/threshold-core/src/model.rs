@@ -41,12 +41,61 @@ impl fmt::Display for GmError {
 
 impl Error for GmError {}
 
+/// What the model server reported for one call (bug pass 5, M4). With a
+/// prompt cache, `prompt_tokens` counts only the tokens the server read
+/// fresh: Ollama's `prompt_eval_count` leaves out the cached prefix.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CallStats {
+    /// Prompt tokens read fresh (`prompt_eval_count`).
+    pub prompt_tokens: u64,
+    /// Time to read them (`prompt_eval_duration`), in milliseconds.
+    pub prompt_ms: u64,
+    /// Tokens generated (`eval_count`).
+    pub eval_tokens: u64,
+    /// Time to generate them (`eval_duration`), in milliseconds.
+    pub eval_ms: u64,
+}
+
+impl fmt::Display for CallStats {
+    /// One line of `key=value` pairs, for the debug log's `metrics` rows.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "prompt_eval_count={} prompt_eval_ms={} eval_count={} eval_ms={}",
+            self.prompt_tokens, self.prompt_ms, self.eval_tokens, self.eval_ms
+        )
+    }
+}
+
+impl CallStats {
+    /// Reads a line that `Display` wrote; `None` when a field is missing.
+    pub fn parse(line: &str) -> Option<Self> {
+        let field = |name: &str| -> Option<u64> {
+            line.split_whitespace()
+                .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))?
+                .parse()
+                .ok()
+        };
+        Some(Self {
+            prompt_tokens: field("prompt_eval_count")?,
+            prompt_ms: field("prompt_eval_ms")?,
+            eval_tokens: field("eval_count")?,
+            eval_ms: field("eval_ms")?,
+        })
+    }
+}
+
 pub trait Gm {
     fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError>;
     fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError>;
     /// The prompt tokens the model reported for the last call, if the adapter
     /// knows them.
     fn last_prompt_tokens(&self) -> Option<u64> {
+        None
+    }
+    /// The server's numbers for the last call, if the adapter knows them.
+    /// The engine writes them to the debug log (step `metrics`).
+    fn last_call_stats(&self) -> Option<CallStats> {
         None
     }
     /// Why the model stopped generating in the last call (`stop`,

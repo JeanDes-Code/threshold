@@ -30,7 +30,11 @@ fn report_has_every_metric() {
     );
     let config = Config {
         root: root(),
-        scenarios: SCENARIOS.iter().map(ToString::to_string).collect(),
+        scenarios: SCENARIOS
+            .iter()
+            .filter(|s| **s != "replay")
+            .map(ToString::to_string)
+            .collect(),
         runs: 2,
         model: "recorded".into(),
         judge: "first-choice".into(),
@@ -38,11 +42,13 @@ fn report_has_every_metric() {
         source: None,
         expected: None,
         raw_log: None,
+        campaign: None,
+        intents: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
     let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
 
-    for name in SCENARIOS {
+    for name in SCENARIOS.iter().filter(|s| **s != "replay") {
         assert_eq!(
             report.matches(&format!("\n## {name}\n")).count(),
             1,
@@ -80,14 +86,16 @@ fn report_has_every_metric() {
         "Moves to an unknown place that left the PC in place",
         "Wrong closes in total",
         "Proposal prompt tokens",
+        "Right answers in total",
+        "Departures told with no recorded departure",
     ] {
         assert!(report.contains(metric), "missing {metric}:\n{report}");
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4, speech 10, play_basics 8, open_items 9
-    // = 110 Turns.
-    assert!(report.contains("- Turns played: 220 (0 failed"), "{report}");
+    // agency_leaks 12, offscreen 4, speech 10, play_basics 8, open_items 9,
+    // departures 5 = 115 Turns. The OOC scenario plays no Turn.
+    assert!(report.contains("- Turns played: 230 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -438,6 +446,8 @@ fn offscreen_measures_the_seeded_event() {
         source: None,
         expected: None,
         raw_log: None,
+        campaign: None,
+        intents: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
     let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
@@ -1331,6 +1341,8 @@ mod speech {
             source: None,
             expected: None,
             raw_log: None,
+            campaign: None,
+            intents: None,
         };
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
         let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
@@ -1404,6 +1416,8 @@ fn play_basics_counts_each_step() {
             source: None,
             expected: None,
             raw_log: None,
+            campaign: None,
+            intents: None,
         };
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
         run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap()
@@ -1476,6 +1490,8 @@ fn raw_log_goes_to_a_file_outside_the_repository_only() {
         source: None,
         expected: None,
         raw_log: Some(raw_log),
+        campaign: None,
+        intents: None,
     };
     let inside = root().join("evals/reports/raw.log");
     let refused = run(
@@ -1567,6 +1583,8 @@ fn open_items_counts_right_and_wrong_closes() {
         source: None,
         expected: None,
         raw_log: None,
+        campaign: None,
+        intents: None,
     };
     let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
     let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();

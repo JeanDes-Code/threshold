@@ -42,6 +42,10 @@ use crate::{
 /// The longest Intent, in characters.
 pub const MAX_INTENT_CHARS: usize = 2_000;
 
+/// The debug step of a row with the server's numbers for one model call
+/// (`Engine::log_stats`).
+pub const METRICS_STEP: &str = "metrics";
+
 /// The `op_id` of the Opening Turn: a Campaign has one Begin at most.
 pub const BEGIN_OP_ID: &str = "__begin__";
 
@@ -371,6 +375,7 @@ impl Engine {
         let start = Instant::now();
         let answer = self.gm.narrate(&prompt, &mut |_| {});
         self.log(&op_id, "ooc", &prompt, answer_text(&answer), start)?;
+        self.log_stats(&op_id, "ooc")?;
         Ok(answer?)
     }
 
@@ -587,6 +592,7 @@ impl Engine {
         let start = Instant::now();
         let narration = narrate_through(self.gm.as_ref(), &prompt, hidden, on_chunk);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
+        self.log_stats(op_id, "narrate")?;
         Ok(narration?)
     }
 
@@ -605,6 +611,7 @@ impl Engine {
         let start = Instant::now();
         let narration = narrate_through(self.gm.as_ref(), &prompt, hidden, on_chunk);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
+        self.log_stats(op_id, "narrate")?;
         Ok(narration?)
     }
 
@@ -638,6 +645,7 @@ impl Engine {
                 None => answer_text(&raw).to_owned(),
             };
             self.log(op_id, attempt, &prompt, &logged, step)?;
+            self.log_stats(op_id, attempt)?;
             let raw = raw?;
 
             let step = Instant::now();
@@ -759,6 +767,22 @@ impl Engine {
             minutes: p.minutes,
             action: p.action,
             verdict: p.verdict,
+        })
+    }
+
+    /// One `metrics` row after a model call: the server's numbers for it
+    /// (`Gm::last_call_stats`), as `call=<step> prompt_eval_count=…`. No row
+    /// when the adapter reports none.
+    fn log_stats(&self, op_id: &str, call: &str) -> Result<(), StoreError> {
+        let Some(stats) = self.gm.last_call_stats() else {
+            return Ok(());
+        };
+        self.store.log_debug(DebugEntry {
+            op_id: op_id.to_owned(),
+            step: METRICS_STEP.to_owned(),
+            prompt: String::new(),
+            raw: format!("call={call} {stats}"),
+            ms: stats.prompt_ms + stats.eval_ms,
         })
     }
 

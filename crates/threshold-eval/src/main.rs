@@ -4,7 +4,8 @@
 //! Options:
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
 //!   voices, shortcuts, agency_leaks, offscreen, world_build, speech,
-//!   play_basics, open_items.
+//!   play_basics, open_items, ooc, departures, replay. `all` leaves out replay, which
+//!   needs a Campaign file.
 //!   Repeat or comma-separate.
 //! - `--runs <n>` (default 3)
 //! - `--judge local` (default): the same local model, with a short rubric.
@@ -16,6 +17,9 @@
 //!   outside the repository's `fixtures/` makes its report section print
 //!   counts only.
 //! - `--out <path>` (default `evals/reports/<date>.md`).
+//! - `--campaign <path>`, `--intents <path>`: the replay scenario's
+//!   Campaign file and Intents (one per line). Both must lie outside the
+//!   repository; the report prints numbers only.
 //! - `--raw-log <path>`: appends each Turn's raw proposals, core repairs
 //!   and check results to this file. They can hold GM-only facts, so a path
 //!   inside the repository is refused, and nothing of it reaches stderr or
@@ -46,6 +50,7 @@ fn real_main() -> Result<(), String> {
     let mut out: Option<PathBuf> = None;
     let mut raw_log: Option<PathBuf> = None;
     let (mut source, mut expected): (Option<PathBuf>, Option<PathBuf>) = (None, None);
+    let (mut campaign, mut intents): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value"));
@@ -65,6 +70,8 @@ fn real_main() -> Result<(), String> {
             "--raw-log" => raw_log = Some(PathBuf::from(value()?)),
             "--source" => source = Some(PathBuf::from(value()?)),
             "--expected" => expected = Some(PathBuf::from(value()?)),
+            "--campaign" => campaign = Some(PathBuf::from(value()?)),
+            "--intents" => intents = Some(PathBuf::from(value()?)),
             "-h" | "--help" => {
                 println!(
                     "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>] [--raw-log <path outside the repository>]"
@@ -75,7 +82,11 @@ fn real_main() -> Result<(), String> {
         }
     }
     if scenarios.is_empty() || scenarios.iter().any(|s| s == "all") {
-        scenarios = SCENARIOS.iter().map(ToString::to_string).collect();
+        scenarios = SCENARIOS
+            .iter()
+            .filter(|s| **s != "replay")
+            .map(ToString::to_string)
+            .collect();
     }
     if runs == 0 {
         return Err("--runs must be at least 1".into());
@@ -106,6 +117,8 @@ fn real_main() -> Result<(), String> {
         source: source.map(|p| cwd.join(p)),
         expected: expected.map(|p| cwd.join(p)),
         raw_log,
+        campaign: campaign.map(|p| cwd.join(p)),
+        intents: intents.map(|p| cwd.join(p)),
     };
     let make = || Box::new(OllamaGm::new(ollama.clone())) as Box<dyn Gm + Send>;
     let mut slow = ollama.clone();

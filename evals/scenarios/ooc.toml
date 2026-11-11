@@ -1,0 +1,72 @@
+# "Ask the GM" (bug pass 5, M2). QA asked "Which requests have I answered
+# and how?" after two refusals and got "You have not answered any
+# requests.", while "Which proposals did I accept or refuse so far?" got the
+# right answer. The PC holds three Open Items on the town fixture: one
+# accepted, one refused, one still open. Each question is asked in six
+# phrasings. An answer is right when it holds one word of each `all_of`
+# group and none of `none_of` (case does not matter).
+fixture = "town"
+
+[[items]]
+subject = "Orsel"
+key = "pending_copy_tithe_roll"
+value = "orsel asked, no answer yet"
+text = "Orsel asked Wren to copy the tithe roll before dusk."
+outcome = "accepted"
+
+[[items]]
+subject = "Hessa"
+key = "pending_supper_invitation"
+value = "invited, no answer yet"
+text = "Hessa invited Wren to supper at her house tonight."
+outcome = "refused"
+
+[[items]]
+subject = "Tobin"
+key = "pending_flour_payment"
+value = "two sacks unpaid"
+text = "Tobin wants Wren to pay for two sacks of flour by the next market day."
+
+[[questions]]
+topic = "who is here and what time"
+phrasings = [
+    "Who is here, and what time is it?",
+    "Who's in the room with me right now, and what's the time?",
+    "What time is it, and who else is around?",
+    "Remind me who is present and what hour it is.",
+    "Who can I see here, and how late is it?",
+    "Quick check: the time, and the people in this room?",
+]
+all_of = [["Orsel"], ["Doul"], ["Hessa"], ["08:00", "8:00", "eight", "8 a"]]
+none_of = ["Tobin is here", "do not know what time", "don't know what time"]
+
+[[questions]]
+topic = "what did I answer and how"
+phrasings = [
+    "Which requests have I answered and how?",
+    "What did I say yes or no to so far?",
+    "Which offers did I accept or refuse?",
+    "Have I answered anyone's requests yet? What did I answer?",
+    "What have I promised, and what have I turned down?",
+    "Which proposals did I accept or refuse so far?",
+]
+all_of = [
+    ["tithe"],
+    ["accept", "agreed", "said yes", "promised"],
+    ["supper"],
+    ["refus", "declin", "turned down", "said no"],
+]
+none_of = ["not answered any", "haven't answered any", "have not answered", "no requests"]
+
+[[questions]]
+topic = "what do I know about Tobin"
+phrasings = [
+    "What do I know about Tobin?",
+    "Tell me what my character knows of Tobin.",
+    "Who is Tobin, as far as I know?",
+    "Remind me about Tobin.",
+    "What have I learned about Tobin so far?",
+    "Anything I know about Tobin?",
+]
+all_of = [["flour"], ["sack", "pay", "owe"]]
+none_of = ["do not know anything", "don't know anything"]

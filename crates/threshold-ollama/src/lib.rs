@@ -16,7 +16,7 @@ const CANCEL_POLL: Duration = Duration::from_millis(100);
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use threshold_core::{Gm, GmError, Prompt};
+use threshold_core::{CallStats, Gm, GmError, Prompt};
 use ureq::{Agent, Response};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,6 +263,15 @@ impl Gm for OllamaGm {
 
     fn last_done_reason(&self) -> Option<String> {
         self.last_metrics().and_then(|metrics| metrics.done_reason)
+    }
+
+    fn last_call_stats(&self) -> Option<CallStats> {
+        self.last_metrics().map(|m| CallStats {
+            prompt_tokens: m.prompt_tokens,
+            prompt_ms: m.prompt_eval_duration_ns / 1_000_000,
+            eval_tokens: m.eval_tokens,
+            eval_ms: m.eval_duration_ns / 1_000_000,
+        })
     }
 }
 

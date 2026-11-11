@@ -1810,3 +1810,61 @@ fn a_contested_move_whose_destination_is_dropped_is_an_act() {
             .any(|(step, raw)| step == "settle" && raw.contains("move_to")),
     );
 }
+
+/// A recorded Gm that reports fixed server numbers for every call.
+struct StatsGm(RecordedGm);
+
+const STATS: threshold_core::CallStats = threshold_core::CallStats {
+    prompt_tokens: 120,
+    prompt_ms: 30,
+    eval_tokens: 40,
+    eval_ms: 800,
+};
+
+impl Gm for StatsGm {
+    fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
+        self.0.propose(prompt, schema)
+    }
+    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+        self.0.narrate(prompt, on_chunk)
+    }
+    fn last_call_stats(&self) -> Option<threshold_core::CallStats> {
+        Some(STATS)
+    }
+}
+
+#[test]
+fn each_model_call_writes_its_server_numbers_to_the_debug_log() {
+    let mut w = World::new();
+    let gm = RecordedGm::new(
+        vec![json(&proposal(Verdict::Allowed))],
+        vec!["You look.".into()],
+    );
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(StatsGm(gm)),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    engine
+        .play_turn("t1".into(), "I look around.", &mut no_chunks())
+        .unwrap();
+    let rows: Vec<String> = engine
+        .store()
+        .debug_log("t1")
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.step == threshold_core::turn::METRICS_STEP)
+        .map(|r| r.raw)
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            "call=propose prompt_eval_count=120 prompt_eval_ms=30 eval_count=40 eval_ms=800",
+            "call=narrate prompt_eval_count=120 prompt_eval_ms=30 eval_count=40 eval_ms=800",
+        ]
+    );
+    assert_eq!(threshold_core::CallStats::parse(&rows[1]), Some(STATS));
+}

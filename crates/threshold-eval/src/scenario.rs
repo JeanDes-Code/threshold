@@ -221,6 +221,71 @@ pub enum ItemKind {
     Unrelated,
 }
 
+/// "Ask the GM" (bug pass 5, M2): the PC holds Open Items, some of them
+/// already answered, and each question is asked in several phrasings. An
+/// answer is right when it holds one word of each `all_of` list and none of
+/// `none_of` (case does not matter).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ooc {
+    #[serde(default = "default_fixture")]
+    pub fixture: String,
+    pub items: Vec<AnsweredPending>,
+    pub questions: Vec<OocQuestion>,
+}
+
+/// An Open Item the PC holds, and, when `outcome` is set, its answer: a
+/// fact on the outcome key, as a closing `settles` writes it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnsweredPending {
+    pub subject: String,
+    pub key: String,
+    pub value: String,
+    pub text: String,
+    #[serde(default)]
+    pub outcome: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OocQuestion {
+    pub topic: String,
+    pub phrasings: Vec<String>,
+    pub all_of: Vec<Vec<String>>,
+    #[serde(default)]
+    pub none_of: Vec<String>,
+}
+
+/// Departures (bug pass 5, M1): the Player sends an NPC away, a World Event
+/// makes another NPC leave, then the PC looks around. Each Narration is
+/// judged against who is here after its Turn.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Departures {
+    #[serde(default = "default_fixture")]
+    pub fixture: String,
+    pub event: DepartureEvent,
+    pub steps: Vec<String>,
+}
+
+/// A World Event seeded before play whose text makes its actor leave. With
+/// `moves_actor_to`, it carries the actor's `location` effect, as the World
+/// Build writes it since bug pass 5; without, it has no effect, as the QA
+/// world's event had.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DepartureEvent {
+    pub actor: String,
+    pub text: String,
+    pub in_minutes: u64,
+    #[serde(default)]
+    pub seen_by: Vec<String>,
+    /// A place name, or `away` (a place the PC cannot name).
+    #[serde(default)]
+    pub moves_actor_to: Option<String>,
+}
+
 /// A Seed Draft and a World Build from a Source Text, scored against a
 /// hand-made list. A relative path starts at the repository root; the
 /// command line can name files outside it.
