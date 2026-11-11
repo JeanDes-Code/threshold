@@ -252,3 +252,17 @@ The rule is now:
 The other paths that give the PC a fact were checked. An event a proposal schedules fires through the same function, so the same rule holds; a test covers it. A proposal fact has the witnesses the model declares (`seen`). A stake is the visible result of a Check in the PC's Scene, witnessed by everyone present. A reaction writes no fact. These stay as they were.
 
 What this does not cover: a Campaign file committed before this change keeps the PC's Belief (the QA Campaign's fact 93). The data model has no "visible part" fact for an event: if the PC should remember "Ludo counted coins", that lives in the Narration only.
+
+### What the OOC prompt holds (MB)
+
+QA asked the GM three OOC questions, and the answers contradicted the screen: "Ludo Brenn is not mentioned as being in the common room", "You do not know what time it is", "You do not know what requests or offers you have answered tonight". The screen showed Ludo under Here, the clock at Day 1, 21:08, and two "Refused:" lines. The stored OOC prompt (debug log, step `ooc`) shows why: it held the rules, the Adventure Seed block and every PC Belief, and nothing else. No clock, no place line, no list of who is here (Ludo's presence was a Belief with the text "He drinks at the Copper Kettle when his barge waits for the tide."), no Turn, and each settled item twice, once with the open marker and once as "Refused: …".
+
+The OOC prompt's scene block is now `view::ooc_sheet`, made from `PcSight` only, like every Player screen:
+
+- `NOW`: the place as the top bar names it, `Time: Day N, HH:MM` (`view::clock_text`, the same words as `clockText` in the UI), and `Here with the PC:` with the names the PC knows ("someone the PC cannot name" for a character without one).
+- `OPEN ITEMS (not done yet)`: the side panel's list (`open_lines`).
+- `SETTLED ITEMS`: each closed item once, as its outcome line ("Refused: <item>").
+- `RECENT TURNS`: the last `view::OOC_RECENT_TURNS` (4) standing Turns, the Intent and the Narration as the Player read it.
+- `WHAT THE PC KNOWS`: every other PC Belief, with "told by".
+
+One rule line says what the blocks mean. The OOC call stays one plain call with no commit.

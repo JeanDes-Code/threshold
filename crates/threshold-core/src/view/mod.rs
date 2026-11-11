@@ -924,3 +924,158 @@ fn word_spans(text: &str) -> Vec<(usize, usize)> {
     }
     spans
 }
+
+/// How many of the latest standing Turns the OOC sheet shows.
+pub const OOC_RECENT_TURNS: usize = 4;
+
+/// The World Clock in the Player's words, as the top bar shows it
+/// (`clockText` of `ui/src/api.ts`): "Day 1, 08:05".
+pub fn clock_text(minutes: ClockMin) -> String {
+    format!(
+        "Day {}, {:02}:{:02}",
+        minutes / 1440 + 1,
+        (minutes % 1440) / 60,
+        minutes % 60
+    )
+}
+
+/// What the GM reads to answer an OOC question (bug pass 4, MB): the Play
+/// screen's facts, as text. An OOC answer is a Player screen, so it is made
+/// from `PcSight` only, like every view. QA asked "Who is in the room, what
+/// time is it?" and got "You do not know what time it is" and "Ludo Brenn is
+/// not mentioned as being in the common room", while the screen showed the
+/// clock and Ludo under Here: the old prompt held PC Knowledge only, with
+/// no clock, no presence, no Turn, and each closed item twice, once open.
+///
+/// The blocks: NOW (place, clock, who is here by the names the PC knows),
+/// OPEN ITEMS (`open_lines`), SETTLED ITEMS (each closed item with its
+/// outcome line), RECENT TURNS (the Intent and the Narration as the Player
+/// read it), then WHAT THE PC KNOWS (the other Beliefs).
+pub fn ooc_sheet(sight: &PcSight) -> String {
+    let mut out = String::from("NOW\n");
+    let place = sight.place.as_ref().map(|(entity_id, text)| {
+        entity_id
+            .and_then(|id| name_ref(sight, id)?.name)
+            .unwrap_or_else(|| text.clone())
+    });
+    out.push_str(&format!(
+        "Place: {}\n",
+        place.as_deref().unwrap_or("unknown")
+    ));
+    out.push_str(&format!("Time: {}\n", clock_text(sight.clock_min)));
+    let here: Vec<String> = sight
+        .present
+        .iter()
+        .filter(|id| **id != sight.pc)
+        .filter_map(|id| name_ref(sight, *id))
+        .map(|who| {
+            who.name
+                .unwrap_or_else(|| "someone the PC cannot name".into())
+        })
+        .collect();
+    if here.is_empty() {
+        out.push_str("Here with the PC: nobody\n");
+    } else {
+        out.push_str(&format!("Here with the PC: {}\n", here.join(", ")));
+    }
+
+    let open = open_lines(sight);
+    if !open.is_empty() {
+        out.push_str("OPEN ITEMS (not done yet)\n");
+        // The marker of every prompt line of an open item (ADR 0005).
+        for line in &open {
+            out.push_str(&format!("- (open, not done) {}\n", ooc_line(line)));
+        }
+    }
+    // Each closed item once, as its outcome line: "Refused: <item>".
+    let settled: Vec<(&OpenItem, Belief)> = sight
+        .open_items
+        .iter()
+        .filter(|item| item.closed_in.is_some())
+        .filter_map(|item| {
+            let key = outcome_key(&item.key)?;
+            let outcome = sight
+                .beliefs
+                .iter()
+                .find(|b| b.subject == item.subject && b.key == key)?;
+            Some((item, outcome.clone()))
+        })
+        .collect();
+    if !settled.is_empty() {
+        out.push_str("SETTLED ITEMS (done, refused or given up)\n");
+        for (_, outcome) in &settled {
+            if let Some(line) = fact_line(sight, outcome) {
+                out.push_str(&format!("- {}\n", ooc_line(&line)));
+            }
+        }
+    }
+
+    let turns: Vec<&SightTurn> = sight
+        .story
+        .iter()
+        .filter(|t| !t.reverted && t.narration.is_some())
+        .collect();
+    let recent = &turns[turns.len().saturating_sub(OOC_RECENT_TURNS)..];
+    if !recent.is_empty() {
+        out.push_str("RECENT TURNS (oldest first)\n");
+        for turn in recent {
+            if turn.kind != TurnKind::Opening {
+                out.push_str(&format!("Player: {}\n", one_line(&turn.intent)));
+            }
+            let text: Vec<String> = turn
+                .lines
+                .iter()
+                .map(|line| match line {
+                    SightLine::Prose(text) => one_line(text),
+                    SightLine::Speech { speaker, words } => {
+                        let name = name_ref(sight, *speaker)
+                            .and_then(|who| who.name)
+                            .unwrap_or_else(|| "Someone".into());
+                        format!("{name}: \"{}\"", one_line(words))
+                    }
+                })
+                .filter(|line| !line.is_empty())
+                .collect();
+            out.push_str(&format!("Narration: {}\n", text.join(" ")));
+        }
+    }
+
+    // Everything else the PC holds: no open key and no outcome line, which
+    // the item blocks above already show.
+    let item_keys: Vec<(EntityId, String)> = sight
+        .open_items
+        .iter()
+        .flat_map(|item| {
+            let outcome = outcome_key(&item.key).map(str::to_owned);
+            [Some(item.key.clone()), outcome]
+                .into_iter()
+                .flatten()
+                .map(move |key| (item.subject, key))
+        })
+        .collect();
+    let known: Vec<String> = sight
+        .beliefs
+        .iter()
+        .filter(|b| !item_keys.contains(&(b.subject, b.key.clone())))
+        .filter_map(|b| fact_line(sight, b))
+        .map(|line| format!("- {}\n", ooc_line(&line)))
+        .collect();
+    if !known.is_empty() {
+        out.push_str("WHAT THE PC KNOWS\n");
+        out.push_str(&known.concat());
+    }
+    out
+}
+
+/// One fact line of the OOC sheet: its text, and who told it.
+fn ooc_line(line: &FactLine) -> String {
+    let text = one_line(&line.text);
+    match line.told_by.as_ref().and_then(|who| who.name.as_deref()) {
+        Some(name) => format!("{text} (told by {name})"),
+        None => text,
+    }
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}

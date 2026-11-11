@@ -1530,3 +1530,75 @@ fn a_witnessed_event_s_hidden_effect_reaches_no_screen() {
         assert!(!json.contains("partially paid"), "the debt leaks: {json}");
     }
 }
+
+/// Bug pass 4, MB: the OOC prompt holds what the Play screen shows, from
+/// `PcSight` only: the place, the clock in the Player's words, who is here
+/// by the names the PC knows, the open and the settled items, the recent
+/// Turns. It holds no hidden fact.
+#[test]
+fn the_ooc_prompt_holds_the_play_screen_and_no_hidden_fact() {
+    use threshold_core::{RecordedGm, view::clock_text};
+    let mut w = HiddenWorld::new();
+    let (ada, meet_on) = (
+        w.ada,
+        w.view()
+            .live_fact(w.ada, "pending_meet")
+            .unwrap()
+            .slot
+            .subject,
+    );
+    let view = w.view();
+    let settled = w.play(
+        "I tell Brann: no, I will not meet you at the mill.",
+        &observe(),
+        2,
+        vec![set(
+            &view,
+            meet_on,
+            "meet",
+            "refused",
+            "Refused: Ada plans to meet Brann at the mill.",
+            &[ada],
+        )],
+    );
+    w.narrate(settled, "Brann: \"As you like.\"");
+    let gm = RecordedGm::new(vec![], vec!["You are at the gate square.".into()]);
+    let clock = w.view().clock_min;
+    let (mut engine, _campaign) = w.engine(&gm);
+    engine
+        .ooc(
+            "ooc-1".into(),
+            "Who is here, what time is it, and what did I refuse?",
+        )
+        .unwrap();
+    let prompt = &gm.calls()[0].prompt;
+    let all = [&prompt.stable, &prompt.scene, &prompt.recent]
+        .map(|s| s.as_str())
+        .concat();
+    assert!(all.contains("Place: gate square"), "{all}");
+    assert!(
+        all.contains(&format!("Time: {}", clock_text(clock))),
+        "{all}"
+    );
+    assert_eq!(clock_text(clock), "Day 1, 00:07");
+    assert!(
+        all.contains("Here with the PC: Orsel, Brann, someone the PC cannot name"),
+        "{all}"
+    );
+    assert!(all.contains("SETTLED ITEMS"), "{all}");
+    assert!(
+        all.contains("- Refused: Ada plans to meet Brann at the mill."),
+        "{all}"
+    );
+    // The closed item is listed once, as settled, never as open.
+    assert!(!all.contains("(open, not done) Ada plans"), "{all}");
+    assert_eq!(all.matches("Ada plans to meet Brann").count(), 1, "{all}");
+    assert!(
+        all.contains("Player: I tell Brann: no, I will not meet you at the mill."),
+        "{all}"
+    );
+    assert!(all.contains("Brann: \"As you like.\""), "{all}");
+    for hidden in HIDDEN {
+        assert!(!all.contains(hidden), "{hidden} leaks: {all}");
+    }
+}

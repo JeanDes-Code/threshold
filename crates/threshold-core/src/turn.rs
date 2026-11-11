@@ -20,12 +20,12 @@ use serde_json::json;
 use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     context::{
-        adventure_block, fact_text, guard_events, guard_plans, narration_prompt, one_line,
-        opening_prompt, perceived_by_pc, proposal_context, seen_present,
+        adventure_block, guard_events, guard_plans, narration_prompt, one_line, opening_prompt,
+        perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource,
-        Handle, Knowing, LedgerOp, Reaction, Verdict,
+        Handle, LedgerOp, Reaction, Verdict,
     },
     model::{Gm, GmError, Prompt},
     pack::ContentPack,
@@ -36,7 +36,7 @@ use crate::{
         CampaignId, CommitError, DebugEntry, OpId, Store, StoreError, StoredTurn, TurnId, TurnKind,
         TurnRecord, WorldView,
     },
-    world::{self, pc_knowledge},
+    world::{self, PcSight},
 };
 
 /// The longest Intent, in characters.
@@ -185,6 +185,7 @@ struct Planned {
 pub const OOC_RULES: &str = "\
 You answer the player's out-of-character question about a single-player tabletop role-playing game.
 Answer only from the adventure and what the player character (PC) knows, given below. If the answer is not there, say the PC does not know.
+NOW gives the PC's place, the time and who is here; OPEN ITEMS are not done yet; SETTLED ITEMS are done, and their first word is the outcome; RECENT TURNS are what the player last did and read.
 Never invent facts about the world, and never continue the story.
 Answer briefly, in plain prose.
 ";
@@ -359,7 +360,14 @@ impl Engine {
     pub fn ooc(&mut self, op_id: OpId, question: &str) -> Result<String, TurnError> {
         check_intent(question)?;
         let view = self.store.snapshot(self.campaign)?;
-        let prompt = ooc_prompt(&view, question);
+        let turns = self.store.turns(self.campaign)?;
+        let reverted: HashSet<TurnId> = self
+            .store
+            .reverted_turns(self.campaign)?
+            .into_iter()
+            .collect();
+        let sight = crate::world::pc_sight(&view, &turns, &reverted);
+        let prompt = ooc_prompt(&view, sight.as_ref(), question);
         let start = Instant::now();
         let answer = self.gm.narrate(&prompt, &mut |_| {});
         self.log(&op_id, "ooc", &prompt, answer_text(&answer), start)?;
@@ -885,27 +893,15 @@ fn stored_events(proposal_json: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The OOC prompt: rules, the narration prompt's stable block, then PC
-/// Knowledge, then the question.
-fn ooc_prompt(view: &WorldView, question: &str) -> Prompt {
+/// The OOC prompt: rules, the narration prompt's stable block, then the
+/// OOC sheet (`view::ooc_sheet`): what the Play screen shows, made from
+/// `PcSight` only (bug pass 4, MB), then the question.
+fn ooc_prompt(view: &WorldView, sight: Option<&PcSight>, question: &str) -> Prompt {
     let stable = adventure_block(view, None);
-    let mut scene = String::from("WHAT THE PC KNOWS\n");
-    let name = |id: u64| {
-        view.entities
-            .iter()
-            .find(|e| e.id == id)
-            .map_or_else(|| "someone".to_owned(), |e| e.name.clone())
-    };
-    for belief in pc_knowledge(view) {
-        match (belief.how, belief.source) {
-            (Knowing::Told, Some(speaker)) => scene.push_str(&format!(
-                "- {} (told by {})\n",
-                fact_text(&belief.key, &belief.text),
-                name(speaker)
-            )),
-            _ => scene.push_str(&format!("- {}\n", fact_text(&belief.key, &belief.text))),
-        }
-    }
+    let scene = sight.map_or_else(
+        || "NOW\nPlace: unknown\n".to_owned(),
+        crate::view::ooc_sheet,
+    );
     Prompt {
         system: OOC_RULES.to_owned(),
         stable,
