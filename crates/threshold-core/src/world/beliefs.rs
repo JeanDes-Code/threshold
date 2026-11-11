@@ -94,26 +94,104 @@ pub fn pc_knowledge(view: &WorldView) -> Vec<Belief> {
         .unwrap_or_default()
 }
 
-/// The Open Items the PC holds that are still open, as `(subject, open
-/// key)`: each live fact on a `pending_x` key that the PC believes, whose
-/// outcome slot `x` has no live fact yet. A Turn whose Intent settles one
-/// names it in a closing `settles`, and the core writes its outcome
-/// (ADR 0005, ADR 0007). Sorted, no duplicates.
+/// The Open Items the PC holds that are still open for the PC, as
+/// `(subject, open key)`: the rule of `pc_items` (review M2). A Turn whose
+/// Intent settles one names it in a closing `settles`, and the core writes
+/// its outcome (ADR 0005, ADR 0007). Sorted, no duplicates.
 pub fn pc_open_items(view: &WorldView) -> Vec<(EntityId, Key)> {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return Vec::new();
     };
-    let mut items: Vec<(EntityId, Key)> = beliefs(view, pc.id)
+    let rows: Vec<&Knowledge> = view
+        .knowledge
+        .iter()
+        .filter(|r| r.holder == pc.id)
+        .collect();
+    let mut items: Vec<(EntityId, Key)> = pc_items(view, pc.id, &rows)
         .into_iter()
-        .filter(|b| is_open_key(&b.key) && view.live_fact(b.subject, &b.key).is_some())
-        .filter(|b| {
-            outcome_key(&b.key).is_some_and(|outcome| view.live_fact(b.subject, outcome).is_none())
-        })
-        .map(|b| (b.subject, b.key))
+        .filter(|item| item.closing.is_none())
+        .map(|item| (item.belief.subject, item.belief.key))
         .collect();
     items.sort();
     items.dedup();
     items
+}
+
+/// One Open Item as the PC holds it.
+pub(super) struct ItemState<'a> {
+    /// The PC's Belief on the open key now.
+    pub belief: Belief,
+    /// The place, among the PC's rows in the order they were written, of
+    /// the first row on the fact or the Claim of that Belief.
+    pub first: usize,
+    /// The PC's row that closed the item for the PC, if one did.
+    pub closing: Option<&'a Knowledge>,
+}
+
+/// Every Open Item the PC holds, open or closed for the PC: each PC Belief
+/// on a `pending_` key, and the first later PC row that closes it
+/// (`closes_item`). `rows` are the PC's `knowledge` rows in the order they
+/// were written. The one rule of "open for the PC" (review M2): an item is
+/// open while the PC holds the pending Belief and no row that closes it.
+/// The world's state does not count: an outcome slot that an event wrote
+/// without the PC leaves the item open for the PC, on the screens, in the
+/// offer of `settles` and in `pc_open_items` alike. `pc_sight` reads it for
+/// the screens.
+pub(super) fn pc_items<'a>(
+    view: &WorldView,
+    pc: EntityId,
+    rows: &[&'a Knowledge],
+) -> Vec<ItemState<'a>> {
+    let at = |i: usize| (rows[i].learned_at, i);
+    held(view, rows.iter().copied(), view.clock_min)
+        .into_iter()
+        .filter(|(b, _)| is_open_key(&b.key))
+        .filter_map(|(belief, open)| {
+            // The first time the PC learned this open row. A later row on the
+            // same fact (a proposal that restates it) must not re-open an
+            // item that an outcome already closed.
+            let first = (0..rows.len())
+                .filter(|i| rows[*i].fact_id == open.fact_id && rows[*i].claim_id == open.claim_id)
+                .min_by_key(|i| at(*i))?;
+            let closing = outcome_key(&belief.key).and_then(|outcome| {
+                (0..rows.len())
+                    .filter(|i| rows[*i].arrives_at <= view.clock_min && at(*i) > at(first))
+                    .map(|i| rows[i])
+                    .find(|row| closes_item(view, pc, row, belief.subject, outcome))
+            });
+            Some(ItemState {
+                belief,
+                first,
+                closing,
+            })
+        })
+        .collect()
+}
+
+/// True when the PC's `row` closes an Open Item whose outcome slot is
+/// `(subject, outcome)` for the PC: a row from a fact on that slot, or from
+/// the PC's own Claim on it (a `settles` whose slot the world had already
+/// filled, review M2). A Claim of anyone else never closes an item: it is
+/// news the PC was told, and the item stays open.
+fn closes_item(
+    view: &WorldView,
+    pc: EntityId,
+    row: &Knowledge,
+    subject: EntityId,
+    outcome: &str,
+) -> bool {
+    if let Some(id) = row.fact_id {
+        return view
+            .facts
+            .iter()
+            .find(|f| f.id == id)
+            .is_some_and(|f| f.slot.subject == subject && f.slot.key == outcome);
+    }
+    row.claim_id
+        .and_then(|id| view.claims.iter().find(|c| c.id == id))
+        .is_some_and(|c| {
+            c.claim.speaker == pc && c.claim.slot.subject == subject && c.claim.slot.key == outcome
+        })
 }
 
 /// The text of an Open Item as the PC holds it: the text of the PC's Belief

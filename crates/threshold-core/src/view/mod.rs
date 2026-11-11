@@ -835,7 +835,11 @@ fn fact_line(sight: &PcSight, belief: &Belief) -> Option<FactLine> {
         subject: name_ref(sight, belief.subject)?,
         text,
         open: is_open_key(&belief.key),
-        told_by: belief.source.and_then(|id| name_ref(sight, id)),
+        // The PC's own Claim (a `settles` outcome, review M2) has no teller.
+        told_by: belief
+            .source
+            .filter(|id| *id != sight.pc)
+            .and_then(|id| name_ref(sight, id)),
     })
 }
 

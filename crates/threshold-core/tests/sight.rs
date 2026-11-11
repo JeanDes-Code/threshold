@@ -1330,3 +1330,84 @@ fn a_close_on_an_observe_turn_is_a_decision() {
         );
     }
 }
+
+/// Review M2: a GM-only write fills the outcome slot of an item the PC
+/// holds, and the PC never sees it. The item is open for the PC on every
+/// path: the screens, `pc_open_items` and the offer. When the PC settles
+/// it, the PC's outcome is the PC's Belief, and the world keeps its fact
+/// for those who know it.
+#[test]
+fn an_item_whose_outcome_the_pc_never_saw_stays_open_and_can_be_settled() {
+    use threshold_core::world::{beliefs, items_named_by, pc_knowledge, pc_open_items};
+    let mut w = HiddenWorld::new();
+    let (ada, brann) = (w.ada, w.brann);
+    let view = w.view();
+    w.play(
+        "I wait.",
+        &record(ActionKind::Wait, Verdict::Allowed, None),
+        1,
+        vec![set(
+            &view,
+            ada,
+            "meet",
+            "cancelled",
+            "Brann called the meeting off.",
+            &[brann],
+        )],
+    );
+    let view = w.view();
+    let item = (ada, "pending_meet".to_owned());
+    assert_eq!(pc_open_items(&view), [item.clone()]);
+    assert_eq!(meet(&w.sight(), ada).closed_in, None);
+    assert_eq!(items_named_by(&view, "Yes, I will meet Brann."), [item]);
+
+    let mut accept = proposal(Verdict::Allowed);
+    accept.action = ActionKind::Talk;
+    accept.settles = Some(threshold_core::domain::Settle {
+        item: format!("E{ada} pending_meet"),
+        outcome: threshold_core::domain::ItemStatus::Accepted,
+    });
+    let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
+    let (mut engine, campaign) = w.engine(&gm);
+    let outcome = engine
+        .play_turn(
+            "t-accept".into(),
+            "Yes, I will meet Brann.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert_eq!(view.live_fact(ada, "meet").unwrap().slot.value, "cancelled");
+    assert!(
+        beliefs(&view, brann)
+            .iter()
+            .any(|b| b.subject == ada && b.key == "meet" && b.value == "cancelled"),
+        "Brann keeps the world's fact"
+    );
+    assert!(
+        pc_knowledge(&view)
+            .iter()
+            .any(|b| b.subject == ada && b.key == "meet" && b.value == "accepted"),
+        "{:?}",
+        pc_knowledge(&view)
+    );
+    assert!(pc_open_items(&view).is_empty());
+    let sight = sight_of(engine.store(), campaign);
+    assert_eq!(meet(&sight, ada).closed_in, Some(outcome.turn_id));
+    assert!(moment(&sight, outcome.turn_id).unwrap().decision);
+    // The narrator reads the outcome line, not a line the PC "says".
+    let recent = gm
+        .calls()
+        .into_iter()
+        .filter(|c| c.kind == threshold_core::CallKind::Narrate)
+        .map(|c| c.prompt.recent)
+        .next_back()
+        .unwrap();
+    assert!(recent.contains("- Accepted: "), "{recent}");
+    assert!(!recent.contains("Ada says"), "{recent}");
+    // No screen says the PC told itself.
+    let marks = threshold_core::player::Marks::default();
+    let journal =
+        serde_json::to_string(&threshold_core::view::journal_view(&sight, &marks)).unwrap();
+    assert!(!journal.contains("\"told_by\":{"), "{journal}");
+}

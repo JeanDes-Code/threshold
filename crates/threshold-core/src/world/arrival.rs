@@ -248,6 +248,12 @@ pub fn with_witnessed_events(view: &WorldView, ops: Vec<LedgerOp>) -> (Vec<Ledge
         pc: pc.id,
         here: here.as_deref(),
         named: super::sight::pc_can_name(view, &standing),
+        items: super::beliefs::pc_open_items(view)
+            .into_iter()
+            .filter_map(|(subject, key)| {
+                crate::domain::outcome_key(&key).map(|k| (subject, k.to_owned()))
+            })
+            .collect(),
     };
     let mut texts = Vec::new();
     let mut out = Vec::with_capacity(ops.len());
@@ -324,6 +330,9 @@ struct Sight<'a> {
     here: Option<&'a str>,
     /// The entities the PC can name (`world::pc_can_name`).
     named: std::collections::HashSet<EntityId>,
+    /// The outcome slots of the Open Items open for the PC, as `(subject,
+    /// outcome key)`.
+    items: Vec<(EntityId, String)>,
 }
 
 impl Sight<'_> {
@@ -351,8 +360,16 @@ impl Sight<'_> {
         };
         let key = normalize::key(&slot.key);
         if subject == self.pc {
-            // The text rule never gives the PC a feeling or a choice.
-            return if crate::checks::PC_INVOLUNTARY_KEYS.contains(&key.as_str()) {
+            // The text rule never gives the PC a feeling or a choice: on the
+            // PC, it covers only the outcome of an Open Item the PC holds
+            // ("the meeting is cancelled", review M2).
+            let involuntary = crate::checks::PC_INVOLUNTARY_KEYS.contains(&key.as_str());
+            let outcome = self.items.iter().any(|(s, k)| *s == subject && *k == key);
+            return if involuntary
+                || outcome
+                    && states(text, &slot.value)
+                    && !crate::context::names_unheard(self.view, text)
+            {
                 Perceived::Effect
             } else {
                 Perceived::Nothing

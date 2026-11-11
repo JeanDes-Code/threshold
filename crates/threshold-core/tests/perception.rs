@@ -384,3 +384,46 @@ fn an_event_guarded_away_gives_the_narrator_a_neutral_line() {
         "{recent}"
     );
 }
+
+/// Review M2 with M1: an event that states the ruling aloud closes the item
+/// for the PC in that Turn, on an NPC's item and on the PC's own.
+#[test]
+fn an_announced_ruling_closes_the_item_in_that_turn() {
+    let mut w = World::new();
+    let (ada, orsel) = (w.ada, w.orsel);
+    let pending = |subject: u64, key: &str, text: &str| LedgerOp::AddFact {
+        slot: Slot {
+            subject: EntityRef::Id(subject),
+            key: key.into(),
+            value: "pending".into(),
+        },
+        text: text.into(),
+        canon: Canon::Established,
+        source: threshold_core::domain::FactSource::Proposal,
+        seen_by: vec![EntityRef::Id(ada), EntityRef::Id(orsel)],
+        causes: vec![],
+    };
+    w.commit(vec![
+        pending(orsel, "pending_toll", "Orsel will rule on the toll."),
+        pending(ada, "pending_meet", "Ada is to meet Orsel's clerk."),
+    ]);
+    schedule(
+        &mut w,
+        "Orsel reads out his ruling: the toll is raised, and the meeting is cancelled",
+        &[(orsel, "toll", "raised"), (ada, "meet", "cancelled")],
+    );
+    let (engine, campaign, recent) = wait(w);
+    let view = view_of(&engine, campaign);
+    assert!(
+        threshold_core::world::pc_open_items(&view).is_empty(),
+        "{:?}",
+        threshold_core::world::pc_open_items(&view)
+    );
+    let sight = sight(engine.store(), campaign);
+    let last = sight.story.last().unwrap().turn;
+    for key in ["pending_toll", "pending_meet"] {
+        let item = sight.open_items.iter().find(|i| i.key == key).unwrap();
+        assert_eq!(item.closed_in, Some(last), "{key}");
+    }
+    assert!(recent.contains("toll is now raised"), "{recent}");
+}

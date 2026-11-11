@@ -251,7 +251,12 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
             Origin::Move,
         );
     }
-    for close in closed(p, view).into_iter().filter(|_| happens) {
+    // A close whose outcome slot the world already filled writes no slot:
+    // the core tells the PC a Claim instead (`to_ops`, review M2).
+    for close in closed(p, view)
+        .into_iter()
+        .filter(|c| happens && view.live_fact(c.subject, c.key).is_none())
+    {
         push(
             Handle::Entity(close.subject),
             close.key,

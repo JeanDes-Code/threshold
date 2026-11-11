@@ -342,7 +342,7 @@ fn scene(r: &Retrieval<'_>) -> String {
         .into_iter()
         .filter(|b| shown.contains(&b.subject))
         .map(|b| match (b.how, b.source) {
-            (Knowing::Told, Some(speaker)) => {
+            (Knowing::Told, Some(speaker)) if Some(speaker) != r.pc => {
                 format!(
                     "- {} (told by {})\n",
                     fact_text(&b.key, &b.text),
@@ -385,6 +385,13 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
         LedgerOp::AddFact { slot, text, .. } => format!("- {}\n", fact_text(&slot.key, text)),
         LedgerOp::SupersedeFact { new, .. } => {
             format!("- {}\n", fact_text(&new.slot.key, &new.text))
+        }
+        // The PC's own Claim is the outcome of a `settles` (review M2): an
+        // outcome line, never words the PC says.
+        LedgerOp::AddClaim { claim, .. }
+            if r.pc.is_some_and(|pc| claim.speaker == EntityRef::Id(pc)) =>
+        {
+            format!("- {}\n", fact_text(&claim.slot.key, &claim.text))
         }
         LedgerOp::AddClaim { claim, .. } => format!(
             "- {} says: {}\n",

@@ -85,14 +85,37 @@ pub fn to_ops(
     // the action happen (changed after review). The core builds the value
     // and the text from the outcome word and the item's text as the PC
     // holds it (review B3), never the live text.
+    //
+    // An item whose outcome slot the world already filled, unseen by the PC
+    // (review M2): the core does not overwrite the world's fact for those
+    // who know it. The PC's outcome is a Claim of the PC, told to the PC
+    // alone, stored as a told Claim is: it closes the item for the PC
+    // (`world::pc_open_items`), and the slot keeps its fact.
     for close in super::closed(p, view).into_iter().filter(|_| lets_happen) {
+        let text = close.outcome.text(&close.text);
+        let filled = view.live_fact(close.subject, close.key).is_some();
+        if let (true, Some(pc)) = (filled, pc(view)) {
+            b.ops.push(LedgerOp::AddClaim {
+                claim: ClaimDraft {
+                    speaker: EntityRef::Id(pc),
+                    slot: Slot {
+                        subject: EntityRef::Id(close.subject),
+                        key: close.key.to_owned(),
+                        value: close.outcome.word().to_owned(),
+                    },
+                    text,
+                },
+                listeners: vec![EntityRef::Id(pc)],
+                delay_min: 0,
+            });
+            continue;
+        }
         let holders = b.holders(Seen::Present);
         let outcome = SlotDraft {
             subject: Handle::Entity(close.subject),
             key: close.key.to_owned(),
             value: close.outcome.word().to_owned(),
         };
-        let text = close.outcome.text(&close.text);
         b.write_text(&outcome, text, FactSource::Proposal, holders, Vec::new());
     }
     if let (Some(place), Some(pc)) = (&moved_to, pc(view)) {

@@ -14,7 +14,7 @@ use crate::{
     context::seen_present,
     domain::{
         ActionKind, Canon, ClockMin, EntityId, EntityKind, FactSource, Key, Knowing, Verdict,
-        is_alias_key, is_open_key, outcome_key,
+        is_alias_key, is_open_key,
     },
     normalize,
     rules::RollResult,
@@ -60,9 +60,11 @@ pub struct OpenItem {
     /// The open key, `pending_` prefix included.
     pub key: Key,
     pub text: String,
-    /// The Turn of the first PC row from a fact on the outcome slot, learned
-    /// after the first PC row on the open fact. A Claim never closes an
-    /// item, and a closed item stays closed.
+    /// The Turn of the first PC row that closes the item for the PC
+    /// (`world::beliefs::pc_items`, review M2): a row from a fact on the
+    /// outcome slot, or from the PC's own Claim on it, learned after the
+    /// first PC row on the open fact. Another speaker's Claim never closes
+    /// an item, and a closed item stays closed.
     pub closed_in: Option<TurnId>,
     /// When the PC first learned the item: the place of that row among the
     /// PC's rows, in the order they were written. A higher one is newer.
@@ -179,18 +181,12 @@ pub fn pc_sight(
         .copied()
         .filter(|t| is_story(t.record.kind) && !reverted.contains(&t.id))
         .collect();
-    // The PC's rows in the order they were written, with that order.
+    // The PC's rows in the order they were written.
     let rows: Vec<&Knowledge> = view
         .knowledge
         .iter()
         .filter(|r| r.holder == pc.id)
         .collect();
-    let order: HashMap<*const Knowledge, usize> = rows
-        .iter()
-        .enumerate()
-        .map(|(i, row)| (std::ptr::from_ref(*row), i))
-        .collect();
-    let at = |row: &Knowledge| (row.learned_at, order[&std::ptr::from_ref(row)]);
     let now = held(view, rows.iter().copied(), view.clock_min);
 
     let named = named(view, pc.id, &now, &standing);
@@ -218,36 +214,15 @@ pub fn pc_sight(
         .filter(|b| kept(b))
         .collect();
 
-    let open_items: Vec<OpenItem> = now
-        .iter()
-        .filter(|(b, _)| kept(b) && is_open_key(&b.key))
-        .map(|(b, open)| {
-            // The first time the PC learned this open row. A later row on the
-            // same fact (a proposal that restates it) must not re-open an
-            // item that an outcome already closed.
-            let first = rows
-                .iter()
-                .copied()
-                .filter(|r| r.fact_id == open.fact_id && r.claim_id == open.claim_id)
-                .min_by_key(|r| at(r))
-                .unwrap_or(open);
-            let closed_in = outcome_key(&b.key).and_then(|outcome| {
-                arrived()
-                    .filter(|r| at(r) > at(first))
-                    .find(|r| {
-                        r.fact_id
-                            .and_then(|id| view.facts.iter().find(|f| f.id == id))
-                            .is_some_and(|f| f.slot.subject == b.subject && f.slot.key == outcome)
-                    })
-                    .map(|r| r.turn)
-            });
-            OpenItem {
-                subject: b.subject,
-                key: b.key.clone(),
-                text: b.text.clone(),
-                closed_in,
-                learned: order[&std::ptr::from_ref(first)],
-            }
+    let open_items: Vec<OpenItem> = super::beliefs::pc_items(view, pc.id, &rows)
+        .into_iter()
+        .filter(|item| kept(&item.belief))
+        .map(|item| OpenItem {
+            subject: item.belief.subject,
+            key: item.belief.key.clone(),
+            text: item.belief.text.clone(),
+            closed_in: item.closing.map(|row| row.turn),
+            learned: item.first,
         })
         .collect();
 

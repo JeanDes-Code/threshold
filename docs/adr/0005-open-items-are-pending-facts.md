@@ -54,3 +54,7 @@ A Campaign built from a Source Text held 12 Open Items. With one required status
 ## Changed after review (2026-11-11)
 
 The outcome fact's text is built from the item's text as the PC holds it (the PC's Belief on the open key), not from the live fact: a GM-only write can replace the live fact, and the PC would then hold a text it never knew. A `settles` closes only an item this Turn offered. See ADR 0007.
+
+## Changed after the review of bug pass 4 (2026-11-11)
+
+"Open" means open for the PC, by one rule (`world::beliefs::pc_items`): the PC holds the item's Belief, and no later PC row comes from a fact on the outcome slot or from the PC's own Claim on it. `pc_open_items`, the screens and the offer of `settles` read it; the world's live facts no longer decide it. An item whose outcome an event wrote unseen stays open for the PC and can be settled. Then the core keeps the world's fact and tells the PC its outcome as a Claim of the PC (data shape section 13).
