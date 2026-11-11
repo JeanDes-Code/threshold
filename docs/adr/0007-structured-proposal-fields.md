@@ -131,3 +131,9 @@ What this does not cover:
 - **A hidden seed entry's name in a Narration** still reaches the Player as text, if the narrator writes it. It is no longer a link, a card or a People and places line.
 - **A restatement on another subject** (1 of the 7 QA items) stays a GM-only Open Item. The proposal prompt can show it as open after the PC settled the first copy.
 - **A word with a capital at the start of a sentence** ("Gate" as the first word of a sentence) still names the place Gate.
+
+## Changed after the review of bug pass 4 (2026-11-11)
+
+- **`settles` on an item whose outcome the world already wrote.** An event could fill an item's outcome slot without the PC learning it. The item now stays open for the PC and is offered (ADR 0005, one rule for "open"). When the PC settles it, the core does not overwrite the world's fact for those who know it: the outcome `<Word>: <item text>` becomes a Claim of the PC, told to the PC alone. It closes the item for the PC. The leniency rule holds: the Claim comes from the Player's Intent, through `settles`.
+- **Decisions follow `settles` alone, or a Check whose stake changed a slot**, won or lost alike (data shape, section 13).
+- **What the narrator gets of a witnessed event** changed too (data shape, section 13: a departure to a place the PC cannot name, an effect the event's text states, a neutral line when every part of an event is guarded away). None of it was measured on the live model.

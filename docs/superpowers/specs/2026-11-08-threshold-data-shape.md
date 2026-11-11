@@ -318,3 +318,7 @@ Bug pass 4 appended a bracket note, `[Wick: a name only … know; nobody else sa
 - The knowers are data, not the Adventure Seed alone: every holder of a Belief on the name's `alias_` slot (`world::holders_of`). The store writes the seed's `known_to` as such Beliefs, already resolved to entities, and a knower who learns the name in play joins the line. So a knower cited by its other name ("the Grey Lady") is its entity (B2). The bearer and the PC are not listed.
 - The narrator's block (narration and Begin) leaves out a hidden bearer, an other name the PC does not know, and each knower that is hidden or that the PC cannot name. The proposal prompt (the GM) lists every knower by main name.
 - The block follows the data: two Turns of one Scene share it byte for byte unless a knower changes (ADR 0001; test `the_names_block_keeps_the_prefix_stable`). `context::adventure_block_chars` counts it from the Adventure Seed.
+
+### Which Turn is a Decision (minor)
+
+A Turn is a Decision when it closes an Open Item through `settles` (its stored proposal settles that item, and the item closed for the PC in that Turn), or when it is a Check, won or lost alike, whose stake changed a slot. A won Check used to count through its Persistent stake while a lost one, on a state key, did not. The play experience data shape (3.2, section 9) holds the rule's detail.
