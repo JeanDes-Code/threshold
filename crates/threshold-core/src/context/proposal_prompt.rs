@@ -144,27 +144,39 @@ fn system(packs: &[ContentPack]) -> String {
 /// One entity line. It takes the `Entity` itself, so an unknown id can never
 /// be rendered as an empty line.
 fn entity_line(r: &Retrieval<'_>, e: &Entity) -> String {
-    let id = e.id;
+    let mut line = identity(e);
+    line.push_str(&entity_state(r, e.id));
+    line.push('\n');
+    line
+}
+
+/// `E<id> <name> (<kind>, age <n>)`: what does not change in play.
+fn identity(e: &Entity) -> String {
     let kind = serde_json::to_value(e.kind)
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_default();
-    let mut line = format!("E{id} {} ({kind}", e.name);
+    let mut line = format!("E{} {} ({kind}", e.id, e.name);
     if let Some(age) = e.age {
         line.push_str(&format!(", age {age}"));
     }
     line.push(')');
+    line
+}
+
+/// `; attitude to PC <n>; keys: <keys>`, or nothing: what a Turn changes.
+fn entity_state(r: &Retrieval<'_>, id: EntityId) -> String {
+    let mut out = String::new();
     if let Some(pc) = r.pc.filter(|pc| *pc != id)
         && let Some(a) = r.view.attitudes.iter().find(|a| a.from == id && a.to == pc)
     {
-        line.push_str(&format!("; attitude to PC {}", a.attitude));
+        out.push_str(&format!("; attitude to PC {}", a.attitude));
     }
     let keys = r.live_keys(id);
     if !keys.is_empty() {
-        line.push_str(&format!("; keys: {}", keys.join(", ")));
+        out.push_str(&format!("; keys: {}", keys.join(", ")));
     }
-    line.push('\n');
-    line
+    out
 }
 
 fn fact_line(r: &Retrieval<'_>, f: &Fact) -> String {
@@ -193,6 +205,13 @@ fn fact_line(r: &Retrieval<'_>, f: &Fact) -> String {
     line
 }
 
+/// The scene block, the part that changes least first (ADR 0001, changed in
+/// bug pass 4): Ollama reuses a prompt up to its first changed byte. QA's
+/// proposal prompts broke inside this block on 5 of 20 Turns, at an
+/// ENTITIES line whose key list or attitude had changed, and every line
+/// after it was read again. So the entity lines hold the name only, the
+/// Persistent facts come before the others, and the key lists and
+/// attitudes come last, under ENTITY STATE.
 fn scene(r: &Retrieval<'_>) -> String {
     let mut out = String::from("SCENE\n");
     match (&r.location, r.place) {
@@ -209,25 +228,14 @@ fn scene(r: &Retrieval<'_>) -> String {
     }
     out.push_str("ENTITIES\n");
     for id in &r.scene_entities {
-        out.push_str(&entity_line(r, r.known(*id)));
+        out.push_str(&identity(r.known(*id)));
+        out.push('\n');
     }
     let voices = r.voice_cards(&r.present);
     if !voices.is_empty() {
         out.push_str("VOICES\n");
         for card in voices {
             out.push_str(&render_voice(&format!("E{}", card.npc), card));
-        }
-    }
-    if !r.scene_facts.is_empty() {
-        out.push_str("FACTS\n");
-        for f in &r.scene_facts {
-            out.push_str(&fact_line(r, f));
-        }
-    }
-    if !r.obstacles.is_empty() {
-        out.push_str("OPEN OBSTACLES\n");
-        for f in &r.obstacles {
-            out.push_str(&fact_line(r, f));
         }
     }
     if !r.goals.is_empty() {
@@ -244,6 +252,24 @@ fn scene(r: &Retrieval<'_>) -> String {
                 g.npc_id,
                 one_line(&g.text)
             ));
+        }
+    }
+    if !r.scene_facts.is_empty() {
+        out.push_str("FACTS\n");
+        // Persistent facts first: no Turn changes them, so a new or a
+        // changed fact breaks the prefix after them.
+        let (fixed, open): (Vec<&Fact>, Vec<&Fact>) = r
+            .scene_facts
+            .iter()
+            .partition(|f| f.canon == Canon::Persistent);
+        for f in fixed.into_iter().chain(open) {
+            out.push_str(&fact_line(r, f));
+        }
+    }
+    if !r.obstacles.is_empty() {
+        out.push_str("OPEN OBSTACLES\n");
+        for f in &r.obstacles {
+            out.push_str(&fact_line(r, f));
         }
     }
     if !r.events.is_empty() {
@@ -263,6 +289,19 @@ fn scene(r: &Retrieval<'_>) -> String {
                 one_line(&w.text)
             ));
         }
+    }
+    let state: Vec<String> = r
+        .scene_entities
+        .iter()
+        .filter_map(|id| {
+            let state = entity_state(r, *id);
+            let state = state.strip_prefix("; ")?;
+            Some(format!("E{id}: {state}\n"))
+        })
+        .collect();
+    if !state.is_empty() {
+        out.push_str("ENTITY STATE\n");
+        out.push_str(&state.concat());
     }
     out
 }

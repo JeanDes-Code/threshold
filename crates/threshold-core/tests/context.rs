@@ -1306,3 +1306,63 @@ fn alias_notes_keep_the_prefix_stable() {
     let b = proposal_prompt(&view, &[], "I ask Swift's friend Brann for the time.");
     assert_eq!(prefix(&a), prefix(&b));
 }
+
+/// The length of the common prefix of `a` and `b`, in bytes.
+fn shared_prefix(a: &str, b: &str) -> usize {
+    a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
+}
+
+/// Bug pass 4, ME: two consecutive Turns of one Scene, where the first
+/// changes a present NPC (a new key, a new attitude, a changed fact).
+/// The proposal prompt is sent as `system + stable + scene`, then `recent`
+/// (`threshold-ollama`); Ollama reuses it up to the first changed byte. The
+/// change now sits at the end of the scene block, so the two prompts share
+/// at least 90% of the first one's scene-and-before part. Before the
+/// reorder, they diverged at Orsel's ENTITIES line.
+#[test]
+fn a_changed_npc_keeps_most_of_the_proposal_prefix() {
+    let mut w = World::new();
+    w.commit(vec![
+        voice(w.orsel, "Speaks in clipped orders"),
+        voice(w.brann, "Talks fast and laughs"),
+    ]);
+    witness_presence(&mut w);
+    let before = proposal_prompt(&w.view, &[], "I greet Orsel and Brann.");
+    let (orsel, ada) = (w.orsel, w.ada);
+    let mood = w.view.live_fact(orsel, "location").unwrap().id;
+    play_turn(
+        &mut w,
+        "turn-a",
+        "I greet Orsel and Brann.",
+        "Orsel nods without warmth.",
+        vec![
+            LedgerOp::AdvanceClock { minutes: 5 },
+            add_fact(orsel, "mood", "wary", "Orsel is wary.", vec![ada]),
+            LedgerOp::ShiftAttitude {
+                from: EntityRef::Id(orsel),
+                to: EntityRef::Id(ada),
+                delta: -1,
+            },
+        ],
+    );
+    assert!(w.view.live_fact(orsel, "location").unwrap().id == mood);
+    let after = proposal_prompt(&w.view, &[], "I ask Orsel why he frowns.");
+    let head = |p: &Prompt| format!("{}{}{}", p.system, p.stable, p.scene);
+    let (a, b) = (fields(&before).concat(), fields(&after).concat());
+    let shared = shared_prefix(&a, &b);
+    let wanted = head(&before).len() * 9 / 10;
+    assert!(
+        shared >= wanted,
+        "shared {shared} of {} (head {}): diverges at {:?}",
+        a.len(),
+        head(&before).len(),
+        &b[shared..(shared + 80).min(b.len())]
+    );
+    // The change is in the prompt, after the stable part.
+    assert!(after.scene.contains("mood"), "{}", after.scene);
+    let state = after.scene.split("ENTITY STATE\n").nth(1).unwrap();
+    assert!(
+        state.contains(&format!("E{orsel}: attitude to PC")),
+        "{state}"
+    );
+}

@@ -65,3 +65,31 @@ These change the machine or carry a risk, so they are the owner's call:
 - One machine, one session, a few calls per measure. The idle test ran once.
 - The swapped size is a snapshot of `/proc/<pid>/status`, not a trace over time.
 - The Narration's time (6 to 9 s in QA) was not changed: about 200 tokens of prose at 40 to 50 tokens per second.
+
+## Bug pass 4 (2026-11-11): what the prompt prefix shares, Turn after Turn
+
+Not measured on the live model yet. These numbers come from prompt text only: the QA Campaign's stored prompts (QA pass 3, 20 consecutive proposal pairs) and the same Turns' proposal prompts rebuilt by the code before and after the reorder of ADR 0001 (bug pass 4). Tokens are estimated at 4 characters each. Script: `scripts/qa/prompt_prefix.py` on a copy of the Campaign file.
+
+| Proposal prompts | Mean shared prefix | Share of the prompt | Pairs that part before 6,000 chars |
+|---|---|---|---|
+| Stored by QA pass 3 | 9,862 chars (about 2,470 tokens) | 59.1% | 6 of 20: 4,598 to 5,651 chars |
+| Rebuilt, before the reorder | 10,398 chars (about 2,600 tokens) | 59.4% | 6 of 20: 4,746 to 5,955 chars |
+| Rebuilt, after the reorder | 11,369 chars (about 2,840 tokens) | 64.8% | 2 of 20: 4,746 chars (the two place changes) |
+
+The rebuilt prompts are longer than the stored ones by about 700 characters: they carry the other-name notes of bug pass 4 (MA). Of the 6 early parts, 4 were an ENTITIES line whose key list had changed and 2 a place change. After the reorder, those 4 Turns share 8,917 to 11,531 characters instead of 4,977 to 5,955: about 1,000 to 1,500 tokens fewer to read on such a Turn, about 1 to 1.5 s at the cold rate above, if the cache holds. The 13 other Turns already part at `Minute N`, the first line of the `recent` block, and do not change. The `recent` block (about 5,500 characters, 1,400 tokens: the recent Turns and the Intent) is read on every Turn, because the window of recent Turns moves by one Turn each time.
+
+The stored timings show a second cause that the prompt does not own:
+
+| Call | Turns 2 to 4 | Turn 6 on |
+|---|---|---|
+| Proposal after the previous Turn's narration | 3.3 to 3.8 s | 5.4 to 11 s |
+| Retry right after a proposal (same prefix) | (none) | 2.0 to 2.8 s |
+
+From Turn 6 on, a proposal that shared about 3,000 tokens with the previous proposal read its whole prompt, while a retry right after a proposal read from the cache. So the narration call between two proposals took the proposal's cache. A proposal prompt and a narration prompt share about 12 characters at the start, so with one cache slot no call reuses anything. Turn 6 is also the Turn whose first proposal call timed out after 60 s. We cannot tell from the Campaign file whether Ollama then ran with fewer slots; the server log of that night would. The app cannot choose a slot: Ollama's `/api/chat` has no such field, and the number of slots is `OLLAMA_NUM_PARALLEL`, a server setting we did not change.
+
+Options, not done:
+
+- Start the proposal and the narration prompt with the same block (the Adventure Seed block, about 800 characters in this Campaign, about 200 tokens), so that one slot still serves both calls a little. It moves the rules after that block; the live model must be measured first.
+- Cut the window of recent Turns in steps (keep 3 to 6 Turns) instead of one Turn at a time, so its start stays the same for several Turns. It changes what the model reads.
+
+Live checks still to run: the per-call `prompt_eval_count` of Ollama on a replay of these Turns, with the server's slot count noted.

@@ -29,3 +29,11 @@ With the MoE at 16K context and a 10K-token prompt, we measured a warm Turn (dec
 - **Fresh context budget of about 4-6K tokens per Turn.** Above that, a Turn with a cold prompt exceeds 15 s.
 - **One model behind an adapter.** Domain and world logic never name a model. Changing the Ollama tag is a configuration change.
 - The `-64k` tag's `num_ctx 65536` is a ceiling, not a per-Turn setting. A larger context pushes more of the model onto the CPU.
+
+## Changed in bug pass 4 (2026-11-11): the scene block puts what a Turn changes last
+
+QA saw the proposal call of most Turns from Turn 6 on read about 4,500 tokens again, against 700 to 1,100 on Turns 2 to 5. `scripts/qa/prompt_prefix.py` compares the proposal prompts that the QA Campaign's debug log stored, Turn after Turn. On 13 of 20 pairs the prompts share about 11,900 characters (about 3,000 tokens) and part at `Minute N`, the first line of the `recent` block, as designed. On 6 pairs they part early in the scene block, at 4,600 to 5,700 characters: four times at an ENTITIES line whose key list had changed (a new key on Agathe, Ludo, Sefa or the PC), twice at a place change. One pair parts at the SCHEDULED EVENTS block.
+
+The proposal prompt's scene block now has this order: place, PLACES, ENTITIES (handle, name, kind and age only), VOICES, NPC GOALS, FACTS (Persistent facts first, then the others, each in id order), OPEN OBSTACLES, SCHEDULED EVENTS, then ENTITY STATE: one line per entity with its attitude to the PC and its key list. The model gets the same lines; only their order changed. The narrator prompt is unchanged.
+
+The prompt cache does not explain the rest of the QA numbers. From Turn 6 on, a proposal that shared about 3,000 tokens with the previous proposal still took 6 to 11 s, while a retry right after a proposal took 2 to 3 s. So the previous proposal's cache was gone when the next proposal came: the narration call between them took its place. A proposal and a narration prompt share about 12 characters ("You are the "), so with one cache slot each call reads its whole prompt. Ollama's `/api/chat` has no field to choose a slot, so the adapter cannot keep one slot per call; the number of slots is a server setting (`OLLAMA_NUM_PARALLEL`). The numbers are in `evals/reports/2026-11-turn-time.md`.
