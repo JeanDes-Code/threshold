@@ -15,8 +15,8 @@
 use std::collections::HashSet;
 
 use super::{
-    Retrieval, adventure_block, fact_text, one_line, recent_block, render_voice, seen_present,
-    with_fragments,
+    AliasAudience, Retrieval, adventure_block, fact_text, one_line, recent_block, render_voice,
+    seen_present, with_alias_notes, with_fragments,
 };
 use crate::{
     domain::{
@@ -213,12 +213,13 @@ pub fn narration_prompt(
     turn: Option<(ActionKind, Verdict)>,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
-    Prompt {
+    let prompt = Prompt {
         system: with_fragments(NARRATION_RULES, packs),
         stable: adventure_block(view_after, None),
         scene: scene(&r),
         recent: recent(&r, perceived, events, reactions, intent, turn),
-    }
+    };
+    with_alias_notes(prompt, view_after, AliasAudience::Narrator)
 }
 
 /// The outcome line of an impossible attempt (changed after QA,
@@ -263,12 +264,13 @@ pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt {
             }
         }
     }
-    Prompt {
+    let prompt = Prompt {
         system: with_fragments(&format!("{NARRATION_RULES}{OPENING_RULES}"), packs),
         stable: adventure_block(view, None),
         scene: scene(&r),
         recent,
-    }
+    };
+    with_alias_notes(prompt, view, AliasAudience::Narrator)
 }
 
 fn scene(r: &Retrieval<'_>) -> String {

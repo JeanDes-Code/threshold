@@ -24,6 +24,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     domain::{AdventureSeed, EntityId, EntityKind, Trigger, is_open_key},
+    model::Prompt,
     normalize,
     pack::{ContentPack, InsertPoint},
     store::{Entity, Fact, Goal, StoredTurn, TurnKind, VoiceCard, WorldEvent, WorldView},
@@ -309,10 +310,14 @@ pub(crate) fn adventure_block(view: &WorldView, pc: Option<EntityId>) -> String 
         .map_or_else(|| "ADVENTURE\n".to_owned(), |seed| seed_block(seed, pc))
 }
 
-/// The length in chars of the stable block that `seed` gives, without the
-/// PC's handle. `ADVENTURE_BLOCK_MAX_CHARS` caps it.
+/// The length in chars of the stable block that `seed` gives the narrator,
+/// without the PC's handle and with its other-name notes (bug pass 4).
+/// `ADVENTURE_BLOCK_MAX_CHARS` caps it.
 pub fn adventure_block_chars(seed: &AdventureSeed) -> usize {
-    seed_block(seed, None).chars().count()
+    let notes = seed_alias_notes(seed, AliasAudience::Narrator);
+    mark_aliases(&seed_block(seed, None), &notes)
+        .chars()
+        .count()
 }
 
 /// Premise, the PC line with age and other names, story language,
@@ -410,4 +415,130 @@ pub(crate) fn recent_block(view: &WorldView, head: &str, tail: &str) -> String {
         out = build(&rendered);
     }
     out
+}
+
+/// Who may say an other name, for the prompts (bug pass 4, MA). QA: Ludo
+/// Brenn called the PC "Wick" in three Narrations, a name the Adventure Seed
+/// gives to Agathe Morrow and Sefa Lind only. The name stood unmarked in the
+/// premise, on the PC line, in the PC's Beliefs and in the recent Turns, and
+/// one prompt serves every NPC of the Scene.
+#[derive(Clone, Debug)]
+pub(crate) struct AliasNote {
+    /// The other name's words (`normalize::name_words`), article left out.
+    words: Vec<String>,
+    /// The note that follows each line that uses the name.
+    note: String,
+}
+
+/// Which prompt the notes are for. The narrator gets only the other names
+/// the PC knows, and never a hidden Adventure Seed entry as a knower.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AliasAudience {
+    Gm,
+    Narrator,
+}
+
+/// One note per other name in the Adventure Seed: the PC's, and each
+/// entry's. Its knowers are the entry's `known_to`, without the bearer. The
+/// narrator's notes leave out a hidden entry (as a bearer and as a knower)
+/// and an NPC's other name that the PC does not know (no `known_to` entry
+/// for the PC): the narrator must not learn that name, or who knows it.
+pub(crate) fn alias_notes(view: &WorldView, audience: AliasAudience) -> Vec<AliasNote> {
+    view.adventure_seed
+        .as_ref()
+        .map_or_else(Vec::new, |seed| seed_alias_notes(seed, audience))
+}
+
+/// `alias_notes` from the Adventure Seed alone: an entry is hidden when the
+/// seed says so, as `world::hidden` reads it.
+fn seed_alias_notes(seed: &AdventureSeed, audience: AliasAudience) -> Vec<AliasNote> {
+    let is_pc = |name: &str| normalize::name(name) == normalize::name(&seed.pc.name);
+    let hidden_name = |name: &str| {
+        seed.entities
+            .iter()
+            .any(|e| e.hidden && normalize::name(&e.name) == normalize::name(name))
+    };
+    let narrator = audience == AliasAudience::Narrator;
+    let bearers = std::iter::once((seed.pc.name.as_str(), &seed.pc.other_names, false)).chain(
+        seed.entities
+            .iter()
+            .map(|e| (e.name.as_str(), &e.other_names, e.hidden)),
+    );
+    let mut notes = Vec::new();
+    for (bearer, other_names, bearer_hidden) in bearers {
+        if narrator && bearer_hidden {
+            continue;
+        }
+        for other in other_names {
+            let pc_knows = is_pc(bearer) || other.known_to.iter().any(|k| is_pc(k));
+            if narrator && !pc_knows {
+                continue;
+            }
+            let words = normalize::name_words(&normalize::name(&other.name));
+            if words.is_empty() {
+                continue;
+            }
+            let knowers: Vec<String> = other
+                .known_to
+                .iter()
+                .filter(|k| normalize::name(k) != normalize::name(bearer))
+                .filter(|k| !(narrator && hidden_name(k)))
+                .map(|k| one_line(k))
+                .collect();
+            let name = one_line(&other.name);
+            let note = if knowers.is_empty() {
+                format!("[{name}: a name no other character knows; nobody says it]")
+            } else {
+                let verb = if knowers.len() == 1 { "knows" } else { "know" };
+                format!(
+                    "[{name}: a name only {} {verb}; nobody else says it]",
+                    knowers.join(" and ")
+                )
+            };
+            notes.push(AliasNote { words, note });
+        }
+    }
+    notes
+}
+
+/// `text` with the note of each other name it uses after the line that uses
+/// it, once per line. A line that already holds the note keeps it as it is.
+pub(crate) fn mark_aliases(text: &str, notes: &[AliasNote]) -> String {
+    if notes.is_empty() {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let (body, end) = match line.strip_suffix('\n') {
+            Some(body) => (body, "\n"),
+            None => (line, ""),
+        };
+        out.push_str(body);
+        let words = normalize::name_words(body);
+        for note in notes {
+            let uses = words
+                .windows(note.words.len())
+                .any(|w| w == note.words.as_slice());
+            if uses && !body.contains(&note.note) {
+                out.push(' ');
+                out.push_str(&note.note);
+            }
+        }
+        out.push_str(end);
+    }
+    out
+}
+
+/// `prompt` with every use of an other name marked (`mark_aliases`), in
+/// each block but the rules.
+pub(crate) fn with_alias_notes(
+    mut prompt: Prompt,
+    view: &WorldView,
+    audience: AliasAudience,
+) -> Prompt {
+    let notes = alias_notes(view, audience);
+    prompt.stable = mark_aliases(&prompt.stable, &notes);
+    prompt.scene = mark_aliases(&prompt.scene, &notes);
+    prompt.recent = mark_aliases(&prompt.recent, &notes);
+    prompt
 }

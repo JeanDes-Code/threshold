@@ -1203,3 +1203,106 @@ fn a_place_the_pc_cannot_name_is_no_move_target() {
     assert!(!nameable.contains(&cove));
     assert!(nameable.contains(&w.gate));
 }
+
+/// Bug pass 4, MA: an other name with few knowers. Ada is also "Swift",
+/// known to Brann only; Orsel, who does not know it, stands in the same
+/// Scene. Orsel is also "the Toll-Wolf", known to Brann only, and the PC
+/// does not know that name.
+fn alias_world() -> (Store, u64, WorldView) {
+    use threshold_core::{domain::OtherName, turn::create_campaign};
+    let mut seed = adventure_seed();
+    seed.premise =
+        "A town gate at dusk. Ada, a courier called Swift, waits for the night post.".into();
+    seed.pc.other_names = vec![OtherName {
+        name: "Swift".into(),
+        known_to: vec!["Brann".into()],
+    }];
+    seed.entities
+        .iter_mut()
+        .find(|e| e.name == "Orsel")
+        .unwrap()
+        .other_names = vec![OtherName {
+        name: "the Toll-Wolf".into(),
+        known_to: vec!["Brann".into()],
+    }];
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &seed, 7).unwrap();
+    let clock = store.snapshot(campaign).unwrap().clock_min;
+    let turn = store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: "talk".into(),
+                kind: TurnKind::Play,
+                intent: "I ask Brann why he calls me Swift.".into(),
+                proposal_json: "{}".into(),
+                clock_before: clock,
+                clock_after: clock,
+            },
+            vec![],
+        )
+        .unwrap();
+    store
+        .set_narration(
+            turn,
+            "Brann grins.\n\nBrann: \"Everyone on the night road knows Swift.\"\n\nThe Toll-Wolf mark is cut into the gate.",
+        )
+        .unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    (store, campaign, view)
+}
+
+/// Every line of `text` that uses `name` as a whole word carries `note`.
+fn every_use_marked(text: &str, name: &str, note: &str) {
+    for line in text.lines() {
+        let uses = line
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|w| w == name);
+        assert!(!uses || line.contains(note), "unmarked use: {line}");
+    }
+}
+
+#[test]
+fn a_restricted_other_name_is_marked_with_its_knowers() {
+    let (_store, _campaign, view) = alias_world();
+    let note = "[Swift: a name only Brann knows; nobody else says it]";
+    let narrator = narration_prompt(&view, &[], &[], &[], &[], "I nod to Orsel.", None);
+    let opening = opening_prompt(&view, &[]);
+    let proposal = proposal_prompt(&view, &[], "I tell Orsel that Swift needs no escort.");
+    for prompt in [&narrator, &opening, &proposal] {
+        let text = fields(prompt).concat();
+        assert!(text.contains(note), "{text}");
+        every_use_marked(&text, "swift", note);
+    }
+    // The PC line itself carries the note in every prompt.
+    assert!(
+        narrator
+            .stable
+            .lines()
+            .any(|l| l.starts_with("PC: Ada") && l.contains(note)),
+        "{}",
+        narrator.stable
+    );
+    // The narrator never learns an other name the PC does not know, nor who
+    // knows it; the GM sees it marked.
+    let narration = fields(&narrator).concat();
+    assert!(!narration.contains("only Brann knows; nobody else says it] [the Toll-Wolf"));
+    assert!(!narration.contains("[the Toll-Wolf"), "{narration}");
+    let gm = fields(&proposal).concat();
+    every_use_marked(
+        &gm,
+        "wolf",
+        "[the Toll-Wolf: a name only Brann knows; nobody else says it]",
+    );
+}
+
+/// The notes add no change between two Turns of one Scene: the prefix
+/// stays byte-identical (ADR 0001).
+#[test]
+fn alias_notes_keep_the_prefix_stable() {
+    let (_store, _campaign, view) = alias_world();
+    let a = proposal_prompt(&view, &[], "I nod to Orsel.");
+    let b = proposal_prompt(&view, &[], "I ask Swift's friend Brann for the time.");
+    assert_eq!(prefix(&a), prefix(&b));
+}
