@@ -783,7 +783,11 @@ fn story() -> Story {
     let view = w.view();
     let trade = w.play(
         "I hand over the salt.",
-        &record(ActionKind::Act, Verdict::Allowed, None),
+        &settling(
+            ActionKind::Act,
+            format!("E{} pending_trade", w.ada),
+            threshold_core::domain::ItemStatus::Done,
+        ),
         5,
         vec![set(
             &view,
@@ -1759,7 +1763,11 @@ fn the_journal_says_how_an_item_ended() {
     let item_text = view.live_fact(ada, "pending_meet").unwrap().text.clone();
     let turn = w.play(
         "No, I will not meet Brann.",
-        &record(ActionKind::Talk, Verdict::Allowed, None),
+        &settling(
+            ActionKind::Talk,
+            format!("E{ada} pending_meet"),
+            threshold_core::domain::ItemStatus::Refused,
+        ),
         1,
         vec![set(
             &view,

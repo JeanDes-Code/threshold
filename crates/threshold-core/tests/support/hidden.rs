@@ -64,6 +64,19 @@ pub fn record(action: ActionKind, verdict: Verdict, roll: Option<RollResult>) ->
     json!({ "proposal": p, "reactions": [], "events": [], "roll": roll }).to_string()
 }
 
+/// A `proposal_json` whose proposal settles `item` (`E<id> pending_<x>`)
+/// with `outcome`, as the Engine stores a Turn that closes an Open Item.
+pub fn settling(
+    action: ActionKind,
+    item: String,
+    outcome: threshold_core::domain::ItemStatus,
+) -> String {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = action;
+    p.settles = Some(threshold_core::domain::Settle { item, outcome });
+    json!({ "proposal": p, "reactions": [], "events": [], "roll": null }).to_string()
+}
+
 /// The PC's sight of a campaign in `store`.
 pub fn sight_of(store: &Store, campaign: u64) -> PcSight {
     let view = store.snapshot(campaign).unwrap();

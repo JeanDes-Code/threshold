@@ -12,15 +12,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use super::beliefs::{Belief, belief, held};
 use crate::{
     context::seen_present,
-    domain::{
-        ActionKind, Canon, ClockMin, EntityId, EntityKind, FactSource, Key, Knowing, Verdict,
-        is_alias_key, is_open_key,
-    },
+    domain::{Canon, ClockMin, EntityId, EntityKind, FactSource, Key, Knowing, is_alias_key},
     normalize,
     rules::RollResult,
     speech::{self, Line},
     store::{Entity, Fact, Knowledge, StoredTurn, TurnId, TurnKind, WorldView},
-    turn::{stored_action, stored_roll},
+    turn::{stored_roll, stored_settles},
 };
 
 /// A Turn that moves the World Clock by more than this starts a new Scene.
@@ -255,7 +252,7 @@ pub fn pc_sight(
                 place,
                 clock_after: t.record.clock_after,
                 learned: Vec::new(),
-                decision: decision(t, view, &rows, &open_items),
+                decision: decision(t, view, &open_items),
             }
         })
         .collect();
@@ -690,45 +687,30 @@ fn present_at(
     seen.into_iter().collect()
 }
 
-/// A decision of the PC (data shape 3.2): a standing Play or Correction
-/// Turn that closed an Open Item the PC knows, whatever its action
-/// (Decisions follow `settles`, ADR 0007; changed after review: a close on
-/// an `observe` or `wait` Turn was missed); or one whose stored action is
-/// `talk`, `move` or `act`, not impossible, that wrote a Persistent fact
-/// from the proposal, its Check or a Correction, or wrote an Open Item the
-/// PC knows. A Roll alone is no decision (bug pass 4): every arm-wrestle of
-/// QA carried the badge, and a contest decides nothing the PC holds.
-fn decision(
-    turn: &StoredTurn,
-    view: &WorldView,
-    rows: &[&Knowledge],
-    open_items: &[OpenItem],
-) -> bool {
+/// A decision of the PC (data shape 3.2, review minor): a standing Play or
+/// Correction Turn that closed an Open Item the PC knows through `settles`
+/// (its stored proposal settles that item), whatever its action; or a Turn
+/// with a Check, won or lost alike, whose stake changed a slot (it wrote a
+/// fact with the source `Stake`). Nothing else: a lasting fact or a new
+/// Open Item without a Check, an outcome written without `settles`, a Roll
+/// whose stake changed nothing (QA's arm-wrestles all carried the badge in
+/// bug pass 3).
+fn decision(turn: &StoredTurn, view: &WorldView, open_items: &[OpenItem]) -> bool {
     if !matches!(turn.record.kind, TurnKind::Play | TurnKind::Correction) {
         return false;
     }
-    if open_items.iter().any(|i| i.closed_in == Some(turn.id)) {
-        return true;
-    }
-    let Some((action, verdict)) = stored_action(&turn.record.proposal_json) else {
-        return false;
-    };
-    if !matches!(
-        action,
-        ActionKind::Talk | ActionKind::Move | ActionKind::Act
-    ) || verdict == Verdict::Impossible
-    {
-        return false;
-    }
-    let written = || view.facts.iter().filter(|f| f.created_turn == turn.id);
-    written().any(|f| {
-        f.canon == Canon::Persistent
-            && matches!(
-                f.source,
-                FactSource::Proposal | FactSource::Stake | FactSource::Correction
-            )
-    }) || written()
-        .any(|f| is_open_key(&f.slot.key) && rows.iter().any(|r| r.fact_id == Some(f.id)))
+    let settled = stored_settles(&turn.record.proposal_json)
+        .and_then(|s| s.closing().map(|(item, _)| item.to_owned()));
+    let closed = open_items.iter().any(|i| {
+        i.closed_in == Some(turn.id)
+            && settled.as_deref() == Some(super::beliefs::open_item_ref(i.subject, &i.key).as_str())
+    });
+    let staked = stored_roll(&turn.record.proposal_json).is_some()
+        && view
+            .facts
+            .iter()
+            .any(|f| f.created_turn == turn.id && f.source == FactSource::Stake);
+    closed || staked
 }
 
 /// `value` as `text` spells it: "the Toll-Wolf" in "Orsel is also called

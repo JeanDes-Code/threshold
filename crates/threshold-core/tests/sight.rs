@@ -441,14 +441,18 @@ fn closed_item_stays_closed_when_the_pc_learns_the_plan_again() {
     let view = w.view();
     let met = w.play(
         "I meet Brann at the mill.",
-        &action(ActionKind::Act),
+        &settling(
+            ActionKind::Act,
+            format!("E{ada} pending_meet"),
+            threshold_core::domain::ItemStatus::Done,
+        ),
         10,
         vec![set(
             &view,
             ada,
             "meet",
-            "brann",
-            "Ada met Brann at the mill.",
+            "done",
+            "Done: Ada plans to meet Brann at the mill.",
             &[ada],
         )],
     );
@@ -524,12 +528,13 @@ fn sourced(mut op: LedgerOp, source: FactSource) -> LedgerOp {
     op
 }
 
-/// The clauses of the decision rule that `decision_rule_marks_lasting_
-/// witnessed_acts` does not reach alone: a Persistent fact from a Check
-/// stake or a Correction, and a Turn whose only mark is that it closed an
-/// Open Item the PC knows.
+/// Review minor, the Decisions rule: a Turn is a Decision when it closes
+/// an item through `settles`, or when it is a Check, won or lost alike,
+/// whose stake changed a slot. Nothing else: not a lasting fact without a
+/// Check, not a new Open Item, not an outcome written without `settles`,
+/// not a Roll whose stake changed nothing.
 #[test]
-fn decision_rule_counts_stakes_corrections_and_closed_items() {
+fn decision_rule_is_a_settles_close_or_a_check_that_changed_a_slot() {
     let mut w = HiddenWorld::new();
     let (ada, gate) = (w.ada, w.gate);
     let view = w.view();
@@ -546,59 +551,87 @@ fn decision_rule_counts_stakes_corrections_and_closed_items() {
             source,
         )
     };
-    let stake = w.play(
-        "I bet my coin on the lock.",
-        &action(ActionKind::Act),
+    let check = |won: bool| record(ActionKind::Act, Verdict::Check, Some(roll(won)));
+    let won = w.play(
+        "I pick the lock.",
+        &check(true),
         5,
         vec![mark("bet", FactSource::Stake)],
     );
-    let fixed = w.play(
-        "I scratch the gate.",
+    let lost = w.play(
+        "I force the lock.",
+        &check(false),
+        5,
+        vec![mark("dent", FactSource::Stake)],
+    );
+    let no_stake = w.play("I arm-wrestle Brann.", &check(false), 5, vec![]);
+    let lasting = w.play(
+        "I chalk a sign on the gate.",
         &action(ActionKind::Act),
         5,
-        vec![mark("scratch", FactSource::Correction)],
+        vec![mark("sign", FactSource::Proposal)],
     );
-    let event = w.play(
-        "I watch the gate.",
+    let plan = w.play(
+        "I plan a trip to the mill.",
         &action(ActionKind::Act),
-        5,
-        vec![mark("stain", FactSource::WorldEvent)],
-    );
-    // `mood` is a state key: the outcome fact is never Persistent, so the
-    // only mark of this Turn is that it closes the Open Item.
-    let view = w.view();
-    w.play(
-        "I promise to keep calm.",
-        &action(ActionKind::Observe),
         0,
         vec![set(
             &view,
             ada,
-            "pending_mood",
-            "calm",
-            "Ada means to stay calm.",
+            "pending_trip",
+            "the mill",
+            "Ada plans a trip to the mill.",
             &[ada],
         )],
     );
     let view = w.view();
-    let calm = w.play(
-        "I breathe slowly.",
+    let walked = w.play(
+        "I walk to the mill.",
         &action(ActionKind::Act),
-        0,
-        vec![set(&view, ada, "mood", "calm", "Ada is calm.", &[ada])],
+        10,
+        vec![set(
+            &view,
+            ada,
+            "trip",
+            "done",
+            "Ada went to the mill.",
+            &[ada],
+        )],
+    );
+    let view = w.view();
+    let settled = w.play(
+        "No, I will not meet Brann.",
+        &settling(
+            ActionKind::Talk,
+            format!("E{ada} pending_meet"),
+            threshold_core::domain::ItemStatus::Refused,
+        ),
+        1,
+        vec![set(
+            &view,
+            ada,
+            "meet",
+            "refused",
+            "Refused: Ada plans to meet Brann at the mill.",
+            &[ada],
+        )],
     );
     let sight = w.sight();
     let decision = |turn| moment(&sight, turn).is_some_and(|m| m.decision);
-    assert!(decision(stake), "a Persistent fact from a stake");
-    assert!(decision(fixed), "a Persistent fact from a Correction");
-    assert!(!decision(event), "a World Event fact is not the PC's act");
-    let item = sight
+    assert!(decision(won), "a won Check whose stake changed a slot");
+    assert!(decision(lost), "a lost Check whose stake changed a slot");
+    assert!(!decision(no_stake), "a Check whose stake changed nothing");
+    assert!(!decision(lasting), "a lasting fact without a Check");
+    assert!(!decision(plan), "a new Open Item");
+    let trip = sight
         .open_items
         .iter()
-        .find(|i| i.key == "pending_mood")
+        .find(|i| i.key == "pending_trip")
         .unwrap();
-    assert_eq!(item.closed_in, Some(calm));
-    assert!(decision(calm), "it closed an Open Item the PC knows");
+    assert_eq!(trip.closed_in, Some(walked));
+    assert!(!decision(walked), "an outcome written without settles");
+    assert_eq!(meet(&sight, ada).closed_in, Some(settled));
+    assert!(decision(settled), "a close through settles");
 }
 
 /// A PC row counts only once it has arrived: not in "Known before the
@@ -759,8 +792,10 @@ fn decision_rule_marks_lasting_witnessed_acts() {
     // Bug pass 4: a Roll alone is no decision; QA's arm-wrestles all
     // carried the badge.
     assert!(!decision(talk), "talk with a Roll and nothing lasting");
-    assert!(decision(act), "a lasting witnessed fact");
-    assert!(decision(plan), "an Open Item the PC knows");
+    // Review minor: a lasting fact or a new Open Item without a Check or a
+    // close is no decision.
+    assert!(!decision(act), "a lasting witnessed fact, no Check");
+    assert!(!decision(plan), "a new Open Item");
     assert!(!decision(walk), "a move writes state only");
     assert!(!decision(impossible), "impossible");
     assert!(!decision(look), "observe");

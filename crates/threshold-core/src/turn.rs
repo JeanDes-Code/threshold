@@ -890,6 +890,13 @@ pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)> {
     Some((action, verdict))
 }
 
+/// The `settles` stored in a Turn's `proposal_json`, if its proposal had
+/// one. The Decisions rule reads it (`world::sight::decision`).
+pub fn stored_settles(proposal_json: &str) -> Option<crate::domain::Settle> {
+    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
+    serde_json::from_value(record.get("proposal")?.get("settles")?.clone()).ok()
+}
+
 fn stored_reactions(proposal_json: &str) -> Vec<Reaction> {
     serde_json::from_str::<serde_json::Value>(proposal_json)
         .ok()
