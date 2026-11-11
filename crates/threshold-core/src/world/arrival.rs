@@ -1,5 +1,5 @@
 use crate::domain::{
-    Canon, ClockMin, EntityId, EntityKind, EntityRef, FactSource, Knowing, LedgerOp, Slot,
+    Canon, ClockMin, Effect, EntityId, EntityKind, EntityRef, FactSource, Knowing, LedgerOp, Slot,
 };
 use crate::normalize;
 use crate::store::{Fact, WorldEvent, WorldView};
@@ -172,14 +172,45 @@ pub fn with_arrival(
     ops
 }
 
-/// True when the PC would witness `event` if it fired now: the event is not
-/// GM-only (its `seen_by` is not empty), and one of its actors openly stands
-/// at the PC's place (not hidden, not placed with `seen = gm`).
+/// True when the PC would witness `event` if it fired now:
+/// - the event is not GM-only (its `seen_by` is not empty), and one of its
+///   actors openly stands at the PC's place (not hidden, not placed with
+///   `seen = gm`); or
+/// - an effect moves one of its actors, not hidden, to the PC's place: an
+///   arrival is perceptible, whoever the event names as witnesses (review
+///   of bug pass 4, M2: Orsel, who had left, walked back in unseen, and
+///   the PC still held his departure record).
 ///
 /// `with_witnessed_events` and the engine-owned wait (`wait_minutes`) share
-/// this rule, so a wait never ends at an event the PC does not see.
+/// this rule, so a wait never ends at an event the PC does not see, and it
+/// ends at an arrival.
 pub fn pc_witnesses(view: &WorldView, event: &WorldEvent) -> bool {
-    !event.seen_by.is_empty() && event.actors.iter().any(|a| openly_here(view, *a))
+    (!event.seen_by.is_empty() && event.actors.iter().any(|a| openly_here(view, *a)))
+        || arrives_here(view, event)
+}
+
+/// True when an effect of `event` moves one of its actors, not hidden and
+/// not the PC, to the PC's place.
+fn arrives_here(view: &WorldView, event: &WorldEvent) -> bool {
+    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+        return false;
+    };
+    let Some(here) = view
+        .live_fact(pc.id, "location")
+        .map(|f| normalize::value(&f.slot.value))
+    else {
+        return false;
+    };
+    event.effects.iter().any(|effect| match effect {
+        Effect::SetFact { slot, .. } => {
+            slot.subject != pc.id
+                && event.actors.contains(&slot.subject)
+                && !hidden(view, slot.subject)
+                && normalize::key(&slot.key) == "location"
+                && normalize::value(&slot.value) == here
+        }
+        _ => false,
+    })
 }
 
 /// True when `entity` openly stands at the PC's place: it is not the PC, the

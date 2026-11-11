@@ -228,6 +228,112 @@ fn a_departure_names_an_npc_whom_an_old_narration_named() {
     assert_eq!(card.who.name.as_deref(), Some("Kestrel"));
 }
 
+/// Schedules a World Event at `at` whose actor is Orsel, seen by Brann,
+/// that moves Orsel to `place`.
+fn move_orsel(w: &mut World, at: u64, text: &str, place: &str) {
+    let (brann, orsel) = (w.brann, w.orsel);
+    w.commit(vec![LedgerOp::ScheduleEvent {
+        text: text.into(),
+        trigger: Trigger::At(at),
+        actors: vec![EntityRef::Id(orsel)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![Effect::SetFact {
+            slot: Slot {
+                subject: EntityRef::Id(orsel),
+                key: "location".into(),
+                value: place.into(),
+            },
+            text: format!("Orsel is at {place}."),
+            seen_by: vec![],
+        }],
+        seen_by: vec![EntityRef::Id(brann)],
+        public: false,
+    }]);
+}
+
+/// The live departure records of `entity`: Possible location facts with
+/// no place.
+fn departure_records(view: &WorldView, entity: u64) -> usize {
+    view.live_facts
+        .iter()
+        .filter(|f| f.slot.subject == entity && f.slot.key == "location" && f.slot.value.is_empty())
+        .count()
+}
+
+/// Review of bug pass 4, M2: Orsel leaves for a place the PC cannot name,
+/// walks back in alone, and leaves again. His return is perceptible: the
+/// wait stops at it, the PC's Belief puts him here again, the departure
+/// record is superseded and Here lists him. His second departure leaves
+/// one live departure record, never two.
+#[test]
+fn an_npc_who_leaves_and_walks_back_in_is_seen_both_ways() {
+    let mut w = World::new();
+    add_unnamed_place(&mut w, "Smugglers Cellar");
+    let orsel = w.orsel;
+    move_orsel(&mut w, 10, "Orsel slips away", "Smugglers Cellar");
+    move_orsel(&mut w, 20, "Orsel comes back in", "gate square");
+    move_orsel(&mut w, 40, "Orsel slips away again", "Smugglers Cellar");
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Wait;
+    let gm = RecordedGm::new(vec![], vec![]);
+    for _ in 0..3 {
+        gm.push_proposal(json(&p));
+        gm.push_narration("You wait.".into());
+    }
+    let campaign = w.campaign;
+    let mut engine = Engine::new(
+        w.store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        campaign,
+    );
+    let mut wait = |n: u32| {
+        engine
+            .play_turn(format!("wait-{n}"), "I wait an hour.", &mut |_| {})
+            .unwrap();
+    };
+    wait(1);
+    wait(2);
+    let view = view_of(&engine, campaign);
+    assert_eq!(view.clock_min, 20, "the wait stops at the return");
+    assert!(
+        pc_knowledge(&view)
+            .iter()
+            .any(|b| b.subject == orsel && b.key == "location" && b.value == "gate square"),
+        "{:?}",
+        pc_knowledge(&view)
+    );
+    assert!(seen_present(&view).contains(&orsel));
+    assert_eq!(
+        departure_records(&view, orsel),
+        0,
+        "the record is superseded"
+    );
+    let sight = sight(engine.store(), campaign);
+    let marks = Marks::default();
+    assert!(
+        play_view(&sight, &marks)
+            .here
+            .iter()
+            .any(|who| who.entity_id == orsel)
+    );
+    let card = entity_card(&sight, &marks, orsel).unwrap();
+    assert!(
+        card.facts.iter().all(|f| !f.text.contains("Orsel le")),
+        "{card:?}"
+    );
+    let mut engine = engine;
+    engine
+        .play_turn("wait-3".into(), "I wait an hour.", &mut |_| {})
+        .unwrap();
+    let view = view_of(&engine, campaign);
+    assert_eq!(view.clock_min, 40);
+    assert!(!seen_present(&view).contains(&orsel));
+    assert_eq!(departure_records(&view, orsel), 1, "one live record");
+}
+
 /// A destination the PC can name is seen: the Adventure Seed place Gate.
 #[test]
 fn a_witnessed_move_to_a_place_the_pc_can_name_shows_the_destination() {

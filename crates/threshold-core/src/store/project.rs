@@ -213,6 +213,17 @@ fn apply(
             };
             db.execute("INSERT INTO fact(id,subject_id,key,value,text,canon,source,created_turn) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,slot.subject,normalize::key(&slot.key),normalize::value(&slot.value),text,enum_text(&actual_canon)?,enum_text(source)?,turn])?;
             let fact_id = db.last_insert_rowid();
+            // A departure record (a Possible World Event `location` with no
+            // place, `world::with_witnessed_events`) lasts until the next
+            // canon write on its slot: that write supersedes it. So a return
+            // retires it, and a slot never holds two live records (review
+            // of bug pass 4, M2).
+            if actual_canon != Canon::Possible {
+                db.execute(
+                    "UPDATE fact SET superseded_by=?1 WHERE subject_id=?2 AND key=?3 AND key='location' AND value='' AND canon='possible' AND source='world_event' AND superseded_by IS NULL AND id<>?1",
+                    params![fact_id, slot.subject, normalize::key(&slot.key)],
+                )?;
+            }
             for cause in causes {
                 db.execute(
                     "INSERT INTO fact_cause(fact_id,cause_fact_id) VALUES(?1,?2)",
