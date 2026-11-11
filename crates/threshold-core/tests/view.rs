@@ -857,9 +857,12 @@ fn journal_view_shows_pc_knowledge_only() {
     );
     assert_eq!(
         keys(&json["scenes"][0]["acts"][0]),
-        ["decision", "intent", "turn_id"]
+        ["closed", "decision", "intent", "turn_id"]
     );
-    assert_eq!(keys(&json["closed"][0]), ["closed_in", "item"]);
+    assert_eq!(
+        keys(&json["closed"][0]),
+        ["closed_in", "item", "outcome", "scene"]
+    );
 }
 
 /// Shape 3.3: what the PC knew from the start is "Known before the
@@ -1741,5 +1744,90 @@ fn what_you_learned_holds_no_machine_line() {
             .closed
             .iter()
             .any(|c| c.item.text == "Orsel wants two coins.")
+    );
+}
+
+/// Review M3: the Journal says how an item ended. Each closed item carries
+/// its outcome word and the Scene that closed it, and the Act of the Turn
+/// that closed it lists it. The core's outcome line stays out of "What you
+/// learned".
+#[test]
+fn the_journal_says_how_an_item_ended() {
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let view = w.view();
+    let item_text = view.live_fact(ada, "pending_meet").unwrap().text.clone();
+    let turn = w.play(
+        "No, I will not meet Brann.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        1,
+        vec![set(
+            &view,
+            ada,
+            "meet",
+            "refused",
+            &format!("Refused: {item_text}"),
+            &[ada],
+        )],
+    );
+    let journal = journal_view(&w.sight(), &Marks::default());
+    let closed = journal
+        .closed
+        .iter()
+        .find(|c| c.item.belief.key == "pending_meet")
+        .expect("the item closed");
+    assert_eq!(closed.outcome, "Refused");
+    assert_eq!(closed.closed_in, turn);
+    let scene = journal
+        .scenes
+        .iter()
+        .find(|s| s.acts.iter().any(|a| a.turn_id == turn))
+        .unwrap();
+    assert_eq!(closed.scene, Some(scene.turn_id));
+    let act = scene.acts.iter().find(|a| a.turn_id == turn).unwrap();
+    assert!(act.decision);
+    assert_eq!(act.closed.len(), 1);
+    assert_eq!(act.closed[0].outcome, "Refused");
+    assert_eq!(act.closed[0].text, item_text);
+    assert!(
+        scene.learned.iter().all(|l| !l.text.starts_with("Refused")),
+        "{:?}",
+        scene.learned
+    );
+}
+
+/// Review minor: news the PC is told on the outcome key of an item that
+/// stays open is something learned. It shows under "What you learned" and
+/// in the OOC sheet, as it does on the card.
+#[test]
+fn news_on_an_open_item_s_outcome_is_learned() {
+    let mut w = HiddenWorld::new();
+    let (ada, brann) = (w.ada, w.brann);
+    w.play(
+        "I ask Brann about the meeting.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        1,
+        vec![claim(brann, ada, "meet", "moved to dawn", &[ada], 0)],
+    );
+    let sight = w.sight();
+    assert!(
+        sight
+            .open_items
+            .iter()
+            .any(|i| i.key == "pending_meet" && i.closed_in.is_none()),
+        "a Claim closes no item"
+    );
+    let journal = journal_view(&sight, &Marks::default());
+    let learned: Vec<&str> = journal
+        .scenes
+        .iter()
+        .flat_map(|s| &s.learned)
+        .map(|l| l.text.as_str())
+        .collect();
+    assert!(learned.contains(&"meet: moved to dawn"), "{learned:?}");
+    let sheet = threshold_core::view::ooc_sheet(&sight);
+    assert!(
+        sheet.contains("meet: moved to dawn (told by Brann)"),
+        "{sheet}"
     );
 }

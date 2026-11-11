@@ -7,8 +7,8 @@ use serde::Serialize;
 
 use crate::{
     domain::{
-        ClockMin, EntityId, EntityKind, STATE_KEYS, is_open_key, is_state_key, outcome_key,
-        slot_sentence, you_sentence,
+        ClockMin, CloseOutcome, EntityId, EntityKind, STATE_KEYS, is_open_key, is_state_key,
+        outcome_key, slot_sentence, you_sentence,
     },
     normalize,
     player::{Marks, Note, Target},
@@ -46,16 +46,10 @@ pub struct CharacterFact {
 /// The PC as the PC knows itself: its own Beliefs about itself, without an
 /// open item or the outcome of one, and the Open Items of the side panel.
 pub fn character_view(sight: &PcSight) -> CharacterView {
-    let outcome = |key: &str| {
-        sight
-            .open_items
-            .iter()
-            .any(|i| i.subject == sight.pc && outcome_key(&i.key).is_some_and(|k| k == key))
-    };
     let facts = sight
         .beliefs
         .iter()
-        .filter(|b| b.subject == sight.pc && !is_open_key(&b.key) && !outcome(&b.key))
+        .filter(|b| b.subject == sight.pc && !is_open_key(&b.key) && closed_by(sight, b).is_none())
         .map(|b| CharacterFact {
             text: fact_text(&b.text, &b.key),
         })
@@ -331,13 +325,32 @@ pub struct Act {
     pub intent: String,
     /// A decision of the PC (data shape 3.2).
     pub decision: bool,
+    /// The Open Items this Turn closed, each with how it ended (review
+    /// M3): the Decisions read "Refused · <item text>".
+    pub closed: Vec<ClosedLine>,
 }
 
-/// An Open Item that closed, and the Turn that closed it.
+/// How one Open Item ended, as the Journal shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ClosedLine {
+    /// The outcome word: "Accepted", "Refused", "Done", "Failed",
+    /// "Dropped", or the value an event stated ("Raised").
+    pub outcome: String,
+    /// The item's text.
+    pub text: String,
+}
+
+/// An Open Item that closed, how it ended, and the Turn and the Scene
+/// that closed it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ClosedItem {
     pub item: FactLine,
     pub closed_in: TurnId,
+    /// The outcome word (`ClosedLine::outcome`, review M3).
+    pub outcome: String,
+    /// The first Turn of the Scene that holds `closed_in`, when that Turn
+    /// stands.
+    pub scene: Option<TurnId>,
 }
 
 /// The Journal of `sight`. No model writes it: each entry comes from
@@ -360,6 +373,13 @@ pub fn journal_view(sight: &PcSight, marks: &Marks) -> JournalView {
                 Some(ClosedItem {
                     item: line,
                     closed_in,
+                    outcome: outcome_word(item)?,
+                    scene: sight
+                        .scenes()
+                        .into_iter()
+                        .find(|scene| scene.iter().any(|m| m.turn == closed_in))
+                        .and_then(|scene| scene.first())
+                        .map(|m| m.turn),
                 })
             })
             .collect(),
@@ -400,6 +420,17 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
                     turn_id: m.turn,
                     intent: turn.intent.clone(),
                     decision: m.decision,
+                    closed: sight
+                        .open_items
+                        .iter()
+                        .filter(|item| item.closed_in == Some(m.turn))
+                        .filter_map(|item| {
+                            Some(ClosedLine {
+                                outcome: outcome_word(item)?,
+                                text: item_line(sight, item)?.text,
+                            })
+                        })
+                        .collect(),
                 })
             })
             .collect(),
@@ -414,14 +445,45 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
 
 /// True when `belief` belongs under "What you learned" (bug pass 4): not
 /// the PC's own place, which the Scene's title already gives, and not the
-/// outcome of an Open Item, which the Decisions and the Open and closed
-/// list show ("Accepted: …").
+/// outcome line the core built for a `settles` ("Refused: …"), which the
+/// Decisions and the closed list show as "Refused · …". Anything else on
+/// an item's outcome key is learned (review minor): news the PC is told,
+/// or an outcome an event stated aloud.
 fn learned_line(sight: &PcSight, belief: &Belief) -> bool {
     let own_place = belief.subject == sight.pc && belief.key == "location";
-    let outcome = sight.open_items.iter().any(|item| {
-        item.subject == belief.subject && outcome_key(&item.key) == Some(belief.key.as_str())
-    });
-    !own_place && !outcome
+    !own_place && !settle_line(sight, belief)
+}
+
+/// The Open Item that `belief` closed for the PC, if it is the Belief that
+/// closed one (`OpenItem::outcome`).
+fn closed_by<'a>(sight: &'a PcSight, belief: &Belief) -> Option<&'a OpenItem> {
+    sight
+        .open_items
+        .iter()
+        .find(|item| item.outcome.as_ref() == Some(belief))
+}
+
+/// True when `belief` is the outcome line the core built for a `settles`:
+/// it closed an item, and its value and text are the core's template
+/// (`CloseOutcome::text`).
+fn settle_line(sight: &PcSight, belief: &Belief) -> bool {
+    closed_by(sight, belief).is_some_and(|item| {
+        CloseOutcome::from_word(&belief.value).is_some_and(|o| o.text(&item.text) == belief.text)
+    })
+}
+
+/// How a closed item ended, as one word the Player reads (review M3): the
+/// `settles` outcome ("Refused"), or the value an event stated, in words
+/// ("Raised"). `None` while the item is open.
+fn outcome_word(item: &OpenItem) -> Option<String> {
+    let value = &item.outcome.as_ref()?.value;
+    if let Some(outcome) = CloseOutcome::from_word(value) {
+        return Some(outcome.head().to_owned());
+    }
+    let words = value.trim().replace('_', " ");
+    let mut chars = words.chars();
+    let first = chars.next()?;
+    Some(first.to_uppercase().chain(chars).collect())
 }
 
 /// A location as the PC names it: the name of a place the PC can name, when
@@ -1081,23 +1143,19 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
         }
     }
 
-    // Everything else the PC holds: no open key and no outcome line, which
-    // the item blocks above already show.
+    // Everything else the PC holds: no open key and no outcome that closed
+    // an item, which the item blocks above already show. News told on the
+    // outcome key of an item that stays open is here (review minor).
     let item_keys: Vec<(EntityId, String)> = sight
         .open_items
         .iter()
-        .flat_map(|item| {
-            let outcome = outcome_key(&item.key).map(str::to_owned);
-            [Some(item.key.clone()), outcome]
-                .into_iter()
-                .flatten()
-                .map(move |key| (item.subject, key))
-        })
+        .map(|item| (item.subject, item.key.clone()))
         .collect();
     let known: Vec<String> = sight
         .beliefs
         .iter()
         .filter(|b| !item_keys.contains(&(b.subject, b.key.clone())))
+        .filter(|b| closed_by(sight, b).is_none())
         .filter_map(|b| fact_line(sight, b))
         .map(|line| format!("- {}\n", ooc_line(&line)))
         .collect();

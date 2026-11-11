@@ -8,6 +8,7 @@ import {
   aboutText,
   bySubject,
   clockSpan,
+  closedText,
   decisions,
   placeTitle,
   sceneOfTurn,
@@ -210,6 +211,11 @@ function Decisions({ view, pin }: { view: JournalView; pin: Pin }) {
         <li key={act.turn_id} className="journal-decision">
           <div className="journal-decision__main">
             <p className="journal-decision__intent">{act.intent}</p>
+            {act.closed.map((closed) => (
+              <p key={closed.text} className="journal-decision__closed">
+                {closedText(closed)}
+              </p>
+            ))}
             <p className="journal-meta">
               {placeTitle(scene.place)} · {clockSpan(scene.clock_from, scene.clock_to)}
             </p>
@@ -246,12 +252,12 @@ function OpenAndClosed({ view, pin }: { view: JournalView; pin: Pin }) {
 }
 
 function Closed({ view, closed }: { view: JournalView; closed: ClosedItem }) {
-  const where = sceneOfTurn(view, closed.closed_in);
+  const where = sceneOfTurn(view, closed.scene ?? closed.closed_in);
   return (
     <li className="journal-fact journal-fact--closed">
       <span className="journal-fact__check" aria-hidden="true" />
       <span>
-        <span className="journal-fact__text">{closed.item.text}</span>
+        <span className="journal-fact__text">{closedText({ outcome: closed.outcome, text: closed.item.text })}</span>
         {where && (
           <span className="journal-meta journal-meta--block">
             Closed in Scene {where.number} · {placeTitle(where.scene.place)}

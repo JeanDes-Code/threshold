@@ -446,6 +446,7 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 }
 .journal-decision__intent { font-size: var(--text-lg); }
 .journal-decision .journal-meta { margin-top: var(--space-1); }
+.journal-decision__closed { margin: var(--space-1) 0 0; font-family: var(--font-story); font-size: var(--text-md); color: var(--muted); }
 
 /* Open and closed, Known before the Campaign: cards with small upper-case titles. */
 .journal-section {

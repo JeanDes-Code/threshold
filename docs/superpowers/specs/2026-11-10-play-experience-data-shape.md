@@ -477,3 +477,11 @@ The shape takes the views of the first variant and the one prompt line that it n
 - The hidden-world fixture for the view tests, with a hidden other name and a character that no Narration names.
 - The sentence for each `SourceTextProblem`, `ReviewError` and `Gap`.
 - The fonts, the palette, the tokens file, the narrow-window breakpoint, and the colour of an NPC from its `entity_id`.
+
+## 9. Changed after the review of bug pass 4 (2026-11-11)
+
+Nothing in this section was measured on the live model; deterministic tests cover each rule.
+
+- **How an item ended (M3).** After 924b8e2 the Journal no longer said how an item ended: "Refused: …" left "What you learned", and the Closed list and Decisions showed the item's open text with a check mark only. `OpenItem` now carries `outcome`, the PC's Belief that closed the item. `ClosedItem` carries `outcome`, the word the Player reads ("Accepted", "Refused", "Done", "Failed", "Dropped", or the value an event stated, "Raised"), and `scene`, the first Turn of the Scene that closed it. `Act` carries `closed`, one `ClosedLine { outcome, text }` per item its Turn closed. The Journal's Closed list and Decisions read "Refused · <item text>". The side panel shows no closed item. The core's outcome lines stay out of "What you learned".
+- **News on an open item's outcome is learned (minor).** Brann telling `debt: doubled` while `pending_debt` stays open vanished from "What you learned" and from the OOC sheet, and showed on the card. A told Claim never closes an item (3.4), so it is something learned: both now show it. Only the outcome line the core built for a `settles` (value and text from `CloseOutcome`) is left out of "What you learned"; the OOC sheet and the Character screen leave out the Belief that closed an item, which the closed lists show.
+- **Open for the PC (M2).** 3.4's rule reads PC Knowledge only, as before, but it is now the one rule for every path, the offer of `settles` included (data shape of 2026-11-08, section 13). A row that closes an item is a fact on the outcome slot, or the PC's own Claim on it.

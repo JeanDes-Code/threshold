@@ -66,6 +66,10 @@ pub struct OpenItem {
     /// first PC row on the open fact. Another speaker's Claim never closes
     /// an item, and a closed item stays closed.
     pub closed_in: Option<TurnId>,
+    /// The Belief that closed the item for the PC (its value is the
+    /// outcome: "refused", or "raised" for an outcome an event stated),
+    /// `None` while the item is open (review M3).
+    pub outcome: Option<Belief>,
     /// When the PC first learned the item: the place of that row among the
     /// PC's rows, in the order they were written. A higher one is newer.
     pub learned: usize,
@@ -222,6 +226,7 @@ pub fn pc_sight(
             key: item.belief.key.clone(),
             text: item.belief.text.clone(),
             closed_in: item.closing.map(|row| row.turn),
+            outcome: item.closing.and_then(|row| belief(view, row)),
             learned: item.first,
         })
         .collect();

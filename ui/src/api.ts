@@ -176,6 +176,15 @@ export interface Act {
   intent: string;
   /** A decision of the PC: it lasts, and the PC saw it. */
   decision: boolean;
+  /** The Open Items this Turn closed, each with how it ended. */
+  closed: ClosedLine[];
+}
+
+/** How one Open Item ended: "Refused" and the item's text. */
+export interface ClosedLine {
+  /** "Accepted", "Refused", "Done", "Failed", "Dropped", or a value an event stated. */
+  outcome: string;
+  text: string;
 }
 
 /** One Scene: one place and time, who was there, what the PC did and learned. */
@@ -195,6 +204,10 @@ export interface SceneEntry {
 export interface ClosedItem {
   item: FactLine;
   closed_in: number;
+  /** How the item ended, as one word: "Refused". */
+  outcome: string;
+  /** The first Turn of the Scene that closed it, when that Turn stands. */
+  scene: number | null;
 }
 
 /** The Journal: written by the app from PC Knowledge only. */

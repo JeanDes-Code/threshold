@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { FactLine, JournalView, NameRef } from "../api";
 import { journalView } from "../fixtures/journalView";
-import { aboutText, bySubject, clockSpan, decisions, placeTitle, sceneOfTurn, scenesNewestFirst } from "./logic";
+import {
+  aboutText,
+  bySubject,
+  clockSpan,
+  closedText,
+  decisions,
+  placeTitle,
+  sceneOfTurn,
+  scenesNewestFirst,
+} from "./logic";
 
 const maren: NameRef = { entity_id: 2, kind: "npc", name: "Maren" };
 const pc: NameRef = { entity_id: 1, kind: "pc", name: "Ada" };
@@ -23,8 +32,8 @@ const view: JournalView = {
       clock_to: 95,
       present: [maren],
       acts: [
-        { turn_id: 4, intent: "I hand over the manifest.", decision: true },
-        { turn_id: 5, intent: "I wait.", decision: false },
+        { turn_id: 4, intent: "I hand over the manifest.", decision: true, closed: [] },
+        { turn_id: 5, intent: "I wait.", decision: false, closed: [] },
       ],
       learned: [],
     },
@@ -34,7 +43,7 @@ const view: JournalView = {
       clock_from: 130,
       clock_to: 130,
       present: [],
-      acts: [{ turn_id: 6, intent: "I walk to the steps.", decision: true }],
+      acts: [{ turn_id: 6, intent: "I walk to the steps.", decision: true, closed: [] }],
       learned: [],
     },
   ],
@@ -46,6 +55,15 @@ const view: JournalView = {
 };
 
 describe("journal logic", () => {
+  it("a closed item reads its outcome word, then its text", () => {
+    expect(closedText({ outcome: "Refused", text: "Ada is to meet Brann at the mill." })).toBe(
+      "Refused · Ada is to meet Brann at the mill.",
+    );
+    for (const closed of journalView.closed) {
+      expect(closedText({ outcome: closed.outcome, text: closed.item.text })).toMatch(/^Done · /);
+    }
+  });
+
   it("the Decisions tab lists decision acts with their scene's place and time", () => {
     const got = decisions(view);
     expect(got.map((d) => d.act.intent)).toEqual(["I walk to the steps.", "I hand over the manifest."]);

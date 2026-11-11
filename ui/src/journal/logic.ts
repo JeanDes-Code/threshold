@@ -29,6 +29,11 @@ export function decisions(view: JournalView): { act: Act; scene: SceneEntry }[] 
     .reverse();
 }
 
+/** How an Open Item ended, as the Journal shows it: "Refused · <item text>". */
+export function closedText({ outcome, text }: { outcome: string; text: string }): string {
+  return `${outcome} · ${text}`;
+}
+
 /** The Scene that holds a Turn, by its first Turn or one of its acts. */
 export function sceneOfTurn(view: JournalView, turnId: number): NumberedScene | null {
   const i = view.scenes.findIndex(

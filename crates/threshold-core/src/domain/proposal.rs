@@ -155,18 +155,34 @@ impl CloseOutcome {
         }
     }
 
-    /// The text of the outcome fact, from a fixed English template and the
-    /// Open Item's own stored text.
-    pub fn text(self, item_text: &str) -> String {
-        let item = item_text.trim();
-        let head = match self {
+    /// The outcome that `word` names (`word`'s inverse), if any.
+    pub fn from_word(word: &str) -> Option<Self> {
+        [
+            Self::Accepted,
+            Self::Refused,
+            Self::Done,
+            Self::Failed,
+            Self::Dropped,
+        ]
+        .into_iter()
+        .find(|o| o.word() == crate::normalize::value(word))
+    }
+
+    /// The word as the Player reads it: "Refused".
+    pub fn head(self) -> &'static str {
+        match self {
             Self::Accepted => "Accepted",
             Self::Refused => "Refused",
             Self::Done => "Done",
             Self::Failed => "Failed",
             Self::Dropped => "Dropped",
-        };
-        format!("{head}: {item}")
+        }
+    }
+
+    /// The text of the outcome fact, from a fixed English template and the
+    /// Open Item's own stored text.
+    pub fn text(self, item_text: &str) -> String {
+        format!("{}: {}", self.head(), item_text.trim())
     }
 }
 
