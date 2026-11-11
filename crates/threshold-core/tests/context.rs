@@ -1443,6 +1443,45 @@ fn a_knower_cited_by_its_other_name_is_resolved_and_hidden_from_the_narrator() {
     );
 }
 
+/// Review of bug pass 4, m3: whether a NAMES line exists depended on a
+/// hidden NPC existing. "Swift" is known to every NPC the PC can name; a
+/// hidden NPC who does not know it made the narrator's line appear, and
+/// so told that someone else exists. The narrator's block now counts only
+/// the NPCs the PC can name, so it is the same with and without the hidden
+/// NPC. The GM still reads the restriction.
+#[test]
+fn the_narrator_s_names_block_is_the_same_with_a_hidden_npc() {
+    use threshold_core::{domain::OtherName, turn::create_campaign};
+    let mut seed = adventure_seed();
+    seed.pc.other_names = vec![OtherName {
+        name: "Swift".into(),
+        known_to: vec!["Orsel".into(), "Brann".into(), "Pip".into()],
+    }];
+    let names = |seed: &threshold_core::domain::AdventureSeed| {
+        let mut store = Store::open_in_memory().unwrap();
+        let campaign = create_campaign(&mut store, seed, 7).unwrap();
+        let view = store.snapshot(campaign).unwrap();
+        (
+            narration_prompt(&view, &[], &[], &[], &[], "I wait.", None).stable,
+            opening_prompt(&view, &[]).stable,
+            proposal_prompt(&view, &[], "I wait.").stable,
+        )
+    };
+    let (narrator, opening, gm) = names(&seed);
+    assert!(!narrator.contains("Swift\":"), "{narrator}");
+    assert!(!gm.contains("Swift\":"), "{gm}");
+    let mut hidden = npc("Maren Voss", 40);
+    hidden.hidden = true;
+    seed.entities.push(hidden);
+    let (narrator_h, opening_h, gm_h) = names(&seed);
+    assert_eq!(narrator_h, narrator);
+    assert_eq!(opening_h, opening);
+    assert!(
+        gm_h.contains("- \"Swift\": only Orsel, Brann and Pip call Ada this."),
+        "{gm_h}"
+    );
+}
+
 /// Review M5: knowers learned in play are data (a Belief on the alias
 /// key), so the line reads them, not the Adventure Seed alone.
 #[test]

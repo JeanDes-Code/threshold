@@ -489,17 +489,23 @@ fn render_names(lines: &[NameLine]) -> String {
 /// The bearer and the PC are not listed. A name every other NPC knows has
 /// no restriction and no line. The narrator's block leaves out a hidden
 /// bearer, an other name the PC does not know, and each knower that is
-/// hidden or that the PC cannot name (`world::pc_can_name`).
+/// hidden or that the PC cannot name (`world::pc_can_name`); and it counts
+/// only the NPCs the PC can name when it decides that a name is
+/// restricted, so its lines are the same with and without a hidden NPC.
 pub(crate) fn names_block(view: &WorldView, audience: NamesAudience) -> String {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return String::new();
     };
     let narrator = audience == NamesAudience::Narrator;
     let named = pc_can_name(view);
+    // Who counts when the block decides that a name is restricted: every
+    // NPC for the GM; for the narrator only the NPCs the PC can name, so a
+    // hidden NPC never makes a line appear (review of bug pass 4, m3).
     let npcs: BTreeSet<EntityId> = view
         .entities
         .iter()
         .filter(|e| e.kind == EntityKind::Npc)
+        .filter(|e| !narrator || (named.contains(&e.id) && !hidden(view, e.id)))
         .map(|e| e.id)
         .collect();
     let mut bearers: Vec<&Entity> = view
@@ -579,6 +585,15 @@ fn seed_names_block(seed: &AdventureSeed) -> String {
                 {
                     knowers.push(e.name.clone());
                 }
+            }
+            // As `names_block`: a name every visible NPC knows has no line.
+            let mut others = seed
+                .entities
+                .iter()
+                .filter(|e| e.kind == EntityKind::Npc && !e.hidden && e.name != bearer)
+                .peekable();
+            if others.peek().is_some() && others.all(|e| knowers.contains(&e.name)) {
+                continue;
             }
             lines.push(NameLine {
                 other: other.name.clone(),
