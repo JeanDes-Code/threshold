@@ -217,3 +217,170 @@ fn the_departure_record_stays_out_of_the_gm_prompt() {
     assert!(!text.contains("Orsel leaves."), "{text}");
     assert!(text.to_lowercase().contains("smugglers cellar"), "{text}");
 }
+
+/// Review M1: an event that states its own effect in front of the PC. "Orsel
+/// announces his plan to close the gate" with `Orsel.plan = close the gate`
+/// gave the narrator nothing and the PC learned nothing. The PC now learns
+/// an effect whose value the event's text states, and the narrator tells
+/// it. The fact is Persistent: the PC witnessed it, and its key is no state
+/// key (the store keeps state keys Established).
+#[test]
+fn an_announced_effect_is_learned_and_told() {
+    let mut w = World::new();
+    let orsel = w.orsel;
+    schedule(
+        &mut w,
+        "Orsel announces his plan to close the gate",
+        &[(orsel, "plan", "close the gate")],
+    );
+    let (engine, campaign, recent) = wait(w);
+    let view = view_of(&engine, campaign);
+    assert!(
+        pc_knowledge(&view)
+            .iter()
+            .any(|b| b.subject == orsel && b.key == "plan" && b.value == "close the gate"),
+        "{:?}",
+        pc_knowledge(&view)
+    );
+    assert!(
+        recent.contains("- Orsel announces his plan to close the gate\n"),
+        "{recent}"
+    );
+    assert!(
+        recent.contains("- plan is now close the gate.\n"),
+        "{recent}"
+    );
+    let plan = view.live_fact(orsel, "plan").unwrap();
+    assert_eq!(plan.canon, Canon::Persistent);
+    // A stem is enough: "closes" states "close".
+    let mut w = World::new();
+    schedule(
+        &mut w,
+        "Orsel closes the gate for the night",
+        &[(orsel, "plan", "close the gate")],
+    );
+    let (engine, campaign, _) = wait(w);
+    let view = view_of(&engine, campaign);
+    assert!(
+        pc_knowledge(&view)
+            .iter()
+            .any(|b| b.subject == orsel && b.key == "plan")
+    );
+}
+
+/// The leak that bug pass 4 closed stays closed: the text does not state
+/// the value, so the PC does not learn it. The text itself is told: it
+/// holds no secret value ("debt" is the key, not the value).
+#[test]
+fn an_effect_the_text_does_not_state_stays_hidden_and_the_text_is_told() {
+    for text in [
+        "Orsel retreats to a dark corner to count his remaining silver",
+        "Orsel counts the silver for his debt",
+    ] {
+        let mut w = World::new();
+        let orsel = w.orsel;
+        schedule(&mut w, text, &[(orsel, "debt_status", "partially paid")]);
+        let (engine, campaign, recent) = wait(w);
+        let view = view_of(&engine, campaign);
+        assert!(
+            !pc_knowledge(&view)
+                .iter()
+                .any(|b| b.subject == orsel && b.key == "debt_status"),
+            "{text}"
+        );
+        assert!(recent.contains(&format!("- {text}\n")), "{recent}");
+        assert!(!recent.contains("partially paid"), "{recent}");
+        let all = screens(engine.store(), campaign, orsel);
+        assert!(!all.contains("partially paid"), "{all}");
+    }
+    // Only part of the value is stated: not learned.
+    let mut w = World::new();
+    let orsel = w.orsel;
+    schedule(
+        &mut w,
+        "Orsel says the debt is paid",
+        &[(orsel, "debt_status", "not paid")],
+    );
+    let (engine, campaign, _) = wait(w);
+    assert!(
+        !pc_knowledge(&view_of(&engine, campaign))
+            .iter()
+            .any(|b| b.key == "debt_status")
+    );
+}
+
+/// The text rule gives the PC no feeling: an effect on the PC's own mood
+/// stays hidden even when the text states it. And it names no stranger:
+/// an effect on someone the PC cannot name stays hidden.
+#[test]
+fn a_stated_effect_on_the_pc_s_feelings_or_on_a_stranger_stays_hidden() {
+    let mut w = World::new();
+    let (ada, orsel) = (w.ada, w.orsel);
+    schedule(
+        &mut w,
+        "Orsel scares Ada, who is afraid",
+        &[(ada, "mood", "afraid")],
+    );
+    let (engine, campaign, _) = wait(w);
+    assert!(
+        !pc_knowledge(&view_of(&engine, campaign))
+            .iter()
+            .any(|b| b.subject == ada && b.key == "mood")
+    );
+    let mut w = World::new();
+    w.commit(vec![LedgerOp::AddEntity {
+        local: None,
+        kind: EntityKind::Npc,
+        name: "Kestrel".into(),
+        age: Some(40),
+        other_names: vec![],
+    }]);
+    let kestrel = w
+        .view
+        .entities
+        .iter()
+        .find(|e| e.name == "Kestrel")
+        .unwrap()
+        .id;
+    schedule(
+        &mut w,
+        "Orsel announces a plan to close the gate",
+        &[(kestrel, "plan", "close the gate")],
+    );
+    let (engine, campaign, _) = wait(w);
+    let view = view_of(&engine, campaign);
+    assert!(!pc_knowledge(&view).iter().any(|b| b.subject == kestrel));
+    let _ = orsel;
+}
+
+/// When every part of a witnessed event is guarded away, the wait still
+/// stopped for it: the narrator gets a neutral line instead of an empty
+/// outcome.
+#[test]
+fn an_event_guarded_away_gives_the_narrator_a_neutral_line() {
+    let mut w = World::new();
+    let orsel = w.orsel;
+    // `Ada holds = gate key` is GM only: the text quotes a secret.
+    schedule(
+        &mut w,
+        "Orsel eyes the gate key",
+        &[(orsel, "plan", "flee")],
+    );
+    let (_, _, recent) = wait(w);
+    assert!(!recent.contains("gate key"), "{recent}");
+    assert!(
+        recent.contains(&format!(
+            "- {}\n",
+            threshold_core::context::QUIET_EVENT_LINE
+        )),
+        "{recent}"
+    );
+    // A told event gets no neutral line.
+    let mut w = World::new();
+    schedule(&mut w, "Orsel yawns", &[(orsel, "plan", "flee")]);
+    let (_, _, recent) = wait(w);
+    assert!(
+        !recent.contains(threshold_core::context::QUIET_EVENT_LINE),
+        "{recent}"
+    );
+}

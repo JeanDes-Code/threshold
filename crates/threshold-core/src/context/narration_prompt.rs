@@ -118,45 +118,15 @@ pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
 }
 
 /// The texts of witnessed World Events as the narrator may see them. An
-/// event text is model text, like a plan: a text that names a secret (the
-/// same whole-word match as `guard_plans`) is dropped. So is a text that
-/// names an NPC the PC must not know of: one the Adventure Seed hides, or
-/// one that neither stands openly here (`world::openly_here`) nor is known
-/// to the PC (seen here, or the subject of a PC Belief); and one that names
-/// a place, a Faction or a thing the PC cannot name (`world::pc_can_name`,
-/// review B1: "Orsel slips down to the Smugglers Cellar").
+/// event text is model text, like a plan, and it is the visible part of the
+/// event: it is told unless it names something the PC must not learn. A
+/// text that holds a secret value (`secret_values`, the same whole-word
+/// match as `guard_plans`) is dropped; a secret key alone does not drop it
+/// ("Ludo counts the silver for his debt" is seen, review M1). So is a text
+/// that names an entity the PC must not hear of (`names_unheard`).
 pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
-    let mut forbidden = secret_terms(view);
-    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
-    let named = pc_can_name(view, &standing);
-    forbidden.extend(
-        view.entities
-            .iter()
-            .filter(|e| {
-                matches!(
-                    e.kind,
-                    EntityKind::Place | EntityKind::Faction | EntityKind::Item
-                )
-            })
-            .filter(|e| !named.contains(&e.id))
-            .map(|e| words(&e.name))
-            .filter(|name| !name.is_empty()),
-    );
-    let present = seen_present(view);
-    let known: HashSet<EntityId> = pc_knowledge(view).into_iter().map(|b| b.subject).collect();
-    forbidden.extend(
-        view.entities
-            .iter()
-            .filter(|e| e.kind == EntityKind::Npc)
-            .filter(|e| {
-                hidden(view, e.id)
-                    || !(openly_here(view, e.id)
-                        || present.contains(&e.id)
-                        || known.contains(&e.id))
-            })
-            .map(|e| words(&e.name))
-            .filter(|name| !name.is_empty()),
-    );
+    let mut forbidden = secret_values(view);
+    forbidden.extend(unheard_names(view));
     events
         .iter()
         .filter(|text| !quotes(&forbidden, text))
@@ -164,28 +134,80 @@ pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The words of every live fact the PC holds no Belief about, on a key that
-/// is not a state key or that is an open key: its key (an open key without
-/// its prefix, `outcome_key`) and its value. An open
-/// key is a state key only so that its fact stays replaceable; a plan the PC
-/// does not know stays a secret. Entity names are public, so a key or value
-/// that is an entity name is left out.
-fn secret_terms(view: &WorldView) -> Vec<Vec<String>> {
+/// The line the narrator gets when a World Event stopped the clock and
+/// every part of it is guarded away: its text and its effects (review M1).
+/// The outcome is then never empty.
+pub const QUIET_EVENT_LINE: &str = "Nothing the PC notices happens.";
+
+/// True when `text` names an entity the PC must not hear of: an NPC the
+/// Adventure Seed hides, or one that neither stands openly here
+/// (`world::openly_here`) nor is known to the PC (seen here, or the subject
+/// of a PC Belief); or a place, a Faction or a thing the PC cannot name
+/// (`world::pc_can_name`, review B1: "Orsel slips down to the Smugglers
+/// Cellar"). `guard_events` drops such a text, and the PC learns no effect
+/// of an event whose text it is (`world::with_witnessed_events`).
+pub fn names_unheard(view: &WorldView, text: &str) -> bool {
+    quotes(&unheard_names(view), text)
+}
+
+fn unheard_names(view: &WorldView) -> Vec<Vec<String>> {
+    let present = seen_present(view);
+    let known: HashSet<EntityId> = pc_knowledge(view).into_iter().map(|b| b.subject).collect();
+    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
+    let named = pc_can_name(view, &standing);
+    view.entities
+        .iter()
+        .filter(|e| match e.kind {
+            EntityKind::Npc => {
+                hidden(view, e.id)
+                    || !(openly_here(view, e.id)
+                        || present.contains(&e.id)
+                        || known.contains(&e.id))
+            }
+            EntityKind::Place | EntityKind::Faction | EntityKind::Item => !named.contains(&e.id),
+            EntityKind::Pc => false,
+        })
+        .map(|e| words(&e.name))
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The values of `secret_facts`: what an event text must not state.
+fn secret_values(view: &WorldView) -> Vec<Vec<String>> {
+    let names: HashSet<Vec<String>> = view.entities.iter().map(|e| words(&e.name)).collect();
+    secret_facts(view)
+        .map(|f| words(&f.slot.value))
+        .filter(|term| !term.is_empty() && !names.contains(term))
+        .collect()
+}
+
+/// Every live fact the PC holds no Belief about (same slot, same value), on
+/// a key that is not a state key or that is an open key. An open key is a
+/// state key only so that its fact stays replaceable; a plan the PC does
+/// not know stays a secret.
+fn secret_facts(view: &WorldView) -> impl Iterator<Item = &crate::store::Fact> {
     let known: HashSet<(EntityId, String, String)> = pc_knowledge(view)
         .into_iter()
         .map(|b| (b.subject, b.key, normalize::value(&b.value)))
         .collect();
-    let names: HashSet<Vec<String>> = view.entities.iter().map(|e| words(&e.name)).collect();
     view.live_facts
         .iter()
         .filter(|f| !is_state_key(&f.slot.key) || is_open_key(&f.slot.key))
-        .filter(|f| {
+        .filter(move |f| {
             !known.contains(&(
                 f.slot.subject,
                 f.slot.key.clone(),
                 normalize::value(&f.slot.value),
             ))
         })
+}
+
+/// The words of every secret fact (`secret_facts`): its key (an open key
+/// without its prefix, `outcome_key`) and its value. Entity names are
+/// public, so a key or value that is an entity name is left out.
+fn secret_terms(view: &WorldView) -> Vec<Vec<String>> {
+    let names: HashSet<Vec<String>> = view.entities.iter().map(|e| words(&e.name)).collect();
+    secret_facts(view)
         .flat_map(|f| {
             // An open key names its outcome; the bare prefix names nothing.
             let key = &f.slot.key;

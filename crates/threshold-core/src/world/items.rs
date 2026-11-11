@@ -294,7 +294,7 @@ pub fn items_named_by(view: &WorldView, intent: &str) -> Vec<(EntityId, Key)> {
 
 /// A short English stem: "carrying" and "carried" are "carry", "posts" is
 /// "post". Enough for a match, not a dictionary.
-fn stem(word: &str) -> String {
+pub(super) fn stem(word: &str) -> String {
     for (suffix, with) in [
         ("ies", "y"),
         ("ied", "y"),
