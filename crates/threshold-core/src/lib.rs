@@ -172,6 +172,15 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         });
         require(&mut schema, "", "settles");
     }
+    // A scheduled event says whether everyone at its place perceives what
+    // it changes (review of bug pass 4: the visibility of an effect is
+    // data, never read from the event's text).
+    if let Some(public) = schema.pointer_mut("/$defs/EventDraft/properties/public") {
+        if let Some(public) = public.as_object_mut() {
+            public.remove("default");
+        }
+        require(&mut schema, "/$defs/EventDraft", "public");
+    }
     schema["properties"]["contested"] = json!({"type": "boolean"});
     require(&mut schema, "", "contested");
     for stake in ["win", "lose"] {

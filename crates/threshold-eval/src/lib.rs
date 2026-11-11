@@ -859,6 +859,7 @@ fn schedule_event(
             seen_by: seen_by.clone(),
         }],
         seen_by,
+        public: false,
     }];
     store.commit(record, ops).map_err(|e| format!("{e:?}"))?;
     let after = store.snapshot(campaign).map_err(|e| e.to_string())?;

@@ -172,6 +172,7 @@ fn ev(minutes: u64, actor: &str, effects: &[(&str, &str, &str)], seen_by: &[&str
         "text": format!("{actor} checks the harbour chains."),
         "effects": effects,
         "seen_by": seen_by,
+        "public": false,
     })
 }
 
@@ -1534,6 +1535,23 @@ fn every_name_field_of_each_world_stage_is_an_enum() {
 
     let events = &calls[4].schema;
     assert_eq!(names_at(events, &["events", "[]", "actor"]), NPCS);
+    // Review of bug pass 4, blocker: an event says whether everyone at the
+    // place perceives what it changes, as a required boolean.
+    let event = node(events, &["events", "[]"]);
+    assert!(
+        event["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("public")),
+        "{event}"
+    );
+    assert_eq!(event["properties"]["public"]["type"], json!("boolean"));
+    assert!(
+        event["properties"]["public"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("everyone at the place")
+    );
     assert_eq!(names_at(events, &["events", "[]", "seen_by", "[]"]), NPCS);
     assert_eq!(
         names_at(events, &["events", "[]", "effects", "[]", "subject"]),

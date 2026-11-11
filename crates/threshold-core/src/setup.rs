@@ -185,6 +185,7 @@ pub fn commit_world(
             cause_fact_id: None,
             effects,
             seen_by: ids(&ev.seen_by)?,
+            public: ev.public,
         });
     }
 

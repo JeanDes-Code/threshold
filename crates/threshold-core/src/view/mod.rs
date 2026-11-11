@@ -336,7 +336,7 @@ pub struct Act {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ClosedLine {
     /// The outcome word: "Accepted", "Refused", "Done", "Failed",
-    /// "Dropped", or the value an event stated ("Raised").
+    /// "Dropped", or the value a public event wrote ("Raised").
     pub outcome: String,
     /// The item's text.
     pub text: String,
@@ -450,7 +450,7 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
 /// outcome line the core built for a `settles` ("Refused: …"), which the
 /// Decisions and the closed list show as "Refused · …". Anything else on
 /// an item's outcome key is learned (review minor): news the PC is told,
-/// or an outcome an event stated aloud.
+/// or an outcome a public event wrote in front of the PC.
 fn learned_line(sight: &PcSight, belief: &Belief) -> bool {
     let own_place = belief.subject == sight.pc && belief.key == "location";
     !own_place && !settle_line(sight, belief)
@@ -475,7 +475,7 @@ fn settle_line(sight: &PcSight, belief: &Belief) -> bool {
 }
 
 /// How a closed item ended, as one word the Player reads (review M3): the
-/// `settles` outcome ("Refused"), or the value an event stated, in words
+/// `settles` outcome ("Refused"), or the value a public event wrote, in words
 /// ("Raised"). `None` while the item is open.
 fn outcome_word(item: &OpenItem) -> Option<String> {
     let value = &item.outcome.as_ref()?.value;

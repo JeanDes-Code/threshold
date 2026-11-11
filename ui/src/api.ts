@@ -188,7 +188,7 @@ export interface Act {
 
 /** How one Open Item ended: "Refused" and the item's text. */
 export interface ClosedLine {
-  /** "Accepted", "Refused", "Done", "Failed", "Dropped", or a value an event stated. */
+  /** "Accepted", "Refused", "Done", "Failed", "Dropped", or a value a public event wrote. */
   outcome: string;
   text: string;
 }

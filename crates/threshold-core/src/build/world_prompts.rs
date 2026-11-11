@@ -45,6 +45,7 @@ Rules:
 - text: one short line about what the actor does, at most 80 characters. Never narrate a scene of the PC.
 - effects: zero to two changes to the world, as data. subject: a name from the ROSTER. key: a short English word in snake_case. value: a few words.
 - seen_by: at most two NPC names who witness the event. Never the PC, never the actor. Empty when nobody sees it.
+- public: true when everyone at the place sees or hears what the event changes (an announcement, a public act). false when only the people in seen_by notice it.
 - in_minutes: minutes after play starts, from 10 to 20160 (two weeks). Spread them: some within a day, some later.
 - Never schedule what must wait for a choice of the Player. Never decide what the PC does.
 - Write every text in the story language.";

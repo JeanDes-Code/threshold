@@ -694,6 +694,7 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
                 cause_fact_id: Some(old),
                 effects: vec![],
                 seen_by: vec![EntityRef::Id(pc)],
+                public: false,
             },
             LedgerOp::ScheduleEvent {
                 text: "Wind".into(),
@@ -707,6 +708,7 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
                 cause_fact_id: None,
                 effects: vec![],
                 seen_by: vec![],
+                public: false,
             },
             LedgerOp::RecordRoll {
                 seed: u64::MAX,
@@ -1434,6 +1436,7 @@ fn event_effect_cannot_reference_another_campaign() {
             seen_by: vec![],
         }],
         seen_by: vec![],
+        public: false,
     };
     assert!(db.commit(record(a, "foreign effect"), vec![op]).is_err());
     assert_eq!(db.snapshot(a).unwrap(), before);
@@ -1839,4 +1842,60 @@ fn clock_starts_at_the_seed_hour() {
     let old: AdventureSeed = serde_json::from_value(json).unwrap();
     assert_eq!(old.start.hour, None);
     assert_eq!(old.start.start_hour(), 8);
+}
+
+/// Review of bug pass 4, blocker: `public` is a field of the event's
+/// ledger op only. Schema 3 keeps its `world_event` projection, so an old
+/// Campaign file opens; the store reads the flag from the op, after a
+/// rebuild and in a past state too, and an op without it is not public.
+#[test]
+fn an_event_s_public_flag_lives_in_its_ledger_op() {
+    use threshold_core::domain::Trigger;
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let orsel = db.snapshot(c).unwrap().entities[0].id;
+    let event = |text: &str, public: bool| LedgerOp::ScheduleEvent {
+        text: text.into(),
+        trigger: Trigger::At(60),
+        actors: vec![EntityRef::Id(orsel)],
+        goal_id: None,
+        cause_fact_id: None,
+        effects: vec![],
+        seen_by: vec![],
+        public,
+    };
+    let turn = db
+        .commit(
+            record(c, "one"),
+            vec![
+                event("Orsel announces the toll", true),
+                event("Orsel sulks", false),
+            ],
+        )
+        .unwrap();
+    let flags = |view: &threshold_core::store::WorldView| -> Vec<(String, bool)> {
+        view.events_scheduled
+            .iter()
+            .map(|e| (e.text.clone(), e.public))
+            .collect()
+    };
+    let expected = vec![
+        ("Orsel announces the toll".to_owned(), true),
+        ("Orsel sulks".to_owned(), false),
+    ];
+    assert_eq!(flags(&db.snapshot(c).unwrap()), expected);
+    let seq = db.turn(turn).unwrap().unwrap().seq;
+    assert_eq!(flags(&db.snapshot_before(c, seq + 1).unwrap()), expected);
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(flags(&db.snapshot(c).unwrap()), expected);
+    // An event written before the field existed has no `public` in its op:
+    // a private event serializes the same way, and reads as not public.
+    let ops = db.turn_ops(turn).unwrap();
+    let json = serde_json::to_string(&ops[1]).unwrap();
+    assert!(!json.contains("public"), "{json}");
+    assert!(
+        serde_json::to_string(&ops[0])
+            .unwrap()
+            .contains("\"public\":true")
+    );
 }

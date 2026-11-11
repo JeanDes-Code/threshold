@@ -398,6 +398,13 @@ pub enum LedgerOp<E = EntityRef> {
         cause_fact_id: Option<u64>,
         effects: Vec<Effect<E>>,
         seen_by: Vec<E>,
+        /// Everyone at the event's place sees or hears what it changes (an
+        /// announcement, a public act). False when only `seen_by` notice
+        /// it. A PC who witnesses a public event learns its effects
+        /// (`world::with_witnessed_events`). An op stored before the field
+        /// existed reads as not public.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        public: bool,
     },
     FireEvent {
         event_id: u64,
@@ -607,6 +614,7 @@ impl<E> LedgerOp<E> {
                 cause_fact_id,
                 effects,
                 seen_by,
+                public,
             } => LedgerOp::ScheduleEvent {
                 text,
                 trigger: trigger.try_map(f)?,
@@ -618,6 +626,7 @@ impl<E> LedgerOp<E> {
                     .map(|effect| effect.try_map(f))
                     .collect::<Result<_, _>>()?,
                 seen_by: map_all(seen_by, f)?,
+                public,
             },
             Self::FireEvent { event_id } => LedgerOp::FireEvent { event_id },
             Self::CancelEvent {

@@ -149,6 +149,10 @@ pub struct WorldEvent {
     pub scheduled_turn: TurnId,
     pub effects: Vec<Effect<EntityId>>,
     pub seen_by: Vec<EntityId>,
+    /// Everyone at the place sees or hears what the event changes. The
+    /// projection has no column for it: the store reads it from the
+    /// event's ledger op, and an op without it reads as not public.
+    pub public: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VoiceCard {

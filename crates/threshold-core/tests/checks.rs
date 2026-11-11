@@ -326,6 +326,7 @@ fn write_to_when_slot_counts_as_cancel() {
         cause_fact_id: None,
         effects: vec![],
         seen_by: vec![],
+        public: false,
     }]);
     let mut p = proposal(Verdict::Allowed);
     p.facts = vec![fact(slot(e(w.gate), "bell", "broken"), Seen::Pc, vec![])];
@@ -360,6 +361,7 @@ fn bad_handles_rejected() {
                 goal: Some(Handle::Goal(999)),
                 text: "x".into(),
                 effects: vec![],
+                public: false,
             })
         }),
         Box::new(move |p| {
@@ -405,6 +407,7 @@ fn event_effects_writing_one_slot_twice_rejected() {
             slot(e(w.orsel), "mood", "calm"),
             slot(e(w.orsel), second_key, "angry"),
         ],
+        public: false,
     };
     let mut p = proposal(Verdict::Allowed);
     p.schedule = Some(draft("Mood"));
@@ -459,6 +462,7 @@ fn pc_cannot_react_act_or_speak() {
         goal: None,
         text: "Ada leaves".into(),
         effects: vec![],
+        public: false,
     });
     rejected(validate(&p, &w.view), CheckKind::Agency);
 
@@ -649,6 +653,7 @@ fn claims_blockers_rolls_schedule_and_clock_commit() {
         goal: None,
         text: "Brann fetches the captain".into(),
         effects: vec![slot(e(w.brann), "errand", "captain")],
+        public: false,
     });
     p.minutes = 5;
     ok(validate(&p, &w.view));
@@ -804,6 +809,7 @@ fn agency_applies_to_stakes_and_effects() {
         goal: None,
         text: "Brann shouts".into(),
         effects: vec![slot(e(w.ada), "intends", "flee")],
+        public: false,
     });
     rejected(validate(&p, &w.view), CheckKind::Agency);
 }
@@ -1059,6 +1065,7 @@ fn schedule_effect_may_set_pc_reputation() {
         goal: None,
         text: "Orsel files a complaint".into(),
         effects: vec![slot(e(w.ada), "reputation", "under_suspicion")],
+        public: false,
     });
     ok(validate(&p, &w.view));
 }
@@ -1106,6 +1113,7 @@ fn schedule_seen_by_lists_npc_witnesses_only() {
             goal: None,
             text: "Orsel files a complaint".into(),
             effects: vec![slot(e(w.ada), "reputation", "under_suspicion")],
+            public: false,
         });
         p
     };
@@ -1237,6 +1245,7 @@ fn settle_removes_the_three_pc_shapes_and_keeps_the_rest() {
         text: "Orsel reports to the guard".into(),
         effects: vec![],
         seen_by: vec![e(w.ada), e(w.brann)],
+        public: false,
     });
     rejected(validate(&p, &w.view), CheckKind::Agency);
 
@@ -1256,6 +1265,7 @@ fn settle_removes_the_three_pc_shapes_and_keeps_the_rest() {
         text: "Ada comes back".into(),
         effects: vec![],
         seen_by: vec![],
+        public: false,
     });
     let (settled, notes) = settle(p, &w.view);
     assert!(settled.schedule.is_none());

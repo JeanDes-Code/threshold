@@ -164,6 +164,10 @@ _Avoid_: Timer, game time, real time
 Something that happens in the world at a fictional time, whether the PC is present or not. It can be scheduled, triggered, resolved or canceled.
 _Avoid_: Plot point, trigger, quest event
 
+**Public Event**:
+A World Event whose changes everyone at its place sees or hears, such as an announcement or a public act. A PC who witnesses it learns what it changes. The World Build and the GM declare it; the event's text never decides it.
+_Avoid_: Announcement (for the flag), visible event
+
 **Offscreen**:
 Happening where the PC cannot perceive it.
 _Avoid_: Background, hidden (for events)

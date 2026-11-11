@@ -1512,6 +1512,7 @@ fn a_witnessed_event_s_hidden_effect_reaches_no_screen() {
                 seen_by: vec![],
             }],
             seen_by: vec![EntityRef::Id(brann)],
+            public: false,
         }],
     );
     let mut wait = support::proposal(Verdict::Allowed);

@@ -39,8 +39,18 @@ fn add_unnamed_place(w: &mut World, name: &str) {
 
 /// Schedules a World Event at minute 10 whose actor is Orsel, who stands
 /// with the PC, seen by Brann, with `text` and one effect per
-/// `(subject, key, value)`.
+/// `(subject, key, value)`. Not public: only Brann notices what it changes.
 fn schedule(w: &mut World, text: &str, effects: &[(u64, &str, &str)]) {
+    schedule_event(w, text, effects, false);
+}
+
+/// `schedule`, for a public event: everyone at the place sees or hears
+/// what it changes.
+fn schedule_public(w: &mut World, text: &str, effects: &[(u64, &str, &str)]) {
+    schedule_event(w, text, effects, true);
+}
+
+fn schedule_event(w: &mut World, text: &str, effects: &[(u64, &str, &str)], public: bool) {
     let brann = w.brann;
     let orsel = w.orsel;
     w.commit(vec![LedgerOp::ScheduleEvent {
@@ -62,6 +72,7 @@ fn schedule(w: &mut World, text: &str, effects: &[(u64, &str, &str)]) {
             })
             .collect(),
         seen_by: vec![EntityRef::Id(brann)],
+        public,
     }]);
 }
 
@@ -218,17 +229,107 @@ fn the_departure_record_stays_out_of_the_gm_prompt() {
     assert!(text.to_lowercase().contains("smugglers cellar"), "{text}");
 }
 
-/// Review M1: an event that states its own effect in front of the PC. "Orsel
-/// announces his plan to close the gate" with `Orsel.plan = close the gate`
-/// gave the narrator nothing and the PC learned nothing. The PC now learns
-/// an effect whose value the event's text states, and the narrator tells
-/// it. The fact is Persistent: the PC witnessed it, and its key is no state
+/// Review of bug pass 4, blocker: the text rule of 9459297 read meaning
+/// from a bag of words. Each event below "states" its effect's value word
+/// for word, and none of them makes the effect true in front of the PC.
+/// A private event (not `public`) teaches the PC none of them: no Belief,
+/// no card line, no narrator outcome line, and the value stays a secret,
+/// so the guard drops the text that holds it.
+#[test]
+fn a_private_event_teaches_no_effect_its_text_seems_to_state() {
+    // (text, subject, key, value); the subject is Orsel, Brann or Pip.
+    let cases: [(&str, &str, &str, &str); 11] = [
+        (
+            "Orsel paid no attention to the crowd",
+            "Orsel",
+            "debt_status",
+            "paid",
+        ),
+        (
+            "Orsel has not paid the reeve",
+            "Orsel",
+            "debt_status",
+            "paid",
+        ),
+        ("Orsel says yes to another ale", "Orsel", "guilty", "yes"),
+        ("Orsel stares with dead eyes", "Pip", "status", "dead"),
+        (
+            "Orsel swears he will never close the gate",
+            "Orsel",
+            "plan",
+            "close the gate",
+        ),
+        (
+            "Orsel asks Brann whether the toll is raised",
+            "Orsel",
+            "toll",
+            "raised",
+        ),
+        (
+            "Orsel denies that Brann is guilty",
+            "Brann",
+            "guilt",
+            "guilty",
+        ),
+        (
+            "Orsel laughs at the rumor that Brann is married",
+            "Brann",
+            "marital",
+            "married",
+        ),
+        (
+            "Orsel dreams of being free one day",
+            "Orsel",
+            "status",
+            "free",
+        ),
+        ("Orsel jokes that Pip is lost", "Pip", "fate", "lost"),
+        (
+            "Orsel forgets whether he sold the barge",
+            "Orsel",
+            "barge",
+            "sold",
+        ),
+    ];
+    for (text, subject, key, value) in cases {
+        let mut w = World::new();
+        let subject = w.view.entity_by_name(subject).unwrap().id;
+        schedule(&mut w, text, &[(subject, key, value)]);
+        let (engine, campaign, recent) = wait(w);
+        let view = view_of(&engine, campaign);
+        assert!(
+            !pc_knowledge(&view)
+                .iter()
+                .any(|b| b.subject == subject && b.key == key),
+            "{text}: the PC learned {key}"
+        );
+        let line = format!("{key} is now {value}.");
+        assert!(!recent.contains(&line), "{text}: {recent}");
+        assert!(
+            !recent.contains(text),
+            "{text}: the guard told it: {recent}"
+        );
+        let all = screens(engine.store(), campaign, subject);
+        assert!(!all.contains(&line), "{text}: {all}");
+        assert_eq!(
+            view.live_fact(subject, key).unwrap().slot.value,
+            value,
+            "{text}: the event fired"
+        );
+    }
+}
+
+/// A public event: everyone at the place sees or hears what it changes.
+/// "Orsel announces his plan to close the gate" is learned and told. The
+/// flag decides, never the text: a public event whose text says nothing of
+/// the value is learned too, and the same announcement not public is not.
+/// The fact is Persistent: the PC witnessed it, and its key is no state
 /// key (the store keeps state keys Established).
 #[test]
-fn an_announced_effect_is_learned_and_told() {
+fn a_public_announcement_is_learned_and_told() {
     let mut w = World::new();
     let orsel = w.orsel;
-    schedule(
+    schedule_public(
         &mut w,
         "Orsel announces his plan to close the gate",
         &[(orsel, "plan", "close the gate")],
@@ -252,17 +353,28 @@ fn an_announced_effect_is_learned_and_told() {
     );
     let plan = view.live_fact(orsel, "plan").unwrap();
     assert_eq!(plan.canon, Canon::Persistent);
-    // A stem is enough: "closes" states "close".
+    // The flag decides, not the words of the text.
     let mut w = World::new();
-    schedule(
+    schedule_public(
         &mut w,
-        "Orsel closes the gate for the night",
+        "Orsel speaks to the whole square",
         &[(orsel, "plan", "close the gate")],
     );
     let (engine, campaign, _) = wait(w);
-    let view = view_of(&engine, campaign);
     assert!(
-        pc_knowledge(&view)
+        pc_knowledge(&view_of(&engine, campaign))
+            .iter()
+            .any(|b| b.subject == orsel && b.key == "plan")
+    );
+    let mut w = World::new();
+    schedule(
+        &mut w,
+        "Orsel announces his plan to close the gate",
+        &[(orsel, "plan", "close the gate")],
+    );
+    let (engine, campaign, _) = wait(w);
+    assert!(
+        !pc_knowledge(&view_of(&engine, campaign))
             .iter()
             .any(|b| b.subject == orsel && b.key == "plan")
     );
@@ -309,14 +421,14 @@ fn an_effect_the_text_does_not_state_stays_hidden_and_the_text_is_told() {
     );
 }
 
-/// The text rule gives the PC no feeling: an effect on the PC's own mood
-/// stays hidden even when the text states it. And it names no stranger:
-/// an effect on someone the PC cannot name stays hidden.
+/// A public event gives the PC no feeling: an effect on the PC's own mood
+/// stays hidden. And it names nobody the PC must not know: an effect on a
+/// hidden NPC, or on someone the PC cannot name, stays hidden.
 #[test]
-fn a_stated_effect_on_the_pc_s_feelings_or_on_a_stranger_stays_hidden() {
+fn a_public_effect_on_the_pc_s_feelings_a_hidden_npc_or_a_stranger_stays_hidden() {
     let mut w = World::new();
-    let (ada, orsel) = (w.ada, w.orsel);
-    schedule(
+    let ada = w.ada;
+    schedule_public(
         &mut w,
         "Orsel scares Ada, who is afraid",
         &[(ada, "mood", "afraid")],
@@ -335,14 +447,8 @@ fn a_stated_effect_on_the_pc_s_feelings_or_on_a_stranger_stays_hidden() {
         age: Some(40),
         other_names: vec![],
     }]);
-    let kestrel = w
-        .view
-        .entities
-        .iter()
-        .find(|e| e.name == "Kestrel")
-        .unwrap()
-        .id;
-    schedule(
+    let kestrel = w.view.entity_by_name("Kestrel").unwrap().id;
+    schedule_public(
         &mut w,
         "Orsel announces a plan to close the gate",
         &[(kestrel, "plan", "close the gate")],
@@ -350,7 +456,32 @@ fn a_stated_effect_on_the_pc_s_feelings_or_on_a_stranger_stays_hidden() {
     let (engine, campaign, _) = wait(w);
     let view = view_of(&engine, campaign);
     assert!(!pc_knowledge(&view).iter().any(|b| b.subject == kestrel));
-    let _ = orsel;
+    let mut w = World::with_seed(seed_with_maren());
+    let maren = w.view.entity_by_name("Maren Voss").unwrap().id;
+    schedule_public(
+        &mut w,
+        "Orsel announces a plan to close the gate",
+        &[(maren, "plan", "close the gate")],
+    );
+    let (engine, campaign, _) = wait(w);
+    let view = view_of(&engine, campaign);
+    assert!(!pc_knowledge(&view).iter().any(|b| b.subject == maren));
+}
+
+/// The gate seed with the hidden NPC Maren Voss ("the Grey Lady"), who
+/// stands at the gate square unseen.
+fn seed_with_maren() -> threshold_core::domain::AdventureSeed {
+    let mut seed = adventure_seed();
+    let mut maren = npc("Maren Voss", 40);
+    maren.hidden = true;
+    maren.other_names = vec![threshold_core::domain::OtherName {
+        name: "the Grey Lady".into(),
+        known_to: vec![],
+    }];
+    seed.entities.push(maren);
+    seed.decided
+        .push(seed_fact("Maren Voss", "location", "gate square"));
+    seed
 }
 
 /// When every part of a witnessed event is guarded away, the wait still
@@ -385,8 +516,8 @@ fn an_event_guarded_away_gives_the_narrator_a_neutral_line() {
     );
 }
 
-/// Review M2 with M1: an event that states the ruling aloud closes the item
-/// for the PC in that Turn, on an NPC's item and on the PC's own.
+/// Review M2: a public event that settles an item closes it for the PC in
+/// that Turn, on an NPC's item and on the PC's own (its outcome slot).
 #[test]
 fn an_announced_ruling_closes_the_item_in_that_turn() {
     let mut w = World::new();
@@ -407,7 +538,7 @@ fn an_announced_ruling_closes_the_item_in_that_turn() {
         pending(orsel, "pending_toll", "Orsel will rule on the toll."),
         pending(ada, "pending_meet", "Ada is to meet Orsel's clerk."),
     ]);
-    schedule(
+    schedule_public(
         &mut w,
         "Orsel reads out his ruling: the toll is raised, and the meeting is cancelled",
         &[(orsel, "toll", "raised"), (ada, "meet", "cancelled")],

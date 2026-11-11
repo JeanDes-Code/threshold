@@ -12,7 +12,8 @@
 //!   0005): it commits on the `pending_` key. An obstacle names the live fact it
 //!   stands on by subject and key. An event is a World Event due `at`
 //!   minutes after the campaign starts; `seen_by` names the NPCs who witness
-//!   it (empty means GM only).
+//!   it (empty means GM only); `public = true` when everyone at the place
+//!   sees or hears what it changes (missing means not public).
 //!
 //! ```toml
 //! [[facts]]

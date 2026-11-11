@@ -31,6 +31,7 @@ fn schedule(at: u64, text: &str, effects: Vec<Effect>, seen_by: Vec<u64>) -> Led
         cause_fact_id: None,
         effects,
         seen_by: seen_by.into_iter().map(EntityRef::Id).collect(),
+        public: false,
     }
 }
 
@@ -304,6 +305,7 @@ fn when_trigger_fires_on_live_slot() {
             delta: 1,
         }],
         seen_by: vec![],
+        public: false,
     }]);
     assert!(fired(&advance_and_commit(&mut w, 30)).is_empty());
     w.commit(vec![LedgerOp::SupersedeFact {
@@ -410,6 +412,7 @@ fn when_event_fires_after_earlier_at_event() {
         cause_fact_id: None,
         effects: vec![],
         seen_by: vec![],
+        public: false,
     }]);
     w.commit(vec![
         schedule(5, "Early", vec![], vec![]),
@@ -527,6 +530,7 @@ fn schedule_by(w: &mut World, trigger: Trigger, actor: u64, seen_by: Vec<u64>) {
         cause_fact_id: None,
         effects: vec![],
         seen_by: seen_by.into_iter().map(EntityRef::Id).collect(),
+        public: false,
     }]);
 }
 

@@ -297,4 +297,12 @@ pub struct EventDraft {
     #[serde(default)]
     #[schemars(length(max = 2))]
     pub seen_by: Vec<Handle>,
+    /// True when everyone at the place sees or hears what this event
+    /// changes (an announcement, a public act). False when only the people
+    /// in seen_by notice it.
+    ///
+    /// Required in the per-Turn schema (`proposal_schema_for`); a stored
+    /// proposal without it reads as not public.
+    #[serde(default)]
+    pub public: bool,
 }

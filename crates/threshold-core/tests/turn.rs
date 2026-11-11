@@ -620,6 +620,7 @@ fn schedule_write(w: &mut World, at: u64, subject: u64, key: &str, value: &str) 
             seen_by: vec![],
         }],
         seen_by: vec![],
+        public: false,
     }]);
 }
 
@@ -757,6 +758,7 @@ fn schedule_seen(
             seen_by: vec![],
         }],
         seen_by: seen_by.into_iter().map(EntityRef::Id).collect(),
+        public: false,
     }]);
 }
 
@@ -996,6 +998,7 @@ fn wait_over_event(
             seen_by: vec![],
         }],
         seen_by: vec![EntityRef::Id(brann), EntityRef::Id(pip)],
+        public: false,
     }]);
     let mut wait = proposal(Verdict::Allowed);
     wait.action = ActionKind::Wait;
@@ -1114,6 +1117,7 @@ fn a_scheduled_event_from_play_keeps_its_hidden_effect_from_the_pc() {
         goal: None,
         effects: vec![slot(e(w0.orsel), "debt", "partially paid")],
         seen_by: vec![e(w0.brann)],
+        public: false,
     });
     let mut wait = proposal(Verdict::Allowed);
     wait.action = ActionKind::Wait;
@@ -1133,6 +1137,41 @@ fn a_scheduled_event_from_play_keeps_its_hidden_effect_from_the_pc() {
         !threshold_core::world::pc_knowledge(&view)
             .iter()
             .any(|b| b.subject == w.orsel && b.key == "debt")
+    );
+}
+
+/// The sibling path of a public event (review of bug pass 4, blocker): an
+/// event a proposal schedules with `public: true` fires through the same
+/// rule, and the PC who witnesses it learns its effect.
+#[test]
+fn a_public_event_from_play_teaches_the_pc_its_effect() {
+    let w0 = World::new();
+    let mut first = proposal(Verdict::Allowed);
+    first.schedule = Some(threshold_core::domain::EventDraft {
+        text: "Orsel announces his plan".into(),
+        in_minutes: 5,
+        actor: e(w0.orsel),
+        goal: None,
+        effects: vec![slot(e(w0.orsel), "plan", "close the gate")],
+        seen_by: vec![e(w0.brann)],
+        public: true,
+    });
+    let mut wait = proposal(Verdict::Allowed);
+    wait.action = ActionKind::Wait;
+    let (mut engine, w, _gm) = setup(vec![json(&first), json(&wait)], vec!["a", "b"]);
+    engine
+        .play_turn("turn-1".into(), "I watch Orsel.", &mut no_chunks())
+        .unwrap();
+    engine
+        .play_turn("turn-2".into(), "I wait an hour.", &mut no_chunks())
+        .unwrap();
+    let view = snapshot(&engine, &w);
+    let plan = view.live_fact(w.orsel, "plan").expect("the event fired");
+    assert!(plan.seen_by.contains(&w.ada), "{plan:?}");
+    assert!(
+        threshold_core::world::pc_knowledge(&view)
+            .iter()
+            .any(|b| b.subject == w.orsel && b.key == "plan")
     );
 }
 
@@ -1290,6 +1329,7 @@ fn pc_reaction_and_pc_witness_are_removed_not_rejected() {
         text: "Brann fetches the smith".into(),
         effects: vec![],
         seen_by: vec![e(w0.ada)],
+        public: false,
     });
     p.minutes = 2;
     let (mut engine, w, gm) = setup(vec![json(&p)], vec!["Brann shrugs."]);
@@ -1330,6 +1370,7 @@ fn event_with_the_pc_as_actor_is_removed_not_rejected() {
         text: "Ada returns".into(),
         effects: vec![],
         seen_by: vec![],
+        public: false,
     });
     let (mut engine, w, _gm) = setup(vec![json(&p)], vec!["Time passes."]);
     let before = snapshot(&engine, &w).events_scheduled.len();

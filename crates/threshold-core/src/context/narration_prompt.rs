@@ -119,11 +119,12 @@ pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
 
 /// The texts of witnessed World Events as the narrator may see them. An
 /// event text is model text, like a plan, and it is the visible part of the
-/// event: it is told unless it names something the PC must not learn. A
-/// text that holds a secret value (`secret_values`, the same whole-word
-/// match as `guard_plans`) is dropped; a secret key alone does not drop it
-/// ("Ludo counts the silver for his debt" is seen, review M1). So is a text
-/// that names an entity the PC must not hear of (`names_unheard`).
+/// event: it is told unless it names something the PC must not learn,
+/// whether the event is public or not. A text that holds a secret value
+/// (`secret_values`, the same whole-word match as `guard_plans`) is
+/// dropped; a secret key alone does not drop it ("Ludo counts the silver
+/// for his debt" is seen). So is a text that names an entity the PC must
+/// not hear of (`names_unheard`).
 pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
     let mut forbidden = secret_values(view);
     forbidden.extend(unheard_names(view));
@@ -135,8 +136,8 @@ pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
 }
 
 /// The line the narrator gets when a World Event stopped the clock and
-/// every part of it is guarded away: its text and its effects (review M1).
-/// The outcome is then never empty.
+/// every part of it is guarded away: its text dropped, and no effect the PC
+/// learned. The outcome is then never empty.
 pub const QUIET_EVENT_LINE: &str = "Nothing the PC notices happens.";
 
 /// True when `text` names an entity the PC must not hear of: an NPC the
@@ -144,8 +145,9 @@ pub const QUIET_EVENT_LINE: &str = "Nothing the PC notices happens.";
 /// (`world::openly_here`) nor is known to the PC (seen here, or the subject
 /// of a PC Belief); or a place, a Faction or a thing the PC cannot name
 /// (`world::pc_can_name`, review B1: "Orsel slips down to the Smugglers
-/// Cellar"). `guard_events` drops such a text, and the PC learns no effect
-/// of an event whose text it is (`world::with_witnessed_events`).
+/// Cellar"). `guard_events` drops such a text, and a public event's effect
+/// whose fact text or value names such an entity is not learned
+/// (`world::with_witnessed_events`).
 pub fn names_unheard(view: &WorldView, text: &str) -> bool {
     quotes(&unheard_names(view), text)
 }

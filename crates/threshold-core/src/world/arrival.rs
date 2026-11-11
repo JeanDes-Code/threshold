@@ -212,13 +212,20 @@ pub fn openly_here(view: &WorldView, entity: EntityId) -> bool {
 /// for the event before the Turn.
 ///
 /// What the PC perceives of a witnessed event is its visible part: the
-/// event's text, and the effects that `perceive` accepts (an entity that
-/// comes or goes at the PC's place, what happens to the PC). The PC joins
-/// the witnesses of those facts only, and they become Persistent, as for
-/// any fact the PC sees (the store keeps state keys Established). Every
-/// other effect stays with the witnesses the event declares (bug pass 4,
-/// B1: "Ludo counts his silver" made the PC hold "Ludo's debt is now
-/// partially paid", a secret seen by Agathe only).
+/// event's text, and the effects that `perceive` accepts. Which effects are
+/// visible is data, declared by the event's `public` flag, never read from
+/// its text (review of bug pass 4: a word rule taught "Orsel paid no
+/// attention to the crowd" as `debt_status = paid`):
+/// - a public event (an announcement, a public act): every effect on an
+///   entity the PC can name and that is not hidden;
+/// - any event: an entity that comes or goes at the PC's place, and what
+///   happens to the PC (`checks::PC_INVOLUNTARY_KEYS`).
+///
+/// The PC joins the witnesses of those facts only, and they become
+/// Persistent, as for any fact the PC sees (the store keeps state keys
+/// Established). Every other effect stays with the witnesses the event
+/// declares (bug pass 4, B1: "Ludo counts his silver" made the PC hold
+/// "Ludo's debt is now partially paid", a secret seen by Agathe only).
 ///
 /// An entity that leaves for a place the PC cannot name is seen to leave,
 /// not to arrive (review B1): the PC gets a departure record
@@ -257,10 +264,9 @@ pub fn with_witnessed_events(view: &WorldView, ops: Vec<LedgerOp>) -> (Vec<Ledge
     };
     let mut texts = Vec::new();
     let mut out = Vec::with_capacity(ops.len());
-    // The text of the witnessed event whose effect ops follow, if the PC
-    // witnesses it. `advance` puts each event's effect ops right after its
-    // `FireEvent`.
-    let mut witnessed: Option<&str> = None;
+    // The witnessed event whose effect ops follow, if the PC witnesses it.
+    // `advance` puts each event's effect ops right after its `FireEvent`.
+    let mut witnessed: Option<&WorldEvent> = None;
     for mut op in ops {
         let mut extra = None;
         match &mut op {
@@ -269,17 +275,17 @@ pub fn with_witnessed_events(view: &WorldView, ops: Vec<LedgerOp>) -> (Vec<Ledge
                     .events_scheduled
                     .iter()
                     .find(|e| e.id == *event_id)
-                    .filter(|e| pc_witnesses(view, e))
-                    .map(|e| e.text.as_str());
-                texts.extend(witnessed.map(str::to_owned));
+                    .filter(|e| pc_witnesses(view, e));
+                texts.extend(witnessed.map(|e| e.text.clone()));
             }
             LedgerOp::AddFact {
                 source: FactSource::WorldEvent,
                 slot,
+                text,
                 seen_by,
                 canon,
                 ..
-            } if let Some(text) = witnessed => match sight.perceive(slot, text) {
+            } if let Some(event) = witnessed => match sight.perceive(slot, text, event) {
                 Perceived::Effect => {
                     if !seen_by.contains(&pc_ref) {
                         seen_by.push(pc_ref);
@@ -290,10 +296,10 @@ pub fn with_witnessed_events(view: &WorldView, ops: Vec<LedgerOp>) -> (Vec<Ledge
                 Perceived::Nothing => {}
             },
             LedgerOp::SupersedeFact { new, .. }
-                if let Some(text) = witnessed
+                if let Some(event) = witnessed
                     && new.source == FactSource::WorldEvent =>
             {
-                match sight.perceive(&new.slot, text) {
+                match sight.perceive(&new.slot, &new.text, event) {
                     Perceived::Effect => {
                         if !new.seen_by.contains(&pc_ref) {
                             new.seen_by.push(pc_ref);
@@ -336,8 +342,8 @@ struct Sight<'a> {
 }
 
 impl Sight<'_> {
-    /// What the PC, who witnesses an event whose text is `text`, perceives
-    /// of this effect:
+    /// What the PC, who witnesses `event`, perceives of this effect, whose
+    /// fact text is `text`:
     /// - the `location` of an entity that is not hidden, when the entity
     ///   comes to the PC's place (the PC sees it come), or openly stands at
     ///   the PC's place and goes to a place the PC can name (the PC sees
@@ -346,30 +352,24 @@ impl Sight<'_> {
     /// - a slot of the PC itself on a key of what happens to the PC
     ///   (`checks::PC_INVOLUNTARY_KEYS`): the event acts on the PC in the
     ///   PC's presence;
-    /// - any other slot whose value the event's own text states (`states`,
-    ///   review M1: "Orsel announces his plan to close the gate"), about an
-    ///   entity the PC can name, when the text names nothing the PC must not
-    ///   hear of (`context::names_unheard`).
+    /// - when the event is `public`: the outcome slot of an Open Item the
+    ///   PC holds, on the PC (never another key of the PC: a public event
+    ///   gives the PC no feeling and no choice); and any other slot of an
+    ///   entity the PC can name, when the fact's text and value name
+    ///   nothing the PC must not hear of (`context::names_unheard`).
     ///
     /// Any other effect (a debt, a plan, a feeling, a slot of an absent
-    /// entity that the text does not state) is hidden state: only the
+    /// entity, every effect of a private event) is hidden state: only the
     /// event's declared witnesses learn the fact (bug pass 4, B1).
-    fn perceive(&self, slot: &Slot, text: &str) -> Perceived {
+    fn perceive(&self, slot: &Slot, text: &str, event: &WorldEvent) -> Perceived {
         let EntityRef::Id(subject) = slot.subject else {
             return Perceived::Nothing;
         };
         let key = normalize::key(&slot.key);
         if subject == self.pc {
-            // The text rule never gives the PC a feeling or a choice: on the
-            // PC, it covers only the outcome of an Open Item the PC holds
-            // ("the meeting is cancelled", review M2).
             let involuntary = crate::checks::PC_INVOLUNTARY_KEYS.contains(&key.as_str());
             let outcome = self.items.iter().any(|(s, k)| *s == subject && *k == key);
-            return if involuntary
-                || outcome
-                    && states(text, &slot.value)
-                    && !crate::context::names_unheard(self.view, text)
-            {
+            return if involuntary || (event.public && outcome) {
                 Perceived::Effect
             } else {
                 Perceived::Nothing
@@ -379,10 +379,11 @@ impl Sight<'_> {
             return Perceived::Nothing;
         }
         if key != "location" {
-            let stated = self.named.contains(&subject)
-                && states(text, &slot.value)
-                && !crate::context::names_unheard(self.view, text);
-            return if stated {
+            let public = event.public
+                && self.named.contains(&subject)
+                && !crate::context::names_unheard(self.view, text)
+                && !crate::context::names_unheard(self.view, &slot.value);
+            return if public {
                 Perceived::Effect
             } else {
                 Perceived::Nothing
@@ -440,51 +441,6 @@ impl Sight<'_> {
             seen_by: vec![EntityRef::Id(self.pc)],
             causes: Vec::new(),
         }
-    }
-}
-
-/// Words that carry no content in a value: articles, prepositions,
-/// pronouns, auxiliaries. "not" and "no" carry content: "not paid" is no
-/// "paid".
-const FUNCTION_WORDS: &[&str] = &[
-    "a", "an", "the", "of", "to", "in", "on", "at", "by", "for", "with", "from", "into", "onto",
-    "and", "or", "but", "as", "is", "are", "was", "were", "be", "been", "being", "has", "have",
-    "had", "will", "would", "shall", "his", "her", "hers", "its", "their", "theirs", "he", "she",
-    "it", "they", "him", "them", "this", "that", "these", "those", "now", "then",
-];
-
-/// True when `text` states `value` (review M1): every content word of the
-/// value (not a function word, `FUNCTION_WORDS`) is a word of the text,
-/// through a short stem ("closes" states "close"); a value with no content
-/// word must stand whole in the text, as words. One deterministic rule, no
-/// meaning: "Orsel announces his plan to close the gate" states "close the
-/// gate"; "Ludo counts his remaining silver" does not state "partially
-/// paid".
-fn states(text: &str, value: &str) -> bool {
-    let text_words = normalize::name_words(text);
-    let value_words = normalize::name_words(value);
-    let content: Vec<String> = value_words
-        .iter()
-        .filter(|w| !FUNCTION_WORDS.contains(&w.as_str()))
-        .map(|w| root(w))
-        .collect();
-    if content.is_empty() {
-        return !value_words.is_empty()
-            && text_words
-                .windows(value_words.len())
-                .any(|window| window == value_words.as_slice());
-    }
-    let text_roots: Vec<String> = text_words.iter().map(|w| root(w)).collect();
-    content.iter().all(|word| text_roots.contains(word))
-}
-
-/// A word's stem (`world::items` stem), a final "e" dropped from a stem of 5
-/// letters or more, so "close" and "closes" meet at "clos".
-fn root(word: &str) -> String {
-    let stem = super::items::stem(word);
-    match stem.strip_suffix('e') {
-        Some(rest) if stem.chars().count() >= 5 => rest.to_owned(),
-        _ => stem,
     }
 }
 

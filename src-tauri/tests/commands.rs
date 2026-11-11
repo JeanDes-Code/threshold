@@ -664,7 +664,8 @@ fn build_outputs() -> Vec<Value> {
             "actor": "Tobin Reed",
             "text": "Tobin Reed checks the harbour chains.",
             "effects": [],
-            "seen_by": ["Ada Venn"]
+            "seen_by": ["Ada Venn"],
+            "public": false
         }]}),
         json!({"placements": [{"npc": "Ada Venn", "place": "Tide Hall"}]}),
     ]

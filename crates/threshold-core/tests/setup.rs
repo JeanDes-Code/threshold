@@ -202,6 +202,43 @@ value = "filed"
     assert_eq!(store.snapshot(campaign).unwrap(), before);
 }
 
+/// Review of bug pass 4, blocker: a world file's event carries `public`
+/// into the store; an event written before the field existed reads as not
+/// public.
+#[test]
+fn a_world_event_keeps_its_public_flag_and_an_old_one_is_private() {
+    let (mut store, campaign) = campaign(&town_seed());
+    let setup = world(
+        r#"
+[[events]]
+at = 60
+actor = "Doul"
+text = "Doul reads the new toll aloud."
+public = true
+
+[[events]]
+at = 90
+actor = "Doul"
+text = "Doul files a motion."
+"#,
+    );
+    commit_world(&mut store, campaign, &setup).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let flags: Vec<(&str, bool)> = view
+        .events_scheduled
+        .iter()
+        .filter(|e| e.text.starts_with("Doul"))
+        .map(|e| (e.text.as_str(), e.public))
+        .collect();
+    assert_eq!(
+        flags,
+        vec![
+            ("Doul reads the new toll aloud.", true),
+            ("Doul files a motion.", false)
+        ]
+    );
+}
+
 #[test]
 fn unknown_name_fails_and_writes_nothing() {
     let (mut store, campaign) = campaign(&town_seed());

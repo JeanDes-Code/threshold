@@ -241,6 +241,7 @@ fn town_demo_offscreen_consequence() {
         text: "Doul opens an inquiry into the scribe".into(),
         effects: vec![slot(e(pc), "reputation", "under_suspicion")],
         seen_by: vec![e(hessa)],
+        public: false,
     });
     insult.minutes = 5;
 

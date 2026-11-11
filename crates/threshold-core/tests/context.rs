@@ -532,6 +532,7 @@ fn every_handle_in_the_proposal_prompt_is_in_the_schema() {
             cause_fact_id: None,
             effects: vec![],
             seen_by: vec![],
+            public: false,
         },
     ]);
     let intent = "I wait.";

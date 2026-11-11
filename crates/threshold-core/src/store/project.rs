@@ -371,6 +371,7 @@ fn apply(
             cause_fact_id,
             effects,
             seen_by,
+            public: _,
         } => {
             for x in actors.iter().chain(seen_by) {
                 entity(db, *x, c)?;
@@ -779,6 +780,17 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             opened_turn,
         });
     }
+    // `public` lives in the event's ledger op only: the `world_event`
+    // projection of schema 3 has no column for it, and an older op has no
+    // field (it reads as not public). Only the ops of the Turns that
+    // scheduled a live event are parsed.
+    let public: HashSet<u64> = ids(
+        db,
+        "SELECT CAST(json_extract(l.op_json,'$.id') AS INTEGER) FROM ledger l WHERE l.turn_id IN (SELECT w.scheduled_turn FROM world_event w JOIN turn t ON t.id=w.scheduled_turn WHERE t.campaign_id=?1 AND w.status='scheduled') AND json_extract(l.op_json,'$.op.schedule_event.public')=1",
+        c,
+    )?
+    .into_iter()
+    .collect();
     let mut events_scheduled = Vec::new();
     for id in ids(
         db,
@@ -801,6 +813,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             scheduled_turn: row.6,
             effects: parse(row.7)?,
             seen_by: parse(row.8)?,
+            public: public.contains(&id),
         });
     }
     let mut goals_active = Vec::new();

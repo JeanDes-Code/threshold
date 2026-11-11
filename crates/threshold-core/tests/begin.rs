@@ -260,6 +260,7 @@ fn begin_moves_no_clock_and_fires_no_event() {
                 cause_fact_id: None,
                 effects: vec![],
                 seen_by: vec![],
+                public: false,
             }],
         )
         .unwrap();

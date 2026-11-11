@@ -316,6 +316,7 @@ fn shortcut_committed_reads_the_ledger() {
             cause_fact_id: None,
             effects: vec![],
             seen_by: vec![],
+            public: false,
         }],
     );
     let pending = store.snapshot(campaign).unwrap();
@@ -968,6 +969,7 @@ done = ["owns ferry", "bought ferry"]
                         value: "five pennies".into(),
                     }],
                     seen_by: vec![],
+                    public: false,
                 },
                 EventEntry {
                     at: 600,
@@ -975,6 +977,7 @@ done = ["owns ferry", "bought ferry"]
                     text: "Osric argues with the cook".into(),
                     effects: vec![],
                     seen_by: vec![],
+                    public: false,
                 },
             ],
             ..WorldSetup::default()

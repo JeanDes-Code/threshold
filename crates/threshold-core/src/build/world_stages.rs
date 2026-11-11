@@ -329,6 +329,7 @@ fn world_events(
                 })
                 .collect(),
             seen_by: e.seen_by.iter().map(|n| roster.main(n)).collect(),
+            public: e.public,
         })
         .collect())
 }
@@ -541,6 +542,10 @@ pub(super) struct EventOut {
     pub effects: Vec<EffectOut>,
     #[schemars(length(max = 2), inner(length(max = 60)))]
     pub seen_by: Vec<String>,
+    /// True when everyone at the place sees or hears what this event
+    /// changes (an announcement, a public act). False when only the people
+    /// in seen_by notice it.
+    pub public: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]

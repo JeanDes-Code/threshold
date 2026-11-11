@@ -71,7 +71,9 @@ pub struct ObstacleEntry {
 }
 
 /// A World Event due `at` minutes after the campaign starts. `seen_by`
-/// names the characters who witness it; empty means GM only.
+/// names the characters who witness it; empty means GM only. `public`:
+/// everyone at the place sees or hears what it changes; a world file
+/// without it reads as not public.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EventEntry {
@@ -83,6 +85,8 @@ pub struct EventEntry {
     pub effects: Vec<EffectEntry>,
     #[serde(default)]
     pub seen_by: Vec<String>,
+    #[serde(default)]
+    pub public: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

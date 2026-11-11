@@ -192,6 +192,41 @@ fn schema_for_limits_entity_handles() {
     );
 }
 
+/// Review of bug pass 4, blocker: whether everyone at the place perceives
+/// what a scheduled event changes is a required boolean, `public`, with a
+/// description; never read from the event's text.
+#[test]
+fn schema_for_requires_public_on_a_scheduled_event() {
+    use threshold_core::{HandleContext, proposal_schema_for};
+    let ctx = HandleContext {
+        entities: vec![Handle::Entity(1)],
+        ..Default::default()
+    };
+    let s = proposal_schema_for(&ctx);
+    let required = s.pointer("/$defs/EventDraft/required").unwrap();
+    assert!(
+        required
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("public")),
+        "{required}"
+    );
+    let public = s.pointer("/$defs/EventDraft/properties/public").unwrap();
+    assert_eq!(public["type"], "boolean");
+    assert!(public.get("default").is_none(), "{public}");
+    let description = public["description"].as_str().unwrap();
+    assert!(
+        description.contains("everyone at the place"),
+        "{description}"
+    );
+    // A stored proposal without the field reads as not public.
+    let draft: threshold_core::domain::EventDraft = serde_json::from_value(serde_json::json!({
+        "in_minutes": 5, "actor": "E1", "goal": null, "text": "Orsel leaves", "effects": []
+    }))
+    .unwrap();
+    assert!(!draft.public);
+}
+
 #[test]
 fn schema_for_omits_event_fields_without_events() {
     use threshold_core::{HandleContext, proposal_schema_for};

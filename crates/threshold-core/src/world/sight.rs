@@ -64,7 +64,7 @@ pub struct OpenItem {
     /// an item, and a closed item stays closed.
     pub closed_in: Option<TurnId>,
     /// The Belief that closed the item for the PC (its value is the
-    /// outcome: "refused", or "raised" for an outcome an event stated),
+    /// outcome: "refused", or "raised" for an outcome a public event wrote),
     /// `None` while the item is open (review M3).
     pub outcome: Option<Belief>,
     /// When the PC first learned the item: the place of that row among the

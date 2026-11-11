@@ -268,6 +268,7 @@ impl HiddenWorld {
                     cause_fact_id: None,
                     effects: vec![],
                     seen_by: vec![],
+                    public: false,
                 },
             ],
         );

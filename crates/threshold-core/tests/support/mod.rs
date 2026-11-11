@@ -45,7 +45,7 @@ pub struct World {
     ops: u32,
 }
 
-fn seed_fact(subject: &str, key: &str, value: &str) -> SeedFact {
+pub fn seed_fact(subject: &str, key: &str, value: &str) -> SeedFact {
     SeedFact {
         subject: subject.into(),
         key: key.into(),
@@ -64,7 +64,7 @@ pub fn place(name: &str) -> SeedEntity {
     }
 }
 
-fn npc(name: &str, age: u16) -> SeedEntity {
+pub fn npc(name: &str, age: u16) -> SeedEntity {
     SeedEntity {
         name: name.into(),
         kind: EntityKind::Npc,
@@ -130,8 +130,14 @@ fn add_fact(subject: u64, key: &str, value: &str, seen_by: Vec<u64>) -> LedgerOp
 
 impl World {
     pub fn new() -> Self {
+        Self::with_seed(adventure_seed())
+    }
+
+    /// The gate scene built from `seed`, a variant of `adventure_seed`
+    /// (for example with a hidden entry).
+    pub fn with_seed(seed: AdventureSeed) -> Self {
         let mut store = Store::open_in_memory().unwrap();
-        let campaign = store.create_campaign(&adventure_seed(), 7).unwrap();
+        let campaign = store.create_campaign(&seed, 7).unwrap();
         let view = store.snapshot(campaign).unwrap();
         let id = |name: &str| view.entities.iter().find(|e| e.name == name).unwrap().id;
         let (ada, orsel, brann, pip, gate) =
@@ -177,6 +183,7 @@ impl World {
                 cause_fact_id: None,
                 effects: vec![],
                 seen_by: vec![],
+                public: false,
             },
         ]);
         let live = |w: &World, subject: u64, key: &str| w.view.live_fact(subject, key).unwrap().id;

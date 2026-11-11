@@ -565,7 +565,7 @@ impl Engine {
         let mut events = guard_events(view_after, committed.events);
         // A witnessed event stopped the clock, and every part of it is
         // guarded away: the narrator gets a neutral line, never an empty
-        // outcome (review M1).
+        // outcome.
         let event_fact = perceived.iter().any(|op| match op {
             LedgerOp::AddFact { source, .. } => *source == FactSource::WorldEvent,
             LedgerOp::SupersedeFact { new, .. } => new.source == FactSource::WorldEvent,
