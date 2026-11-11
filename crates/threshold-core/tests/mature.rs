@@ -857,3 +857,95 @@ fn the_narrator_present_line_is_a_subset_of_the_checked_set() {
         }
     }
 }
+
+// --- Review of Tasks 1 and 2: the place rule of the gate --------------------
+
+/// M1: for the gate, a place written another way is the PC's place: case,
+/// accents, punctuation, a word-prefix, or another name of the same place
+/// entity. Ada stands at "gate square".
+#[test]
+fn a_near_place_name_counts_as_here() {
+    for place in [
+        "Gate Square.",
+        "gate-square",
+        "Gâte Square",
+        "gate square, by the well",
+        "Gate",
+        "the gate square",
+    ] {
+        let mut w = confirmed_gate();
+        let wren = add_character(&mut w, "Wren", 16, true, place);
+        assert_eq!(
+            clearance(&w.view, &[]).unwrap_err(),
+            Blocked { who: vec![wren] },
+            "{place}"
+        );
+        let errs = validate(&intimate(&w, Stance::Comply), &w.view).expect_err(place);
+        assert_eq!(adults_only(&errs), [Some(e(wren))], "{place}");
+    }
+
+    // Another name of the place entity the PC stands at.
+    let mut w = confirmed_gate();
+    w.commit(vec![LedgerOp::AddEntity {
+        local: None,
+        kind: EntityKind::Place,
+        name: "Gate Square".into(),
+        age: None,
+        other_names: vec!["Old Yard".into()],
+        age_confirmed: false,
+    }]);
+    let wren = add_character(&mut w, "Wren", 16, true, "old yard");
+    assert_eq!(
+        clearance(&w.view, &[]).unwrap_err(),
+        Blocked { who: vec![wren] }
+    );
+}
+
+/// M1: unknown is not cleared. A character with no live location counts
+/// as here, and so does every character when the PC's own place is
+/// unknown.
+#[test]
+fn a_character_with_no_place_counts_as_here() {
+    let mut w = confirmed_gate();
+    w.commit(vec![LedgerOp::AddEntity {
+        local: None,
+        kind: EntityKind::Npc,
+        name: "Wren".into(),
+        age: Some(16),
+        other_names: vec![],
+        age_confirmed: true,
+    }]);
+    let wren = w.view.entity_by_name("Wren").unwrap().id;
+    assert_eq!(
+        clearance(&w.view, &[]).unwrap_err(),
+        Blocked { who: vec![wren] }
+    );
+
+    // The PC's place unknown: Pip, at the market, counts too.
+    let mut w = confirmed_gate();
+    let mut view = w.view.clone();
+    view.live_facts
+        .retain(|f| !(f.slot.subject == w.ada && f.slot.key == "location"));
+    assert_eq!(
+        clearance(&view, &[]).unwrap_err(),
+        Blocked { who: vec![w.pip] }
+    );
+    let pip = w.pip;
+    bring(&mut w, pip, "far road");
+    assert!(clearance(&w.view, &[]).is_ok(), "far road is not here");
+}
+
+/// M1: a place that shares no first words with the PC's place does not
+/// block, even when one word is the same.
+#[test]
+fn another_place_does_not_block() {
+    for place in ["market", "far road", "square of the mill", "town gate"] {
+        let mut w = confirmed_gate();
+        add_character(&mut w, "Wren", 16, true, place);
+        assert!(clearance(&w.view, &[]).is_ok(), "{place}");
+        assert!(
+            validate(&intimate(&w, Stance::Comply), &w.view).is_ok(),
+            "{place}"
+        );
+    }
+}

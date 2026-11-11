@@ -17,6 +17,7 @@ use crate::{
     },
     normalize,
     store::{Claim, Entity, Fact, Knowledge, WorldView},
+    world::pc_knowledge,
 };
 
 /// The proof that every character of a place is cleared. Only `clearance`
@@ -82,22 +83,77 @@ pub fn clearance(view: &WorldView, also: &[EntityId]) -> Result<Cleared, Blocked
 ///   function the narrator's `Present` line reads (`context::seen_present`),
 ///   so a stale Belief or a Claim counts: the narrator would tell that
 ///   character as here;
+/// - each character whose live location, or whose location as the PC
+///   believes it, is the PC's place by the gate's own place rule
+///   (`same_place`), and each character with no live location: unknown is
+///   not cleared. When the PC's own place is unknown, every character;
 /// - the PC.
 ///
 /// The narrator's `Present` line is a subset of this set by construction;
 /// the test `the_narrator_present_line_is_a_subset_of_the_checked_set`
 /// pins it. Things and places are in the set too; `clearance` checks the
-/// characters among them.
+/// characters among them. The place rule here is for the gate only: play
+/// keeps `normalize::value` equality.
 pub fn checked_here(view: &WorldView) -> BTreeSet<EntityId> {
     let mut here: BTreeSet<EntityId> = view.present().into_iter().collect();
     here.extend(seen_present(view));
+    let pc = view.entities.iter().find(|e| e.kind == EntityKind::Pc);
+    here.extend(pc.map(|pc| pc.id));
+    let pc_place = pc
+        .and_then(|pc| view.live_fact(pc.id, "location"))
+        .map(|f| f.slot.value.as_str())
+        .unwrap_or_default();
+    let at_pc_place = |value: &str| same_place(view, pc_place, value);
     here.extend(
         view.entities
             .iter()
-            .filter(|e| e.kind == EntityKind::Pc)
+            .filter(|e| is_character(e))
+            .filter(|e| {
+                view.live_fact(e.id, "location")
+                    .is_none_or(|f| at_pc_place(&f.slot.value))
+            })
             .map(|e| e.id),
     );
+    here.extend(
+        pc_knowledge(view)
+            .into_iter()
+            .filter(|b| b.key == "location" && at_pc_place(&b.value))
+            .map(|b| b.subject)
+            .filter(|id| view.entities.iter().any(|e| e.id == *id && is_character(e))),
+    );
     here
+}
+
+/// The gate's place rule (review M1): two location values name one place
+/// when, after the strongest normal form the core has (`place_words`:
+/// case, accents, punctuation, a leading article), their words are equal,
+/// or one is a word-prefix of the other ("gate" and "gate square, by the
+/// well"), or both name one Place entity through any of its names. A value
+/// with no words is unknown and counts as the same place: the gate fails
+/// closed.
+fn same_place(view: &WorldView, a: &str, b: &str) -> bool {
+    let (wa, wb) = (place_words(a), place_words(b));
+    if wa.is_empty() || wb.is_empty() || wa.starts_with(&wb) || wb.starts_with(&wa) {
+        return true;
+    }
+    let places = |value: &str| -> HashSet<EntityId> {
+        view.entities_by_name(value)
+            .filter(|e| e.kind == EntityKind::Place)
+            .map(|e| e.id)
+            .collect()
+    };
+    !places(a).is_disjoint(&places(b))
+}
+
+/// The words of a location value for `same_place`: `normalize::name_words`
+/// (lower case, no accents, split on every character that is not a letter
+/// or a digit), with a leading article left out.
+fn place_words(value: &str) -> Vec<String> {
+    let mut words = normalize::name_words(value);
+    if words.len() > 1 && ["the", "a", "an"].contains(&words[0].as_str()) {
+        words.remove(0);
+    }
+    words
 }
 
 /// Who is at the PC's place once the ops of one Turn are committed (data

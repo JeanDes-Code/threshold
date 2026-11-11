@@ -1310,8 +1310,14 @@ fn a_cleared_min_age_never_clears_a_minor() {
             Blocked { who: vec![tam.id] },
             "min_age {min_age:?}"
         );
+        // Jean is cleared. Tam has no location, so the gate counts Tam as
+        // here (unknown is not cleared, review M1), and Tam alone blocks.
         let jean = view.entities.iter().find(|e| e.name == "Jean").unwrap();
-        assert!(clearance(&view, &[jean.id]).is_ok());
+        assert_eq!(
+            clearance(&view, &[jean.id]).unwrap_err(),
+            Blocked { who: vec![tam.id] },
+            "min_age {min_age:?}"
+        );
     }
 
     // A `min_age` above the minor's age keeps the gap: no confirmed ages.
