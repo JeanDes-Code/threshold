@@ -101,7 +101,9 @@ pub struct PlayView {
     /// The characters present now, the PC left out.
     pub here: Vec<NameRef>,
     pub you: YouCard,
-    /// The Open Items the PC knows that are not closed.
+    /// The Open Items the PC knows that are not closed, those about an NPC
+    /// present first, then the newest (`open_lines`): the UI shows the
+    /// first ones as they come.
     pub open: Vec<FactLine>,
     pub pinned: Vec<PinLine>,
     /// Each named NPC, place and Faction the PC knows.
@@ -419,12 +421,20 @@ fn place_name(sight: &PcSight, text: &str) -> String {
         .unwrap_or_else(|| text.to_owned())
 }
 
-/// The Open Items the PC knows that are not closed.
+/// The Open Items the PC knows that are not closed: those about an NPC
+/// present now first, then the newest (`OpenItem::learned`).
 fn open_lines(sight: &PcSight) -> Vec<FactLine> {
-    sight
+    let mut items: Vec<&OpenItem> = sight
         .open_items
         .iter()
         .filter(|item| item.closed_in.is_none())
+        .collect();
+    // The items about someone here first, then the newest (review minor:
+    // the side panel shows the first 5, and they came by subject id).
+    let here = |item: &OpenItem| item.subject != sight.pc && sight.present.contains(&item.subject);
+    items.sort_by_key(|item| (!here(item), std::cmp::Reverse(item.learned)));
+    items
+        .into_iter()
         .filter_map(|item| item_line(sight, item))
         .collect()
 }

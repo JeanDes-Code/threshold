@@ -1421,3 +1421,53 @@ fn a_link_needs_the_name_s_own_capitals() {
         .collect();
     assert_eq!(links, [(w.gate, "Gate".to_owned())]);
 }
+
+/// Review minor: the side panel shows the first 5 Open Items, and they
+/// came sorted by subject id. The view now lists the items about someone
+/// present first, then the newest: the order a Player needs in play.
+#[test]
+fn open_items_list_people_here_first_then_the_newest() {
+    let mut w = HiddenWorld::new();
+    let (ada, orsel, pip) = (w.ada, w.orsel, w.pip);
+    let view = w.view();
+    w.play(
+        "I listen.",
+        &observe(),
+        0,
+        vec![set(
+            &view,
+            orsel,
+            "pending_toll",
+            "unpaid",
+            "Orsel wants the toll paid by dusk.",
+            &[ada, orsel],
+        )],
+    );
+    let view = w.view();
+    w.play(
+        "I listen.",
+        &observe(),
+        0,
+        vec![set(
+            &view,
+            pip,
+            "pending_errand",
+            "asked",
+            "Pip asked Ada to fetch a lantern.",
+            &[ada],
+        )],
+    );
+    let order: Vec<(u64, String)> = view_of(&w)
+        .open
+        .iter()
+        .map(|f| (f.belief.subject_id, f.belief.key.clone()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (orsel, "pending_toll".to_owned()),
+            (pip, "pending_errand".to_owned()),
+            (ada, "pending_meet".to_owned()),
+        ]
+    );
+}

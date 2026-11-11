@@ -64,6 +64,9 @@ pub struct OpenItem {
     /// after the first PC row on the open fact. A Claim never closes an
     /// item, and a closed item stays closed.
     pub closed_in: Option<TurnId>,
+    /// When the PC first learned the item: the place of that row among the
+    /// PC's rows, in the order they were written. A higher one is newer.
+    pub learned: usize,
 }
 
 /// One Opening, Play or Correction Turn, reverted or not.
@@ -243,6 +246,7 @@ pub fn pc_sight(
                 key: b.key.clone(),
                 text: b.text.clone(),
                 closed_in,
+                learned: order[&std::ptr::from_ref(first)],
             }
         })
         .collect();
