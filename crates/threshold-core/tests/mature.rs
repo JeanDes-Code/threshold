@@ -1336,3 +1336,73 @@ fn a_malformed_first_answer_keeps_the_tag() {
     let first = format!("```json\n{untagged}\n```");
     play_with_first(gate(), first).expect("an untagged Turn commits");
 }
+
+// --- Review of Tasks 1 and 2: minors ----------------------------------------
+
+/// One Turn of `w` whose two answers are `p`: the result and the number of
+/// proposal calls.
+fn play_twice(mut w: World, p: &DecisionProposal) -> (Result<(), TurnError>, usize) {
+    let raw = serde_json::to_string(p).unwrap();
+    let gm = RecordedGm::new(vec![raw.clone(), raw], vec!["unused".into()]);
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    let result = engine
+        .play_turn("t1".into(), "I lean closer.", &mut |_| {})
+        .map(|_| ());
+    let calls = gm
+        .calls()
+        .iter()
+        .filter(|c| c.kind == CallKind::Propose)
+        .count();
+    (result, calls)
+}
+
+/// `CheckKind::is_final` is the one list of final kinds: `turn::plan`
+/// reads it through `mature::final_refusal`. Each final kind ends the Turn
+/// after one proposal call; a kind made non-final would get the retry.
+#[test]
+fn every_final_kind_ends_the_turn_after_one_call() {
+    // `DetailExcluded`: the default level.
+    let mut w = World::new();
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    let p = intimate(&w, Stance::Comply);
+    let (result, calls) = play_twice(w, &p);
+    assert!(CheckKind::DetailExcluded.is_final());
+    assert!(
+        matches!(
+            result,
+            Err(TurnError::Refused {
+                kind: RefusalKind::Excluded,
+                ..
+            })
+        ),
+        "{result:?}"
+    );
+    assert_eq!(calls, 1, "excluded");
+
+    // `AdultsOnly`: Brann is unconfirmed.
+    let mut w = World::with_detail(DetailLevel::Implied);
+    let ids = [w.ada, w.orsel];
+    w.confirm(&ids);
+    let p = intimate(&w, Stance::Comply);
+    let (result, calls) = play_twice(w, &p);
+    assert!(CheckKind::AdultsOnly.is_final());
+    assert!(
+        matches!(
+            result,
+            Err(TurnError::Refused {
+                kind: RefusalKind::AdultsOnly,
+                ..
+            })
+        ),
+        "{result:?}"
+    );
+    assert_eq!(calls, 1, "adults only");
+}

@@ -39,19 +39,21 @@ pub enum RefusalKind {
     Unwilling,
 }
 
-/// The Refusal that `errs` holds, if one of them is final
-/// (`CheckKind::is_final`): its kind, and the ids of the characters who
-/// block it, sorted, each once. `Excluded` wins over `AdultsOnly`.
+/// The Refusal that `errs` holds, if one of them is final: its kind, and
+/// the ids of the characters who block it, sorted, each once.
+/// `CheckKind::is_final` is the one list of final kinds; this function
+/// reads it and keeps no list of its own. `Excluded` wins; any other final
+/// kind is an `AdultsOnly` Refusal, so a new final kind fails closed.
 pub(crate) fn final_refusal(errs: &[Rejection]) -> Option<(RefusalKind, Vec<EntityId>)> {
-    if errs.iter().any(|r| r.check == CheckKind::DetailExcluded) {
-        return Some((RefusalKind::Excluded, Vec::new()));
-    }
-    if !errs.iter().any(|r| r.check == CheckKind::AdultsOnly) {
+    let finals: Vec<&Rejection> = errs.iter().filter(|r| r.check.is_final()).collect();
+    if finals.is_empty() {
         return None;
     }
-    let mut blocked: Vec<EntityId> = errs
+    if finals.iter().any(|r| r.check == CheckKind::DetailExcluded) {
+        return Some((RefusalKind::Excluded, Vec::new()));
+    }
+    let mut blocked: Vec<EntityId> = finals
         .iter()
-        .filter(|r| r.check == CheckKind::AdultsOnly)
         .filter_map(|r| match r.handle {
             Some(Handle::Entity(id)) => Some(id),
             _ => None,
