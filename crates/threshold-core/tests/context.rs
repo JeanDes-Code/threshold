@@ -404,6 +404,17 @@ fn the_proposal_rules_define_intimate_in_one_line() {
     assert_eq!(lines, 1, "one line defines intimate");
 }
 
+/// Review M4: the tag covers this Turn's intent or outcome between any
+/// characters, the PC taking part or only watching, not only contact
+/// between the PC and another character.
+#[test]
+fn the_intimate_line_covers_any_characters() {
+    assert!(!INTIMATE_FIELD_LINE.contains("between the PC and another character"));
+    for words in ["intent or its outcome", "any characters", "watches"] {
+        assert!(INTIMATE_FIELD_LINE.contains(words), "{words}");
+    }
+}
+
 #[test]
 fn pack_with_code_is_refused() {
     let base = Path::new(env!("CARGO_TARGET_TMPDIR")).join("packs");

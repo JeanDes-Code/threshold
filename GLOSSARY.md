@@ -73,7 +73,7 @@ A continuous stretch of play at one place and time, with a known set of particip
 _Avoid_: Chapter, encounter
 
 **Intimate Scene**:
-A Scene of sexual or erotic content between adults, from the first Turn tagged intimate to its end.
+A Scene of sexual or erotic content between adults, from the first Turn tagged intimate to its end. A Turn is tagged intimate when its Intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches.
 _Avoid_: Sex scene, NSFW scene, adult scene
 
 **Fade to Black**:

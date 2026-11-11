@@ -18,7 +18,7 @@ use crate::{
 /// hold it with `concat!`.
 macro_rules! intimate_field_text {
     () => {
-        "- intimate: true when the player's intent of THIS Turn seeks sexual or erotic contact between the PC and another character; else false."
+        "- intimate: true when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches; else false."
     };
 }
 

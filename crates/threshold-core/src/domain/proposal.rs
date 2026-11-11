@@ -53,8 +53,9 @@ pub struct DecisionProposal {
     pub schedule: Option<EventDraft>,
     #[serde(default)]
     pub minutes: u32,
-    /// True when the Intent of this Turn seeks sexual or erotic contact.
-    /// Required in the per-Turn schema, and `turn::parse` refuses a raw
+    /// True when this Turn's intent or its outcome involves sexual or
+    /// erotic content between any characters, whether the PC takes part or
+    /// only watches. Required in the per-Turn schema, and `turn::parse` refuses a raw
     /// proposal without it; `default` stays so that a stored proposal
     /// still reads. `mature::check` gates a proposal that sets it.
     #[serde(default)]
