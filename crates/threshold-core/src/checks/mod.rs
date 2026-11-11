@@ -186,14 +186,14 @@ pub(super) enum Origin {
     LoseStake,
     /// The PC's `location` that the core writes from `move_to` (ADR 0007).
     Move,
-    /// An outcome fact that the core writes from a closing status in
-    /// `open_items` (ADR 0007).
+    /// An outcome fact that the core writes from a closing `settles`
+    /// (ADR 0007).
     Close,
 }
 
 /// A slot write of the proposal on an entity that exists before this Turn:
 /// non-claim facts, schedule effects, both stakes, the PC's `location`
-/// from `move_to`, and the outcomes of the closing statuses in `open_items`.
+/// from `move_to`, and the outcome of a closing `settles`.
 pub(super) struct Write<'a> {
     pub subject: EntityId,
     pub key: &'a str,
@@ -263,29 +263,28 @@ pub(super) fn writes<'a>(p: &'a DecisionProposal, view: &'a WorldView) -> Vec<Wr
     out
 }
 
-/// The entries of `open_items` that close an Open Item the PC holds (any
-/// status but `open`), with the item's subject, outcome key (the open key
-/// without its prefix, ADR 0005) and outcome. Entries that name nothing are
-/// left out, and so is every close after the first `MAX_CLOSES`.
+/// The Open Item that `settles` closes (any outcome but `open`), when the PC
+/// holds it: its subject, outcome key (the open key without its prefix,
+/// ADR 0005) and outcome. At most one.
 pub(super) fn closed<'a>(
     p: &'a DecisionProposal,
     view: &WorldView,
 ) -> Vec<(EntityId, &'a str, crate::domain::CloseOutcome)> {
     let held = crate::world::pc_open_items(view);
-    p.open_items
-        .iter()
-        .filter_map(|(item, status)| {
-            let outcome = status.outcome()?;
+    p.settles
+        .as_ref()
+        .and_then(|s| s.closing())
+        .and_then(|(item, outcome)| {
             let (subject, key) = held
                 .iter()
-                .find(|(subject, key)| crate::world::open_item_ref(*subject, key) == *item)?;
+                .find(|(subject, key)| crate::world::open_item_ref(*subject, key) == item)?;
             let outcome_key = crate::domain::outcome_key(key)?;
             // The item text ends with the open key, so it ends with the
             // outcome key too: borrow it from there.
             let at = item.len() - outcome_key.len();
             Some((*subject, &item[at..], outcome))
         })
-        .take(crate::domain::MAX_CLOSES)
+        .into_iter()
         .collect()
 }
 

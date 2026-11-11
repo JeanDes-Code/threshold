@@ -974,26 +974,130 @@ fn proposal_prompt_lists_the_places_for_move_to() {
     assert!(!system.contains("A move always has this fact"), "{system}");
 }
 
-/// ADR 0007: one rule line describes `open_items`, `open` included; the B3
-/// lines (the outcome fact rule and the `settles:` list on the PC's line)
-/// are gone.
+/// Commits an Open Item on `subject` that the PC (Ada) holds.
+fn held(w: &mut World, subject: u64, key: &str, text: &str) {
+    let ada = w.ada;
+    w.commit(vec![add_fact(subject, key, "asked", text, vec![ada])]);
+}
+
+/// Bug pass 3: one rule line describes `settles`, every outcome word in
+/// it. The items it may name are the Open Items the Intent names
+/// (`world::items_named_by`). They are listed with their text after the
+/// recent Turns, so the prefix of the prompt stays stable; an item the
+/// Intent does not name is in neither the list nor the schema.
 #[test]
-fn proposal_prompt_describes_open_items_in_one_line() {
-    let w = World::new();
-    let prompt = proposal_prompt(&w.view, &[], "I say yes.");
-    let lines: Vec<&str> = prompt
+fn proposal_prompt_offers_the_items_the_intent_names() {
+    let mut w = World::new();
+    let (brann, orsel) = (w.brann, w.orsel);
+    held(
+        &mut w,
+        brann,
+        "pending_winter_post",
+        "Brann asked Ada to carry the winter post upriver.",
+    );
+    held(
+        &mut w,
+        orsel,
+        "pending_feast",
+        "Orsel plans a feast at the old mill.",
+    );
+    let ctx = threshold_core::context::proposal_context(
+        &w.view,
+        &[],
+        "I tell Brann yes: I am carrying the post tomorrow.",
+    );
+    let post = format!("E{brann} pending_winter_post");
+    assert_eq!(ctx.handles.open_items, std::slice::from_ref(&post));
+    let recent = &ctx.prompt.recent;
+    let list = recent.find("OPEN ITEMS").expect(recent);
+    assert!(list < recent.find("INTENT\n").unwrap(), "{recent}");
+    assert!(!prefix(&ctx.prompt).contains("OPEN ITEMS (for settles)"));
+    assert!(
+        recent.contains(&format!(
+            "{post}: Brann asked Ada to carry the winter post upriver."
+        )),
+        "{recent}"
+    );
+    assert!(!recent.contains("feast"), "{recent}");
+    let lines: Vec<&str> = ctx
+        .prompt
         .system
         .lines()
-        .filter(|l| l.contains("open_items") || l.contains("closes"))
+        .filter(|l| l.contains("settles") || l.contains("open_items") || l.contains("closes"))
         .collect();
-    assert_eq!(lines.len(), 1, "{}", prompt.system);
-    assert!(lines[0].starts_with("- open_items:"), "{}", lines[0]);
-    for status in ["open", "accepted", "refused", "done", "failed", "dropped"] {
+    assert_eq!(lines.len(), 1, "{}", ctx.prompt.system);
+    assert!(lines[0].starts_with("- settles:"), "{}", lines[0]);
+    for status in [
+        "none", "open", "accepted", "refused", "done", "failed", "dropped",
+    ] {
         assert!(lines[0].contains(status), "{status}: {}", lines[0]);
     }
-    let all = fields(&prompt).concat();
-    assert!(!all.contains("settles:"), "{all}");
+    let all = fields(&ctx.prompt).concat();
     assert!(!all.contains("write x only"), "{all}");
+    // An Intent that names no item offers none: no list, no `settles`.
+    let quiet = threshold_core::context::proposal_context(&w.view, &[], "I sharpen my quill.");
+    assert!(quiet.handles.open_items.is_empty());
+    assert!(!quiet.prompt.recent.contains("OPEN ITEMS"));
+    let schema = threshold_core::proposal_schema_for(&quiet.handles);
+    assert!(schema.pointer("/properties/settles").is_none());
+}
+
+/// Bug pass 3: which Open Items an Intent names. A content word of the
+/// Intent matches a word of the item's text, of its key or of its
+/// subject's name, through a short stem ("carrying" is "carry"). A stem of
+/// five letters or more also matches the start of a longer word; a
+/// shorter one only itself ("evening" is no "event"). Function words and
+/// the PC's own names match nothing: the PC is in most items.
+#[test]
+fn an_intent_names_the_items_that_share_a_content_word() {
+    use threshold_core::world::items_named_by;
+    let mut w = World::new();
+    let (ada, brann, orsel) = (w.ada, w.brann, w.orsel);
+    held(
+        &mut w,
+        brann,
+        "pending_winter_post",
+        "Brann asked Ada to carry the winter post upriver.",
+    );
+    held(
+        &mut w,
+        orsel,
+        "pending_feast",
+        "Orsel plans a feast at the old mill.",
+    );
+    held(
+        &mut w,
+        ada,
+        "pending_letter",
+        "The unsigned letter, and who wrote it.",
+    );
+    held(
+        &mut w,
+        brann,
+        "pending_event",
+        "Brann handled the event of the harvest.",
+    );
+    let named = |intent: &str| -> Vec<String> {
+        items_named_by(&w.view, intent)
+            .into_iter()
+            .map(|(_, key)| key)
+            .collect()
+    };
+    assert_eq!(
+        named("Yes, I will be carrying it."),
+        ["pending_winter_post"]
+    );
+    assert_eq!(named("I ask Orsel about it."), ["pending_feast"]);
+    assert_eq!(named("I ask about the harvesting."), ["pending_event"]);
+    assert_eq!(named("I walk down to the mill."), ["pending_feast"]);
+    assert!(named("I warm my hands this evening.").is_empty());
+    assert_eq!(named("I check the letters."), ["pending_letter"]);
+    assert_eq!(named("I read the letter again."), ["pending_letter"]);
+    assert!(named("I, Ada, will have thought so.").is_empty());
+    assert!(named("I sharpen my quill.").is_empty());
+    let mut both = named("Orsel: what about the feast and the post?");
+    both.sort();
+    assert_eq!(both, ["pending_feast", "pending_winter_post"]);
 }
 
 /// C7: the places for `move_to` are the place entities the PC can name,

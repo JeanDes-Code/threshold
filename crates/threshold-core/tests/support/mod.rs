@@ -264,7 +264,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         verdict,
         contested: false,
         move_to: None,
-        open_items: Default::default(),
+        settles: None,
         blockers: vec![],
         check: None,
         reactions: vec![],

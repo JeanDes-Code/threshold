@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,13 +18,15 @@ pub struct DecisionProposal {
     /// schema makes it required, with the known places' handles and `null`.
     #[serde(default)]
     pub move_to: Option<Handle>,
-    /// One status for each Open Item the PC holds, keyed by the item as the
-    /// prompt shows it (`world::open_item_ref`). `open` leaves the item
-    /// open; any other status closes it, and the core writes the outcome
-    /// fact (ADR 0005, ADR 0007). The per-Turn schema makes it required,
-    /// with exactly the held items as keys; with none held it is absent.
+    /// The one Open Item that the Player's Intent settles in this Turn, and
+    /// how (ADR 0007, changed in bug pass 3). Its `item` is `none` or an
+    /// Open Item the Intent names (`world::items_named_by`), as the prompt
+    /// shows it (`world::open_item_ref`). The core closes the item only on
+    /// an outcome other than `open`, and writes the outcome fact itself
+    /// (ADR 0005). The per-Turn schema makes it required while an item is
+    /// offered; with none offered it is absent.
     #[serde(default)]
-    pub open_items: BTreeMap<String, ItemStatus>,
+    pub settles: Option<Settle>,
     #[serde(default)]
     #[schemars(length(max = 2))]
     pub blockers: Vec<Handle>,
@@ -56,9 +56,27 @@ pub struct DecisionProposal {
     pub facts_on_win: bool,
 }
 
-/// The most Open Items one proposal may close (ADR 0007, changed after
-/// review). `validate` rejects more; `settle` keeps the first ones.
-pub const MAX_CLOSES: usize = 2;
+/// The `item` of a `Settle` that names no Open Item.
+pub const NO_ITEM: &str = "none";
+
+/// What the Player's Intent does to at most one Open Item. One choice, so at
+/// most one item closes per Turn and the model names it instead of filling
+/// a status for every held item (bug pass 3).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Settle {
+    /// `none`, or an Open Item as `world::open_item_ref` names it.
+    pub item: String,
+    pub outcome: ItemStatus,
+}
+
+impl Settle {
+    /// The item this closes and how; `None` for item `none` or outcome
+    /// `open`.
+    pub fn closing(&self) -> Option<(&str, CloseOutcome)> {
+        let outcome = self.outcome.outcome()?;
+        (self.item != NO_ITEM).then_some((self.item.as_str(), outcome))
+    }
+}
 
 /// What the Player's Intent does to one Open Item the PC holds. A closed
 /// list: serde parses no other value. `open` means the item stays open:

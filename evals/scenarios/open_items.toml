@@ -1,0 +1,112 @@
+# Open Items at the scale of a real Campaign (bug pass 3, 2026-11-11).
+# QA played a Campaign built from a Source Text whose PC held 12 Open Items,
+# several of them near-duplicates. An acceptance closed two unrelated items
+# and left the asked one open; a refusal closed nothing. This scenario seeds
+# 10 Open Items that the PC holds before play: two pairs of near-duplicates,
+# items about NPCs who are absent, and one item on a Faction. One campaign
+# per run plays the steps in order.
+#
+# Each step names the items it may close (`closes`, by item `id`). A step
+# with a list is right when one of them closes in its Turn. Any other item
+# that closes in a Turn is a wrong close.
+fixture = "town"
+
+[[items]]
+id = "copy"
+subject = "Orsel"
+key = "pending_copy_tithe_roll"
+value = "orsel asked, no answer yet"
+text = "Orsel asked Wren to copy the tithe roll before dusk. Wren has not answered yet."
+
+[[items]]
+id = "copy_answer"
+subject = "Wren"
+key = "pending_tithe_roll_answer"
+value = "answer owed to orsel"
+text = "Wren still owes Orsel an answer about copying the tithe roll."
+
+[[items]]
+id = "supper"
+subject = "Hessa"
+key = "pending_supper_invitation"
+value = "invited, no answer yet"
+text = "Hessa invited Wren to supper at her house tonight. Wren has not answered yet."
+
+[[items]]
+id = "flour"
+subject = "Tobin"
+key = "pending_flour_payment"
+value = "two sacks unpaid"
+text = "Tobin wants Wren to pay for two sacks of flour by the next market day."
+
+[[items]]
+id = "flour_debt"
+subject = "Wren"
+key = "pending_flour_debt"
+value = "owes tobin two sacks"
+text = "Wren owes Tobin for two sacks of flour, due on the next market day."
+
+[[items]]
+id = "charters"
+subject = "Magistracy"
+key = "pending_charter_review"
+value = "at the next new moon"
+text = "The Magistracy will review the old river charters at the next new moon."
+
+[[items]]
+id = "questioning"
+subject = "Doul"
+key = "pending_questioning"
+value = "after the morning session"
+text = "Doul says he will question Wren about the missing ledger after the morning session."
+
+[[items]]
+id = "millstone"
+subject = "Tobin"
+key = "pending_millstone_sale"
+value = "buyer if the river is calm"
+text = "Tobin has a buyer for the old millstone if the river stays calm."
+
+[[items]]
+id = "letter"
+subject = "Wren"
+key = "pending_unsigned_letter"
+value = "author unknown"
+text = "The unsigned letter in Wren's satchel, and who wrote it."
+
+[[items]]
+id = "ledger"
+subject = "Hessa"
+key = "pending_ledger_silence"
+value = "asked wren to keep quiet"
+text = "Hessa asked Wren to keep quiet about the ledger she misfiled."
+
+[[steps]]
+kind = "unrelated"
+intent = "I sit on the bench by the window and look around the hall."
+
+[[steps]]
+kind = "keep"
+intent = "I ask Orsel for more time to think about copying the tithe roll."
+
+[[steps]]
+kind = "accept"
+intent = "I tell Orsel yes: I will copy the tithe roll before dusk."
+closes = ["copy", "copy_answer"]
+
+[[steps]]
+kind = "unrelated"
+intent = "I ask Hessa how long the walk down to the Varn mill takes."
+
+[[steps]]
+kind = "refuse"
+intent = "I tell Hessa: no, thank you, I will not come to supper at your house tonight."
+closes = ["supper"]
+
+[[steps]]
+kind = "keep"
+intent = "I ask Hessa whether Tobin is still angry about the flour."
+
+[[steps]]
+kind = "unrelated"
+intent = "I sharpen my quill and check my ink."

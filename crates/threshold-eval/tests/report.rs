@@ -78,13 +78,16 @@ fn report_has_every_metric() {
         "Contests with a Roll",
         "Pending items closed",
         "Moves to an unknown place that left the PC in place",
+        "Wrong closes in total",
+        "Proposal prompt tokens",
     ] {
         assert!(report.contains(metric), "missing {metric}:\n{report}");
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4, speech 10, play_basics 8 = 101 Turns.
-    assert!(report.contains("- Turns played: 202 (0 failed"), "{report}");
+    // agency_leaks 12, offscreen 4, speech 10, play_basics 8, open_items 7
+    // = 108 Turns.
+    assert!(report.contains("- Turns played: 216 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1374,7 +1377,7 @@ fn play_basics_counts_each_step() {
             .to_owned();
     let close = |minutes: u32| {
         format!(
-            r#"{{"action":"talk","verdict":"allowed","open_items":{{"E{wren} pending_copy_tithe_roll":"accepted"}},"check":null,"schedule":null,"minutes":{minutes}}}"#
+            r#"{{"action":"talk","verdict":"allowed","settles":{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}},"check":null,"schedule":null,"minutes":{minutes}}}"#
         )
     };
     // No `minutes`: the core's default for a talk.
@@ -1502,4 +1505,66 @@ fn raw_log_goes_to_a_file_outside_the_repository_only() {
         lines.iter().all(|l| !l.contains("\"verdict\"")),
         "{lines:?}"
     );
+}
+
+/// Bug pass 3: the open-items counts, on recorded answers. The acceptance
+/// closes its item; the refusal closes nothing; an unrelated step closes
+/// another item, which is a wrong close.
+#[test]
+fn open_items_counts_right_and_wrong_closes() {
+    use threshold_core::{
+        fixture::{load_adventure_seed, load_world},
+        store::Store,
+        turn::create_campaign,
+    };
+
+    let dir = root().join("fixtures/town");
+    let seed = load_adventure_seed(&dir.join("adventure-seed.toml")).unwrap();
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = create_campaign(&mut store, &seed, 1).unwrap();
+    load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let id = |name: &str| view.entity_by_name(name).unwrap().id;
+    let (orsel, tobin) = (id("Orsel"), id("Tobin"));
+    let talk = r#"{"action":"talk","verdict":"allowed","minutes":2}"#.to_owned();
+    let settle = |item: String| {
+        format!(
+            r#"{{"action":"talk","verdict":"allowed","settles":{{"item":"{item}","outcome":"accepted"}},"minutes":2}}"#
+        )
+    };
+    let gm = RecordedGm::new(
+        vec![
+            talk.clone(),
+            talk.clone(),
+            settle(format!("E{orsel} pending_copy_tithe_roll")),
+            settle(format!("E{tobin} pending_millstone_sale")),
+            talk.clone(),
+            talk.clone(),
+            talk,
+        ],
+        vec!["It happens.".to_owned(); 7],
+    );
+    let config = Config {
+        root: root(),
+        scenarios: vec!["open_items".into()],
+        runs: 1,
+        model: "recorded".into(),
+        judge: "first-choice".into(),
+        memory_turns: None,
+        source: None,
+        expected: None,
+        raw_log: None,
+    };
+    let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+    let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
+    for line in [
+        "| Accept | 1 | 1 / 1 | 0 | 0 |",
+        "| Refuse | 1 | 0 / 1 | 0 | 0 |",
+        "| Keep | 2 | (none asked) | 0 | 0 |",
+        "| Unrelated | 3 | (none asked) | 1 | 0 |",
+        "- Wrong closes in total: 1",
+        "- Wrong closes by item: millstone 1",
+    ] {
+        assert!(report.contains(line), "missing {line}:\n{report}");
+    }
 }

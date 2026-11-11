@@ -365,10 +365,22 @@ impl FactBook {
             .collect()
     }
 
-    /// A same subject and key decides: the same openness and value is the
-    /// same fact; another value fails `SettledFacts`; another openness fails
-    /// `OpenItems`.
+    /// An open fact whose sentence (through `normalize::value`) is the
+    /// sentence of an accepted open fact, on any subject and key, is that
+    /// fact: the QA World Build wrote 7 Open Items of the draft again (bug
+    /// pass 3). Else a same subject and key decides: the same openness and
+    /// value is the same fact; another value fails `SettledFacts`; another
+    /// openness fails `OpenItems`.
     fn fit(&self, entry: &FactEntry) -> Fit {
+        let sentence = normalize::value(&entry.text);
+        if entry.open
+            && !sentence.is_empty()
+            && let Some(i) = self.entries.iter().position(|b| {
+                !b.fixed && b.entry.open && normalize::value(&b.entry.text) == sentence
+            })
+        {
+            return Fit::Same(i);
+        }
         let on_key = |b: &&Booked| {
             same_name(&b.entry.subject, &entry.subject)
                 && normalize::key(&b.entry.key) == normalize::key(&entry.key)

@@ -175,6 +175,52 @@ pub enum BasicKind {
     UnknownMove,
 }
 
+/// Open Items at scale (bug pass 3, 2026-11-11): the PC holds many Open
+/// Items, near-duplicates among them, before play. Each step names the items
+/// it may close; any other close is wrong.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenItems {
+    #[serde(default = "default_fixture")]
+    pub fixture: String,
+    pub items: Vec<NamedPending>,
+    pub steps: Vec<ItemStep>,
+}
+
+/// An Open Item with the id that steps use for it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamedPending {
+    pub id: String,
+    pub subject: String,
+    pub key: String,
+    pub value: String,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ItemStep {
+    pub kind: ItemKind,
+    pub intent: String,
+    /// The ids of the items this step may close. Empty: none may close.
+    #[serde(default)]
+    pub closes: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemKind {
+    /// The PC accepts one item: one of `closes` must close.
+    Accept,
+    /// The PC refuses one item: one of `closes` must close.
+    Refuse,
+    /// The PC talks about an item without settling it: nothing closes.
+    Keep,
+    /// The Intent touches no item: nothing closes.
+    Unrelated,
+}
+
 /// A Seed Draft and a World Build from a Source Text, scored against a
 /// hand-made list. A relative path starts at the repository root; the
 /// command line can name files outside it.

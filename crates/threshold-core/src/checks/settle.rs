@@ -6,7 +6,7 @@
 
 use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
-    domain::{ActionKind, DecisionProposal, EntityKind, Handle, ItemStatus, SlotDraft},
+    domain::{ActionKind, DecisionProposal, EntityKind, Handle, NO_ITEM, SlotDraft},
     normalize,
     store::WorldView,
     world,
@@ -62,38 +62,22 @@ fn drop_pc_acts(p: &mut DecisionProposal, pc: Handle, notes: &mut Vec<String>) {
     }
 }
 
-/// An `open_items` entry that names no Open Item the PC holds goes. A
-/// closing status after the first `MAX_CLOSES` becomes `open`: the item
-/// stays open, so no PC act is added. A fact on the outcome slot of an item
-/// that closes goes too: the core writes that slot itself (ADR 0007).
+/// A `settles` that names an item the PC does not hold goes. A fact on the
+/// outcome slot of the item that closes goes too: the core writes that slot
+/// itself (ADR 0007).
 fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
     let held = world::pc_open_items(view);
-    p.open_items.retain(|item, _| {
-        let known = held
+    if let Some(s) = p.settles.as_ref()
+        && s.item != NO_ITEM
+        && !held
             .iter()
-            .any(|(subject, key)| world::open_item_ref(*subject, key) == *item);
-        if !known {
-            notes.push(format!(
-                "removed open_items {item}: not an open item the PC holds"
-            ));
-        }
-        known
-    });
-    let mut closes = 0;
-    for (item, status) in p.open_items.iter_mut() {
-        if status.outcome().is_none() {
-            continue;
-        }
-        if closes < crate::domain::MAX_CLOSES {
-            closes += 1;
-        } else {
-            notes.push(format!(
-                "kept {item} open instead of {}: at most {} items close per Turn",
-                status.word(),
-                crate::domain::MAX_CLOSES
-            ));
-            *status = ItemStatus::Open;
-        }
+            .any(|(subject, key)| world::open_item_ref(*subject, key) == s.item)
+    {
+        notes.push(format!(
+            "removed settles {}: not an open item the PC holds",
+            s.item
+        ));
+        p.settles = None;
     }
     let slots: Vec<(Handle, String)> = closed(p, view)
         .into_iter()
@@ -108,7 +92,7 @@ fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Str
     });
     if p.facts.len() < before {
         notes.push(
-            "removed a fact on the outcome of an item that open_items closes: the core writes it"
+            "removed a fact on the outcome of the item that settles closes: the core writes it"
                 .into(),
         );
     }

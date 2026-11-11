@@ -888,7 +888,7 @@ fn a_streamed_narration_never_shows_an_unknown_tag() {
 }
 
 /// The PC accepts a pending proposal (B3, then ADR 0007). The proposal
-/// gives the Open Item the status `accepted` in `open_items`, the core
+/// settles the Open Item with outcome `accepted`, the core
 /// writes its outcome on the PC, and the item closes in a Turn that is a
 /// decision.
 #[test]
@@ -898,11 +898,10 @@ fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     let mut accept = proposal(Verdict::Allowed);
     accept.action = ActionKind::Talk;
     accept.minutes = 2;
-    accept.open_items = [(
-        format!("E{ada} pending_meet"),
-        threshold_core::domain::ItemStatus::Accepted,
-    )]
-    .into();
+    accept.settles = Some(threshold_core::domain::Settle {
+        item: format!("E{ada} pending_meet"),
+        outcome: threshold_core::domain::ItemStatus::Accepted,
+    });
     let gm = RecordedGm::new(vec![json(&accept)], vec!["You give your word.".into()]);
     let (mut engine, campaign) = w.engine(&gm);
     let handles = {
@@ -922,6 +921,56 @@ fn pc_settles_its_open_item_and_the_turn_is_a_decision() {
     assert!(moment(&sight, outcome.turn_id).unwrap().decision);
 }
 
+/// Bug pass 3, M1 step 3: "Correct last Turn" re-opens what the corrected
+/// Turn closed. The Correction reverts the close; its own proposal settles
+/// nothing, so the item is open again, and the reverted Turn is no
+/// decision.
+#[test]
+fn a_correction_reopens_the_item_its_turn_closed() {
+    let w = HiddenWorld::new();
+    let ada = w.ada;
+    let mut accept = proposal(Verdict::Allowed);
+    accept.action = ActionKind::Talk;
+    accept.settles = Some(threshold_core::domain::Settle {
+        item: format!("E{ada} pending_meet"),
+        outcome: threshold_core::domain::ItemStatus::Accepted,
+    });
+    let mut talk = proposal(Verdict::Allowed);
+    talk.action = ActionKind::Talk;
+    let gm = RecordedGm::new(
+        vec![json(&accept), json(&talk)],
+        vec!["You give your word.".into(), "Brann waits.".into()],
+    );
+    let (mut engine, campaign) = w.engine(&gm);
+    let old = engine
+        .play_turn("t-yes".into(), "Yes, I will meet Brann.", &mut no_chunks())
+        .unwrap()
+        .turn_id;
+    assert_eq!(
+        meet(&sight_of(engine.store(), campaign), ada).closed_in,
+        Some(old)
+    );
+    let new = engine
+        .correct_last(
+            "t-fix".into(),
+            "I ask Brann where the mill is.",
+            "I did not accept",
+            &mut no_chunks(),
+        )
+        .unwrap()
+        .turn_id;
+    let sight = sight_of(engine.store(), campaign);
+    assert_eq!(meet(&sight, ada).closed_in, None, "{:?}", sight.open_items);
+    assert!(moment(&sight, old).is_none());
+    assert!(moment(&sight, new).is_some_and(|m| !m.decision));
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert!(view.live_fact(ada, "meet").is_none());
+    assert_eq!(
+        threshold_core::world::pc_open_items(&view),
+        [(ada, "pending_meet".to_owned())]
+    );
+}
+
 /// The live bug (play_basics, cdefde8), in the new shape: the Intent asks
 /// for more time, and the proposal states the item `open`. The Turn
 /// commits on the first attempt and the item stays open.
@@ -930,7 +979,7 @@ fn an_intent_that_asks_for_time_leaves_the_open_item_open() {
     let w = HiddenWorld::new();
     let ada = w.ada;
     let raw = format!(
-        r#"{{"action":"talk","contested":false,"move_to":null,"open_items":{{"E{ada} pending_meet":"open"}},"verdict":"allowed","minutes":3}}"#
+        r#"{{"action":"talk","contested":false,"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"open"}},"verdict":"allowed","minutes":3}}"#
     );
     let gm = RecordedGm::new(vec![raw], vec!["Brann nods and waits.".into()]);
     let (mut engine, campaign) = w.engine(&gm);

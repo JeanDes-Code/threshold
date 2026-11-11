@@ -79,7 +79,7 @@ pub fn to_ops(
             b.write(stake, FactSource::Stake, holders, Vec::new());
         }
     }
-    // ADR 0007: each Open Item with a closing status gets its outcome fact,
+    // ADR 0007: the Open Item that `settles` closes gets its outcome fact,
     // witnessed by everyone present, the PC included, when the verdict lets
     // the action happen (changed after review). The core builds the value
     // and the text from the item's own text and the outcome word.

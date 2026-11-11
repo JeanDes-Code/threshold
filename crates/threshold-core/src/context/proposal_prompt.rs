@@ -10,14 +10,14 @@ use crate::{
     model::Prompt,
     pack::ContentPack,
     store::{Entity, Fact},
-    world::{known_places, open_item_ref, pc_open_items},
+    world::{items_named_by, known_places, open_item_ref, pc_knowledge},
 };
 
 /// The rules part of the system prompt. Its first lines are the wording
 /// measured by the live probe (`threshold-ollama/examples/probe.rs`); the
 /// VERDICT and LATER ACTIONS parts answer two failures that probe found: a
 /// Check on every proposal, and no scheduled event for a delayed action.
-/// The `move_to`, `open_items` and `contested` lines describe the required
+/// The `move_to`, `settles` and `contested` lines describe the required
 /// fields of ADR 0007, one line each.
 pub const PROPOSAL_RULES: &str = "\
 You are the Game Master for a single-player tabletop role-playing game. You decide what the world and its NPCs do; the player decides what the player character (PC) does.
@@ -41,7 +41,7 @@ LATER ACTIONS
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
 - move_to: when the player moves the PC to a place listed under PLACES, that place's handle; else null, and the PC stays. Never write the PC's location in facts or stakes.
-- open_items: one status for each open item (a fact on a pending_ key), keyed \"<subject handle> <pending_ key>\". accepted, refused, done, failed or dropped only when the player's intent settles it (accepts, refuses, does, fails or gives up); else open. Asking about an item, talking about it or asking for more time keeps it open. At most 2 items settle per Turn.
+- settles: what the player's intent of THIS Turn does to one item under OPEN ITEMS. item none when the intent settles none of them. Else that item, with outcome accepted, refused, done, failed or dropped when this intent accepts, refuses, does, fails or gives it up; outcome open when it only asks about it, talks about it or asks for more time. An item settled in an earlier Turn is not listed.
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.
 - For wait: use the duration the player names. If the player names none, use the minutes until something happens.
@@ -68,7 +68,7 @@ pub fn proposal_prompt(
 /// The handles that `proposal_prompt(view, _, intent)` shows. Packs never
 /// change them.
 pub fn handle_context(view: &crate::store::WorldView, intent: &str) -> HandleContext {
-    handles(&Retrieval::new(view, intent))
+    handles(&Retrieval::new(view, intent), intent)
 }
 
 pub fn proposal_context(
@@ -84,11 +84,11 @@ pub fn proposal_context(
             scene: scene(&r),
             recent: recent(&r, intent),
         },
-        handles: handles(&r),
+        handles: handles(&r, intent),
     }
 }
 
-fn handles(r: &Retrieval<'_>) -> HandleContext {
+fn handles(r: &Retrieval<'_>, intent: &str) -> HandleContext {
     let places = known_places(r.view);
     let mut entities: Vec<EntityId> = r.scene_entities.clone();
     entities.extend(&r.mentioned);
@@ -111,11 +111,27 @@ fn handles(r: &Retrieval<'_>) -> HandleContext {
         goals: r.goals.iter().map(|g| Handle::Goal(g.id)).collect(),
         new_slots: 1,
         places: places.into_iter().map(Handle::Entity).collect(),
-        open_items: pc_open_items(r.view)
+        open_items: offered(r, intent)
             .into_iter()
-            .map(|(subject, key)| open_item_ref(subject, &key))
+            .map(|(subject, key, _)| open_item_ref(subject, &key))
             .collect(),
     }
+}
+
+/// The Open Items the Intent names (`world::items_named_by`), each with its
+/// text as the PC knows it: the values of `settles.item` (bug pass 3).
+fn offered(r: &Retrieval<'_>, intent: &str) -> Vec<(EntityId, String, String)> {
+    let known = pc_knowledge(r.view);
+    items_named_by(r.view, intent)
+        .into_iter()
+        .map(|(subject, key)| {
+            let text = known
+                .iter()
+                .find(|b| b.subject == subject && b.key == key)
+                .map_or_else(String::new, |b| one_line(&b.text));
+            (subject, key, text)
+        })
+        .collect()
 }
 
 fn system(packs: &[ContentPack]) -> String {
@@ -262,6 +278,16 @@ fn recent(r: &Retrieval<'_>, intent: &str) -> String {
             }
         }
     }
-    let tail = format!("INTENT\n{}\n", intent.trim());
+    // The offered items depend on the Intent, so they sit in the tail with
+    // it: the prefix of the prompt stays stable within a Scene.
+    let mut tail = String::new();
+    let items = offered(r, intent);
+    if !items.is_empty() {
+        tail.push_str("OPEN ITEMS (for settles)\n");
+        for (subject, key, text) in items {
+            tail.push_str(&format!("{}: {text}\n", open_item_ref(subject, &key)));
+        }
+    }
+    tail.push_str(&format!("INTENT\n{}\n", intent.trim()));
     recent_block(r.view, &head, &tail)
 }

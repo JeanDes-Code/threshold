@@ -143,3 +143,31 @@ Limits:
 - The raw log shows the status `done` more often than `accepted` on "I tell Orsel yes: I will copy the tithe roll". The item closes, but the outcome word says the copy is done when it is only promised. The report does not count the outcome word.
 - A default Check has no stakes, so a won or lost arm-wrestle changes no slot unless the proposal's facts do.
 - One fixture, one phrasing per step and 4 runs: the counts are small.
+
+## Attempt 6: `settles` (bug pass 3, 2026-11-11)
+
+- Code: `settles` replaces `open_items` (ADR 0007, section "Changed in bug pass 3"). The Open Item is offered only when the Intent names it.
+- Same command and scenario, 4 runs of 8 Turns. The machine was under load (about 14 GB of RAM free, the model 63% on CPU), and the run started right after a `cargo` build.
+
+| Measure | Attempt 5 | Attempt 6 |
+|---|---|---|
+| Moves that reached the asked place | 8 / 8 | 7 / 8 |
+| False closes on the negative step | 0 / 4 | 0 / 4 |
+| False moves on the negative step | 0 / 4 | 0 / 4 |
+| Turns with a clock advance | 32 / 32 | 31 / 31 |
+| Impossible acts told as a failure (judge) | 4 / 4 | 4 / 4 |
+| Contests with a Roll | 4 / 4 | 3 / 4 |
+| Pending items closed | 4 / 4 | 4 / 4 |
+| Unknown-place moves that left the PC in place | 4 / 4 | 4 / 4 |
+| Turns failed | 0 / 32 | 1 / 32 (timeout) |
+| Turns that needed the retry | 1 / 32 | 0 / 32 |
+| Turn time | p50 7.9 s, p90 9.9 s, max 10.2 s | p50 7.6 s, p90 9.4 s, max 60.4 s |
+
+- The missing Roll is the failed Turn: the first Turn of run 1, the arm-wrestle, timed out at 60 s. The second Turn took 60.4 s. Every later Turn took 6 to 10 s.
+- The missed move is the walk back to the town hall in run 3: the model answered `move_to: null`.
+- The negative step "I ask Orsel for more time" named the item with outcome `open`.
+
+Limits:
+
+- The two slow Turns are the machine, not the prompt: see `evals/reports/2026-11-turn-time.md`. Attempt 5 ran on a free machine.
+- One fixture, one phrasing per step and 4 runs: the counts are small.

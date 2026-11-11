@@ -46,3 +46,7 @@ The rule above did not work on the live model: in `play_basics`, 0 of 4 acceptan
 ## Changed after a live evaluation (2026-11-11): `open_items`
 
 `closes` was an optional list, so the model had no way to say that the Intent touched an item and left it open. On "I ask Orsel for more time", it closed the item in 4 of 4 runs. `closes` is now `open_items`: one required status per item the PC holds, with `open` among the values (ADR 0007). Only a status other than `open` closes the item. Every other rule above stays.
+
+## Changed in bug pass 3 (2026-11-11): `settles`
+
+A Campaign built from a Source Text held 12 Open Items. With one required status per item, the live model gave all 12 a closing status on one acceptance, and closed an acceptance one Turn late. `open_items` is now `settles`: one choice, `none` or one item that the Player's Intent names, with an outcome (ADR 0007). At most one item closes per Turn. Every other rule above stays.

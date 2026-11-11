@@ -8,6 +8,7 @@
 //! gives counts, never a pass/fail, except the latency pass line.
 
 mod judge;
+mod open_items;
 mod play_basics;
 pub mod scan;
 mod scenario;
@@ -37,7 +38,7 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 9] = [
+pub const SCENARIOS: [&str; 10] = [
     "latency",
     "memory",
     "voices",
@@ -47,6 +48,7 @@ pub const SCENARIOS: [&str; 9] = [
     "world_build",
     "speech",
     "play_basics",
+    "open_items",
 ];
 
 /// The latency pass line (design §10): p90 at or under 15 s, warm.
@@ -168,6 +170,7 @@ pub fn run(
             "world_build" => world_build::scenario(&mut ctx)?,
             "speech" => speech::scenario(&mut ctx)?,
             "play_basics" => play_basics::scenario(&mut ctx)?,
+            "open_items" => open_items::scenario(&mut ctx)?,
             _ => unreachable!("checked above"),
         };
         sections.insert(name, section);

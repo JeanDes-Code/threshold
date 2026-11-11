@@ -40,11 +40,10 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejec
         }
     }
     // Every slot write on the PC: facts, both stakes and schedule effects.
-    // The core writes the PC's location from `move_to` and the outcomes of
-    // the closing statuses in `open_items` (ADR 0007): the Player's Intent
-    // chose them, so they are no PC act of the model's. A fact on the
-    // outcome key of an Open Item the PC holds is no longer allowed:
-    // `open_items` replaces it.
+    // The core writes the PC's location from `move_to` and the outcome of
+    // a closing `settles` (ADR 0007): the Player's Intent chose them, so
+    // they are no PC act of the model's. A fact on the outcome key of an
+    // Open Item the PC holds is no longer allowed: `settles` replaces it.
     for w in writes(p, view).iter().filter(|w| {
         Handle::Entity(w.subject) == pc && !matches!(w.origin, Origin::Move | Origin::Close)
     }) {

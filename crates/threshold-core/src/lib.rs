@@ -34,8 +34,9 @@ pub struct HandleContext {
     /// The places the PC knows (`world::known_places`): the values of
     /// `move_to` besides `null`.
     pub places: Vec<domain::Handle>,
-    /// The Open Items the PC holds (`world::open_item_ref`): the required
-    /// keys of `open_items`.
+    /// The Open Items the Intent names (`world::items_named_by`), as
+    /// `world::open_item_ref` names them: the values of `settles.item`
+    /// besides `none`.
     pub open_items: Vec<String>,
 }
 
@@ -151,26 +152,25 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         .collect();
     schema["properties"]["move_to"] = json!({"type": ["string", "null"], "enum": places});
     require(&mut schema, "", "move_to");
-    // One required status per Open Item the PC holds, `open` included: the
-    // model always has a value that says "this item stays open" (changed
-    // after the live run of cdefde8). With none held, the field is absent.
+    // One choice: `none` or one Open Item the Intent names, and its outcome
+    // (bug pass 3). With no item offered, the field is absent.
     if ctx.open_items.is_empty() {
-        omit(&mut schema, "/properties", "open_items");
+        omit(&mut schema, "/properties", "settles");
     } else {
-        let statuses: Vec<&str> = domain::ItemStatus::ALL.iter().map(|s| s.word()).collect();
-        let status = json!({"type": "string", "enum": statuses});
-        let properties: serde_json::Map<String, serde_json::Value> = ctx
-            .open_items
-            .iter()
-            .map(|item| (item.clone(), status.clone()))
+        let items: Vec<&str> = std::iter::once(domain::NO_ITEM)
+            .chain(ctx.open_items.iter().map(String::as_str))
             .collect();
-        schema["properties"]["open_items"] = json!({
+        let outcomes: Vec<&str> = domain::ItemStatus::ALL.iter().map(|s| s.word()).collect();
+        schema["properties"]["settles"] = json!({
             "type": "object",
-            "properties": properties,
-            "required": ctx.open_items,
+            "properties": {
+                "item": {"type": "string", "enum": items},
+                "outcome": {"type": "string", "enum": outcomes},
+            },
+            "required": ["item", "outcome"],
             "additionalProperties": false,
         });
-        require(&mut schema, "", "open_items");
+        require(&mut schema, "", "settles");
     }
     schema["properties"]["contested"] = json!({"type": "boolean"});
     require(&mut schema, "", "contested");

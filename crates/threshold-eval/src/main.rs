@@ -4,7 +4,7 @@
 //! Options:
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
 //!   voices, shortcuts, agency_leaks, offscreen, world_build, speech,
-//!   play_basics.
+//!   play_basics, open_items.
 //!   Repeat or comma-separate.
 //! - `--runs <n>` (default 3)
 //! - `--judge local` (default): the same local model, with a short rubric.

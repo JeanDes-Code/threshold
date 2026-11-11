@@ -871,6 +871,51 @@ fn open_items_trap() {
     create_campaign_file(&dir.0.join("c.sqlite"), &draft().seed, &world, 7).unwrap();
 }
 
+/// Bug pass 3: the QA World Build wrote 7 Open Items of the draft again,
+/// with the same sentence on a new key or another subject, held by no one
+/// but the GM. The proposal prompt then showed an item the PC had settled
+/// as still open. An open fact whose sentence is the sentence of an
+/// accepted open fact is that fact: it adds its holders and no fact.
+#[test]
+fn an_open_item_the_build_restates_is_merged() {
+    let restated = |subject: &str, key: &str| {
+        json!({
+            "subject": subject, "key": key, "value": "pier",
+            "text": "Harbour Council: vote is new pier.",
+            "open": true, "known_by": ["Tobin Reed"],
+        })
+    };
+    let mut outputs = plain();
+    outputs[0] = hidden(&[
+        restated("Harbour Council", "pier_vote"),
+        restated("Tobin Reed", "council_vote"),
+    ]);
+    let first = run(&draft(), &outputs);
+    let world = first.world();
+    assert!(facts_on(&world, "Harbour Council", "pier_vote").is_empty());
+    assert!(facts_on(&world, "Tobin Reed", "council_vote").is_empty());
+    let vote = facts_on(&world, "Harbour Council", "vote");
+    assert_eq!(vote.len(), 1);
+    assert!(vote[0].open);
+    assert!(
+        vote[0].known_by.iter().any(|h| h == "Tobin Reed"),
+        "{:?}",
+        vote[0].known_by
+    );
+    // A settled fact with the sentence of an open one is no duplicate.
+    let mut settled = plain();
+    settled[0] = hidden(&[json!({
+        "subject": "Tobin Reed", "key": "council_vote", "value": "pier",
+        "text": "Harbour Council: vote is new pier.",
+        "open": false, "known_by": ["Tobin Reed"],
+    })]);
+    let second = run(&draft(), &settled);
+    assert_eq!(
+        facts_on(&second.world(), "Tobin Reed", "council_vote").len(),
+        1
+    );
+}
+
 #[test]
 fn secrecy_trap() {
     let bad_hidden = hidden(&[

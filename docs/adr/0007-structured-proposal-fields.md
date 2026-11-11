@@ -71,3 +71,27 @@ A review of the first version found three ways in which `closes` could commit wh
 - **The default Check on the first attempt.** In every run of cdefde8, the arm-wrestle came back `contested: true` with verdict `check` and no Check, and spent its retry on the repair note. That case now gets the default Check on the first attempt (`checks::checks_now`): the model already said "roll" twice, and the retry only added stakes. The default Check is the one above: against the NPC whose reaction has the lowest stance, no stakes, no factors, the facts on a win only. It adds no PC act. A contested act with verdict `allowed`, and a `check` verdict that is not contested, keep the repair round. The cost: these Checks have no stakes, so a won or lost arm-wrestle changes no slot unless the proposal's facts do (on a win).
 
 The live numbers of this change are in `evals/reports/2026-11-play-basics.md` (attempt 5).
+
+## Changed in bug pass 3 (2026-11-11): `settles`, one choice among the items the Intent names
+
+QA played 17 Turns on a Campaign built from a Source Text. The PC held 12 Open Items, several of them near-duplicates. `open_items` was then an object with 12 required status keys. The debug log of that Campaign shows:
+
+- On "I accept. I will carry the winter post.", the model gave all 12 items a closing status. `settle` kept the first two in key order (`E1 pending_event`, `E1 pending_mystery`) and turned the rest back to `open`: two unrelated items closed, and the asked one stayed open.
+- After "Correct last Turn", the same happened with three closing statuses: two unrelated items closed.
+- The model then closed the asked item on later Turns, once on a Turn that only asked a distance. A clear refusal of the Guild's offer closed nothing.
+
+The new scenario `open_items` (10 Open Items, two pairs of near-duplicates, items on absent NPCs) reproduced the late close on the code of d899a42: in 2 of 4 runs the acceptance closed nothing on its own Turn and closed on the next, unrelated Turn (`evals/reports/2026-11-open-items.md`, attempt 1). The model reads a status per item as "the state now", not as "what this Intent does".
+
+- **`open_items` becomes `settles`.** One object `{item, outcome}`. `item` is `none` or one offered Open Item, named as before (`world::open_item_ref`). `outcome` is `open`, `accepted`, `refused`, `done`, `failed` or `dropped` (`domain::ItemStatus`). The model picks one name instead of filling a status for every item, so at most one item closes per Turn. `domain::MAX_CLOSES` is gone.
+- **Only the items the Intent names are offered** (`world::items_named_by`). A content word of the Intent must match a word of the item's text, of its key or of its subject's name, through a short stem. Function words, words under 4 letters and the PC's own names match nothing. The offered items are listed with their text in the prompt's tail (`OPEN ITEMS (for settles)`), before the Intent, so the prompt prefix stays stable within a Scene. With none offered, the schema has no `settles`. On the QA Campaign's 17 Intents, the rule offers 0 to 6 items instead of 12.
+- **What stays.** Only items the PC holds; the core writes the outcome fact `<Word>: <item text>`, Established, only when the verdict lets the action happen; a fact on the slot of the closing item is dropped; the model's own outcome fact on the PC is an agency error. Dropping a `settles` removes model output and adds no PC act, so the leniency rule holds.
+- **The World Build merges a restated Open Item.** In the QA Campaign the World Build wrote 7 Open Items of the draft again, with the same sentence on a new key, hidden from the PC. The prompt then showed the GM an item the PC had settled as still open. `FactBook` now treats an open fact whose sentence (`normalize::value`) is the sentence of an accepted open fact as that fact: it adds its holders and no fact.
+- **A Correction re-opens what its Turn closed.** This already held: the Correction reverts the Turn's outcome fact. A test now covers it (`a_correction_reopens_the_item_its_turn_closed`). The Journal's Decisions follow the closes (`world::sight::decision`), so they follow `settles`.
+
+Live numbers: `evals/reports/2026-11-open-items.md` and `evals/reports/2026-11-play-basics.md` (attempt 6).
+
+What this does not cover:
+
+- **An Intent that settles an item without naming it** ("Yes." after an NPC's question) offers nothing, so the item stays open. The Player names it to close it. We chose a missed close over a wrong one.
+- **Near-duplicates with different sentences** (the draft's summary "Osric Fell's daughter's wedding in the spring, and the boundary wall" on the PC, and "Osric Fell's daughter's wedding is planned for the first day of spring at Harrowmere" on Osric) are not merged: no deterministic rule tells them apart from two real matters. Settling one leaves the other open.
+- **Whether the outcome word is right.** The model still picks `done` or `accepted`; the schema only bounds the choice.
