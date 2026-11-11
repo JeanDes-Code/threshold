@@ -11,6 +11,8 @@ export interface PlayScreenProps {
   view: PlayView;
   /** True while a Turn runs. */
   busy: boolean;
+  /** When the running call started (the session store keeps it); null while idle. */
+  startedMs: number | null;
   /**
    * The raw Narration text of the running Turn, "" before its first chunk;
    * null when no Turn runs (an OOC question keeps the story as it is).
@@ -133,6 +135,7 @@ export default function PlayScreen(props: PlayScreenProps) {
       <ActionBar
         scene={view.scene}
         phase={turnPhase(busy, stream)}
+        startedMs={props.startedMs}
         pcName={view.pc_name}
         needsBegin={view.needs_begin}
         answer={answer}

@@ -38,6 +38,12 @@ export interface TurnState {
   notice: string | null;
   /** The last OOC answer. */
   answer: string | null;
+  /**
+   * When the running call started, in ms since the epoch; null while idle.
+   * The phase line counts its seconds from here, so a tab switch, which
+   * mounts the Play screen again, does not start them over.
+   */
+  startedMs: number | null;
 }
 
 export const IDLE_TURN: TurnState = {
@@ -49,6 +55,7 @@ export const IDLE_TURN: TurnState = {
   canRetry: false,
   notice: null,
   answer: null,
+  startedMs: null,
 };
 
 export interface TurnDeps {
@@ -58,6 +65,8 @@ export interface TurnDeps {
   canRetry(): boolean;
   /** The turn client forgets the failed Turn. */
   forget(): void;
+  /** The clock, in ms since the epoch; `Date.now` when left out. */
+  now?: () => number;
 }
 
 export interface TurnStore {
@@ -85,6 +94,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
   // A reset starts a new generation; a late result of an older one is dropped.
   let generation = 0;
   const listeners = new Set<() => void>();
+  const now = deps.now ?? Date.now;
 
   const set = (change: Partial<TurnState>) => {
     state = { ...state, ...change };
@@ -124,6 +134,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         failure: null,
         canRetry: false,
         notice: null,
+        startedMs: now(),
       });
       let committed = false;
       let notice: string | null = null;
@@ -146,6 +157,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         failure,
         canRetry: failure !== null && deps.canRetry(),
         notice: reloadNotice ?? notice,
+        startedMs: null,
       });
       return committed;
     },
@@ -153,7 +165,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
     renarrate: async (opId, call) => {
       if (state.busy) return;
       const mine = generation;
-      set({ busy: true, opId, stream: "", failure: null, canRetry: false, notice: null });
+      set({ busy: true, opId, stream: "", failure: null, canRetry: false, notice: null, startedMs: now() });
       let notice: string | null = null;
       try {
         await call();
@@ -165,13 +177,13 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
       set({ opId: null });
       const reloadNotice = await reload();
       if (mine !== generation) return;
-      set({ busy: false, stream: null, notice: reloadNotice ?? notice });
+      set({ busy: false, stream: null, notice: reloadNotice ?? notice, startedMs: null });
     },
 
     ask: async (call) => {
       if (state.busy) return false;
       const mine = generation;
-      set({ busy: true });
+      set({ busy: true, startedMs: now() });
       let answer: string;
       let ok = false;
       try {
@@ -181,7 +193,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         answer = `OOC failed: ${errorText(e)}`;
       }
       if (mine !== generation) return ok;
-      set({ busy: false, answer });
+      set({ busy: false, answer, startedMs: null });
       return ok;
     },
 

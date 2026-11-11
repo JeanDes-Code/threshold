@@ -108,6 +108,26 @@ export function intentAfterRetry(retried: string, typed: string): string {
   return typed;
 }
 
+/** What the Player sent last from the action bar: an Intent or a Correction. */
+export type Sent = "intent" | "correction";
+
+/**
+ * The action bar after a Retry commits (review minor). A retried Intent
+ * takes its text out of the field (`intentAfterRetry`). A retried
+ * Correction closes the Fix form and clears it, and leaves the Intent field
+ * alone: text that an older failed Intent gave back was never played.
+ */
+export function afterRetry(sent: Sent, returned: string, typed: string): { intent: string; closeFix: boolean } {
+  return sent === "correction"
+    ? { intent: typed, closeFix: true }
+    : { intent: intentAfterRetry(returned, typed), closeFix: false };
+}
+
+/** The ms a call has run since `startedMs`; 0 when none runs. */
+export function elapsedSince(startedMs: number | null, now: number): number {
+  return startedMs === null ? 0 : Math.max(0, now - startedMs);
+}
+
 /** The seconds a running Turn has taken, as the phase line shows them. */
 export function elapsedText(ms: number): string {
   return `${Math.max(0, Math.floor(ms / 1000))} s`;

@@ -73,6 +73,7 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
     <PlayScreen
       view={view}
       busy={turn.busy}
+      startedMs={turn.startedMs}
       stream={turn.stream}
       pendingIntent={turn.pendingIntent}
       answer={turn.answer}

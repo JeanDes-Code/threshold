@@ -18,9 +18,10 @@ function deferred<T>() {
 /** Lets every settled promise run its callbacks. */
 const settle = () => new Promise((done) => setTimeout(done, 0));
 
-function harness(retryable = true) {
+function harness(retryable = true, now = () => 1_000) {
   const log = { reloads: 0, forgets: 0 };
   const deps: TurnDeps = {
+    now,
     reload: () => {
       log.reloads += 1;
       return Promise.resolve();
@@ -42,6 +43,21 @@ function attempt(opId: string) {
 // The store holds the Turn state above the tabs: no screen needs to be
 // mounted for a chunk, a result or a failure to land.
 describe("createTurnStore", () => {
+  it("a running call holds the time it started, and an idle store holds none", async () => {
+    let clock = 5_000;
+    const { store } = harness(true, () => clock);
+    expect(store.get().startedMs).toBeNull();
+    const turn = attempt("op-1");
+    const done = store.run(turn.make, "I knock.");
+    expect(store.get().startedMs).toBe(5_000);
+    clock = 9_000;
+    // A screen that mounts again (a tab switch) reads the same start.
+    expect(store.get().startedMs).toBe(5_000);
+    turn.result.resolve(committed);
+    await done;
+    expect(store.get().startedMs).toBeNull();
+  });
+
   it("a chunk for the running op appends while no Play screen listens", () => {
     const { store } = harness();
     const turn = attempt("op-1");

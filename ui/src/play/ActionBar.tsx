@@ -1,12 +1,23 @@
 import { useEffect, useId, useState } from "react";
 import type { SceneState } from "../api";
 import NoteField from "../marks/NoteField";
-import { PHASE_TEXT, elapsedText, intentAfterRetry, intentAfterTurn, isSendKey, type TurnPhase } from "./logic";
+import {
+  PHASE_TEXT,
+  afterRetry,
+  elapsedSince,
+  elapsedText,
+  intentAfterTurn,
+  isSendKey,
+  type Sent,
+  type TurnPhase,
+} from "./logic";
 
 interface Props {
   /** The mature content module decides its buttons from `scene` and `phase`. */
   scene: SceneState;
   phase: TurnPhase;
+  /** When the running call started (the session store keeps it); null while idle. */
+  startedMs: number | null;
   pcName: string;
   needsBegin: boolean;
   /** The OOC answer, shown apart from the story. */
@@ -61,12 +72,15 @@ export default function ActionBar(props: Props) {
   // The text a failed Turn gave back to the field: a Retry that commits
   // takes it out again.
   const [returned, setReturned] = useState("");
-  const elapsed = useElapsed(busy);
+  // What was sent last: a Retry resends it (review minor).
+  const [sent, setSent] = useState<Sent>("intent");
+  const elapsed = useElapsed(props.startedMs);
 
   const act = async () => {
     const text = intent.trim();
     if (!text || busy) return;
     setIntent("");
+    setSent("intent");
     const taken = await onAct(text);
     setReturned(taken ? "" : text);
     setIntent((typed) => intentAfterTurn(text, typed, taken));
@@ -74,8 +88,14 @@ export default function ActionBar(props: Props) {
 
   const retry = async () => {
     if (await onRetry()) {
-      setIntent((typed) => intentAfterRetry(returned, typed));
+      // What the Player typed while the Retry ran stays.
+      setIntent((typed) => afterRetry(sent, returned, typed).intent);
       setReturned("");
+      if (afterRetry(sent, returned, "").closeFix) {
+        onFixing(false);
+        setClarified("");
+        setWhy("");
+      }
     }
   };
 
@@ -88,6 +108,10 @@ export default function ActionBar(props: Props) {
   const correct = async () => {
     const text = clarified.trim();
     if (!text || !why.trim() || busy) return;
+    // The Intent an older failed Turn gave back is not this Turn's: a Retry
+    // of the Correction must not take it out of the field.
+    setSent("correction");
+    setReturned("");
     if (await onCorrect(text, why.trim())) {
       onFixing(false);
       setClarified("");
@@ -276,17 +300,17 @@ export default function ActionBar(props: Props) {
   );
 }
 
-/** The milliseconds since `busy` turned true; 0 while idle. Ticks each second. */
-function useElapsed(busy: boolean): number {
-  const [elapsed, setElapsed] = useState(0);
+/**
+ * The ms since the running call started; 0 while idle. Ticks each second.
+ * It counts from the session store's start time, not from the mount, so a
+ * tab switch does not start the count over (review minor).
+ */
+function useElapsed(startedMs: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!busy) return;
-    const begun = Date.now();
-    const timer = window.setInterval(() => setElapsed(Date.now() - begun), 1000);
-    return () => {
-      window.clearInterval(timer);
-      setElapsed(0);
-    };
-  }, [busy]);
-  return busy ? elapsed : 0;
+    if (startedMs === null) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedMs]);
+  return elapsedSince(startedMs, now);
 }

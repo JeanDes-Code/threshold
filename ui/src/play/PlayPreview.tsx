@@ -29,6 +29,8 @@ export default function PlayPreview() {
   const [pinned, setPinned] = useState<PinLine[]>(playView.pinned);
   const [fixing, setFixing] = useState(false);
   const [debug, setDebug] = useState(false);
+  // The preview counts from when it turned busy, as the session store does.
+  const [startedMs, setStartedMs] = useState<number | null>(() => (initialStep() === "idle" ? null : Date.now()));
   const timers = useRef<number[]>([]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
@@ -42,6 +44,7 @@ export default function PlayPreview() {
     if (replaying) return;
     setStep("idle");
     setReplaying(true);
+    setStartedMs(Date.now());
     setStream("");
     let at = 0;
     const feed = () => {
@@ -52,6 +55,7 @@ export default function PlayPreview() {
         later(700, () => {
           setStream(null);
           setReplaying(false);
+          setStartedMs(null);
         });
     };
     later(1200, feed);
@@ -59,7 +63,10 @@ export default function PlayPreview() {
 
   const cycleBusy = () => {
     if (replaying) return;
-    setStep((s) => (s === "idle" ? "deciding" : s === "deciding" ? "narrating" : "idle"));
+    const next: Step = step === "idle" ? "deciding" : step === "deciding" ? "narrating" : "idle";
+    setStep(next);
+    if (step === "idle") setStartedMs(Date.now());
+    if (next === "idle") setStartedMs(null);
   };
 
   const busy = replaying || step !== "idle";
@@ -90,6 +97,7 @@ export default function PlayPreview() {
       <PlayScreen
         view={view}
         busy={busy}
+        startedMs={startedMs}
         stream={shownStream}
         pendingIntent={pendingIntent}
         answer={answer}

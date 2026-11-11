@@ -15,6 +15,8 @@ import {
   streamShown,
   intentAfterTurn,
   intentAfterRetry,
+  afterRetry,
+  elapsedSince,
   elapsedText,
   openShown,
   OPEN_CAP,
@@ -122,6 +124,17 @@ describe("Task 5 fixes", () => {
     // The Player rewrote the field: it stays as it is.
     expect(intentAfterRetry("I wait.", "I run.")).toBe("I run.");
     expect(intentAfterRetry("", "I look")).toBe("I look");
+  });
+
+  it("a Retry that commits a Correction closes the Fix form and leaves the Intent field alone", () => {
+    expect(afterRetry("correction", "I wait.", "I look")).toEqual({ intent: "I look", closeFix: true });
+    expect(afterRetry("intent", "I wait.", "I wait.\nI look")).toEqual({ intent: "I look", closeFix: false });
+  });
+
+  it("the seconds count from the Turn's start, so a tab switch does not reset them", () => {
+    expect(elapsedSince(null, 50_000)).toBe(0);
+    expect(elapsedSince(40_000, 50_000)).toBe(10_000);
+    expect(elapsedSince(60_000, 50_000)).toBe(0);
   });
 
   it("a running Turn shows its whole seconds", () => {
