@@ -27,7 +27,7 @@ use crate::{
     normalize,
     pack::ContentPack,
     store::WorldView,
-    world::{hidden, openly_here, pc_knowledge},
+    world::{hidden, openly_here, pc_can_name, pc_knowledge},
 };
 
 /// The narrator's rules. The last line is `speech::RULE`, the speech mark.
@@ -122,9 +122,26 @@ pub fn guard_plans(view: &WorldView, reactions: &[Reaction]) -> Vec<Reaction> {
 /// same whole-word match as `guard_plans`) is dropped. So is a text that
 /// names an NPC the PC must not know of: one the Adventure Seed hides, or
 /// one that neither stands openly here (`world::openly_here`) nor is known
-/// to the PC (seen here, or the subject of a PC Belief).
+/// to the PC (seen here, or the subject of a PC Belief); and one that names
+/// a place, a Faction or a thing the PC cannot name (`world::pc_can_name`,
+/// review B1: "Orsel slips down to the Smugglers Cellar").
 pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
     let mut forbidden = secret_terms(view);
+    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
+    let named = pc_can_name(view, &standing);
+    forbidden.extend(
+        view.entities
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    EntityKind::Place | EntityKind::Faction | EntityKind::Item
+                )
+            })
+            .filter(|e| !named.contains(&e.id))
+            .map(|e| words(&e.name))
+            .filter(|name| !name.is_empty()),
+    );
     let present = seen_present(view);
     let known: HashSet<EntityId> = pc_knowledge(view).into_iter().map(|b| b.subject).collect();
     forbidden.extend(

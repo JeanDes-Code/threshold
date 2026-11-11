@@ -280,3 +280,13 @@ A review of bug pass 4 found two blockers, five majors and a list of minors. Not
 ### The draft keeps a fact as the model files it (M4)
 
 The repair of B2 (section 12) is gone. It cost a model call, dropped true facts about places with no trace, and failed on French articles ("la pointe"). The PC Knowledge stage checks a fact's subject as before 618f56d: it must be a roster name. Accepted limit: the draft may file a true fact under the wrong subject (the reeve's inquiry under "the stone quay"), and the Player, who reads and approves every fact in the review, is the one who catches it.
+
+### A departure to a place the PC cannot name (B1)
+
+An event moved Orsel, in front of the PC, to the hidden place "Smugglers Cellar". The PC got the Belief "Orsel is at Smugglers Cellar", and Orsel's card, the OOC sheet and the narrator's outcome showed it. The rule of section 12 now reads:
+
+- A witnessed location change gives the PC the destination only when the destination is the PC's own place, or a place entity the PC can name (`world::pc_can_name`). A location text that names no place entity counts as a place the PC cannot name.
+- Otherwise the PC sees the entity leave. The core writes a departure record: a fact on the entity's `location` with an empty value and the text "<name> leaves." ("Someone leaves." for an entity the PC cannot name), witnessed by the PC alone. The PC's Belief on it puts the entity nowhere the PC knows, so Here and the narrator's Present leave it out, and the narrator's outcome block reads "- Orsel leaves.".
+- The record is Possible. The slot model holds one live Established value per slot, and the event's own fact stays world truth. A Possible fact never takes the slot: the store makes a witnessed Possible fact Established only when no Established fact holds the slot, and no prompt shows a Possible fact whose slot an Established fact holds (`context::Retrieval`). This is the one Possible fact play writes (section 9 said play writes none).
+- `context::guard_events` also drops an event text that names a place, a Faction or a thing the PC cannot name ("Orsel slips down to the Smugglers Cellar").
+- `PC_FELT_KEYS` is gone: the effect on the PC reads `checks::PC_INVOLUNTARY_KEYS`, the one list.

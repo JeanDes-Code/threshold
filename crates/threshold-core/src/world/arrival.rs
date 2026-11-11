@@ -212,20 +212,22 @@ pub fn openly_here(view: &WorldView, entity: EntityId) -> bool {
 /// for the event before the Turn.
 ///
 /// What the PC perceives of a witnessed event is its visible part: the
-/// event's text, and the effects that `perceptible_effect` accepts (an
-/// entity that comes or goes at the PC's place, what happens to the PC).
-/// The PC joins the witnesses of those facts only, and they become
-/// Persistent, as for any fact the PC sees (the store keeps state keys
-/// Established). Every other effect stays with the witnesses the event
-/// declares (bug pass 4, B1: "Ludo counts his silver" made the PC hold
-/// "Ludo's debt is now partially paid", a secret seen by Agathe only).
+/// event's text, and the effects that `perceive` accepts (an entity that
+/// comes or goes at the PC's place, what happens to the PC). The PC joins
+/// the witnesses of those facts only, and they become Persistent, as for
+/// any fact the PC sees (the store keeps state keys Established). Every
+/// other effect stays with the witnesses the event declares (bug pass 4,
+/// B1: "Ludo counts his silver" made the PC hold "Ludo's debt is now
+/// partially paid", a secret seen by Agathe only).
+///
+/// An entity that leaves for a place the PC cannot name is seen to leave,
+/// not to arrive (review B1): the PC gets a departure record
+/// (`departure`), never the destination.
+///
 /// Returns the ops and the texts of the witnessed events, in firing order,
 /// for the narrator. The texts are model text: the narrator receives them
 /// only through `context::guard_events`.
-pub fn with_witnessed_events(
-    view: &WorldView,
-    mut ops: Vec<LedgerOp>,
-) -> (Vec<LedgerOp>, Vec<String>) {
+pub fn with_witnessed_events(view: &WorldView, ops: Vec<LedgerOp>) -> (Vec<LedgerOp>, Vec<String>) {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return (ops, Vec::new());
     };
@@ -240,12 +242,21 @@ pub fn with_witnessed_events(
     if moves {
         return (ops, Vec::new());
     }
+    let standing: Vec<&crate::store::StoredTurn> = view.recent_turns.iter().collect();
+    let sight = Sight {
+        view,
+        pc: pc.id,
+        here: here.as_deref(),
+        named: super::sight::pc_can_name(view, &standing),
+    };
     let mut texts = Vec::new();
+    let mut out = Vec::with_capacity(ops.len());
     // Whether the event whose effect ops follow is witnessed. `advance` puts
     // each event's effect ops right after its `FireEvent`.
     let mut witnessed = false;
-    for op in &mut ops {
-        match op {
+    for mut op in ops {
+        let mut extra = None;
+        match &mut op {
             LedgerOp::FireEvent { event_id } => {
                 let event = view.events_scheduled.iter().find(|e| e.id == *event_id);
                 witnessed = event.is_some_and(|e| pc_witnesses(view, e));
@@ -259,67 +270,140 @@ pub fn with_witnessed_events(
                 seen_by,
                 canon,
                 ..
-            } if witnessed => {
-                if perceptible_effect(view, pc.id, here.as_deref(), slot) {
+            } if witnessed => match sight.perceive(slot) {
+                Perceived::Effect => {
                     if !seen_by.contains(&pc_ref) {
                         seen_by.push(pc_ref);
                     }
                     *canon = Canon::Persistent;
                 }
-            }
+                Perceived::Departure => extra = Some(sight.departure(slot.subject)),
+                Perceived::Nothing => {}
+            },
             LedgerOp::SupersedeFact { new, .. }
                 if witnessed && new.source == FactSource::WorldEvent =>
             {
-                if perceptible_effect(view, pc.id, here.as_deref(), &new.slot) {
-                    if !new.seen_by.contains(&pc_ref) {
-                        new.seen_by.push(pc_ref);
+                match sight.perceive(&new.slot) {
+                    Perceived::Effect => {
+                        if !new.seen_by.contains(&pc_ref) {
+                            new.seen_by.push(pc_ref);
+                        }
+                        new.canon = Canon::Persistent;
                     }
-                    new.canon = Canon::Persistent;
+                    Perceived::Departure => extra = Some(sight.departure(new.slot.subject)),
+                    Perceived::Nothing => {}
                 }
             }
             LedgerOp::ShiftAttitude { .. } | LedgerOp::AddClaim { .. } => {}
             _ => witnessed = false,
         }
+        out.push(op);
+        out.extend(extra);
     }
-    (ops, texts)
+    (out, texts)
 }
 
-/// The keys of the PC that an event the PC witnesses may change in front of
-/// the PC: what happens to the PC (the same list as
-/// `checks::PC_INVOLUNTARY_KEYS`). The town's "Orsel summons the scribe"
-/// sets the PC's `standing` to summoned, and the PC is there to hear it.
-const PC_FELT_KEYS: &[&str] = &[
-    "condition",
-    "injury",
-    "fatigue",
-    "carrying",
-    "reputation",
-    "standing",
-    "debt",
-];
+/// What the PC perceives of one effect of a witnessed event.
+enum Perceived {
+    /// The PC witnesses the fact itself.
+    Effect,
+    /// The PC sees the entity leave, and not where to (review B1).
+    Departure,
+    Nothing,
+}
 
-/// True when the PC, who witnesses an event, perceives this effect of it:
-/// - the `location` of an entity that is not hidden, when that entity
-///   openly stands at the PC's place (the PC sees it leave) or the new
-///   place is the PC's place (the PC sees it come);
-/// - a slot of the PC itself on a key of what happens to the PC
-///   (`PC_FELT_KEYS`): the event acts on the PC in the PC's presence.
-///
-/// Any other effect (a debt, a plan, a feeling, a slot of an absent entity)
-/// is hidden state: the event's text may show its visible side, and only
-/// the event's declared witnesses learn the fact.
-fn perceptible_effect(view: &WorldView, pc: EntityId, here: Option<&str>, slot: &Slot) -> bool {
-    let EntityRef::Id(subject) = slot.subject else {
-        return false;
-    };
-    let key = normalize::key(&slot.key);
-    if subject == pc {
-        return PC_FELT_KEYS.contains(&key.as_str());
+/// What `with_witnessed_events` reads to judge one effect.
+struct Sight<'a> {
+    view: &'a WorldView,
+    pc: EntityId,
+    /// The PC's place, normalized.
+    here: Option<&'a str>,
+    /// The entities the PC can name (`world::pc_can_name`).
+    named: std::collections::HashSet<EntityId>,
+}
+
+impl Sight<'_> {
+    /// What the PC, who witnesses an event, perceives of this effect:
+    /// - the `location` of an entity that is not hidden, when the entity
+    ///   comes to the PC's place (the PC sees it come), or openly stands at
+    ///   the PC's place and goes to a place the PC can name (the PC sees
+    ///   where it goes). One that goes to a place the PC cannot name is a
+    ///   departure: the PC sees it leave (review B1);
+    /// - a slot of the PC itself on a key of what happens to the PC
+    ///   (`checks::PC_INVOLUNTARY_KEYS`): the event acts on the PC in the
+    ///   PC's presence.
+    ///
+    /// Any other effect (a debt, a plan, a feeling, a slot of an absent
+    /// entity) is hidden state: the event's text may show its visible
+    /// side, and only the event's declared witnesses learn the fact.
+    fn perceive(&self, slot: &Slot) -> Perceived {
+        let EntityRef::Id(subject) = slot.subject else {
+            return Perceived::Nothing;
+        };
+        let key = normalize::key(&slot.key);
+        if subject == self.pc {
+            return if crate::checks::PC_INVOLUNTARY_KEYS.contains(&key.as_str()) {
+                Perceived::Effect
+            } else {
+                Perceived::Nothing
+            };
+        }
+        if key != "location" || hidden(self.view, subject) {
+            return Perceived::Nothing;
+        }
+        let to = normalize::value(&slot.value);
+        if self.here == Some(to.as_str()) {
+            return Perceived::Effect;
+        }
+        if !openly_here(self.view, subject) {
+            return Perceived::Nothing;
+        }
+        if self.can_name_place(&slot.value) {
+            Perceived::Effect
+        } else {
+            Perceived::Departure
+        }
     }
-    key == "location"
-        && !hidden(view, subject)
-        && (openly_here(view, subject)
-            || here.is_some_and(|here| normalize::value(&slot.value) == here))
+
+    /// True when `location` is the name of a place the PC can name.
+    fn can_name_place(&self, location: &str) -> bool {
+        self.view
+            .entities_by_name(location)
+            .any(|e| e.kind == EntityKind::Place && self.named.contains(&e.id))
+    }
+
+    /// The departure record of `subject` (review B1): a fact on its
+    /// `location` with no place, the text "<name> leaves.", witnessed by
+    /// the PC alone. It is Possible, so it never takes the slot from the
+    /// event's own fact, which stays world truth; the store never makes it
+    /// Established while that fact holds the slot, and no GM prompt shows
+    /// it (`context::Retrieval`). The PC's Belief on it puts the entity
+    /// nowhere the PC knows: the side panel's Here and the narrator's
+    /// Present leave it out, and the narrator's outcome reads "<name>
+    /// leaves.". An entity the PC cannot name is "Someone".
+    fn departure(&self, subject: EntityRef) -> LedgerOp {
+        let name = match subject {
+            EntityRef::Id(id) if self.named.contains(&id) => self
+                .view
+                .entities
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.name.clone()),
+            _ => None,
+        };
+        LedgerOp::AddFact {
+            slot: Slot {
+                subject,
+                key: "location".into(),
+                value: String::new(),
+            },
+            text: format!("{} leaves.", name.as_deref().unwrap_or("Someone")),
+            canon: Canon::Possible,
+            source: FactSource::WorldEvent,
+            seen_by: vec![EntityRef::Id(self.pc)],
+            causes: Vec::new(),
+        }
+    }
 }
 
 fn hidden_ref(view: &WorldView, entity: EntityRef) -> bool {

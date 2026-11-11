@@ -23,7 +23,7 @@ pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, pro
 use std::collections::BTreeSet;
 
 use crate::{
-    domain::{AdventureSeed, EntityId, EntityKind, Trigger, is_open_key},
+    domain::{AdventureSeed, Canon, EntityId, EntityKind, Trigger, is_open_key},
     model::Prompt,
     normalize,
     pack::{ContentPack, InsertPoint},
@@ -97,7 +97,7 @@ impl<'a> Retrieval<'a> {
         let scene_facts: Vec<&Fact> = view
             .live_facts
             .iter()
-            .filter(|f| room.contains(&f.slot.subject))
+            .filter(|f| room.contains(&f.slot.subject) && may_become_canon(view, f))
             .collect();
         let obstacles: Vec<&Fact> = view
             .obstacles_open
@@ -148,7 +148,7 @@ impl<'a> Retrieval<'a> {
         let mentioned_facts = view
             .live_facts
             .iter()
-            .filter(|f| mentioned.contains(&f.slot.subject))
+            .filter(|f| mentioned.contains(&f.slot.subject) && may_become_canon(view, f))
             .collect();
 
         Self {
@@ -228,6 +228,16 @@ pub fn seen_present(view: &WorldView) -> Vec<EntityId> {
         .collect();
     seen.insert(pc.id);
     seen.into_iter().collect()
+}
+
+/// False for a Possible fact whose slot an Established or Persistent fact
+/// holds: it can never become canon, so no prompt shows it. A departure
+/// record (`world::with_witnessed_events`, review B1) is such a fact.
+fn may_become_canon(view: &WorldView, fact: &Fact) -> bool {
+    fact.canon != Canon::Possible
+        || view
+            .live_fact(fact.slot.subject, &fact.slot.key)
+            .is_none_or(|live| live.canon == Canon::Possible)
 }
 
 /// The entities a World Event names: its actors and a `When` subject.
