@@ -24,7 +24,8 @@ pub struct AdventureSeed {
     #[serde(default)]
     pub resolution: String,
     /// The lowest age of any character. `checks::boundary` refuses a new
-    /// NPC below it.
+    /// NPC below it. It never changes who counts as an adult: that floor is
+    /// `domain::ADULT_AGE`.
     #[serde(default)]
     pub min_age: Option<u16>,
     /// Where play starts. Read by the World Build and the opening prompt,
@@ -34,6 +35,23 @@ pub struct AdventureSeed {
     /// What the Source Text leaves open. Only the World Build reads it.
     #[serde(default)]
     pub open_details: Vec<OpenDetail>,
+    /// The Detail Level the Campaign starts with. A seed without it
+    /// excludes Intimate Scenes: the module is off until the Player sets a
+    /// level. Only `store` reads it, at creation and at a rebuild; every
+    /// other reader uses `WorldView::detail`. The draft stages never set it.
+    #[serde(default)]
+    pub detail: DetailLevel,
+}
+
+/// The Detail Level of a Campaign (glossary): how an Intimate Scene is told,
+/// if at all. `excluded` refuses every intimate Turn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DetailLevel {
+    #[default]
+    Excluded,
+    Implied,
+    Explicit,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

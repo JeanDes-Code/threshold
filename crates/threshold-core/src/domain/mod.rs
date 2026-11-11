@@ -5,8 +5,8 @@ mod types;
 mod world_setup;
 
 pub use adventure_seed::{
-    AdventureSeed, DEFAULT_START_HOUR, OpenDetail, OpenMode, OtherName, PcSeed, SeedEntity,
-    SeedFact, StartSeed,
+    AdventureSeed, DEFAULT_START_HOUR, DetailLevel, OpenDetail, OpenMode, OtherName, PcSeed,
+    SeedEntity, SeedFact, StartSeed,
 };
 pub use handle::{Handle, HandleError};
 pub use proposal::{
@@ -28,8 +28,9 @@ pub use world_setup::{
 /// The age from which a character is an adult.
 pub const ADULT_AGE: u16 = 18;
 
-/// The only derivation of adult status. A character without a stored age is
-/// not an adult.
+/// The only derivation of adult status from an age. A character without a
+/// stored age is not an adult. Only `mature` calls it: an age alone never
+/// clears a character for an Intimate Scene (`mature::clearance`).
 pub fn is_adult(age: Option<u16>) -> bool {
     age.is_some_and(|age| age >= ADULT_AGE)
 }

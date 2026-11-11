@@ -32,7 +32,26 @@ pub enum CheckKind {
     NpcFolds,
     FactBends,
     TensionEvaporates,
+    /// The `min_age` rule for a new NPC (`boundary`).
     ContentBoundary,
+    /// An intimate proposal at Detail Level `excluded` (`mature::check`).
+    /// Final: no retry.
+    DetailExcluded,
+    /// An intimate proposal with a character who is not cleared, or a new
+    /// NPC (`mature::check`). Final: no retry.
+    AdultsOnly,
+    /// An intimate proposal with no reaction, or with a reacting NPC below
+    /// comply (`mature::check`). It keeps the one retry.
+    Unwilling,
+}
+
+impl CheckKind {
+    /// True for a rejection that ends the Turn at once: no retry prompt and
+    /// no second proposal call. A retry prompt that lists an age or level
+    /// rejection teaches the model to drop the tag (ADR 0008).
+    pub fn is_final(self) -> bool {
+        matches!(self, Self::DetailExcluded | Self::AdultsOnly)
+    }
 }
 
 impl fmt::Display for CheckKind {
@@ -47,6 +66,9 @@ impl fmt::Display for CheckKind {
             Self::FactBends => "fact bends",
             Self::TensionEvaporates => "tension evaporates",
             Self::ContentBoundary => "content boundary",
+            Self::DetailExcluded => "detail excluded",
+            Self::AdultsOnly => "adults only",
+            Self::Unwilling => "unwilling",
         })
     }
 }
@@ -59,7 +81,7 @@ pub struct Rejection {
 }
 
 impl Rejection {
-    fn new(check: CheckKind, handle: Option<Handle>, reason: impl Into<String>) -> Self {
+    pub(crate) fn new(check: CheckKind, handle: Option<Handle>, reason: impl Into<String>) -> Self {
         Self {
             check,
             handle,
@@ -158,15 +180,21 @@ impl<'a> Validated<'a> {
     }
 }
 
-/// Runs every Commit check that comes before the Roll. References and shape
-/// run first; when they fail, the other checks are skipped, so they never see
-/// an unknown handle.
+/// Runs every Commit check that comes before the Roll. The adults-only gate
+/// (`mature::check`, G2) runs first, whatever the other checks find, so a
+/// final rejection is found even on a proposal with a bad handle (plan
+/// deviation 3). References and shape run next; when they fail, the other
+/// checks are skipped, so they never see an unknown handle.
 pub fn validate<'a>(
     p: &'a DecisionProposal,
     view: &WorldView,
 ) -> Result<Validated<'a>, Vec<Rejection>> {
-    let mut errs = references::check(p, view);
-    if errs.is_empty() {
+    let mut errs = Vec::new();
+    crate::mature::check(p, view, &mut errs);
+    let references = references::check(p, view);
+    let references_ok = references.is_empty();
+    errs.extend(references);
+    if references_ok {
         agency::check(p, view, &mut errs);
         shortcuts::check(p, view, &mut errs);
         boundary::check(p, view, &mut errs);

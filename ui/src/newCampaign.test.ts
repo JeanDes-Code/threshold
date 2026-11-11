@@ -70,6 +70,7 @@ function form(): ReviewForm {
     min_age: null,
     start: { place: "Ostley Crossing", present: ["Pim Quast"], situation: "", when: "" },
     open_details: [],
+    detail: "excluded",
   };
   return {
     seed,

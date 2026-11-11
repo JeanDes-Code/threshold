@@ -153,6 +153,7 @@ fn a_leave_to_a_place_the_pc_cannot_name_shows_a_departure_only() {
         name: "Smugglers Cove".into(),
         age: None,
         other_names: vec![],
+        age_confirmed: false,
     }]);
     let cove = w.view.entity_by_name("Smugglers Cove").unwrap().id;
     let mut p = proposal(Verdict::Allowed);

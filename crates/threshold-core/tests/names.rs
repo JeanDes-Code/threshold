@@ -13,6 +13,7 @@ fn entity(id: u64, name: &str, other_names: &[&str]) -> Entity {
         norm_name: normalize::name(name),
         age: Some(30),
         other_names: other_names.iter().map(|n| (*n).into()).collect(),
+        age_confirmed: false,
     }
 }
 

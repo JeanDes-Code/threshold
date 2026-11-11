@@ -359,6 +359,17 @@ pub enum LedgerOp<E = EntityRef> {
         age: Option<u16>,
         #[serde(default)]
         other_names: Vec<String>,
+        /// The Player confirmed the age through the core (Age
+        /// Confirmation). A ledger line stored before the field existed
+        /// reads as unconfirmed.
+        #[serde(default)]
+        age_confirmed: bool,
+    },
+    /// The Player confirms that a PC or an NPC is an adult. The store
+    /// refuses it for any other entity, and for a stored age under
+    /// `domain::ADULT_AGE`. It never changes the age.
+    ConfirmAge {
+        entity: E,
     },
     AddFact {
         slot: Slot<E>,
@@ -555,13 +566,16 @@ impl<E> LedgerOp<E> {
                 name,
                 age,
                 other_names,
+                age_confirmed,
             } => LedgerOp::AddEntity {
                 local,
                 kind,
                 name,
                 age,
                 other_names,
+                age_confirmed,
             },
+            Self::ConfirmAge { entity } => LedgerOp::ConfirmAge { entity: f(entity)? },
             Self::AddFact {
                 slot,
                 text,

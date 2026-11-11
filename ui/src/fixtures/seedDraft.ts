@@ -42,6 +42,7 @@ const seed: AdventureSeed = {
     when: "The evening of the third day of the thaw",
   },
   open_details: [{ text: "Who sealed the letter.", mode: "discover" }],
+  detail: "excluded",
 };
 
 const knowledge: KnownFact[] = [

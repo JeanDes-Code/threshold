@@ -21,6 +21,27 @@ use crate::{
 /// the reading of the Campaign included (data shape 3.6).
 pub const PLAY_VIEW_MAX_MS: u64 = 50;
 
+/// The Player's sentence for a Refusal at Detail Level `excluded`.
+pub const REFUSAL_EXCLUDED: &str = "This Campaign excludes Intimate Scenes.";
+
+/// The Player's sentence for a Refusal by the age rule. It names nobody: a
+/// hidden character or a minor may be the one who blocks, and the sentence
+/// is the same in every case.
+pub const REFUSAL_ADULTS_ONLY: &str = "An Intimate Scene cannot happen here.";
+
+/// The Player's sentence for a Refusal by the stance rule.
+pub const REFUSAL_UNWILLING: &str = "Nobody here goes along with this.";
+
+/// The one fixed sentence of a Refusal (data shape 5). No name, no id and
+/// no age: the shell shows it as it is, in debug mode too.
+pub fn refusal_text(kind: crate::mature::RefusalKind) -> &'static str {
+    match kind {
+        crate::mature::RefusalKind::Excluded => REFUSAL_EXCLUDED,
+        crate::mature::RefusalKind::AdultsOnly => REFUSAL_ADULTS_ONLY,
+        crate::mature::RefusalKind::Unwilling => REFUSAL_UNWILLING,
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct CharacterView {
     pub name: String,

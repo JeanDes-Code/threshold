@@ -18,14 +18,18 @@ pub(super) fn apply(db: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// The tables of the world: the ledger and its projections.
+/// The tables of the world: the ledger and its projections. Schema 4 adds
+/// `campaign.detail_level` (projection: the seed's `detail`),
+/// `campaign.scene_open_turn` (written by nothing yet), `entity.age_confirmed`
+/// (projection: `AddEntity`, `ConfirmAge`) and `turn.faded` (not a
+/// projection; written by nothing yet).
 const STORE_SCHEMA: &str = r#"
-CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL);
-CREATE TABLE entity (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaign(id), kind TEXT NOT NULL, name TEXT NOT NULL, norm_name TEXT NOT NULL, age INTEGER, other_names_json TEXT NOT NULL, CHECK ((kind IN ('pc','npc')) = (age IS NOT NULL)));
+CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL, detail_level TEXT NOT NULL DEFAULT 'excluded' CHECK (detail_level IN ('excluded','implied','explicit')), scene_open_turn INTEGER REFERENCES turn(id));
+CREATE TABLE entity (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaign(id), kind TEXT NOT NULL, name TEXT NOT NULL, norm_name TEXT NOT NULL, age INTEGER, other_names_json TEXT NOT NULL, age_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (age_confirmed IN (0,1)) CHECK (age_confirmed = 0 OR age IS NOT NULL), CHECK ((kind IN ('pc','npc')) = (age IS NOT NULL)));
 CREATE TABLE voice_card (npc_id INTEGER PRIMARY KEY REFERENCES entity(id), habits TEXT NOT NULL, vocabulary TEXT NOT NULL, samples_json TEXT NOT NULL);
 CREATE TABLE goal (id INTEGER PRIMARY KEY, npc_id INTEGER NOT NULL REFERENCES entity(id), text TEXT NOT NULL, against_id INTEGER REFERENCES entity(id), status TEXT NOT NULL);
 CREATE TABLE relationship (from_id INTEGER NOT NULL REFERENCES entity(id), to_id INTEGER NOT NULL REFERENCES entity(id), attitude INTEGER NOT NULL CHECK(attitude BETWEEN -5 AND 5), PRIMARY KEY(from_id,to_id));
-CREATE TABLE turn (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaign(id), seq INTEGER NOT NULL, op_id TEXT NOT NULL, kind TEXT NOT NULL, intent TEXT NOT NULL, proposal_json TEXT NOT NULL, clock_before INTEGER NOT NULL, clock_after INTEGER NOT NULL, narration TEXT, UNIQUE(campaign_id,op_id), UNIQUE(campaign_id,seq));
+CREATE TABLE turn (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaign(id), seq INTEGER NOT NULL, op_id TEXT NOT NULL, kind TEXT NOT NULL, intent TEXT NOT NULL, proposal_json TEXT NOT NULL, clock_before INTEGER NOT NULL, clock_after INTEGER NOT NULL, narration TEXT, faded INTEGER NOT NULL DEFAULT 0, UNIQUE(campaign_id,op_id), UNIQUE(campaign_id,seq));
 CREATE TABLE fact (id INTEGER PRIMARY KEY, subject_id INTEGER NOT NULL REFERENCES entity(id), key TEXT NOT NULL, value TEXT NOT NULL, text TEXT NOT NULL, canon TEXT NOT NULL, source TEXT NOT NULL, created_turn INTEGER NOT NULL REFERENCES turn(id), superseded_by INTEGER REFERENCES fact(id) DEFERRABLE INITIALLY DEFERRED);
 CREATE UNIQUE INDEX fact_live_slot ON fact(subject_id,key) WHERE superseded_by IS NULL AND canon <> 'possible';
 CREATE TABLE fact_cause (fact_id INTEGER NOT NULL REFERENCES fact(id), cause_fact_id INTEGER NOT NULL REFERENCES fact(id));

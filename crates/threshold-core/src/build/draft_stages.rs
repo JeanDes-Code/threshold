@@ -21,8 +21,8 @@ use super::{
 };
 use crate::{
     domain::{
-        AdventureSeed, EntityKind, OPEN_KEY_PREFIX, OpenDetail, OpenMode, OtherName, PcSeed,
-        SeedEntity, StartSeed,
+        AdventureSeed, DetailLevel, EntityKind, OPEN_KEY_PREFIX, OpenDetail, OpenMode, OtherName,
+        PcSeed, SeedEntity, StartSeed,
     },
     model::{Gm, Prompt},
     normalize,
@@ -785,6 +785,9 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
                     mode: d.mode,
                 })
                 .collect(),
+            // The model's seed output has no `detail` field: a Source Text
+            // cannot turn the module on. The Player sets the level.
+            detail: DetailLevel::Excluded,
         },
         knowledge: vec![],
         age_marks: ages,

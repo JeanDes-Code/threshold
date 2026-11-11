@@ -34,6 +34,7 @@ fn add_unnamed_place(w: &mut World, name: &str) {
         name: name.into(),
         age: None,
         other_names: vec![],
+        age_confirmed: false,
     }]);
 }
 
@@ -231,6 +232,7 @@ fn a_departure_names_an_npc_whom_an_old_narration_named() {
         name: "Kestrel".into(),
         age: Some(40),
         other_names: vec![],
+        age_confirmed: false,
     }]);
     let kestrel = w.view.entity_by_name("Kestrel").unwrap().id;
     w.commit(vec![LedgerOp::AddFact {
@@ -650,6 +652,7 @@ fn a_public_effect_on_the_pc_s_feelings_a_hidden_npc_or_a_stranger_stays_hidden(
         name: "Kestrel".into(),
         age: Some(40),
         other_names: vec![],
+        age_confirmed: false,
     }]);
     let kestrel = w.view.entity_by_name("Kestrel").unwrap().id;
     schedule_public(

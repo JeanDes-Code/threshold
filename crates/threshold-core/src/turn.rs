@@ -24,9 +24,10 @@ use crate::{
         one_line, opening_prompt, perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
-        ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityKind, EntityRef, FactSource,
-        Handle, LedgerOp, Reaction, Verdict,
+        ActionKind, AdventureSeed, ClockMin, DecisionProposal, EntityId, EntityKind, EntityRef,
+        FactSource, Handle, LedgerOp, Reaction, Verdict,
     },
+    mature::{self, RefusalKind},
     model::{Gm, GmError, Prompt},
     pack::ContentPack,
     proposal_schema_for,
@@ -92,6 +93,15 @@ pub enum TurnError {
         turn_id: TurnId,
         error: GmError,
     },
+    /// A Refusal (glossary): the core stopped the Turn for a Content
+    /// Boundary, with no Commit. An age or level refusal comes after one
+    /// proposal call, with no retry. `blocked` lists the characters who
+    /// block an `AdultsOnly` refusal, for the debug log and the core; a
+    /// Player screen never shows it raw.
+    Refused {
+        kind: RefusalKind,
+        blocked: Vec<EntityId>,
+    },
 }
 
 impl fmt::Display for TurnError {
@@ -118,6 +128,7 @@ impl fmt::Display for TurnError {
                     "turn {turn_id} is committed, but its narration failed: {error}"
                 )
             }
+            Self::Refused { kind, .. } => f.write_str(crate::view::refusal_text(*kind)),
         }
     }
 }
@@ -641,6 +652,14 @@ impl Engine {
 
     /// Every step before the Commit, against `view` (the state before the
     /// Turn). One retry in total, shared by parse, shape and Commit checks.
+    ///
+    /// The adults-only gate (ADR 0008): a final rejection
+    /// (`CheckKind::is_final`) ends the Turn at once as a Refusal, with no
+    /// retry prompt and no second proposal call. When the first attempt
+    /// said `intimate: true`, the retry is checked as intimate too, even
+    /// when the first attempt did not parse, so a retry cannot drop the tag
+    /// (plan deviation 4). A retry that
+    /// fails the stance rule only is an `Unwilling` Refusal.
     fn plan(
         &mut self,
         op_id: &str,
@@ -653,6 +672,7 @@ impl Engine {
         let schema = proposal_schema_for(&ctx.handles);
         let mut prompt = ctx.prompt;
         let mut wait_asked = None;
+        let mut tagged = false;
         for attempt in ["propose", "propose_retry"] {
             let step = Instant::now();
             let raw = self.gm.propose(&prompt, &schema);
@@ -668,8 +688,12 @@ impl Engine {
 
             let step = Instant::now();
             let retry = attempt == "propose_retry";
+            // The tag of the first attempt sticks, even when that attempt
+            // did not parse.
+            tagged |= states_intimate(&raw);
             let parsed = match parse(&raw) {
                 Ok(mut p) => {
+                    p.intimate |= tagged;
                     // The items the Intent names: the only ones `settles`
                     // may close (review M1).
                     p.offered.clone_from(&ctx.handles.open_items);
@@ -720,6 +744,15 @@ impl Engine {
                 &lines.join("\n"),
                 step,
             )?;
+            if let Some((kind, blocked)) = mature::final_refusal(&errs) {
+                return Err(TurnError::Refused { kind, blocked });
+            }
+            if retry && mature::only_unwilling(&errs) {
+                return Err(TurnError::Refused {
+                    kind: RefusalKind::Unwilling,
+                    blocked: Vec::new(),
+                });
+            }
             if retry {
                 return Err(TurnError::Rejected(errs));
             }
@@ -882,8 +915,31 @@ fn schema_error(reason: String) -> Vec<Rejection> {
 /// Parses the model text. The shape check runs with the Commit checks
 /// (`checks::validate`), after the core's repairs: on the retry, a missing
 /// Check is one the core can build (`checks::default_check`).
+///
+/// A raw proposal without the `intimate` key is a schema error: the field
+/// keeps `serde(default)` for stored proposals, so without this rule a
+/// missing tag would read as `false` and skip the age rule (plan
+/// deviation 5).
 fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
-    serde_json::from_str(raw.trim()).map_err(|e| schema_error(format!("invalid JSON: {e}")))
+    let raw = raw.trim();
+    let p: DecisionProposal =
+        serde_json::from_str(raw).map_err(|e| schema_error(format!("invalid JSON: {e}")))?;
+    let tagged = serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .is_some_and(|v| v.get("intimate").is_some_and(serde_json::Value::is_boolean));
+    if !tagged {
+        return Err(schema_error(
+            "intimate is required: true or false".to_owned(),
+        ));
+    }
+    Ok(p)
+}
+
+/// True when the model text is a JSON object whose `intimate` is `true`,
+/// whether or not the rest of it parses as a proposal.
+fn states_intimate(raw: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(raw.trim())
+        .is_ok_and(|v| v.get("intimate") == Some(&serde_json::Value::Bool(true)))
 }
 
 /// The engine owns the time of a Turn, so the model cannot freeze the World

@@ -10,6 +10,7 @@ use threshold_core::{
         ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Reaction,
         SeedEntity, SeedFact, Seen, Stance, Verdict,
     },
+    mature::RefusalKind,
     rules::{D10, Ruleset, turn_seed},
     store::{Store, WorldView},
     turn::{Engine, MAX_INTENT_CHARS, TurnError, create_campaign, stored_action},
@@ -2016,4 +2017,225 @@ fn a_move_inside_the_current_place_is_an_act() {
         "{}",
         narration.recent
     );
+}
+
+// --- Mature content module, Task 1: the gates -------------------------------
+
+/// `w` as an engine, with the shared Gm.
+fn engine_for(
+    mut w: World,
+    proposals: Vec<String>,
+    narrations: Vec<&str>,
+) -> (Engine, World, RecordedGm) {
+    let gm = RecordedGm::new(proposals, narrations.into_iter().map(Into::into).collect());
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    (make_engine(store, w.campaign, &gm), w, gm)
+}
+
+/// The gate scene at `implied`, with Ada, Orsel and Brann confirmed, and
+/// Pip (17) at the gate square when `minor_here`.
+fn gate_at_implied(minor_here: bool) -> World {
+    let mut w = World::with_detail(threshold_core::domain::DetailLevel::Implied);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    if minor_here {
+        let old = w.view.live_fact(w.pip, "location").unwrap().id;
+        let pip = w.pip;
+        w.commit(vec![LedgerOp::SupersedeFact {
+            old,
+            new: threshold_core::domain::FactDraft {
+                slot: threshold_core::domain::Slot {
+                    subject: pip.into(),
+                    key: "location".into(),
+                    value: "Gate Square".into(),
+                },
+                text: "Pip came to the gate.".into(),
+                canon: threshold_core::domain::Canon::Established,
+                source: FactSource::Correction,
+                seen_by: vec![],
+                causes: vec![],
+            },
+        }]);
+    }
+    w
+}
+
+fn intimate_with_brann(w: &World, stance: Stance) -> DecisionProposal {
+    let mut p = proposal(Verdict::Allowed);
+    p.intimate = true;
+    p.reactions = vec![reaction(e(w.brann), stance, None)];
+    p
+}
+
+fn refused(
+    result: Result<threshold_core::turn::TurnOutcome, TurnError>,
+) -> (RefusalKind, Vec<u64>) {
+    match result {
+        Err(TurnError::Refused { kind, blocked }) => (kind, blocked),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_raw_proposal_without_the_intimate_key_is_a_schema_error() {
+    let mut raw: serde_json::Value = serde_json::to_value(proposal(Verdict::Allowed)).unwrap();
+    raw.as_object_mut().unwrap().remove("intimate");
+    let (mut engine, _w, gm) = setup(
+        vec![raw.to_string(), json(&proposal(Verdict::Allowed))],
+        vec!["You look around."],
+    );
+    engine
+        .play_turn("t1".into(), "I look around.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(
+        kinds(&gm),
+        [CallKind::Propose, CallKind::Propose, CallKind::Narrate]
+    );
+    let validate: Vec<String> = steps(&engine, "t1")
+        .into_iter()
+        .filter(|(step, _)| step == "validate")
+        .map(|(_, raw)| raw)
+        .collect();
+    assert!(validate[0].starts_with("schema"), "{validate:?}");
+    assert!(validate[0].contains("intimate"), "{validate:?}");
+    assert_eq!(validate[1], "ok");
+}
+
+#[test]
+fn an_age_refusal_makes_no_second_proposal_call() {
+    let w0 = gate_at_implied(true);
+    let p = json(&intimate_with_brann(&w0, Stance::Comply));
+    let (mut engine, w, gm) = engine_for(w0, vec![p.clone(), p], vec!["never"]);
+    let before = snapshot(&engine, &w);
+    let (kind, blocked) =
+        refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
+    assert_eq!(kind, RefusalKind::AdultsOnly);
+    assert_eq!(blocked, [w.pip]);
+    assert_eq!(kinds(&gm), [CallKind::Propose]);
+    // No retry prompt was built, and no Turn row was written.
+    assert_eq!(snapshot(&engine, &w), before);
+    assert!(
+        engine
+            .store()
+            .turn_by_campaign_op(w.campaign, &"t1".to_owned())
+            .unwrap()
+            .is_none()
+    );
+    let steps: Vec<String> = steps(&engine, "t1").into_iter().map(|(s, _)| s).collect();
+    assert_eq!(steps, ["propose", "validate"]);
+    // One proposal stays queued.
+    assert!(
+        gm.propose(&Prompt::default(), &serde_json::json!({}))
+            .is_ok()
+    );
+}
+
+#[test]
+fn an_intimate_check_runs_even_when_references_fail() {
+    let w0 = gate_at_implied(true);
+    let mut p = intimate_with_brann(&w0, Stance::Comply);
+    p.facts = vec![fact(slot(e(9_999), "mood", "calm"), Seen::Present, vec![])];
+    let raw = json(&p);
+    let (mut engine, w, gm) = engine_for(w0, vec![raw.clone(), raw], vec!["never"]);
+    let (kind, blocked) =
+        refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![w.pip]));
+    assert_eq!(kinds(&gm), [CallKind::Propose]);
+    let validate = steps(&engine, "t1")
+        .into_iter()
+        .find(|(step, _)| step == "validate")
+        .unwrap()
+        .1;
+    assert!(validate.contains("references"), "{validate}");
+}
+
+#[test]
+fn a_retry_keeps_the_tag_of_the_first_attempt() {
+    let w0 = gate_at_implied(false);
+    let mut first = intimate_with_brann(&w0, Stance::Comply);
+    first.reactions.clear();
+    let mut second = intimate_with_brann(&w0, Stance::Comply);
+    second.intimate = false;
+    let (mut engine, w, gm) =
+        engine_for(w0, vec![json(&first), json(&second)], vec!["Brann nods."]);
+    let outcome = engine
+        .play_turn("t1".into(), "I lean closer.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(
+        kinds(&gm),
+        [CallKind::Propose, CallKind::Propose, CallKind::Narrate]
+    );
+    let retry = &prompts(&gm, CallKind::Propose)[1];
+    assert!(retry.recent.contains("unwilling"), "{}", retry.recent);
+    let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    let record: serde_json::Value = serde_json::from_str(&stored.record.proposal_json).unwrap();
+    assert_eq!(record["proposal"]["intimate"], true);
+    let _ = w;
+}
+
+#[test]
+fn a_retry_that_only_stays_unwilling_is_refused() {
+    let w0 = gate_at_implied(false);
+    let p = json(&intimate_with_brann(&w0, Stance::Resist));
+    let (mut engine, _w, gm) = engine_for(w0, vec![p.clone(), p], vec!["never"]);
+    let (kind, blocked) =
+        refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
+    assert_eq!((kind, blocked), (RefusalKind::Unwilling, vec![]));
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Propose]);
+}
+
+#[test]
+fn moving_the_minor_out_in_the_same_turn_still_refuses() {
+    let w0 = gate_at_implied(true);
+    let mut p = intimate_with_brann(&w0, Stance::Comply);
+    p.leaves = vec![threshold_core::domain::Leave {
+        npc: e(w0.pip),
+        to: "away".into(),
+    }];
+    let raw = json(&p);
+    let (mut engine, w, gm) = engine_for(w0, vec![raw.clone(), raw], vec!["never"]);
+    let (kind, blocked) =
+        refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![w.pip]));
+    assert_eq!(kinds(&gm), [CallKind::Propose]);
+}
+
+#[test]
+fn a_correction_runs_the_same_gates() {
+    let w0 = gate_at_implied(true);
+    let plain = json(&proposal(Verdict::Allowed));
+    let tagged = json(&intimate_with_brann(&w0, Stance::Comply));
+    let (mut engine, w, gm) =
+        engine_for(w0, vec![plain, tagged.clone(), tagged], vec!["You wait."]);
+    let first = engine
+        .play_turn("t1".into(), "I wait.", &mut no_chunks())
+        .unwrap();
+    let before = snapshot(&engine, &w);
+    let (kind, _) =
+        refused(engine.correct_last("t2".into(), "I lean closer.", "misread", &mut no_chunks()));
+    assert_eq!(kind, RefusalKind::AdultsOnly);
+    assert_eq!(
+        kinds(&gm),
+        [CallKind::Propose, CallKind::Narrate, CallKind::Propose]
+    );
+    let now = snapshot(&engine, &w);
+    assert_eq!(now, before);
+    let last = now.recent_turns.last().unwrap();
+    assert_eq!((last.id, last.seq), (first.turn_id, now.turn_seq));
+}
+
+/// The same bypass after a first attempt that does not parse: its tag
+/// still sticks.
+#[test]
+fn a_retry_keeps_the_tag_of_a_first_attempt_that_did_not_parse() {
+    let w0 = gate_at_implied(true);
+    let mut broken: serde_json::Value =
+        serde_json::to_value(intimate_with_brann(&w0, Stance::Comply)).unwrap();
+    broken["verdict"] = "maybe".into();
+    let plain = json(&proposal(Verdict::Allowed));
+    let (mut engine, w, gm) = engine_for(w0, vec![broken.to_string(), plain], vec!["never"]);
+    let (kind, blocked) =
+        refused(engine.play_turn("t1".into(), "I lean closer.", &mut no_chunks()));
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![w.pip]));
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Propose]);
 }

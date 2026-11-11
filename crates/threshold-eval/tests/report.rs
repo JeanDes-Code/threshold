@@ -19,8 +19,7 @@ impl Judge for FirstChoice {
 }
 
 /// An allowed talk proposal: valid in any campaign, writes nothing.
-const PROPOSAL: &str =
-    r#"{"action":"talk","verdict":"allowed","check":null,"schedule":null,"minutes":5}"#;
+const PROPOSAL: &str = r#"{"action":"talk","verdict":"allowed","intimate":false,"check":null,"schedule":null,"minutes":5}"#;
 
 #[test]
 fn report_has_every_metric() {
@@ -421,11 +420,11 @@ fn offscreen_measures_the_seeded_event() {
     let walk = |place: &str, minutes: u32| {
         let place = id(&view, place);
         format!(
-            r#"{{"action":"move","verdict":"allowed","move_to":"E{place}","check":null,"schedule":null,"minutes":{minutes}}}"#
+            r#"{{"action":"move","verdict":"allowed","intimate":false,"move_to":"E{place}","check":null,"schedule":null,"minutes":{minutes}}}"#
         )
     };
     let tell = format!(
-        r#"{{"action":"talk","verdict":"allowed","check":null,"schedule":null,"minutes":5,"facts":[{{"slot":{{"subject":"E{pc}","key":"reputation","value":"under_suspicion"}},"seen":"present","said_by":"E{hessa}","because":[]}}]}}"#
+        r#"{{"action":"talk","verdict":"allowed","intimate":false,"check":null,"schedule":null,"minutes":5,"facts":[{{"slot":{{"subject":"E{pc}","key":"reputation","value":"under_suspicion"}},"seen":"present","said_by":"E{hessa}","because":[]}}]}}"#
     );
     let gm = RecordedGm::new(
         vec![
@@ -1259,6 +1258,7 @@ mod speech {
                         name: "Mara Quell".into(),
                         age: Some(40),
                         other_names: vec![],
+                        age_confirmed: false,
                     },
                     LedgerOp::AddFact {
                         slot: Slot {
@@ -1387,24 +1387,26 @@ fn play_basics_counts_each_step() {
     let (wren, doul, hall) = (id("Wren"), id("Doul"), id("Varn town hall"));
     let mill = id("Varn mill");
     let contest = format!(
-        r#"{{"action":"act","verdict":"check","check":{{"against":"E{doul}","win":{{"subject":"E{doul}","key":"mood","value":"beaten"}},"lose":{{"subject":"E{wren}","key":"fatigue","value":"sore_arm"}},"factors":[]}},"schedule":null,"minutes":5}}"#
+        r#"{{"action":"act","verdict":"check","intimate":false,"check":{{"against":"E{doul}","win":{{"subject":"E{doul}","key":"mood","value":"beaten"}},"lose":{{"subject":"E{wren}","key":"fatigue","value":"sore_arm"}},"factors":[]}},"schedule":null,"minutes":5}}"#
     );
     let impossible =
-        r#"{"action":"act","verdict":"impossible","check":null,"schedule":null,"minutes":1}"#
+        r#"{"action":"act","verdict":"impossible","intimate":false,"check":null,"schedule":null,"minutes":1}"#
             .to_owned();
     let close = |minutes: u32| {
         format!(
-            r#"{{"action":"talk","verdict":"allowed","settles":{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}},"check":null,"schedule":null,"minutes":{minutes}}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimate":false,"settles":{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}},"check":null,"schedule":null,"minutes":{minutes}}}"#
         )
     };
     // No `minutes`: the core's default for a talk.
-    let talk = r#"{"action":"talk","verdict":"allowed","check":null,"schedule":null}"#.to_owned();
+    let talk =
+        r#"{"action":"talk","verdict":"allowed","intimate":false,"check":null,"schedule":null}"#
+            .to_owned();
     let go = |place: u64| {
         format!(
-            r#"{{"action":"move","verdict":"allowed","move_to":"E{place}","check":null,"schedule":null,"minutes":15}}"#
+            r#"{{"action":"move","verdict":"allowed","intimate":false,"move_to":"E{place}","check":null,"schedule":null,"minutes":15}}"#
         )
     };
-    let nowhere = r#"{"action":"move","verdict":"allowed","move_to":null,"check":null,"schedule":null,"minutes":10}"#
+    let nowhere = r#"{"action":"move","verdict":"allowed","intimate":false,"move_to":null,"check":null,"schedule":null,"minutes":10}"#
         .to_owned();
     let report_of = |proposals: Vec<String>| {
         let gm = RecordedGm::new(proposals, vec!["It happens.".to_owned(); 8]);
@@ -1551,10 +1553,10 @@ fn open_items_counts_right_and_wrong_closes() {
     let id = |name: &str| view.entity_by_name(name).unwrap().id;
     let (orsel, tobin) = (id("Orsel"), id("Tobin"));
     let wren = id("Wren");
-    let talk = r#"{"action":"talk","verdict":"allowed","minutes":2}"#.to_owned();
+    let talk = r#"{"action":"talk","verdict":"allowed","intimate":false,"minutes":2}"#.to_owned();
     let settle = |item: String| {
         format!(
-            r#"{{"action":"talk","verdict":"allowed","settles":{{"item":"{item}","outcome":"accepted"}},"minutes":2}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimate":false,"settles":{{"item":"{item}","outcome":"accepted"}},"minutes":2}}"#
         )
     };
     let gm = RecordedGm::new(

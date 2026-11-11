@@ -67,6 +67,7 @@ fn seed() -> AdventureSeed {
             hour: None,
         },
         open_details: vec![],
+        detail: Default::default(),
     }
 }
 

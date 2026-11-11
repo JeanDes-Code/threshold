@@ -36,6 +36,10 @@ _Avoid_: Filter, safety setting
 The Adventure Seed setting for intimate content. Excluded: no Intimate Scene. Implied: the Narration tells that it happens, with no explicit description. Explicit: full description, which needs a Content Pack.
 _Avoid_: Adult mode, NSFW level, rating
 
+**Age Confirmation**:
+The Player's statement, recorded by the core, that a character's stored age is right. Only a character with one can be in an Intimate Scene.
+_Avoid_: Age check, verification
+
 ## Participants
 
 **Player**:
@@ -76,21 +80,33 @@ _Avoid_: Sex scene, NSFW scene, adult scene
 The Player's choice to skip the description of a Turn or of an Intimate Scene. The world keeps what happened, and the Player reads one neutral line.
 _Avoid_: Skip, censor, cut
 
+**Neutral Line**:
+The fixed sentence the core writes in place of a Narration that the Player skipped, or that a later prompt may not read. No model writes it.
+_Avoid_: Summary, placeholder
+
 **Turn**:
-One cycle from a Player Intent to the Narration of its committed result.
+One cycle from a Player Intent to the Narration of its committed result. A Closing Turn has no Intent.
 _Avoid_: Message, round, exchange
+
+**Closing Turn**:
+The Turn that ends an Intimate Scene when the Player presses "End scene" or "Fade to black". It has no Intent.
+_Avoid_: Epilogue, cleanup
 
 **Intent**:
 What the Player says the PC tries to do, in the Player's own words.
 _Avoid_: Command, prompt, move
 
 **OOC**:
-Communication between the Player and the GM outside the fiction: clarifications, rule questions, Corrections.
+Communication between the Player and the GM outside the fiction: clarifications, rule questions, Corrections, and settings the Player changes during play.
 _Avoid_: Meta, system message
 
 **Correction**:
 An OOC request to fix a continuity error or a misread Intent. It changes the record openly and does not pretend the original outcome never happened.
 _Avoid_: Undo, retcon, edit
+
+**Refusal**:
+A Turn that the core stops for a Content Boundary, with no retry and no Commit. The Player reads one fixed sentence.
+_Avoid_: Block, censorship, rejection (a rejection gets a retry)
 
 **Decision Proposal**:
 The GM's structured interpretation of an Intent: what kind of action it is, whether it needs a Check, the Stakes and Factors, NPC reactions and the time it takes. It is not canon until committed.
@@ -109,7 +125,7 @@ A GM move that makes the next line easy to write at the cost of the world's cons
 _Avoid_: Plot hole, cheat, railroading
 
 **Content Pack**:
-A removable set of data that extends what the GM may portray: prompt fragments, extra Adventure Seed options, model hints. It holds no code and cannot override a Content Boundary.
+A removable set of data that extends what the GM may portray: prompt fragments, extra Adventure Seed options, model hints. It holds no code and cannot override a Content Boundary. A pack may declare that it gives explicit description; such a pack holds scene fragments only.
 _Avoid_: Mod, module, plugin, DLC
 
 **Journal**:

@@ -92,6 +92,7 @@ fn fixture() -> Result<WorldView, Box<dyn Error>> {
         min_age: None,
         start: StartSeed::default(),
         open_details: vec![],
+        detail: Default::default(),
     };
     let campaign = store.create_campaign(&seed, 11)?;
     let view = store.snapshot(campaign)?;

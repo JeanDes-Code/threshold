@@ -333,7 +333,12 @@ export interface AdventureSeed {
   min_age: number | null;
   start: StartSeed;
   open_details: OpenDetail[];
+  /** The Detail Level the Campaign starts with. `excluded` by default. */
+  detail: DetailLevel;
 }
+
+/** How an Intimate Scene is told, if at all (glossary: Detail Level). */
+export type DetailLevel = "excluded" | "implied" | "explicit";
 
 /** A fact the PC knows. `open`: planned or pending, not done. */
 export interface KnownFact {

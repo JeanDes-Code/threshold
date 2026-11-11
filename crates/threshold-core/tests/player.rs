@@ -28,6 +28,7 @@ fn adventure_seed() -> AdventureSeed {
         min_age: None,
         start: StartSeed::default(),
         open_details: vec![],
+        detail: Default::default(),
     }
 }
 

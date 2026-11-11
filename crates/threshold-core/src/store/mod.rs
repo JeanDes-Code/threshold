@@ -4,8 +4,8 @@ mod project;
 use std::{fmt, path::Path};
 
 use crate::domain::{
-    AdventureSeed, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,
-    FactSource, Handle, Knowing, LedgerOp, OtherName, Slot, Trigger,
+    AdventureSeed, Canon, ClaimDraft, ClockMin, DetailLevel, Effect, EntityId, EntityKind,
+    EntityRef, FactSource, Handle, Knowing, LedgerOp, OtherName, Slot, Trigger,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,8 @@ pub type CampaignId = u64;
 pub type TurnId = u64;
 
 /// The schema version of a Campaign file. An older file is refused, with no
-/// migration.
-pub const SCHEMA_VERSION: u32 = 3;
+/// migration (ADR 0012).
+pub const SCHEMA_VERSION: u32 = 4;
 pub type OpId = String;
 
 #[derive(Debug)]
@@ -114,6 +114,9 @@ pub struct Entity {
     /// A PC or an NPC has an age; nothing else does.
     pub age: Option<u16>,
     pub other_names: Vec<String>,
+    /// The Player confirmed the age through the core (Age Confirmation).
+    /// Only `mature::clearance` reads it.
+    pub age_confirmed: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fact {
@@ -190,6 +193,9 @@ pub struct WorldView {
     pub clock_min: ClockMin,
     /// The campaign's Adventure Seed. `None` only in hand-built views.
     pub adventure_seed: Option<AdventureSeed>,
+    /// The Detail Level (projection `campaign.detail_level`): the seed's
+    /// `detail` at creation and after a rebuild.
+    pub detail: DetailLevel,
     pub entities: Vec<Entity>,
     pub live_facts: Vec<Fact>,
     pub facts: Vec<Fact>,
@@ -428,8 +434,12 @@ impl Store {
     ) -> Result<CampaignId, StoreError> {
         let tx = self.db.transaction()?;
         tx.execute(
-            "INSERT INTO campaign(adventure_seed_json,clock_min,seed) VALUES(?1,0,?2)",
-            params![serde_json::to_string(adventure_seed)?, rng_seed as i64],
+            "INSERT INTO campaign(adventure_seed_json,clock_min,seed,detail_level) VALUES(?1,0,?2,?3)",
+            params![
+                serde_json::to_string(adventure_seed)?,
+                rng_seed as i64,
+                project::enum_text(&adventure_seed.detail)?
+            ],
         )?;
         let campaign = tx.last_insert_rowid() as u64;
         // The World Clock starts at the seed's hour of Day 1 (QA,
@@ -482,6 +492,8 @@ impl Store {
                     name: name.to_owned(),
                     age,
                     other_names: other_names.iter().map(|o| o.name.clone()).collect(),
+                    // No path confirms an age at creation yet.
+                    age_confirmed: false,
                 },
             )?
             .ok_or_else(|| StoreError::Invalid("missing entity id".into()))?;
@@ -584,6 +596,7 @@ impl Store {
                                     name: f.subject.clone(),
                                     age: None,
                                     other_names: vec![],
+                                    age_confirmed: false,
                                 },
                             )?
                             .ok_or_else(|| StoreError::Invalid("missing subject id".into()))?;

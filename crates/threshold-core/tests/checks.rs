@@ -478,13 +478,18 @@ fn pc_cannot_react_act_or_speak() {
 
 // --- Content Boundary ------------------------------------------------------
 
+/// The adults-only rule lives in `mature` now (Task 1 of the mature content
+/// module): a minor in the place gives a final `adults only` rejection.
 #[test]
 fn intimate_with_minor_rejected() {
-    let w = World::new();
+    let mut w = World::with_detail(threshold_core::domain::DetailLevel::Implied);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
     let mut p = proposal(Verdict::Allowed);
     p.intimate = true;
-    p.reactions = vec![reaction(e(w.pip), Stance::Neutral, None)];
-    rejected(validate(&p, &w.view), CheckKind::ContentBoundary);
+    p.reactions = vec![reaction(e(w.pip), Stance::Comply, None)];
+    let errs = rejected(validate(&p, &w.view), CheckKind::AdultsOnly);
+    assert!(errs.iter().any(|r| r.handle == Some(e(w.pip))), "{errs:?}");
 
     // Pip is 17: one year short of `ADULT_AGE`.
     assert_eq!(
@@ -494,11 +499,12 @@ fn intimate_with_minor_rejected() {
 
     let mut p = proposal(Verdict::Allowed);
     p.intimate = true;
+    p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
     p.new_npcs = vec![new_npc(1, "Kett", 17)];
-    rejected(validate(&p, &w.view), CheckKind::ContentBoundary);
+    let errs = rejected(validate(&p, &w.view), CheckKind::AdultsOnly);
+    assert!(errs.iter().all(|r| r.check != CheckKind::ContentBoundary));
 
     // A minor who is merely present also blocks an intimate scene.
-    let mut w = World::new();
     let pip_location = w.view.live_fact(w.pip, "location").unwrap().id;
     let pip = w.pip;
     w.commit(vec![LedgerOp::SupersedeFact {
@@ -518,15 +524,17 @@ fn intimate_with_minor_rejected() {
     }]);
     let mut p = proposal(Verdict::Allowed);
     p.intimate = true;
-    p.reactions = vec![reaction(e(w.brann), Stance::Neutral, None)];
-    let errs = rejected(validate(&p, &w.view), CheckKind::ContentBoundary);
+    p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
+    let errs = rejected(validate(&p, &w.view), CheckKind::AdultsOnly);
+    assert_eq!(errs.len(), 1, "{errs:?}");
     assert_eq!(errs[0].handle, Some(e(w.pip)));
+    assert!(errs[0].check.is_final());
 }
 
 #[test]
 fn intimate_with_adults_ok() {
-    let w = World::new();
-    // Brann is 18, exactly `ADULT_AGE`; so is the new NPC.
+    let mut w = World::with_detail(threshold_core::domain::DetailLevel::Implied);
+    // Brann is 18, exactly `ADULT_AGE`.
     assert_eq!(
         w.view
             .entities
@@ -536,10 +544,11 @@ fn intimate_with_adults_ok() {
             .age,
         Some(18)
     );
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
     let mut p = proposal(Verdict::Allowed);
     p.intimate = true;
     p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
-    p.new_npcs = vec![new_npc(1, "Kett", 18)];
     ok(validate(&p, &w.view));
 }
 
@@ -725,6 +734,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "action": "talk",
         "verdict": "allowed",
         "contested": false,
+        "intimate": false,
         "move_to": null,
         "leaves": [],
         "settles": {"item": "none", "outcome": "open"},
@@ -1677,7 +1687,7 @@ fn item_status_is_a_closed_list() {
     });
     let validator = jsonschema::validator_for(&schema).unwrap();
     let mut p = serde_json::json!({
-        "action": "talk", "verdict": "allowed", "contested": false, "move_to": null,
+        "action": "talk", "verdict": "allowed", "contested": false, "intimate": false, "move_to": null,
         "settles": {"item": "E1 pending_trip", "outcome": "refused"}
     });
     assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));

@@ -3,6 +3,7 @@ pub mod checks;
 pub mod context;
 pub mod domain;
 pub mod fixture;
+pub mod mature;
 pub mod model;
 pub mod normalize;
 pub mod pack;
@@ -233,6 +234,11 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
     }
     schema["properties"]["contested"] = json!({"type": "boolean"});
     require(&mut schema, "", "contested");
+    // The adults-only gate needs the signal on every Turn and at every
+    // Detail Level, `excluded` included: an optional tag was never set
+    // (design 4, 0 of 15). `parse` refuses a raw proposal without it.
+    schema["properties"]["intimate"] = json!({"type": "boolean"});
+    require(&mut schema, "", "intimate");
     for stake in ["win", "lose"] {
         schema["$defs"]["CheckDraft"]["properties"][stake] = json!({"$ref": "#/$defs/SlotDraft"});
         require(&mut schema, "/$defs/CheckDraft", stake);

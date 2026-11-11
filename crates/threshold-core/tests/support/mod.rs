@@ -6,9 +6,9 @@ pub mod hidden;
 
 use threshold_core::{
     domain::{
-        ActionKind, AdventureSeed, Canon, CheckDraft, DecisionProposal, EntityKind, EntityRef,
-        FactSource, GoalStatus, Handle, LedgerOp, NewFact, NewNpc, PcSeed, Reaction, SeedEntity,
-        SeedFact, Seen, Slot, SlotDraft, Stance, StartSeed, Trigger, Verdict,
+        ActionKind, AdventureSeed, Canon, CheckDraft, DecisionProposal, DetailLevel, EntityKind,
+        EntityRef, FactSource, GoalStatus, Handle, LedgerOp, NewFact, NewNpc, PcSeed, Reaction,
+        SeedEntity, SeedFact, Seen, Slot, SlotDraft, Stance, StartSeed, Trigger, Verdict,
     },
     rules::RollResult,
     store::{Store, TurnKind, TurnRecord, WorldView},
@@ -110,6 +110,7 @@ pub fn adventure_seed() -> AdventureSeed {
             ..StartSeed::default()
         },
         open_details: vec![],
+        detail: DetailLevel::default(),
     }
 }
 
@@ -131,6 +132,26 @@ fn add_fact(subject: u64, key: &str, value: &str, seen_by: Vec<u64>) -> LedgerOp
 impl World {
     pub fn new() -> Self {
         Self::with_seed(adventure_seed())
+    }
+
+    /// The gate scene at Detail Level `level`. Every age is unconfirmed.
+    pub fn with_detail(level: DetailLevel) -> Self {
+        let mut seed = adventure_seed();
+        seed.detail = level;
+        Self::with_seed(seed)
+    }
+
+    /// Confirms the ages of `ids` through the core: one `ConfirmAge` op
+    /// each, in one Turn. Integration tests cannot build a
+    /// `ConfirmedAges`, so this is their only way to confirm.
+    pub fn confirm(&mut self, ids: &[u64]) {
+        self.commit(
+            ids.iter()
+                .map(|id| LedgerOp::ConfirmAge {
+                    entity: EntityRef::Id(*id),
+                })
+                .collect(),
+        );
     }
 
     /// The gate scene built from `seed`, a variant of `adventure_seed`
@@ -236,6 +257,7 @@ impl World {
             name: name.into(),
             age: None,
             other_names: vec![],
+            age_confirmed: false,
         }]);
         let id = self.view.entity_by_name(name).unwrap().id;
         let ada = self.ada;

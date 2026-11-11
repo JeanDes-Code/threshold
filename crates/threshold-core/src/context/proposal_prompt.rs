@@ -14,13 +14,27 @@ use crate::{
     world::{items_named_by, known_places, open_item_ref, pc_item_text},
 };
 
+/// The text of `INTIMATE_FIELD_LINE`, as a literal, so `PROPOSAL_RULES` can
+/// hold it with `concat!`.
+macro_rules! intimate_field_text {
+    () => {
+        "- intimate: true when the player's intent of THIS Turn seeks sexual or erotic contact between the PC and another character; else false."
+    };
+}
+
+/// The one line that defines the required `intimate` field, in neutral
+/// words (mature content module, Task 1). Part of `PROPOSAL_RULES`. The
+/// owner reads it before the merge.
+pub const INTIMATE_FIELD_LINE: &str = intimate_field_text!();
+
 /// The rules part of the system prompt. Its first lines are the wording
 /// measured by the live probe (`threshold-ollama/examples/probe.rs`); the
 /// VERDICT and LATER ACTIONS parts answer two failures that probe found: a
 /// Check on every proposal, and no scheduled event for a delayed action.
-/// The `move_to`, `settles` and `contested` lines describe the required
-/// fields of ADR 0007, one line each.
-pub const PROPOSAL_RULES: &str = "\
+/// The `move_to`, `settles`, `contested` and `intimate` lines describe
+/// required fields (ADR 0007, ADR 0008), one line each.
+pub const PROPOSAL_RULES: &str = concat!(
+    "\
 You are the Game Master for a single-player tabletop role-playing game. You decide what the world and its NPCs do; the player decides what the player character (PC) does.
 Never decide the player character's actions, words, or feelings.
 Return only one-line minified JSON with no spaces or newlines, matching the supplied schema. Omit optional fields that are empty.
@@ -33,6 +47,9 @@ VERDICT
 - impossible: the world prevents it outright. List the facts that block it in blockers.
 - check: only when BOTH are true: the outcome is truly uncertain, AND failure has real stakes (danger, an NPC who actively opposes the PC, an open obstacle). Then include check with win and lose stakes as slot writes, and factors that cite existing facts.
 - contested: true when an NPC actively opposes this act and the result is uncertain (arm-wrestling, a race, a staring match); then verdict is check, with against = that NPC. Else false.
+",
+    intimate_field_text!(),
+    "
 - If either part is missing, do not use check: choose allowed or impossible. Include check only when verdict is check. Never set a numeric difficulty.
 LATER ACTIONS
 - reactions: what each affected NPC intends right now, as a short plan, not prose.
@@ -49,7 +66,8 @@ TIME
 - For wait: use the duration the player names. If the player names none, use the minutes until something happens.
 - When the PC waits or stays passive, the wait ends because something happens: a present NPC acts on their goal toward the PC. They summon, question, give work or leave.
 - So on a wait, each reaction plan is a concrete action, never observe or watch.
-";
+"
+);
 
 /// The prompt and the handles it shows. The per-Turn schema
 /// (`proposal_schema_for`) must use exactly these handles.

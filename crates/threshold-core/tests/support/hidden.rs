@@ -157,6 +157,7 @@ pub fn newcomer(name: &str, place: &str, seen_by: &[u64]) -> Vec<LedgerOp> {
             name: name.into(),
             age: Some(35),
             other_names: vec![],
+            age_confirmed: false,
         },
         LedgerOp::AddFact {
             slot: Slot {

@@ -20,7 +20,10 @@ pub use narration_prompt::{
     guard_events, guard_plans, names_unheard, narration_prompt, narration_prompt_with,
     opening_prompt, perceived_by_pc,
 };
-pub use proposal_prompt::{ProposalContext, handle_context, proposal_context, proposal_prompt};
+pub use proposal_prompt::{
+    INTIMATE_FIELD_LINE, PROPOSAL_RULES, ProposalContext, handle_context, proposal_context,
+    proposal_prompt,
+};
 
 use std::collections::BTreeSet;
 

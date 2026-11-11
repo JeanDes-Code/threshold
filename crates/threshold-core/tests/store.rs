@@ -42,6 +42,7 @@ fn adventure_seed() -> AdventureSeed {
             ..StartSeed::default()
         },
         open_details: vec![],
+        detail: Default::default(),
     }
 }
 fn record(campaign_id: u64, op: &str) -> TurnRecord {
@@ -63,6 +64,7 @@ fn local_npc(local: u8) -> LedgerOp {
         name: "Orsel".into(),
         age: Some(40),
         other_names: vec![],
+        age_confirmed: false,
     }
 }
 
@@ -304,6 +306,7 @@ fn character_without_age_is_refused() {
         name: "Stranger".into(),
         age,
         other_names: vec![],
+        age_confirmed: false,
     };
     for (op_id, kind, age) in [
         ("ageless-npc", EntityKind::Npc, None),
@@ -403,6 +406,7 @@ fn rebuild_matches_projections() {
                 name: "Bela".into(),
                 age: Some(40),
                 other_names: vec![],
+                age_confirmed: false,
             },
             fact(pc, "open"),
         ],
@@ -648,6 +652,7 @@ fn rebuild_preserves_claims_knowledge_attitudes_events_and_rolls() {
                 name: "Bela".into(),
                 age: Some(40),
                 other_names: vec![],
+                age_confirmed: false,
             },
             fact(pc, "closed"),
         ],
@@ -962,6 +967,7 @@ fn claim_listeners_receive_delayed_told_knowledge() {
             name: "Bela".into(),
             age: Some(40),
             other_names: vec![],
+            age_confirmed: false,
         }],
     )
     .unwrap();
@@ -1139,6 +1145,7 @@ fn additional_projections_survive_rebuild() {
             name: "Bela".into(),
             age: Some(40),
             other_names: vec![],
+            age_confirmed: false,
         }],
     )
     .unwrap();
@@ -1803,7 +1810,7 @@ fn new_file_has_the_player_tables() {
     let version: u32 = sql
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     for table in ["player_note", "player_pin"] {
         let exists: bool = sql
             .query_row(
@@ -1898,4 +1905,206 @@ fn an_event_s_public_flag_lives_in_its_ledger_op() {
             .unwrap()
             .contains("\"public\":true")
     );
+}
+
+// --- Mature content module, Task 1: schema 4 and Age Confirmation -----------
+
+#[test]
+fn a_version_3_file_is_refused() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-3");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.sqlite");
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch(
+        "CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL);
+         PRAGMA user_version=3;",
+    )
+    .unwrap();
+    drop(sql);
+    let bytes = std::fs::read(&path).unwrap();
+
+    let err = match Store::open_existing(&path) {
+        Ok(_) => panic!("a version 3 file opened"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("version 3"), "{err}");
+    let err = threshold_core::store::peek(&path).unwrap_err().to_string();
+    assert!(err.contains("version 3"), "{err}");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "the file changed");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn new_file_is_version_4_with_the_new_columns() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-4");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("new.sqlite");
+    let mut db = Store::open(&path).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
+    db.commit(record(c, "op-1"), vec![]).unwrap();
+    drop(db);
+
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let version: u32 = sql
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 4);
+    assert_eq!(threshold_core::store::SCHEMA_VERSION, 4);
+    for (table, column) in [
+        ("campaign", "detail_level"),
+        ("campaign", "scene_open_turn"),
+        ("entity", "age_confirmed"),
+        ("turn", "faded"),
+    ] {
+        let exists: bool = sql
+            .query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM pragma_table_info('{table}') WHERE name=?1)"),
+                [column],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(exists, "no column {table}.{column}");
+    }
+    let (detail, scene): (String, Option<u64>) = sql
+        .query_row(
+            "SELECT detail_level,scene_open_turn FROM campaign WHERE id=?1",
+            [c],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((detail.as_str(), scene), ("excluded", None));
+    let unconfirmed: bool = sql
+        .query_row(
+            "SELECT COUNT(*)>0 AND MAX(age_confirmed)=0 FROM entity",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(unconfirmed);
+    let unfaded: bool = sql
+        .query_row("SELECT COUNT(*)>0 AND MAX(faded)=0 FROM turn", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert!(unfaded);
+    drop(sql);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_detail_level_comes_from_the_seed_and_survives_rebuild() {
+    use threshold_core::domain::DetailLevel;
+    let mut db = Store::open_in_memory().unwrap();
+    let mut seed = adventure_seed();
+    seed.detail = DetailLevel::Implied;
+    let c = db.create_campaign(&seed, 1).unwrap();
+    assert_eq!(db.snapshot(c).unwrap().detail, DetailLevel::Implied);
+    db.rebuild_projections(c).unwrap();
+    assert_eq!(db.snapshot(c).unwrap().detail, DetailLevel::Implied);
+    db.commit(record(c, "op-1"), vec![]).unwrap();
+    assert_eq!(
+        db.snapshot_before(c, 2).unwrap().detail,
+        DetailLevel::Implied
+    );
+}
+
+#[test]
+fn an_op_without_the_flag_is_unconfirmed() {
+    let op: LedgerOp = serde_json::from_value(serde_json::json!({
+        "add_entity": {"kind": "npc", "name": "Orsel", "age": 40}
+    }))
+    .unwrap();
+    let LedgerOp::AddEntity { age_confirmed, .. } = &op else {
+        panic!("not an AddEntity: {op:?}");
+    };
+    assert!(!age_confirmed);
+
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
+    db.commit(record(c, "op-1"), vec![op]).unwrap();
+    let view = db.snapshot(c).unwrap();
+    let orsel = view.entity_by_name("Orsel").unwrap();
+    assert!(!orsel.age_confirmed);
+    // The seed's PC is unconfirmed too: no path confirms it in this task.
+    assert!(!view.entity_by_name("Ada").unwrap().age_confirmed);
+}
+
+#[test]
+fn confirm_age_sets_the_flag_and_survives_rebuild() {
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
+    db.commit(record(c, "op-1"), vec![local_npc(1)]).unwrap();
+    let orsel = db.snapshot(c).unwrap().entity_by_name("Orsel").unwrap().id;
+    db.commit(
+        record(c, "op-2"),
+        vec![LedgerOp::ConfirmAge {
+            entity: EntityRef::Id(orsel),
+        }],
+    )
+    .unwrap();
+    let confirmed = |db: &Store| {
+        db.snapshot(c)
+            .unwrap()
+            .entities
+            .iter()
+            .find(|e| e.id == orsel)
+            .unwrap()
+            .age_confirmed
+    };
+    assert!(confirmed(&db));
+    db.rebuild_projections(c).unwrap();
+    assert!(confirmed(&db));
+    // A historical view before the confirmation does not hold it.
+    let before = db.snapshot_before(c, 3).unwrap();
+    assert!(!before.entity_by_name("Orsel").unwrap().age_confirmed);
+    // The confirmation never changes the age.
+    assert_eq!(
+        db.snapshot(c).unwrap().entity_by_name("Orsel").unwrap().age,
+        Some(40)
+    );
+}
+
+#[test]
+fn confirm_age_refuses_a_minor_a_place_and_no_age() {
+    let mut db = Store::open_in_memory().unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let add = |kind, name: &str, age| LedgerOp::AddEntity {
+        local: None,
+        kind,
+        name: name.into(),
+        age,
+        other_names: vec![],
+        age_confirmed: false,
+    };
+    db.commit(
+        record(c, "op-1"),
+        vec![
+            add(EntityKind::Npc, "Pip", Some(17)),
+            add(EntityKind::Place, "Gate", None),
+            add(EntityKind::Item, "Lamp", None),
+            add(EntityKind::Faction, "Guild", None),
+        ],
+    )
+    .unwrap();
+    let view = db.snapshot(c).unwrap();
+    let id = |name: &str| view.entity_by_name(name).unwrap().id;
+    for (n, entity) in [id("Pip"), id("Gate"), id("Lamp"), id("Guild"), 9_999]
+        .into_iter()
+        .enumerate()
+    {
+        let result = db.commit(
+            record(c, &format!("confirm-{n}")),
+            vec![LedgerOp::ConfirmAge {
+                entity: EntityRef::Id(entity),
+            }],
+        );
+        assert!(
+            matches!(result, Err(CommitError::Store(_))),
+            "entity {entity}: {result:?}"
+        );
+    }
+    // Nothing committed: no Turn row, no flag.
+    assert_eq!(db.snapshot(c).unwrap(), view);
 }

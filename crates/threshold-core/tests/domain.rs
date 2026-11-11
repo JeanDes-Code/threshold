@@ -427,3 +427,54 @@ fn a_state_of_the_pc_reads_right_for_known_values() {
         assert_eq!(you_sentence(key, value), sentence, "{key} {value:?}");
     }
 }
+
+// --- Mature content module, Task 1 -------------------------------------------
+
+/// The module is off by default: a seed with no `detail` excludes.
+#[test]
+fn a_seed_without_detail_excludes() {
+    use threshold_core::domain::DetailLevel;
+    let seed: AdventureSeed = serde_json::from_value(serde_json::json!({
+        "premise": "A quiet harbour",
+        "pc": {"name": "Ada", "age": 30, "concept": "Courier"},
+        "boundaries": [],
+        "decided": [],
+        "proposed": [],
+        "story_language": "en"
+    }))
+    .unwrap();
+    assert_eq!(seed.detail, DetailLevel::Excluded);
+    assert_eq!(DetailLevel::default(), DetailLevel::Excluded);
+    for (level, word) in [
+        (DetailLevel::Excluded, "excluded"),
+        (DetailLevel::Implied, "implied"),
+        (DetailLevel::Explicit, "explicit"),
+    ] {
+        assert_eq!(serde_json::to_value(level).unwrap(), word);
+        assert_eq!(
+            serde_json::from_value::<DetailLevel>(serde_json::json!(word)).unwrap(),
+            level
+        );
+    }
+}
+
+/// `intimate` is required on every Turn, with or without entities.
+#[test]
+fn a_proposal_without_intimate_fails_the_schema() {
+    use threshold_core::{HandleContext, proposal_schema_for};
+    let empty = proposal_schema_for(&HandleContext::default());
+    let full = proposal_schema_for(&HandleContext {
+        entities: vec![Handle::Entity(1), Handle::Entity(2)],
+        facts: vec![Handle::Fact(3)],
+        new_slots: 1,
+        ..HandleContext::default()
+    });
+    for schema in [empty, full] {
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|k| k == "intimate"), "{required:?}");
+        assert_eq!(
+            schema["properties"]["intimate"],
+            serde_json::json!({"type": "boolean"})
+        );
+    }
+}

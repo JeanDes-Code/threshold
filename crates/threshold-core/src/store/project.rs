@@ -144,10 +144,28 @@ fn apply(
             name,
             age,
             other_names,
+            age_confirmed,
             ..
         } => {
-            db.execute("INSERT INTO entity(id,campaign_id,kind,name,norm_name,age,other_names_json) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![id,c,enum_text(kind)?,name,normalize::name(name),age,serde_json::to_string(other_names)?])?;
+            db.execute("INSERT INTO entity(id,campaign_id,kind,name,norm_name,age,other_names_json,age_confirmed) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,c,enum_text(kind)?,name,normalize::name(name),age,serde_json::to_string(other_names)?,age_confirmed])?;
             true
+        }
+        // Only a PC or an NPC whose stored age is `ADULT_AGE` or more can be
+        // confirmed as an adult (plan deviation 6: `Store::commit` is
+        // public, so the store holds the rule too).
+        LedgerOp::ConfirmAge { entity: target } => {
+            entity(db, *target, c)?;
+            if db.execute(
+                "UPDATE entity SET age_confirmed=1 WHERE id=?1 AND campaign_id=?2 AND kind IN ('pc','npc') AND age IS NOT NULL AND age>=?3",
+                params![target, c, crate::domain::ADULT_AGE],
+            )? != 1
+            {
+                return Err(StoreError::Invalid(
+                    "only a character with a stored adult age can be confirmed as an adult"
+                        .into(),
+                ));
+            }
+            false
         }
         LedgerOp::AddFact {
             slot,
@@ -625,7 +643,17 @@ pub(super) fn rebuild(db: &Connection, c: u64) -> Result<(), StoreError> {
     ] {
         db.execute(sql, [c])?;
     }
-    db.execute("UPDATE campaign SET clock_min=0 WHERE id=?1", [c])?;
+    // The Detail Level starts again from the seed; the ops replay on it.
+    let seed: String = db.query_row(
+        "SELECT adventure_seed_json FROM campaign WHERE id=?1",
+        [c],
+        |r| r.get(0),
+    )?;
+    let seed: AdventureSeed = parse(seed)?;
+    db.execute(
+        "UPDATE campaign SET clock_min=0,detail_level=?2 WHERE id=?1",
+        params![c, enum_text(&seed.detail)?],
+    )?;
     for (turn, op, id) in ops {
         if !reverted.contains(&turn) {
             match op {
@@ -675,23 +703,24 @@ fn ids(db: &Connection, sql: &str, c: u64) -> Result<Vec<u64>, StoreError> {
     Ok(result)
 }
 pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError> {
-    let (clock, adventure_seed): (u64, String) = db
+    let (clock, adventure_seed, detail): (u64, String, String) = db
         .query_row(
-            "SELECT clock_min,adventure_seed_json FROM campaign WHERE id=?1",
+            "SELECT clock_min,adventure_seed_json,detail_level FROM campaign WHERE id=?1",
             [c],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?
         .ok_or_else(|| StoreError::Invalid("unknown campaign".into()))?;
     let adventure_seed = Some(parse(adventure_seed)?);
+    let detail: DetailLevel = enum_parse(detail)?;
     let mut entities = Vec::new();
     for id in ids(
         db,
         "SELECT id FROM entity WHERE campaign_id=?1 ORDER BY id",
         c,
     )? {
-        let (kind, name, norm_name, age, other_names) = db.query_row(
-            "SELECT kind,name,norm_name,age,other_names_json FROM entity WHERE id=?1",
+        let (kind, name, norm_name, age, other_names, age_confirmed) = db.query_row(
+            "SELECT kind,name,norm_name,age,other_names_json,age_confirmed FROM entity WHERE id=?1",
             [id],
             |r| {
                 Ok((
@@ -700,6 +729,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
                     r.get(2)?,
                     r.get(3)?,
                     r.get::<_, String>(4)?,
+                    r.get(5)?,
                 ))
             },
         )?;
@@ -710,6 +740,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             norm_name,
             age,
             other_names: parse(other_names)?,
+            age_confirmed,
         });
     }
     let mut facts = Vec::new();
@@ -978,6 +1009,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
     let mut view = WorldView {
         clock_min: clock,
         adventure_seed,
+        detail,
         entities,
         live_facts,
         facts,

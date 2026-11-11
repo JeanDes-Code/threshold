@@ -295,6 +295,8 @@ impl Builder<'_> {
                 name: npc.name.clone(),
                 age: Some(npc.age),
                 other_names: Vec::new(),
+                // A model-stated age is never confirmed (owner's decision 2).
+                age_confirmed: false,
             });
             self.ops.push(LedgerOp::AddVoiceCard {
                 npc: EntityRef::New(local),

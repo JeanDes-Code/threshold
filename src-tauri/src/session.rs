@@ -685,6 +685,9 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
         TurnError::Store(_) => {
             "a storage error stopped the Turn (details in the debug view)".into()
         }
+        // A Refusal shows its one fixed sentence, in debug mode too: no
+        // name, no id, no age (mature content module, Task 1).
+        TurnError::Refused { kind, .. } => view::refusal_text(*kind).to_owned(),
     };
     AppError::Failed(text)
 }

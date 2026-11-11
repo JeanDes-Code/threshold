@@ -151,6 +151,7 @@ fn unconfirmed_draft() -> SeedDraft {
             hour: None,
         },
         open_details: vec![],
+        detail: Default::default(),
     };
     let mut draft = SeedDraft::new("A ferry, a courier, a late night.".into(), seed);
     draft.knowledge = vec![

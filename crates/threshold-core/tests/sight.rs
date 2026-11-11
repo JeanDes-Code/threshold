@@ -81,6 +81,7 @@ fn moment_matches_seen_present_of_snapshot_before() {
         name: name.into(),
         age: None,
         other_names: vec![],
+        age_confirmed: false,
     };
     // The places the moves go to (`move_to`, ADR 0007).
     w.commit(
@@ -1015,7 +1016,7 @@ fn an_intent_that_asks_for_time_leaves_the_open_item_open() {
     let w = HiddenWorld::new();
     let ada = w.ada;
     let raw = format!(
-        r#"{{"action":"talk","contested":false,"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"open"}},"verdict":"allowed","minutes":3}}"#
+        r#"{{"action":"talk","contested":false,"intimate":false,"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"open"}},"verdict":"allowed","minutes":3}}"#
     );
     let gm = RecordedGm::new(vec![raw], vec!["Brann nods and waits.".into()]);
     let (mut engine, campaign) = w.engine(&gm);
@@ -1131,6 +1132,7 @@ fn a_narration_names_an_entity_with_its_own_capitals() {
             name: "Mill".into(),
             age: None,
             other_names: vec![],
+            age_confirmed: false,
         }],
     );
     let mill = id_of(&w.view(), "Mill");
@@ -1150,6 +1152,7 @@ fn a_narration_names_an_entity_with_its_own_capitals() {
                 name: "Mill".into(),
                 age: None,
                 other_names: vec![],
+                age_confirmed: false,
             }],
         );
         let mill = id_of(&w.view(), "Mill");
@@ -1244,7 +1247,7 @@ fn a_settles_the_turn_did_not_offer_closes_nothing() {
     ));
     assert!(schema.pointer("/properties/settles").is_none());
     let raw = format!(
-        r#"{{"action":"observe","contested":false,"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"accepted"}},"verdict":"allowed","minutes":3}}"#
+        r#"{{"action":"observe","contested":false,"intimate":false,"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"accepted"}},"verdict":"allowed","minutes":3}}"#
     );
     let gm = RecordedGm::new(vec![raw], vec!["The sky is grey.".into()]);
     let (mut engine, campaign) = w.engine(&gm);
