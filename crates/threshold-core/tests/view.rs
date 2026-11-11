@@ -1952,11 +1952,21 @@ fn the_character_tab_says_where_you_are() {
         "I walk to the gate.",
         &record(ActionKind::Move, Verdict::Allowed, None),
         5,
-        vec![set(&view, ada, "location", "gate", "Ada is at Gate.", &[ada])],
+        vec![set(
+            &view,
+            ada,
+            "location",
+            "gate",
+            "Ada is at Gate.",
+            &[ada],
+        )],
     );
     let sight = w.sight();
     let character = threshold_core::view::character_view(&sight);
     let texts: Vec<&str> = character.facts.iter().map(|f| f.text.as_str()).collect();
     assert!(texts.contains(&"You are at Gate."), "{texts:?}");
-    assert!(!texts.iter().any(|t| t.starts_with("Ada is at")), "{texts:?}");
+    assert!(
+        !texts.iter().any(|t| t.starts_with("Ada is at")),
+        "{texts:?}"
+    );
 }
