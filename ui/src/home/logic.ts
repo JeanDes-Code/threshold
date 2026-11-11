@@ -50,10 +50,16 @@ export function createdMs(path: string): number | null {
   return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
-/** "11 Nov 2026": a day as the home screen writes it. */
+/** "11 Nov 2026": a day as the home screen writes it, on the Player's local clock. */
 export function dayText(ms: number): string {
   const date = new Date(ms);
-  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+/** "14:05": a time of day on the Player's local clock. */
+export function timeText(ms: number): string {
+  const date = new Date(ms);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 /**
@@ -66,10 +72,13 @@ export function startedText(path: string): string | null {
   return ms === null ? null : `started ${dayText(ms)}`;
 }
 
-/** The title of a card the core could not read: a plain label, never a raw file name. */
+/**
+ * The title of a card the core could not read: a plain label, never a raw
+ * file name. It holds the time too, so two such files of one day read apart.
+ */
 export function problemTitle(path: string): string {
   const ms = createdMs(path);
-  return ms === null ? "A Campaign file" : `A Campaign started ${dayText(ms)}`;
+  return ms === null ? "A Campaign file" : `A Campaign started ${dayText(ms)}, ${timeText(ms)}`;
 }
 
 /** The Seed Drafts the home screen lists: the ones not built yet. */

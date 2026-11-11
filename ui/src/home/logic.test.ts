@@ -58,16 +58,23 @@ describe("home cards", () => {
   it("a card says the day its Campaign started, from the file name", () => {
     const path = "/data/campaigns/campaign-1794363545195843131.sqlite";
     expect(createdMs(path)).toBe(1794363545195);
-    expect(startedText(path)).toBe(`started ${new Date(1794363545195).getUTCDate()} Nov 2026`);
+    // The local day, as the Player's clock reads it (review minor).
+    expect(startedText(path)).toBe(`started ${new Date(1794363545195).getDate()} Nov 2026`);
     expect(startedText("/data/campaigns/old.sqlite")).toBeNull();
     expect(createdMs("C:\\data\\campaign-12.sqlite")).toBeNull();
   });
 
   it("a card that cannot open shows a plain label, never the file name", () => {
     const path = "/data/campaigns/campaign-1794363545195843131.sqlite";
-    expect(problemTitle(path)).toMatch(/^A Campaign started \d+ Nov 2026$/);
+    expect(problemTitle(path)).toMatch(/^A Campaign started \d+ Nov 2026, \d\d:\d\d$/);
     expect(problemTitle(path)).not.toContain("sqlite");
     expect(problemTitle("/data/x.sqlite")).toBe("A Campaign file");
+    // Two files of one day read apart by their local time.
+    const later = "/data/campaigns/campaign-1794367145195843131.sqlite";
+    expect(problemTitle(later)).not.toBe(problemTitle(path));
+    const at = new Date(1794363545195);
+    const hhmm = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+    expect(problemTitle(path).endsWith(hhmm)).toBe(true);
   });
 
   it("home lists the drafts that are not built", () => {
