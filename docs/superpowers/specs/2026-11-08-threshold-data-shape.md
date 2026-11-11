@@ -266,3 +266,9 @@ The OOC prompt's scene block is now `view::ooc_sheet`, made from `PcSight` only,
 - `WHAT THE PC KNOWS`: every other PC Belief, with "told by".
 
 One rule line says what the blocks mean. The OOC call stays one plain call with no commit.
+
+### A fact the PC knows about a place names it (B2)
+
+QA saw a card for the place "the stone quay" whose only line was "The reeve's inquiry into the missing toll money is pending." The fact that ties the quay to the toll is GM-only. The cause is in the Seed Draft, not in the card rule: the draft's PC Knowledge stage filed the item under the subject "the stone quay" (`pending_inquiry_status`), and the card lists every PC Belief whose subject is the entity. The text names no quay. The card rule already holds: a card lists the PC Beliefs whose subject is the entity, and, for a place or a Faction, the Beliefs whose own text names it (`named_in`, whole words with the name's capitals).
+
+The PC Knowledge stage now checks each fact about a place, a Faction or a thing: its text must name the subject by one of its names (whole words, any case, a leading article dropped), or open with "It", "Its", "They" or "Their". Else the stage gets one repair note that names the field and the subject, never the text; a fact the repair does not fix is dropped, like any other fact with a problem. A person's fact may say "she", so it is not checked. A Campaign built before this change keeps its filing.

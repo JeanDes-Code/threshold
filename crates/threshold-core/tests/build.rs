@@ -1310,3 +1310,56 @@ fn the_knowledge_prompt_rules_out_the_document_itself() {
         knowledge.prompt.system
     );
 }
+
+/// Bug pass 4, B2: a fact the PC knows, filed under a place whose name its
+/// text never says, gets one repair. QA's draft filed "The reeve's inquiry
+/// into the missing toll money is pending." under the place "the stone
+/// quay", and the place's card showed that line alone. A person's fact may
+/// say "she"; a place's, a Faction's or a thing's names it.
+#[test]
+fn a_place_fact_whose_text_does_not_name_the_place_is_repaired() {
+    let filed = |subject: &str, text: &str| {
+        json!({
+            "subject": subject, "key": "vote", "value": "pending",
+            "text": text, "open": true, "pc_knows": true
+        })
+    };
+    let first = knowledge(&[
+        filed("Tide Hall", "The vote on the new pier is pending."),
+        // Named, so it stays: the article and the case do not matter.
+        filed("Gull Point", "The lamp of gull point is to be repaired."),
+        // A pronoun that opens the sentence stands for the place.
+        filed("Tide Hall", "Its doors stay shut until the vote."),
+    ]);
+    let repaired = knowledge(&[
+        filed(
+            "Harbour Council",
+            "The Harbour Council's vote on the new pier is pending.",
+        ),
+        filed("Gull Point", "The lamp of gull point is to be repaired."),
+        filed("Tide Hall", "Its doors stay shut until the vote."),
+    ]);
+    let gm = gm(&[
+        roster_out(),
+        seed_out(),
+        first,
+        repaired,
+        knowledge(&[]),
+        knowledge(&[]),
+    ]);
+    let draft = run(&source(), &gm).result.unwrap();
+    let subjects: Vec<&str> = draft.knowledge.iter().map(|k| k.subject.as_str()).collect();
+    assert_eq!(
+        subjects,
+        ["Harbour Council", "Gull Point", "Tide Hall"],
+        "{:?}",
+        draft.knowledge
+    );
+    let calls = gm.calls();
+    let repair = &calls[3].prompt.recent;
+    assert!(
+        repair.contains("facts[0].text does not name its subject \"Tide Hall\""),
+        "{repair}"
+    );
+    assert!(!repair.contains("facts[2]"), "{repair}");
+}
