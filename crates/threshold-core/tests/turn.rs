@@ -958,14 +958,28 @@ fn correction_facts_have_the_correction_source() {
 
 /// Narrates one wait over a World Event at minute 10 with a witness, and
 /// returns the narration's `recent` block and the PC's Beliefs on its slot.
+/// The event moves Orsel to the market: a change the PC sees.
 fn wait_over_witnessed_event(actor: fn(&World) -> u64) -> (String, bool) {
     wait_over_event_with_text(actor, "Orsel waves the courier over")
 }
 
 /// Like `wait_over_witnessed_event`, with the event's own text.
 fn wait_over_event_with_text(actor: fn(&World) -> u64, text: &str) -> (String, bool) {
+    wait_over_event(actor, text, |w| (w.orsel, "location", "market"))
+}
+
+/// One wait over a World Event at minute 10, seen by Brann and Pip, whose
+/// actor is `actor` and whose one effect writes `effect`. Returns the
+/// narration's `recent` block and whether the PC holds a Belief on the
+/// effect's slot.
+fn wait_over_event(
+    actor: fn(&World) -> u64,
+    text: &str,
+    effect: impl Fn(&World) -> (u64, &'static str, &'static str),
+) -> (String, bool) {
     let mut w = World::new();
     let (brann, pip) = (w.brann, w.pip);
+    let (subject, key, value) = effect(&w);
     w.commit(vec![LedgerOp::ScheduleEvent {
         text: text.into(),
         trigger: threshold_core::domain::Trigger::At(10),
@@ -974,11 +988,11 @@ fn wait_over_event_with_text(actor: fn(&World) -> u64, text: &str) -> (String, b
         cause_fact_id: None,
         effects: vec![threshold_core::domain::Effect::SetFact {
             slot: threshold_core::domain::Slot {
-                subject: EntityRef::Id(w.ada),
-                key: "standing".into(),
-                value: "summoned".into(),
+                subject: EntityRef::Id(subject),
+                key: key.into(),
+                value: value.into(),
             },
-            text: "Ada: standing = summoned".into(),
+            text: format!("{key} = {value}"),
             seen_by: vec![],
         }],
         seen_by: vec![EntityRef::Id(brann), EntityRef::Id(pip)],
@@ -986,7 +1000,7 @@ fn wait_over_event_with_text(actor: fn(&World) -> u64, text: &str) -> (String, b
     let mut wait = proposal(Verdict::Allowed);
     wait.action = ActionKind::Wait;
     let gm = RecordedGm::new(vec![json(&wait)], vec!["a".into()]);
-    let (ada, campaign) = (w.ada, w.campaign);
+    let campaign = w.campaign;
     let mut engine = make_engine(w.store, campaign, &gm);
     engine
         .play_turn("turn-1".into(), "I wait.", &mut no_chunks())
@@ -994,7 +1008,7 @@ fn wait_over_event_with_text(actor: fn(&World) -> u64, text: &str) -> (String, b
     let view = engine.store().snapshot(campaign).unwrap();
     let knows = threshold_core::world::pc_knowledge(&view)
         .iter()
-        .any(|b| b.subject == ada && b.key == "standing");
+        .any(|b| b.subject == subject && b.key == key);
     (prompts(&gm, CallKind::Narrate).pop().unwrap().recent, knows)
 }
 
@@ -1018,13 +1032,13 @@ fn witnessed_event_reaches_the_narrator() {
 fn event_of_an_absent_actor_stays_offscreen() {
     let (recent, knows) = wait_over_witnessed_event(|w| w.pip);
     assert!(!recent.contains("waves the courier"), "{recent}");
-    assert!(!recent.contains("summoned"), "{recent}");
+    assert!(!recent.contains("market"), "{recent}");
     assert!(!knows);
 }
 
 /// Event text is model text, like a reaction plan. A witnessed event whose
 /// text quotes a GM-only fact never reaches the narrator; the PC still
-/// witnesses what the event wrote.
+/// witnesses what the event visibly does.
 #[test]
 fn witnessed_event_text_that_quotes_a_secret_is_dropped() {
     // `Ada holds = gate key` is GM only.
@@ -1032,6 +1046,94 @@ fn witnessed_event_text_that_quotes_a_secret_is_dropped() {
     assert!(!recent.contains("gate key"), "{recent}");
     assert!(!recent.contains("Orsel eyes"), "{recent}");
     assert!(knows);
+}
+
+/// Bug pass 4, B1: "Ludo counts his silver", seen by Agathe only, gave the
+/// PC "Ludo's debt is now partially paid". The PC who witnesses an event
+/// sees its text, never its hidden effects: a debt, a plan, a standing.
+#[test]
+fn a_witnessed_event_keeps_its_hidden_effects_from_the_pc() {
+    for (key, value) in [
+        ("debt", "partially paid"),
+        ("plan", "flee"),
+        ("standing", "summoned"),
+    ] {
+        let (recent, knows) = wait_over_event(
+            |w| w.orsel,
+            "Orsel counts his silver",
+            |w| (w.orsel, key, value),
+        );
+        assert!(recent.contains("- Orsel counts his silver\n"), "{recent}");
+        assert!(!recent.contains(value), "{key}: {recent}");
+        assert!(!knows, "the PC learned Orsel's {key}");
+    }
+    // A slot of the PC that is no involuntary key (a feeling) stays hidden.
+    let (_, knows) = wait_over_event(
+        |w| w.orsel,
+        "Orsel points at Ada",
+        |w| (w.ada, "mood", "afraid"),
+    );
+    assert!(!knows);
+}
+
+/// What the PC does perceive of a witnessed event: an NPC that leaves or
+/// comes, and what happens to the PC itself.
+#[test]
+fn a_witnessed_event_shows_a_move_and_what_happens_to_the_pc() {
+    for (key, value) in [("injury", "bruised arm"), ("standing", "summoned")] {
+        let (_, knows) = wait_over_event(|w| w.orsel, "Orsel shoves Ada", |w| (w.ada, key, value));
+        assert!(knows, "{key}");
+    }
+    // Pip, at the market, comes to the gate square: the PC sees him come.
+    let (_, knows) = wait_over_event(
+        |w| w.orsel,
+        "Orsel whistles",
+        |w| (w.pip, "location", "gate square"),
+    );
+    assert!(knows);
+    // Pip goes from the market to the mill: the PC sees neither place.
+    let (_, knows) = wait_over_event(
+        |w| w.orsel,
+        "Orsel whistles",
+        |w| (w.pip, "location", "mill"),
+    );
+    assert!(!knows);
+}
+
+/// The sibling path: an event a proposal schedules fires through the same
+/// rule. Its hidden effect stays with the GM, and the stored fact is not
+/// Persistent.
+#[test]
+fn a_scheduled_event_from_play_keeps_its_hidden_effect_from_the_pc() {
+    let w0 = World::new();
+    let mut first = proposal(Verdict::Allowed);
+    first.schedule = Some(threshold_core::domain::EventDraft {
+        text: "Orsel counts his silver".into(),
+        in_minutes: 5,
+        actor: e(w0.orsel),
+        goal: None,
+        effects: vec![slot(e(w0.orsel), "debt", "partially paid")],
+        seen_by: vec![e(w0.brann)],
+    });
+    let mut wait = proposal(Verdict::Allowed);
+    wait.action = ActionKind::Wait;
+    let (mut engine, w, _gm) = setup(vec![json(&first), json(&wait)], vec!["a", "b"]);
+    engine
+        .play_turn("turn-1".into(), "I watch Orsel.", &mut no_chunks())
+        .unwrap();
+    engine
+        .play_turn("turn-2".into(), "I wait an hour.", &mut no_chunks())
+        .unwrap();
+    let view = snapshot(&engine, &w);
+    let debt = view.live_fact(w.orsel, "debt").expect("the event fired");
+    assert_eq!(debt.slot.value, "partially paid");
+    assert!(!debt.seen_by.contains(&w.ada), "{debt:?}");
+    assert_ne!(debt.canon, threshold_core::domain::Canon::Persistent);
+    assert!(
+        !threshold_core::world::pc_knowledge(&view)
+            .iter()
+            .any(|b| b.subject == w.orsel && b.key == "debt")
+    );
 }
 
 /// Shape 3.2: the decision rule reads the stored action and verdict.

@@ -236,3 +236,19 @@ The live `play_basics` evaluation showed that the model does not follow the prom
 - The core never *creates* a PC act, word or feeling, except the fields that come from the Player's Intent: `move_to` and a closing `settles`.
 - Every other agency case still rejects. `validate` still rejects the dropped shapes when it gets them directly. The Player reads one plain sentence for a failed Turn (section 10).
 
+
+## 12. Changed in bug pass 4 (2026-11-11)
+
+### What the PC learns from a World Event it witnesses (B1)
+
+QA saw "Ludo Brenn's debt status is now partially paid." on Ludo's card and in the Journal. The ledger of that Turn shows the cause. The World Event "Ludo retreats to a dark corner to count his remaining silver" had `seen_by: [Agathe]` and one effect, `Ludo.debt_status = partially paid`, with no witnesses of its own. Ludo stood in the PC's room, so `world::pc_witnesses` held, and `world::with_witnessed_events` put the PC among the witnesses of every fact the event wrote, and made it Persistent. QA pass 2's "Ludo Brenn: debt = increased" came the same way.
+
+The rule is now:
+
+- The PC who witnesses an event perceives its visible part: the event's text, which reaches the narrator through `context::guard_events`, as before.
+- Of the event's effects, the PC witnesses only the perceptible ones (`world::arrival::perceptible_effect`): the `location` of an entity that is not hidden, when that entity openly stands at the PC's place or comes to it; and a slot of the PC itself on a key of what happens to the PC (`checks::PC_INVOLUNTARY_KEYS`: the town's "Orsel summons the scribe" sets the PC's `standing`, in front of the PC).
+- Every other effect stays with the witnesses the event declares (its `seen_by` and the effect's own). The PC is never among them: `settle` and the World Build checks remove the PC from an event's `seen_by`. The fact is Established, not Persistent.
+
+The other paths that give the PC a fact were checked. An event a proposal schedules fires through the same function, so the same rule holds; a test covers it. A proposal fact has the witnesses the model declares (`seen`). A stake is the visible result of a Check in the PC's Scene, witnessed by everyone present. A reaction writes no fact. These stay as they were.
+
+What this does not cover: a Campaign file committed before this change keeps the PC's Belief (the QA Campaign's fact 93). The data model has no "visible part" fact for an event: if the PC should remember "Ludo counted coins", that lives in the Narration only.

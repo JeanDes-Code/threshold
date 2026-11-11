@@ -1,5 +1,5 @@
 use crate::domain::{
-    Canon, ClockMin, EntityId, EntityKind, EntityRef, FactSource, Knowing, LedgerOp,
+    Canon, ClockMin, EntityId, EntityKind, EntityRef, FactSource, Knowing, LedgerOp, Slot,
 };
 use crate::normalize;
 use crate::store::{Fact, WorldEvent, WorldView};
@@ -211,11 +211,17 @@ pub fn openly_here(view: &WorldView, entity: EntityId) -> bool {
 /// `ops` when the PC stays at its place this Turn and `pc_witnesses` holds
 /// for the event before the Turn.
 ///
-/// The PC joins the witnesses of each fact the witnessed event writes, and
-/// that fact becomes Persistent, as for any fact the PC sees (the store keeps
-/// state keys Established). Returns the ops and the texts of the witnessed
-/// events, in firing order, for the narrator. The texts are model text: the
-/// narrator receives them only through `context::guard_events`.
+/// What the PC perceives of a witnessed event is its visible part: the
+/// event's text, and the effects that `perceptible_effect` accepts (an
+/// entity that comes or goes at the PC's place, what happens to the PC).
+/// The PC joins the witnesses of those facts only, and they become
+/// Persistent, as for any fact the PC sees (the store keeps state keys
+/// Established). Every other effect stays with the witnesses the event
+/// declares (bug pass 4, B1: "Ludo counts his silver" made the PC hold
+/// "Ludo's debt is now partially paid", a secret seen by Agathe only).
+/// Returns the ops and the texts of the witnessed events, in firing order,
+/// for the narrator. The texts are model text: the narrator receives them
+/// only through `context::guard_events`.
 pub fn with_witnessed_events(
     view: &WorldView,
     mut ops: Vec<LedgerOp>,
@@ -249,28 +255,71 @@ pub fn with_witnessed_events(
             }
             LedgerOp::AddFact {
                 source: FactSource::WorldEvent,
+                slot,
                 seen_by,
                 canon,
                 ..
             } if witnessed => {
-                if !seen_by.contains(&pc_ref) {
-                    seen_by.push(pc_ref);
+                if perceptible_effect(view, pc.id, here.as_deref(), slot) {
+                    if !seen_by.contains(&pc_ref) {
+                        seen_by.push(pc_ref);
+                    }
+                    *canon = Canon::Persistent;
                 }
-                *canon = Canon::Persistent;
             }
             LedgerOp::SupersedeFact { new, .. }
                 if witnessed && new.source == FactSource::WorldEvent =>
             {
-                if !new.seen_by.contains(&pc_ref) {
-                    new.seen_by.push(pc_ref);
+                if perceptible_effect(view, pc.id, here.as_deref(), &new.slot) {
+                    if !new.seen_by.contains(&pc_ref) {
+                        new.seen_by.push(pc_ref);
+                    }
+                    new.canon = Canon::Persistent;
                 }
-                new.canon = Canon::Persistent;
             }
             LedgerOp::ShiftAttitude { .. } | LedgerOp::AddClaim { .. } => {}
             _ => witnessed = false,
         }
     }
     (ops, texts)
+}
+
+/// The keys of the PC that an event the PC witnesses may change in front of
+/// the PC: what happens to the PC (the same list as
+/// `checks::PC_INVOLUNTARY_KEYS`). The town's "Orsel summons the scribe"
+/// sets the PC's `standing` to summoned, and the PC is there to hear it.
+const PC_FELT_KEYS: &[&str] = &[
+    "condition",
+    "injury",
+    "fatigue",
+    "carrying",
+    "reputation",
+    "standing",
+    "debt",
+];
+
+/// True when the PC, who witnesses an event, perceives this effect of it:
+/// - the `location` of an entity that is not hidden, when that entity
+///   openly stands at the PC's place (the PC sees it leave) or the new
+///   place is the PC's place (the PC sees it come);
+/// - a slot of the PC itself on a key of what happens to the PC
+///   (`PC_FELT_KEYS`): the event acts on the PC in the PC's presence.
+///
+/// Any other effect (a debt, a plan, a feeling, a slot of an absent entity)
+/// is hidden state: the event's text may show its visible side, and only
+/// the event's declared witnesses learn the fact.
+fn perceptible_effect(view: &WorldView, pc: EntityId, here: Option<&str>, slot: &Slot) -> bool {
+    let EntityRef::Id(subject) = slot.subject else {
+        return false;
+    };
+    let key = normalize::key(&slot.key);
+    if subject == pc {
+        return PC_FELT_KEYS.contains(&key.as_str());
+    }
+    key == "location"
+        && !hidden(view, subject)
+        && (openly_here(view, subject)
+            || here.is_some_and(|here| normalize::value(&slot.value) == here))
 }
 
 fn hidden_ref(view: &WorldView, entity: EntityRef) -> bool {

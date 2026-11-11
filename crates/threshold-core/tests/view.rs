@@ -1471,3 +1471,62 @@ fn open_items_list_people_here_first_then_the_newest() {
         ]
     );
 }
+
+/// Bug pass 4, B1, on the hidden world: a World Event that fires in front of
+/// the PC, seen by Brann only, writes Orsel's debt. The PC witnesses the
+/// event, not its hidden effect: no screen shows the debt.
+#[test]
+fn a_witnessed_event_s_hidden_effect_reaches_no_screen() {
+    use threshold_core::{
+        RecordedGm,
+        domain::{Effect, EntityRef, Slot, Trigger},
+    };
+    let mut w = HiddenWorld::new();
+    let (orsel, brann) = (w.orsel, w.brann);
+    w.commit(
+        TurnKind::Setup,
+        "",
+        "{}",
+        0,
+        vec![LedgerOp::ScheduleEvent {
+            text: "Orsel counts his silver".into(),
+            trigger: Trigger::At(10),
+            actors: vec![EntityRef::Id(orsel)],
+            goal_id: None,
+            cause_fact_id: None,
+            effects: vec![Effect::SetFact {
+                slot: Slot {
+                    subject: EntityRef::Id(orsel),
+                    key: "debt".into(),
+                    value: "partially paid".into(),
+                },
+                text: "Orsel's debt is now partially paid.".into(),
+                seen_by: vec![],
+            }],
+            seen_by: vec![EntityRef::Id(brann)],
+        }],
+    );
+    let mut wait = support::proposal(Verdict::Allowed);
+    wait.action = ActionKind::Wait;
+    let gm = RecordedGm::new(
+        vec![serde_json::to_string(&wait).unwrap()],
+        vec!["Orsel counts coins in the corner.".into()],
+    );
+    let (mut engine, campaign) = w.engine(&gm);
+    engine
+        .play_turn("wait".into(), "I wait a while.", &mut |_| {})
+        .unwrap();
+    let view = engine.store().snapshot(campaign).unwrap();
+    assert!(view.live_fact(orsel, "debt").is_some(), "the event fired");
+    let sight = sight_of(engine.store(), campaign);
+    let marks = Marks::default();
+    let screens = [
+        serde_json::to_string(&play_view(&sight, &marks)).unwrap(),
+        serde_json::to_string(&journal_view(&sight, &marks)).unwrap(),
+        serde_json::to_string(&character_view(&sight)).unwrap(),
+        serde_json::to_string(&entity_card(&sight, &marks, orsel).unwrap()).unwrap(),
+    ];
+    for json in screens {
+        assert!(!json.contains("partially paid"), "the debt leaks: {json}");
+    }
+}
