@@ -253,6 +253,8 @@ export default function App() {
         {campaign && tab === "journal" && (
           <LiveJournal
             revision={story.length}
+            campaign={campaign.db_path}
+            running={turnBusy}
             pcName={campaign.pc_name}
             onMarksChanged={() => void play.noteChanged().then(setView, () => undefined)}
             tools={tools}

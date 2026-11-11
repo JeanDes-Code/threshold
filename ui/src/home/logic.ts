@@ -69,7 +69,9 @@ export function timeText(ms: number): string {
  */
 export function startedText(path: string): string | null {
   const ms = createdMs(path);
-  return ms === null ? null : `started ${dayText(ms)}`;
+  // The time too: two Campaigns of one PC started on one day read apart
+  // (bug pass 5).
+  return ms === null ? null : `started ${dayText(ms)}, ${timeText(ms)}`;
 }
 
 /**

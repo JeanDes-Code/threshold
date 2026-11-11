@@ -81,6 +81,9 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
 
   // When the current stage started, and a clock that ticks while a job runs.
   const [stageStart, setStageStart] = useState(() => Date.now());
+  // When the whole job started: the step timer restarts at each stage, the
+  // total does not (bug pass 5).
+  const [jobStart, setJobStart] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!job) return;
@@ -107,6 +110,7 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
     onJob?.(true);
     setProgress(null);
     setStageStart(Date.now());
+    setJobStart(Date.now());
     setNow(Date.now());
     setCancelling(false);
     setError(null);
@@ -193,7 +197,10 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
       <div className="row">
         <span className="progress">
           {progress ? progressText(progress) : "Starting…"}
-          <span className="muted"> · {elapsedText(now - stageStart)}</span>
+          <span className="muted">
+            {" "}
+            · this step {elapsedText(now - stageStart)} · in all {elapsedText(now - jobStart)}
+          </span>
         </span>
         <button disabled={cancelling} onClick={() => void cancel()}>
           {cancelling ? "Cancelling…" : "Cancel"}

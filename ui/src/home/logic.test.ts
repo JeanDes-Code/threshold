@@ -59,7 +59,9 @@ describe("home cards", () => {
     const path = "/data/campaigns/campaign-1794363545195843131.sqlite";
     expect(createdMs(path)).toBe(1794363545195);
     // The local day, as the Player's clock reads it (review minor).
-    expect(startedText(path)).toBe(`started ${new Date(1794363545195).getDate()} Nov 2026`);
+    const at = new Date(1794363545195);
+    const time = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+    expect(startedText(path)).toBe(`started ${at.getDate()} Nov 2026, ${time}`);
     expect(startedText("/data/campaigns/old.sqlite")).toBeNull();
     expect(createdMs("C:\\data\\campaign-12.sqlite")).toBeNull();
   });
