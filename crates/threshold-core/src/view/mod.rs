@@ -41,6 +41,9 @@ pub struct CharacterView {
 #[derive(Clone, Debug, Serialize)]
 pub struct CharacterFact {
     pub text: String,
+    /// Who told it, as the Journal's lines say (review of bug pass 4, m5);
+    /// `None` for what the PC saw, and for the PC's own Claim.
+    pub told_by: Option<NameRef>,
 }
 
 /// The PC as the PC knows itself: its own Beliefs about itself, without an
@@ -52,6 +55,7 @@ pub fn character_view(sight: &PcSight) -> CharacterView {
         .filter(|b| b.subject == sight.pc && !is_open_key(&b.key) && closed_by(sight, b).is_none())
         .map(|b| CharacterFact {
             text: fact_text(&b.text, &b.key),
+            told_by: teller(sight, b),
         })
         .collect();
     CharacterView {
@@ -933,12 +937,17 @@ fn fact_line(sight: &PcSight, belief: &Belief) -> Option<FactLine> {
         subject: name_ref(sight, belief.subject)?,
         text,
         open: is_open_key(&belief.key),
-        // The PC's own Claim (a `settles` outcome, review M2) has no teller.
-        told_by: belief
-            .source
-            .filter(|id| *id != sight.pc)
-            .and_then(|id| name_ref(sight, id)),
+        told_by: teller(sight, belief),
     })
+}
+
+/// Who told `belief`: the speaker of a Claim, as the PC knows them. The
+/// PC's own Claim (a `settles` outcome, review M2) has no teller.
+fn teller(sight: &PcSight, belief: &Belief) -> Option<NameRef> {
+    belief
+        .source
+        .filter(|id| *id != sight.pc)
+        .and_then(|id| name_ref(sight, id))
 }
 
 /// The line of a fact. A play fact `X: key = value` (the text a Turn wrote

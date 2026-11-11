@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { clockText, errorText, type CharacterView } from "../api";
+import { clockText, errorText, type CharacterView, type NameRef } from "../api";
+import { nameText } from "../play/logic";
 import { api } from "../tauri";
 
 /**
@@ -44,7 +45,7 @@ export default function Character({ revision }: { revision: number }) {
 
       <section className="play-card" aria-label="What you know about yourself">
         <h2 className="play-label">What you know about yourself</h2>
-        <Facts lines={view.facts.map((f) => ({ text: f.text, open: false }))} empty="Nothing yet." />
+        <Facts lines={view.facts.map((f) => ({ ...f, open: false }))} empty="Nothing yet." />
       </section>
 
       <section className="play-card" aria-label="Open">
@@ -55,7 +56,13 @@ export default function Character({ revision }: { revision: number }) {
   );
 }
 
-function Facts({ lines, empty }: { lines: { text: string; open: boolean }[]; empty: string }) {
+function Facts({
+  lines,
+  empty,
+}: {
+  lines: { text: string; open: boolean; told_by: NameRef | null }[];
+  empty: string;
+}) {
   if (lines.length === 0) return <p className="play-empty">{empty}</p>;
   return (
     <ul className="play-list">
@@ -65,6 +72,7 @@ function Facts({ lines, empty }: { lines: { text: string; open: boolean }[]; emp
           <span>
             {f.text}
             {f.open && <span className="play-sr"> (open: planned or pending, not done yet)</span>}
+            {f.told_by && <span className="play-faint"> · told by {nameText(f.told_by)}</span>}
           </span>
         </li>
       ))}

@@ -24,7 +24,7 @@ use threshold_core::{
 
 /// The town fixture after one Turn that gave Wren a fact Wren saw and a
 /// fact only the GM knows.
-const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":485,"facts":[{"text":"Wren carries a satchel of quills."}],"open":[],"state":[{"key":"carrying","value":"satchel of quills","text":"You carry satchel of quills."}]}"#;
+const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":485,"facts":[{"text":"Wren carries a satchel of quills.","told_by":null}],"open":[],"state":[{"key":"carrying","value":"satchel of quills","text":"You carry satchel of quills."}]}"#;
 
 /// What it gave for the hidden world, from `WorldView`.
 const HIDDEN_CHARACTER: &str = r#"{"name":"Ada","concept":"Courier","clock_min":5,"facts":[],"open":[{"belief":{"subject_id":1,"key":"pending_meet"},"subject":{"entity_id":1,"kind":"pc","name":"Ada"},"text":"Ada plans to meet Brann at the mill.","open":true,"told_by":null}],"state":[]}"#;
@@ -36,6 +36,30 @@ fn town() -> (Store, u64) {
     let campaign = create_campaign(&mut store, &seed, 11).unwrap();
     load_world(&mut store, campaign, &dir.join("world.toml")).unwrap();
     (store, campaign)
+}
+
+/// Review of bug pass 4, m5: a Claim told to the PC about itself showed on
+/// the You card with no teller. `CharacterFact` carries `told_by`, as the
+/// Journal's lines do; the PC's own Claim (a `settles` outcome) has none.
+#[test]
+fn a_told_fact_about_the_pc_names_its_teller() {
+    let mut w = HiddenWorld::new();
+    let (ada, orsel) = (w.ada, w.orsel);
+    w.play(
+        "I ask Orsel what the town says of me.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![claim(orsel, ada, "wanted", "by the reeve", &[ada], 0)],
+    );
+    let character = character_view(&w.sight());
+    let told = character
+        .facts
+        .iter()
+        .find(|f| f.text.contains("reeve"))
+        .expect("the told fact");
+    let teller = told.told_by.as_ref().expect("a teller");
+    assert_eq!(teller.entity_id, orsel);
+    assert_eq!(teller.name.as_deref(), Some("Orsel"));
 }
 
 #[test]

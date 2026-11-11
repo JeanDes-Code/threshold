@@ -58,6 +58,8 @@ export interface CharacterView {
 /** One thing the PC knows about itself. */
 export interface CharacterFact {
   text: string;
+  /** Who told it; null for what the PC saw, and for the PC's own decision. */
+  told_by: NameRef | null;
 }
 
 export interface DebugLine {
