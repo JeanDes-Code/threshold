@@ -707,9 +707,10 @@ fn present_at(
 /// Turn that closed an Open Item the PC knows, whatever its action
 /// (Decisions follow `settles`, ADR 0007; changed after review: a close on
 /// an `observe` or `wait` Turn was missed); or one whose stored action is
-/// `talk`, `move` or `act`, not impossible, that has a Roll, wrote a
-/// Persistent fact from the proposal, its Check or a Correction, or wrote
-/// an Open Item the PC knows.
+/// `talk`, `move` or `act`, not impossible, that wrote a Persistent fact
+/// from the proposal, its Check or a Correction, or wrote an Open Item the
+/// PC knows. A Roll alone is no decision (bug pass 4): every arm-wrestle of
+/// QA carried the badge, and a contest decides nothing the PC holds.
 fn decision(
     turn: &StoredTurn,
     view: &WorldView,
@@ -733,16 +734,14 @@ fn decision(
         return false;
     }
     let written = || view.facts.iter().filter(|f| f.created_turn == turn.id);
-    stored_roll(&turn.record.proposal_json).is_some()
-        || written().any(|f| {
-            f.canon == Canon::Persistent
-                && matches!(
-                    f.source,
-                    FactSource::Proposal | FactSource::Stake | FactSource::Correction
-                )
-        })
-        || written()
-            .any(|f| is_open_key(&f.slot.key) && rows.iter().any(|r| r.fact_id == Some(f.id)))
+    written().any(|f| {
+        f.canon == Canon::Persistent
+            && matches!(
+                f.source,
+                FactSource::Proposal | FactSource::Stake | FactSource::Correction
+            )
+    }) || written()
+        .any(|f| is_open_key(&f.slot.key) && rows.iter().any(|r| r.fact_id == Some(f.id)))
 }
 
 /// `value` as `text` spells it: "the Toll-Wolf" in "Orsel is also called

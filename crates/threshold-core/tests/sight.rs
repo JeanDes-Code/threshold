@@ -756,7 +756,9 @@ fn decision_rule_marks_lasting_witnessed_acts() {
     let fix = w.revert(undone, "I leave the gate alone.", 0);
     let sight = w.sight();
     let decision = |turn| moment(&sight, turn).is_some_and(|m| m.decision);
-    assert!(decision(talk), "talk with a Roll");
+    // Bug pass 4: a Roll alone is no decision; QA's arm-wrestles all
+    // carried the badge.
+    assert!(!decision(talk), "talk with a Roll and nothing lasting");
     assert!(decision(act), "a lasting witnessed fact");
     assert!(decision(plan), "an Open Item the PC knows");
     assert!(!decision(walk), "a move writes state only");

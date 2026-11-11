@@ -107,6 +107,8 @@ Rejected:
 
 *Changed after review (2026-11-11):* a Turn that closed an Open Item the PC knows is a decision whatever its action. Decisions follow `settles` (ADR 0007), and a close on an `observe` or `wait` Turn was missed.
 
+*Changed in bug pass 4 (2026-11-11):* a Roll alone no longer makes a decision. Every arm-wrestle of QA pass 3 carried the DECISION badge, though it closed nothing and wrote nothing lasting: a contest decides no matter the PC holds. A Turn with a Check is a decision when it closes an Open Item, writes a Persistent fact, or writes an Open Item the PC knows, like any other Turn. The other two rules stay: a lasting witnessed fact and a new Open Item are things the PC chose that last.
+
 ```rust
 pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)>;   // turn, next to stored_roll
 ```
@@ -136,6 +138,8 @@ One private function holds the Belief rule (the latest `learned_at` wins; only r
 **Why.** The Scene of the glossary is "one place and time". The ledger already says where the PC is and what time it is. The `knowledge` table has no Turn today, and the clock cannot give it: a Turn of zero minutes shares its clock with the next one. The ledger does hold the Turn of each `Know` op, so the new column is a richer projection, not new committed state.
 
 **Cost if wrong.** Two spellings of one place ("back room", "tavern back room") split a Scene. A Turn that moves the PC and writes no `location` gives one long Scene. The text of an entry is never wrong. A change of the rule cuts old Journals again; a Pin names a Turn, not a Scene, so it survives.
+
+*Changed in bug pass 4 (2026-11-11): what a Scene lists as learned.* QA read "Teodor Brandt's fatigue is now heavy.", "Teodor Brandt is at The Copper Kettle." and "Accepted: …" lines under "What you learned". A Scene's `learned` now leaves out the PC's own `location` (the Scene's title names the place) and the outcome fact of an Open Item (the Decisions and the closed items show it). A state of the PC that a Turn wrote, whose text is the core's sentence (`domain::slot_sentence`), reads in the second person on every Player screen (`domain::you_sentence`: "You are tired (heavy).", "You are injured (bruised wrist).", "Your reputation is now respected."). The "You" card and the Character screen's state lines use it too. A sentence the Adventure Seed wrote stays as it is.
 
 ### 3.4 When an Open Item is closed (4)
 

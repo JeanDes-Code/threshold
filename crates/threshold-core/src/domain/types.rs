@@ -82,6 +82,34 @@ pub fn slot_sentence(name: &str, key: &str, value: &str) -> String {
     }
 }
 
+/// `slot_sentence` for the PC, as the Player reads it: in the second person
+/// ("You are injured (bruised wrist).", "Your reputation is now
+/// respected."). The Player screens use it for a state of the PC that a
+/// Turn wrote (bug pass 4: "Teodor Brandt's fatigue is now heavy." read like
+/// a machine under "What you learned").
+pub fn you_sentence(key: &str, value: &str) -> String {
+    let words = |text: &str| text.trim().replace('_', " ");
+    let value = words(value);
+    if ["", "none", "no", "nothing", "n/a"].contains(&crate::normalize::value(&value).as_str()) {
+        return match crate::normalize::key(key).as_str() {
+            "location" => "You do not know where you are.".to_owned(),
+            "injury" => "You are not injured.".to_owned(),
+            "condition" => "You are well.".to_owned(),
+            "fatigue" => "You are not tired.".to_owned(),
+            "carrying" => "You carry nothing.".to_owned(),
+            other => format!("You have no {}.", words(other)),
+        };
+    }
+    match crate::normalize::key(key).as_str() {
+        "location" => format!("You are at {value}."),
+        "injury" => format!("You are injured ({value})."),
+        "condition" => format!("You are {value}."),
+        "fatigue" => format!("You are tired ({value})."),
+        "carrying" => format!("You carry {value}."),
+        other => format!("Your {} is now {value}.", words(other)),
+    }
+}
+
 /// The prefix of the key of a fact that gives an entity one more name.
 pub const ALIAS_KEY_PREFIX: &str = "alias_";
 

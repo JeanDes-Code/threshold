@@ -24,7 +24,7 @@ use threshold_core::{
 
 /// The town fixture after one Turn that gave Wren a fact Wren saw and a
 /// fact only the GM knows.
-const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":485,"facts":[{"text":"Wren carries a satchel of quills."}],"open":[],"state":[{"key":"carrying","value":"satchel of quills","text":"Wren carries satchel of quills."}]}"#;
+const TOWN_CHARACTER: &str = r#"{"name":"Wren","concept":"An outsider scribe, hired to copy the town's charters","clock_min":485,"facts":[{"text":"Wren carries a satchel of quills."}],"open":[],"state":[{"key":"carrying","value":"satchel of quills","text":"You carry satchel of quills."}]}"#;
 
 /// What it gave for the hidden world, from `WorldView`.
 const HIDDEN_CHARACTER: &str = r#"{"name":"Ada","concept":"Courier","clock_min":5,"facts":[],"open":[{"belief":{"subject_id":1,"key":"pending_meet"},"subject":{"entity_id":1,"kind":"pc","name":"Ada"},"text":"Ada plans to meet Brann at the mill.","open":true,"told_by":null}],"state":[]}"#;
@@ -1397,7 +1397,8 @@ fn a_state_line_reads_as_a_sentence() {
     let sight = w.sight();
     let play = play_view(&sight, &Marks::default());
     let line = play.you.state.iter().find(|s| s.key == "injury").unwrap();
-    assert_eq!(line.text, "Ada is injured (bruised wrist).");
+    // The PC's own state reads in the second person (bug pass 4).
+    assert_eq!(line.text, "You are injured (bruised wrist).");
     assert_eq!(character_view(&sight).state[0].text, line.text);
 }
 
@@ -1663,4 +1664,82 @@ fn a_card_shows_a_closed_item_once_as_closed() {
             "card {who}: {about:?}"
         );
     }
+}
+
+/// Bug pass 4: "What you learned" holds no machine line. The PC's own
+/// place is the Scene's title, an outcome line ("Accepted: …") belongs to
+/// the Decisions and the closed items, and a state of the PC that a Turn
+/// wrote reads in the second person.
+#[test]
+fn what_you_learned_holds_no_machine_line() {
+    let mut w = HiddenWorld::new();
+    let (ada, orsel) = (w.ada, w.orsel);
+    let view = w.view();
+    w.play(
+        "I ask Orsel the price of passage.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![set(
+            &view,
+            orsel,
+            "pending_toll",
+            "two coins",
+            "Orsel wants two coins.",
+            &[ada],
+        )],
+    );
+    let view = w.view();
+    w.play(
+        "I pay Orsel and lean on the wall.",
+        &record(ActionKind::Talk, Verdict::Allowed, None),
+        0,
+        vec![
+            set(
+                &view,
+                orsel,
+                "toll",
+                "accepted",
+                "Accepted: Orsel wants two coins.",
+                &[ada],
+            ),
+            set(
+                &view,
+                ada,
+                "fatigue",
+                "heavy",
+                "Ada's fatigue is now heavy.",
+                &[ada],
+            ),
+            set(
+                &view,
+                ada,
+                "location",
+                "gate square",
+                "Ada is at gate square.",
+                &[ada],
+            ),
+        ],
+    );
+    let journal = journal_of(&w);
+    let learned: Vec<&str> = journal
+        .scenes
+        .iter()
+        .flat_map(|s| &s.learned)
+        .map(|l| l.text.as_str())
+        .collect();
+    assert!(learned.contains(&"You are tired (heavy)."), "{learned:?}");
+    assert!(learned.contains(&"Orsel wants two coins."), "{learned:?}");
+    for machine in ["Accepted:", "Ada is at", "Ada's fatigue"] {
+        assert!(
+            learned.iter().all(|l| !l.contains(machine)),
+            "{machine}: {learned:?}"
+        );
+    }
+    // The outcome still shows where it belongs: the closed items.
+    assert!(
+        journal
+            .closed
+            .iter()
+            .any(|c| c.item.text == "Orsel wants two coins.")
+    );
 }

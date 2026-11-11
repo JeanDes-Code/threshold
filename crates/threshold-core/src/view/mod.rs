@@ -6,7 +6,10 @@
 use serde::Serialize;
 
 use crate::{
-    domain::{ClockMin, EntityId, EntityKind, STATE_KEYS, is_open_key, outcome_key, slot_sentence},
+    domain::{
+        ClockMin, EntityId, EntityKind, STATE_KEYS, is_open_key, is_state_key, outcome_key,
+        slot_sentence, you_sentence,
+    },
     normalize,
     player::{Marks, Note, Target},
     rules::RollResult,
@@ -82,7 +85,8 @@ fn state_lines(sight: &PcSight) -> Vec<StateLine> {
         .map(|b| StateLine {
             key: b.key.clone(),
             value: b.value.clone(),
-            text: slot_sentence(&sight.pc_name, &b.key, &b.value),
+            // The PC's own state, in the second person (bug pass 4).
+            text: you_sentence(&b.key, &b.value),
         })
         .collect()
 }
@@ -402,9 +406,22 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
         learned: scene
             .iter()
             .flat_map(|m| &m.learned)
+            .filter(|b| learned_line(sight, b))
             .filter_map(|b| fact_line(sight, b))
             .collect(),
     })
+}
+
+/// True when `belief` belongs under "What you learned" (bug pass 4): not
+/// the PC's own place, which the Scene's title already gives, and not the
+/// outcome of an Open Item, which the Decisions and the Open and closed
+/// list show ("Accepted: …").
+fn learned_line(sight: &PcSight, belief: &Belief) -> bool {
+    let own_place = belief.subject == sight.pc && belief.key == "location";
+    let outcome = sight.open_items.iter().any(|item| {
+        item.subject == belief.subject && outcome_key(&item.key) == Some(belief.key.as_str())
+    });
+    !own_place && !outcome
 }
 
 /// A location as the PC names it: the name of a place the PC can name, when
@@ -800,13 +817,23 @@ fn name_ref(sight: &PcSight, id: EntityId) -> Option<NameRef> {
 }
 
 fn fact_line(sight: &PcSight, belief: &Belief) -> Option<FactLine> {
+    let mut text = fact_text(&belief.text, &belief.key);
+    // A state of the PC that a Turn wrote reads in the second person; a
+    // sentence the Adventure Seed wrote stays as it is (bug pass 4).
+    if belief.subject == sight.pc
+        && is_state_key(&belief.key)
+        && !is_open_key(&belief.key)
+        && text == slot_sentence(&sight.pc_name, &belief.key, &belief.value)
+    {
+        text = you_sentence(&belief.key, &belief.value);
+    }
     Some(FactLine {
         belief: BeliefRef {
             subject_id: belief.subject,
             key: belief.key.clone(),
         },
         subject: name_ref(sight, belief.subject)?,
-        text: fact_text(&belief.text, &belief.key),
+        text,
         open: is_open_key(&belief.key),
         told_by: belief.source.and_then(|id| name_ref(sight, id)),
     })
