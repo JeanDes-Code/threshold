@@ -16,14 +16,14 @@ describe("theme", () => {
     }
   });
 
-  it("the NPC colours have hues at least 30 degrees apart", () => {
+  it("the NPC colours have hues at least 35 degrees apart", () => {
     const tokens = css["./tokens.css"] ?? "";
     const hues = [...tokens.matchAll(/--npc-\d+:\s*#([0-9a-f]{6})/gi)].map((m) => hue(m[1] ?? ""));
     expect(hues).toHaveLength(8);
     for (const [i, a] of hues.entries()) {
       for (const b of hues.slice(i + 1)) {
         const apart = Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
-        expect(apart).toBeGreaterThanOrEqual(30);
+        expect(apart).toBeGreaterThanOrEqual(35);
       }
     }
   });

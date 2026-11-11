@@ -108,10 +108,10 @@ describe("Task 5 fixes", () => {
     // Taken: the field keeps what was typed meanwhile, empty or not.
     expect(intentAfterTurn("I wait.", "", true)).toBe("");
     expect(intentAfterTurn("I wait.", "I look", true)).toBe("I look");
-    // Not taken: the sent text comes back, unless the Player typed meanwhile.
+    // Not taken: the sent text comes back; with text typed meanwhile, both.
     expect(intentAfterTurn("I wait.", "", false)).toBe("I wait.");
     expect(intentAfterTurn("I wait.", "  ", false)).toBe("I wait.");
-    expect(intentAfterTurn("I wait.", "I look", false)).toBe("I look");
+    expect(intentAfterTurn("I wait.", "I look", false)).toBe("I wait.\nI look");
   });
 
   it("the Open card shows the first items and the rest on demand", () => {

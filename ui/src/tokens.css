@@ -31,18 +31,21 @@
 
   /*
    * Eight NPC colours. An NPC keeps one for the whole Campaign (play/logic.ts).
-   * Their hues lie at least 30 degrees apart, away from the blue accent, so
-   * two NPCs never look alike (bug pass 3: #d9a46b and #d6b07a did). Next
-   * ids get far hues. theme.test.ts checks the spacing.
+   * Their hues lie at least 35 degrees apart, away from the blue accent, so
+   * two NPCs never look alike (bug pass 3: #d9a46b and #d6b07a did; review:
+   * the red #e07b7b and the pink #e07bb1 were only 32 degrees apart). Hues:
+   * 1 red 0, 3 orange 35, 5 yellow 70, 7 green 105, 8 sea green 140,
+   * 2 cyan 175, 4 violet 262, 6 magenta 305. Next ids get far hues.
+   * theme.test.ts checks the spacing.
    */
   --npc-1: #e07b7b;
   --npc-2: #7be0d8;
   --npc-3: #e0b67b;
   --npc-4: #a07be0;
   --npc-5: #cfe07b;
-  --npc-6: #d87be0;
+  --npc-6: #e07bd8;
   --npc-7: #94e07b;
-  --npc-8: #e07bb1;
+  --npc-8: #7be09d;
 
   /* Space, radius. */
   --space-1: 4px;

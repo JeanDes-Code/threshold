@@ -85,18 +85,24 @@ export function storyItems(view: PlayView, stream: string | null): StoryItem[] {
 /**
  * The Intent field after a Turn ends. The field clears when the Intent is
  * sent, and the Player may type the next one while the Turn runs: that text
- * stays. When the Turn was not taken, the sent text comes back, unless the
- * Player typed something meanwhile.
+ * stays. When the Turn was not taken, the sent text comes back; if the
+ * Player typed something meanwhile, the field holds both: the sent text, a
+ * new line, then what was typed.
  */
 export function intentAfterTurn(sent: string, typed: string, taken: boolean): string {
-  if (taken || typed.trim() !== "") return typed;
-  return sent;
+  if (taken) return typed;
+  if (typed.trim() === "") return sent;
+  return `${sent}\n${typed}`;
 }
 
 /** How many Open Items the side panel shows before "Show all". */
 export const OPEN_CAP = 5;
 
-/** The Open Items the side panel shows: the first `OPEN_CAP`, or all. */
+/**
+ * The Open Items the side panel shows: the first `OPEN_CAP`, or all. The
+ * core sends them in play order (those about someone here first, then the
+ * newest), so the first ones are the ones that matter now.
+ */
 export function openShown<T>(lines: T[], all: boolean): T[] {
   return all ? lines : lines.slice(0, OPEN_CAP);
 }
