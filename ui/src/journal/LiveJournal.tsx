@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { errorText, type JournalView } from "../api";
 import { api } from "../tauri";
+import ScreenFrame from "../views/ScreenFrame";
 import Journal, { type JournalActions } from "./Journal";
 
 interface Props {
@@ -72,9 +73,21 @@ export default function LiveJournal({
     onDeleteNote: (noteId) => command(() => api.deleteNote(noteId)),
   };
 
-  if (error) return <p className="error page">{error}</p>;
+  // Every state keeps the screen switch: a Journal with nothing to show yet,
+  // or one that failed to load, must still let the Player leave the tab.
+  if (error) {
+    return (
+      <ScreenFrame label="Journal" title={pcName} tools={tools}>
+        <p className="error">{error}</p>
+      </ScreenFrame>
+    );
+  }
   if (!view) {
-    return <p className="muted page">{running ? RUNNING_LINE : "Loading…"}</p>;
+    return (
+      <ScreenFrame label="Journal" title={pcName} tools={tools}>
+        <p className="muted">{running ? RUNNING_LINE : "Loading…"}</p>
+      </ScreenFrame>
+    );
   }
   return (
     <>
