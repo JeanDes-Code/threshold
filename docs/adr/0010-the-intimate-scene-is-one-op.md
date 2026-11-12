@@ -64,3 +64,27 @@ ADR 0001 gives a Turn 15 s. The replay of bug pass 5 (`evals/reports/2026-11-tur
 - **A cut Narration keeps no half speech mark (B2).** After the cut to the last full sentence, a last line that opens a quote it does not close, or a tag line with no complete quoted span, is dropped (`speech::without_cut_mark`), and the stream shows of the line it still holds only what is stored. Test: `a_cut_narration_never_shows_a_name_the_full_text_hides`.
 - **Every reader of past Turn text goes through `turn_text` (M3).** MENTIONED ENTITIES read every Narration and Intent raw; it now reads them through `turn_text` with the prompt's clearance (data shape 3.6 lists the readers). An earlier scene's Narration enters no prompt of the next scene (`an_earlier_scene_is_in_no_prompt_of_the_next_scene`).
 - **A Closing Turn moves nobody.** `checks::settle_closing` drops every `location` fact, and the closing schema says so.
+
+## Changed in the polish pass (2026-11-12): a plain Turn does not end the scene
+
+The owner's play showed a scene broken by one line of talk: "open, not `intimate`" closed the scene with `NotIntimate`, the next act opened a new scene, and the Turns of the old scene then reached every prompt as Neutral Lines only. The lead decided a new rule. The rows of `mature::scene_op` for an open scene are now:
+
+| Scene before | The Turn | Op |
+|---|---|---|
+| open | G1 failed when the Turn started | close, `Gate` (unchanged) |
+| open | any tag, the PC's place changes | close, `Moved` |
+| open | any tag, a character the PC did not see here now sees here | close, `Arrival` |
+| open | not `intimate`, `minutes` over `SCENE_PLAIN_MAX_MIN` (30, a first value) | close, `NotIntimate` |
+| open | not `intimate`, none of the above | none: the scene stays open |
+| open | `intimate`, none of the above | none (unchanged) |
+
+The Closing Turn, Fade to Black, `Excluded` and the gates G1 to G4 keep their rules. An `advance` is a Turn that is not `intimate`: inside an open scene it now keeps the scene open (ADR 0008 said it closes it, as a plain Turn did).
+
+- **The telling does not change.** A Turn that is not `intimate` is told `Plain` (`mature::told`): no implied or explicit line, no pack fragment, no scene cap.
+- **A plain narration call reads no scene text.** Before, a plain Turn closed the scene, so its narration call held no clearance. Now the scene can stay open after it, and `narration_clearance` would pass. `Engine::narrate` gives a narration told `Plain` no clearance: the scene's Turns reach it as Neutral Lines. Its Narration is stored as a plain Turn's, which later prompts and the OOC sheet read in full with no `Cleared` value, so it must not be written from the scene's text. Test: `a_plain_turn_inside_a_scene_is_told_plain`.
+- **The proposal call keeps G1's clearance** inside the scene, as it did before for the plain Turn that closed it: the model needs the scene to tag the Turn.
+- **`turn_text` does not change.** A Turn committed with `intimate` is read in full only by a prompt that holds a `Cleared` value of its open scene. A plain Turn inside the scene was always read in full.
+- **The screens.** `PcSight::scene` reads `open_scene`, so the Play screen shows the scene as open after a plain Turn, and "End scene" closes it (tests `a_short_plain_turn_keeps_the_scene_open`, `end_scene_works_after_a_plain_turn`). The oracle `scene_projection_matches_the_last_turn_rule` states the new rule: the scene starts at the first `intimate` Turn after the last Turn that closed a scene.
+
+What stays open, and was open before this change: the proposal call of a plain Turn inside a cleared scene reads the scene in full, and its reaction plans (up to `SCENE_PLAN_MAX_CHARS`) go to the plain narrator. A plan, or a Narration, that tells intimate content on a Turn tagged `none` is the wrong-tag risk of ADR 0008: code cannot see it. Before this change the same path existed for the one plain Turn that closed a scene; now it exists for every short plain Turn of the scene.
+

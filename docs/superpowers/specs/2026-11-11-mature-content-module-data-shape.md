@@ -174,15 +174,17 @@ pub struct Presence { pub truth: BTreeSet<EntityId>, pub seen: BTreeSet<EntityId
 |---|---|---|---|
 | closed | `intimate`, G2 and G3 pass | `SetScene { open: true, why: Opened }` | open |
 | closed | not `intimate` | none | closed |
-| open | not `intimate` | `why: NotIntimate` | closed |
-| open | `intimate`, the PC's `location` changes | `why: Moved` | closed |
-| open | `intimate`, `after.seen` holds a character that `seen_present(view)` does not | `why: Arrival` | closed |
+| open | any tag, the PC's `location` changes | `why: Moved` | closed |
+| open | any tag, `after.seen` holds a character that `seen_present(view)` does not | `why: Arrival` | closed |
+| open | not `intimate`, `minutes` over `SCENE_PLAIN_MAX_MIN` (30) | `why: NotIntimate` | closed |
+| open | not `intimate`, none of the above | none | open |
 | open | `intimate`, none of the above | none | open |
 | open | a Closing Turn (3.7) | `why: EndScene` or `FadeToBlack` | closed |
 | open | `set_detail_level(excluded)` | `why: Excluded`, in the same OOC Turn | closed |
 | open | G1 fails at the start of any Turn | `why: Gate`, in its own Commit, before the proposal call | closed |
 
 - A Turn that closes a scene never opens one. The next `intimate` Turn opens a new scene.
+- **Changed in the polish pass (2026-11-12).** A Turn that is not `intimate` (a line of talk, an `advance`) no longer closes the scene on its own: it closes it only by a move, a seen arrival, or `minutes` over `SCENE_PLAIN_MAX_MIN` (`mature::SCENE_PLAIN_MAX_MIN`, a first value of 30). Before, a line of talk in the middle of a scene closed it, the next act opened a new scene, and the earlier Turns of the old scene reached later prompts as Neutral Lines only. A Turn that is not `intimate` is still told plain (`told` gives `Plain`: no implied or explicit line, no pack fragment, no scene cap), and its narration call holds no clearance, so the scene's Turns reach that narrator as Neutral Lines (`Engine::narrate`): its Narration is stored as a plain Turn's, which every later prompt reads in full. Its proposal call keeps G1's clearance, as before: the model needs the scene to tag the Turn. ADR 0010, dated section.
 - "Another character arrives" reads what the PC perceives. A hidden arrival does not end the scene on the screen. The age rule reads world truth: a hidden minor refuses the Turn (G3).
 - A scene Turn that a Correction reverts takes its `SetScene` op with it: a rebuild skips the ops of a reverted Turn (`store/project.rs:568`).
 

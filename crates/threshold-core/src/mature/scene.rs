@@ -21,6 +21,12 @@ use crate::{
 /// about 6.5 s of generation (ADR 0010).
 pub const SCENE_NARRATION_MAX_TOKENS: u32 = 280;
 
+/// The most minutes a Turn that is not `intimate` may take inside an open
+/// Intimate Scene and leave it open (polish pass, 2026-11-12, a first
+/// value): a line of talk in the middle of a scene keeps it open, a long
+/// wait ends it (`scene_op`, `why: NotIntimate`).
+pub const SCENE_PLAIN_MAX_MIN: u32 = 30;
+
 /// The minutes of the core's default closing (`default_close`), when the
 /// model gives no closing it can commit (data shape 3.7, a first value).
 pub const SCENE_CLOSE_DEFAULT_MIN: u32 = 15;
@@ -90,17 +96,25 @@ pub fn narration_clearance(view_after: &WorldView, now: &WorldView) -> Option<Cl
     scene_gate(view_after).ok().flatten()
 }
 
-/// The `SetScene` op one Turn adds to its Commit, if any (data shape 3.4):
+/// The `SetScene` op one Turn adds to its Commit, if any (data shape 3.4;
+/// rows changed in the polish pass, 2026-11-12):
 ///
 /// | scene before | the Turn | op |
 /// |---|---|---|
-/// | open | G1 failed when the Turn started (`gate_failed`) | close, `Gate` |
 /// | closed | `intimate` (G2 and G3 passed) | open, `Opened` |
 /// | closed | not `intimate` | none |
-/// | open | not `intimate` | close, `NotIntimate` |
-/// | open | `intimate`, the PC's place changes | close, `Moved` |
-/// | open | `intimate`, a character the PC did not see here now sees here | close, `Arrival` |
+/// | open | G1 failed when the Turn started (`gate_failed`) | close, `Gate` |
+/// | open | any tag, the PC's place changes | close, `Moved` |
+/// | open | any tag, a character the PC did not see here now sees here | close, `Arrival` |
+/// | open | not `intimate`, `minutes` over `SCENE_PLAIN_MAX_MIN` | close, `NotIntimate` |
+/// | open | not `intimate`, none of the above | none |
 /// | open | `intimate`, none of the above | none |
+///
+/// A line of talk in the middle of a scene keeps it open: before, any Turn
+/// that was not `intimate` closed it, the next act opened a new scene, and
+/// the earlier Turns of the old scene reached later prompts as Neutral
+/// Lines only. A Turn that is not `intimate` is still told as a plain Turn
+/// (`told`), and its narration call holds no clearance (`Engine::narrate`).
 ///
 /// `view` is the state before the Turn and `after` the presence once its
 /// ops are committed (`mature::after`). A Turn that closes a scene never
@@ -123,9 +137,6 @@ pub fn scene_op(
     }
     if gate_failed {
         return close(SceneWhy::Gate);
-    }
-    if !p.intimacy.intimate() {
-        return close(SceneWhy::NotIntimate);
     }
     let place_before = view
         .entities
@@ -150,6 +161,9 @@ pub fn scene_op(
         .any(|id| !seen_before.contains(id) && is_character(id))
     {
         return close(SceneWhy::Arrival);
+    }
+    if !p.intimacy.intimate() && p.minutes > SCENE_PLAIN_MAX_MIN {
+        return close(SceneWhy::NotIntimate);
     }
     None
 }

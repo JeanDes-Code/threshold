@@ -249,11 +249,14 @@ pub enum SceneWhy {
     EndScene,
     /// The Player pressed "Fade to black" (a Closing Turn born faded).
     FadeToBlack,
-    /// A Turn of the scene was not intimate.
+    /// A Turn of the scene that was not intimate took more than
+    /// `mature::SCENE_PLAIN_MAX_MIN` minutes (polish pass, 2026-11-12; it
+    /// was any Turn that was not intimate).
     NotIntimate,
-    /// The PC's place changed in an intimate Turn.
+    /// The PC's place changed in a Turn of the scene, whatever its tag.
     Moved,
-    /// A character the PC sees arrived in an intimate Turn.
+    /// A character the PC sees arrived in a Turn of the scene, whatever its
+    /// tag.
     Arrival,
     /// G1: the place of the open scene was no longer cleared when a Turn
     /// started.

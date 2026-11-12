@@ -9,8 +9,9 @@
 # Intimate Scene. In the partner arm, the PC is alone in a private place
 # with a willing partner set up as in `scene_agency` (Maren, the PC's
 # partner, attitude 5, both confirmed): an invitation, then the act, which
-# opens a scene, a plain step that ends it, the act again, then a plain
-# step. The report counts the scenes in which a reacting NPC with a goal
+# opens a scene, a plain step, the act again, then a plain step. Since the
+# polish pass (2026-11-12) a short plain step no longer ends the scene, so
+# the second act goes on in the same scene. The report counts the scenes in which a reacting NPC with a goal
 # against the PC, or an attitude below 0, complies or helps with no cause.
 # No pass line. Neutral Intents only.
 fixture = "town"

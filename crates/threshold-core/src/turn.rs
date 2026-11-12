@@ -1166,7 +1166,15 @@ impl Engine {
             events.push(QUIET_EVENT_LINE.to_owned());
         }
         let told = mature::told(view_after, now, committed.intimate, &self.packs);
-        let cleared = mature::narration_clearance(view_after, now);
+        // A Turn told plain reads no scene text, inside an open scene too
+        // (polish pass, 2026-11-12: a Turn that is not intimate no longer
+        // ends the scene). Its Narration is stored as a plain Turn's, which
+        // every later prompt reads in full, so it must not be written from
+        // the scene's Narrations: they reach it as Neutral Lines.
+        let cleared = match told {
+            Told::Plain => None,
+            _ => mature::narration_clearance(view_after, now),
+        };
         // The level past Turns are read at (final review M3): a scene Turn
         // told above it is its Neutral Line in this prompt.
         let level = mature::reading_level(view_after, now, &self.packs);
