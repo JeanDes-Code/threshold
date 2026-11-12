@@ -40,7 +40,17 @@ A fragment is a style note: plain sentences that the model reads under a heading
 
 - **No control character** but a line end (`\n`) and a tab. A Windows line end (`\r\n`) refuses the pack: save the file with Unix line ends.
 - **No invisible character**: no zero-width space or joiner, no direction mark, no byte order mark, no variation selector, no soft hyphen.
-- **No line that starts with a heading the app writes in its prompts**, in any case, after blanks or marks such as `#`, `*`, `-` or `>`. The list is `context::CORE_HEADINGS` in `crates/threshold-core/src/context/mod.rs`. It holds, among others: `INTIMATE` (and so `INTIMATE TURN`, `INTIMATE SCENE`), `SCENE ENDS`, `FROM CONTENT PACKS`, `TONE`, `SCENES`, `SCENE`, `ADVENTURE`, `NAMES`, `NOW`, `TIME`, `INTENT`, `THIS TURN`, `RECENT TURNS`, `Turn`, `Minute`, `Player:`, `Narration:`, `Player intent:`, `Outcome:`, `Place:`, `Present:`, `When:`. A heading in words matches when no letter or digit follows it ("Scene changes" matches, "Scenery" does not); a heading with a colon matches up to its colon. A line that starts with a handle such as `E12`, `F3`, `G1`, `W2` or `N1` refuses the pack too. Write the note another way: "Keep each scene short." in place of "Scene: keep it short."
+- **No line that starts with a reserved heading word in a form the app writes it.** After the blanks and marks such as `#`, `*`, `-` or `>` at its start, a line is refused when it starts with:
+  - a heading followed by a colon, in any case: "Scene: keep it short." or "**TIME**: dusk";
+  - a heading of one word in the very case the app writes it, alone or followed by a parenthesis or a number: "TIME", "NOW (dusk)", "Turn 3". "Time passes slowly." and "Turn slowly." are fine;
+  - a heading of several words, in any case, with no letter or digit right after it: "Recent turns", "the move does not happen";
+  - a handle such as `E12`, `F3`, `G1`, `W2` or `N1`.
+
+  The refusal says which fragment and which line, never the line. Write the note another way: "Keep each scene short." in place of "Scene: keep it short." The reserved headings are the list `context::CORE_HEADINGS` in `crates/threshold-core/src/context/mod.rs`; this copy is made from it, and a test fails when the two differ:
+
+<!-- CORE_HEADINGS start: made from context::CORE_HEADINGS; tests/pack.rs checks it -->
+`TONE`, `SCENES`, `FROM CONTENT PACKS`, `INTIMATE`, `INTIMATE TURN`, `INTIMATE SCENE`, `SCENE ENDS`, `VERDICT`, `LATER ACTIONS`, `TIME`, `ADVENTURE`, `Premise:`, `PC:`, `Story language:`, `Boundaries`, `Every character is at least`, `Themes:`, `GM agreement:`, `NAMES`, `SCENE`, `Place:`, `PLACES`, `ALL PLACES`, `ENTITIES`, `VOICES`, `NPC GOALS`, `FACTS`, `OPEN OBSTACLES`, `SCHEDULED EVENTS`, `ENTITY STATE`, `Present:`, `WHAT THE PC KNOWS HERE`, `RECENT TURNS`, `Turn`, `Player:`, `Narration:`, `NOW`, `Minute`, `MENTIONED ENTITIES`, `MENTIONED FACTS`, `OPEN ITEMS`, `INTENT`, `REJECTED PROPOSAL`, `THIS TURN`, `Player intent:`, `Outcome:`, `Here after this Turn`, `Nobody else is here`, `After this Turn the PC is`, `The move does not happen`, `The attempt does not happen`, `The wait ends early`, `Time this Turn takes:`, `NPC intentions`, `OPENING`, `Situation:`, `When:`
+<!-- CORE_HEADINGS end -->
 
 ## `pack.toml`
 
@@ -119,13 +129,13 @@ The loader checks a pack against these rules, in this order, and refuses the who
 | 7 | the pack declares `explicit_description` and holds a fragment that is not `intimate_scene` | Refused: a pack that gives explicit description may hold intimate_scene fragments only. |
 | 8 | the pack does not declare `explicit_description` and holds an `intimate_scene` fragment | Refused: an intimate_scene fragment needs provides = ["explicit_description"]. |
 | 9 | a fragment file is over 16,384 bytes, is empty, is not UTF-8, is longer than 1,200 characters, or holds a control character other than a line end or a tab, or an invisible character | Refused: a fragment file is empty, is not UTF-8 text, is longer than 1,200 characters, or holds a control or invisible character. |
-| 10 | a line of a fragment starts with a heading the app writes in its prompts (see "What a fragment may hold") | Refused: a line of a fragment starts with a heading that the app writes in its prompts. |
+| 10 | a line of a fragment starts with a reserved heading word in a form the app writes it, or with a handle (see "What a fragment may hold") | Refused: a line of a fragment starts with a reserved heading word, in a form the app writes in its prompts. |
 | 11 | with this pack, the fragments of one prompt pass a total of the size limits | Refused: with this pack, the fragments of one prompt are too long in total. |
 | 12 | `provides` holds a word other than `explicit_description` | Refused: provides names a capability that does not exist. |
 | 13 | the pack declares `explicit_description` and holds no `narration` `intimate_scene` fragment with `when = "explicit"` | Refused: a pack that gives explicit description needs a narration intimate_scene fragment with when = "explicit". |
 | 14 | `intimate_words` names a file that is not a plain file in the pack folder, or the file is over 8,192 bytes, is not UTF-8, holds a control character other than a line end or a tab or an invisible character, holds no term or more than 200, or a term longer than 60 characters or with no letter or digit | Refused: the intimate_words file is missing, empty, too long, not UTF-8 text, or holds a control or invisible character or a term with no letter. |
 
-After the sentence, the list says where, in brackets: `pack.toml, line N` for a TOML error, `pack.toml, fragment N` for a fragment table or its file, or a fixed name (`pack.toml`, `recommended_model`, `pack.toml, intimate_words`). It never quotes a line and never shows a file name: both are the pack's own text.
+After the sentence, the list says where, in brackets: `pack.toml, line N` for a TOML error, `pack.toml, fragment N` for a fragment table or its file, `pack.toml, fragment N, line L` for a line of a fragment that starts with a reserved heading word, or a fixed name (`pack.toml`, `recommended_model`, `pack.toml, intimate_words`). It never quotes a line and never shows a file name: both are the pack's own text.
 
 ## Where pack text goes, and where it never goes
 

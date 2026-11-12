@@ -21,10 +21,10 @@ use super::{
 };
 use crate::{
     domain::{
-        ActionKind, EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, Verdict,
-        is_open_key, is_state_key, outcome_key,
+        ActionKind, DetailLevel, EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp,
+        Reaction, Verdict, is_open_key, is_state_key, outcome_key,
     },
-    mature::{Cleared, Told},
+    mature::{Cleared, Told, effective},
     model::Prompt,
     normalize,
     pack::{ContentPack, Target, scene_fragments},
@@ -338,6 +338,7 @@ pub fn narration_prompt(
         told,
         None,
         false,
+        effective(view_after.detail, packs),
     )
 }
 
@@ -354,7 +355,9 @@ pub fn narration_prompt(
 /// (`mature::narration_clearance`): with `Some`, the earlier Turns of that
 /// scene are shown in full; with `None`, each Turn committed with
 /// `intimate` is its Neutral Line (`mature::turn_text`). The rules, stable
-/// and scene blocks depend on neither.
+/// and scene blocks depend on neither. `level` is the effective Detail
+/// Level the call reads past Turns at (`mature::reading_level`): an
+/// intimate Turn told above it is its Neutral Line (final review M3).
 #[allow(clippy::too_many_arguments)]
 pub fn narration_prompt_with(
     view_after: &WorldView,
@@ -368,8 +371,9 @@ pub fn narration_prompt_with(
     told: &Told,
     cleared: Option<&Cleared>,
     closing: bool,
+    level: DetailLevel,
 ) -> Prompt {
-    let r = Retrieval::new(view_after, "", cleared);
+    let r = Retrieval::new(view_after, "", cleared, level);
     let head = match told {
         Told::Plain if closing => CLOSING_LINE.to_owned(),
         Told::Plain => String::new(),
@@ -395,7 +399,7 @@ pub fn narration_prompt_with(
         recent: format!(
             "{head}{}",
             recent(
-                &r, perceived, events, reactions, intent, turn, extra, cleared
+                &r, perceived, events, reactions, intent, turn, extra, cleared, level
             )
         ),
     }
@@ -437,7 +441,7 @@ pub const TIME_LINE: &str = "Time this Turn takes: ";
 /// outcome: Begin commits nothing for the PC. An empty situation or time
 /// leaves its line out.
 pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt {
-    let r = Retrieval::new(view, "", None);
+    let r = Retrieval::new(view, "", None, DetailLevel::Excluded);
     let mut recent = String::from("OPENING\n");
     if let Some(start) = view.adventure_seed.as_ref().map(|seed| &seed.start) {
         for (label, text) in [("Situation", &start.situation), ("When", &start.when)] {
@@ -682,6 +686,7 @@ fn recent(
     turn: Option<(ActionKind, Verdict)>,
     extra: &[String],
     cleared: Option<&Cleared>,
+    level: DetailLevel,
 ) -> String {
     // A Closing Turn has no Intent, so no Player intent line.
     let mut tail = String::from("THIS TURN\n");
@@ -741,5 +746,8 @@ fn recent(
     }
     // The Turn being narrated is the last of the view: THIS TURN tells it,
     // so the window stops before it (bug pass 5, M4).
-    format!("{}{tail}", turns_window(r.view, r.view.turn_seq, cleared))
+    format!(
+        "{}{tail}",
+        turns_window(r.view, r.view.turn_seq, cleared, level)
+    )
 }

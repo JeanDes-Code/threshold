@@ -135,6 +135,12 @@ pub struct StoredTurn {
     /// `narration` is `None` and stays so. Not a projection: `rebuild`
     /// leaves it as it is.
     pub faded: bool,
+    /// The level the stored Narration of an intimate Turn was told at:
+    /// `implied` or `explicit` (`mature::Told`); `None` for a Turn told
+    /// plain, or with no Narration. A later prompt reads the Turn in full
+    /// only at that level or above (`mature::turn_text`, final review M3,
+    /// 2026-11-12). Not a projection.
+    pub told: Option<DetailLevel>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entity {
@@ -930,9 +936,34 @@ impl Store {
     /// Stores the Narration of a Turn. A faded Turn takes none: a Fade to
     /// Black cannot be undone (ADR 0011).
     pub fn set_narration(&mut self, t: TurnId, text: &str) -> Result<(), StoreError> {
+        self.set_told_narration(t, text, None)
+    }
+
+    /// Stores the Narration of a Turn and the level it was told at
+    /// (`StoredTurn::told`), in one write. A faded Turn takes none, and
+    /// neither does a Turn of a kind that tells nothing (`TurnKind::tells`:
+    /// a Setup or an OOC Turn; final review minor 4).
+    pub fn set_told_narration(
+        &mut self,
+        t: TurnId,
+        text: &str,
+        told: Option<DetailLevel>,
+    ) -> Result<(), StoreError> {
+        if let Some(turn) = self.turn(t)?
+            && !turn.record.kind.tells()
+        {
+            return Err(StoreError::Invalid(
+                "this kind of Turn takes no Narration".into(),
+            ));
+        }
+        let told = match told {
+            None | Some(DetailLevel::Excluded) => None,
+            Some(DetailLevel::Implied) => Some("implied"),
+            Some(DetailLevel::Explicit) => Some("explicit"),
+        };
         if self.db.execute(
-            "UPDATE turn SET narration=?1 WHERE id=?2 AND faded=0",
-            params![text, t],
+            "UPDATE turn SET narration=?1, told=?3 WHERE id=?2 AND faded=0",
+            params![text, t, told],
         )? != 1
         {
             let faded: Option<bool> = self
@@ -963,10 +994,10 @@ impl Store {
             }
             Some(_) => {}
         }
-        if self
-            .db
-            .execute("UPDATE turn SET narration=NULL, faded=1 WHERE id=?1", [t])?
-            != 1
+        if self.db.execute(
+            "UPDATE turn SET narration=NULL, told=NULL, faded=1 WHERE id=?1",
+            [t],
+        )? != 1
         {
             return Err(StoreError::Invalid("unknown turn".into()));
         }

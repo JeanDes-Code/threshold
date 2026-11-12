@@ -276,7 +276,7 @@ impl PackRule {
                 "Refused: a fragment file is empty, is not UTF-8 text, is longer than 1,200 characters, or holds a control or invisible character."
             }
             Self::CoreHeading => {
-                "Refused: a line of a fragment starts with a heading that the app writes in its prompts."
+                "Refused: a line of a fragment starts with a reserved heading word, in a form the app writes in its prompts."
             }
             Self::TooLong => {
                 "Refused: with this pack, the fragments of one prompt are too long in total."
@@ -398,13 +398,26 @@ pub fn invisible(c: char) -> bool {
 }
 
 /// True when `line` starts with a heading the core writes in a proposal or
-/// a narration prompt (`context::CORE_HEADINGS`), in any case (review M1,
-/// 2026-11-12). Before the match, the line loses what comes before its
-/// first letter or digit (blanks, `#`, `*`, `-`, `>`, quote marks), every
-/// run of blanks becomes one space, and a blank before a colon goes. A
-/// heading that ends with a colon matches up to its colon; any other
-/// heading matches when no letter or digit follows it. A line that starts
-/// with a handle the core writes (`E12`, `F3`, `G1`, `W2`, `N1`) matches too.
+/// a narration prompt (`context::CORE_HEADINGS`) in a form the core writes
+/// it (review M1, 2026-11-12; narrowed after the final review, so that an
+/// ordinary sentence that starts with "Time", "Now" or "Facts" is a style
+/// note again). Before the match, the line loses what comes before its
+/// first letter or digit (blanks, `#`, `*`, `-`, `>`, quote marks). Then
+/// the line forges a heading when:
+///
+/// - it starts with a handle the core writes (`E12`, `F3`, `G1`, `W2`,
+///   `N1`), in any case;
+/// - it starts with a heading, in any case, followed by a colon (blanks and
+///   closing marks such as `**` may come between): "Scene: keep it short.";
+///   a heading that ends with a colon matches up to its colon;
+/// - it starts with a heading of one word in the very case the core writes
+///   it ("TIME", "NOW", "Turn"), and the line ends there or goes on with an
+///   opening parenthesis or a digit: "TIME", "NOW (dusk)", "Turn 3". "Time
+///   passes" and "Turn slowly" are no heading;
+/// - it starts with a heading of several words, in any case, with no letter
+///   or digit right after it: "Recent turns", "the move does not happen".
+///
+/// Every run of blanks counts as one space, and a blank before a colon goes.
 pub fn forges_a_heading(line: &str) -> bool {
     let start = line.trim_start_matches(|c: char| !c.is_alphanumeric());
     let mut norm = String::with_capacity(start.len());
@@ -412,20 +425,44 @@ pub fn forges_a_heading(line: &str) -> bool {
         if !norm.is_empty() && !word.starts_with(':') {
             norm.push(' ');
         }
-        norm.push_str(&word.to_lowercase());
+        norm.push_str(word);
     }
+    let lower = norm.to_lowercase();
     let handle = {
-        let mut chars = norm.chars();
+        let mut chars = lower.chars();
         matches!(chars.next(), Some('e' | 'f' | 'g' | 'w' | 'n'))
             && chars.next().is_some_and(|c| c.is_ascii_digit())
     };
+    // What follows a heading, past blanks and closing marks.
+    let after = |rest: &str| -> Option<char> {
+        rest.trim_start_matches(|c: char| {
+            c.is_whitespace() || matches!(c, '*' | '_' | '"' | '\'' | '\u{201d}' | '\u{2019}' | '`')
+        })
+        .chars()
+        .next()
+    };
     handle
         || CORE_HEADINGS.iter().any(|heading| {
-            let heading = heading.to_lowercase();
-            norm.strip_prefix(heading.as_str()).is_some_and(|rest| {
-                heading.ends_with(':') || !rest.starts_with(char::is_alphanumeric)
-            })
+            let heading_lower = heading.to_lowercase();
+            let Some(rest) = lower.strip_prefix(heading_lower.as_str()) else {
+                return false;
+            };
+            if heading.ends_with(':') || after(rest) == Some(':') {
+                return true;
+            }
+            if heading.contains(' ') {
+                return !rest.starts_with(char::is_alphanumeric);
+            }
+            norm.starts_with(heading)
+                && !rest.starts_with(char::is_alphanumeric)
+                && after(rest).is_none_or(|c| c == '(' || c.is_ascii_digit())
         })
+}
+
+/// The 1-based number of the first line of `text` that forges a heading
+/// (`forges_a_heading`), if any.
+fn forged_line(text: &str) -> Option<usize> {
+    text.lines().position(forges_a_heading).map(|n| n + 1)
 }
 
 /// The `intimate_scene` fragments of `packs` for `prompt`: the `always`
@@ -612,9 +649,13 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
     for (n, (prompt, at, when, file)) in entries.into_iter().enumerate() {
         let at_fragment = || Some(format!("pack.toml, fragment {}", n + 1));
         let text = fragment_text(&dir.join(file)).ok_or((PackRule::FragmentText, at_fragment()))?;
-        // Rule 10.
-        if text.lines().any(forges_a_heading) {
-            return Err((PackRule::CoreHeading, at_fragment()));
+        // Rule 10. Where: the fragment's number and the line's number,
+        // never the line.
+        if let Some(line) = forged_line(&text) {
+            return Err((
+                PackRule::CoreHeading,
+                Some(format!("pack.toml, fragment {}, line {line}", n + 1)),
+            ));
         }
         fragments.push(Fragment {
             prompt,

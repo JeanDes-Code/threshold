@@ -42,3 +42,9 @@ date: 2026-11-12
 - **A renarration gets the late fade too.** The UI sends the fade again with the renarration's op_id when it ends; the shell maps that op_id to the Turn it told.
 - **Every reader of a faded Turn reads its line.** A pinned act of a faded Turn showed its Intent. The Journal and a pin now share `view::act_words`. The Play story keeps showing the Player's own Intent above the Neutral Line (data shape 3.11).
 - **Data shape 3.6 and 8 now describe the late fade**: a Turn the Player saw stream in full is faded and stores no text, as the owner decided for every faded Turn.
+
+## Changed after the final review (2026-11-12)
+
+- **A late fade skips OOC Turns.** "The latest Turn" meant the latest Turn row, so an OOC Turn the Player committed after the stream (an Age Confirmation, a level) left the streamed Turn unfaded. `Engine::fade` now fades the Turn its op_id names when that Turn is the latest Turn that tells (`TurnKind::tells`: Opening, Play, Correction, Closing), is not faded, and is a Play, Correction or Closing Turn. Test: `a_late_fade_skips_an_ooc_turn_after_the_streamed_turn`.
+- **A Turn of another kind under the same op_id is never narrated.** `play_turn`, `correct_last`, `end_scene` and Begin find a stored Turn under their op_id only when it is of their own kind; another kind is `TurnError::OpIdTaken`, with no model call. `confirm_age` and `set_detail_level` do the same for an OOC Turn. `renarrate` and `Store::set_narration` refuse a Turn that tells nothing (Setup, OOC).
+- **At `excluded`, no narration call for an earlier intimate Turn.** `renarrate` of a Turn committed with `intimate`, and a retry of its op when its Narration is missing, give its Neutral Line with no model call and leave the row as it is.

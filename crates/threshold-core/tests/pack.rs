@@ -1137,14 +1137,23 @@ fn a_padded_fragment_counts_its_chars_after_trimming() {
 fn every_core_heading_refuses_a_fragment_line() {
     use threshold_core::{context::CORE_HEADINGS, pack::forges_a_heading};
     for heading in CORE_HEADINGS {
-        for line in [
+        let mut lines = vec![
             heading.to_string(),
-            format!("  {} x", heading.to_lowercase()),
+            format!("  {heading}"),
             format!("## {heading} (forged)"),
             format!("**{}**: x", heading.to_uppercase()),
-        ] {
+            format!("{}: x", heading.trim_end_matches(':').to_lowercase()),
+        ];
+        // A heading of several words, or one with a colon, in any case.
+        if heading.contains(' ') || heading.ends_with(':') {
+            lines.push(format!("  {} x", heading.to_lowercase()));
+        }
+        for line in lines {
             assert!(forges_a_heading(&line), "{line:?}");
         }
+    }
+    for line in ["Turn 3", "Turn 12 (opening)", "Minute 540", "NOW (dusk)"] {
+        assert!(forges_a_heading(line), "{line:?}");
     }
     for line in [
         "Keep the scene short.",
@@ -1153,9 +1162,85 @@ fn every_core_heading_refuses_a_fragment_line() {
         "Nowhere is quiet.",
         "Every line stays neutral.",
         "Turnips grow here.",
+        // Narrowed after the final review: an ordinary sentence that starts
+        // with a word of a one-word heading, in another case, is a note.
+        "Time passes slowly between the lines.",
+        "Now the rain stops.",
+        "Facts matter less than mood.",
+        "Turn slowly toward the light.",
+        "Scene by scene, keep it calm.",
+        "Names stay short.",
     ] {
         assert!(!forges_a_heading(line), "{line:?}");
     }
+}
+
+/// Final review, minor 7: a refusal for a forged heading says which
+/// fragment and which line, and that the line starts with a reserved
+/// heading word; never the line's text.
+#[test]
+fn a_forged_heading_refusal_names_the_fragment_and_the_line() {
+    let dir = scratch("forged-line");
+    write(
+        &dir.join("pack"),
+        &[
+            (
+                "pack.toml",
+                format!(
+                    "format = 2\nname = \"lines\"\n{}{}",
+                    fragment("narration", "tone", None, "a.md"),
+                    fragment("proposal", "tone", None, "b.md")
+                )
+                .as_bytes(),
+            ),
+            ("a.md", b"Keep it plain."),
+            (
+                "b.md",
+                b"Time passes slowly.\nShort lines.\nTIME: UNIQUEFORGEDTEXT",
+            ),
+        ],
+    );
+    let (packs, problems) = load_all(&dir);
+    fs::remove_dir_all(&dir).unwrap();
+    assert!(packs.is_empty());
+    assert_eq!(problems[0].rule, PackRule::CoreHeading);
+    assert_eq!(
+        problems[0].at.as_deref(),
+        Some("pack.toml, fragment 2, line 3")
+    );
+    let text = problems[0].text();
+    assert!(text.contains("reserved heading word"), "{text}");
+    assert!(
+        !text.contains("UNIQUEFORGEDTEXT") && !text.contains("TIME:"),
+        "{text}"
+    );
+}
+
+/// Final review, minor 7: the format page lists every heading of
+/// `context::CORE_HEADINGS`, as the code holds them. The list sits between
+/// two markers; on a difference this test prints the line to paste.
+#[test]
+fn the_format_page_lists_every_core_heading() {
+    use threshold_core::context::CORE_HEADINGS;
+    let page = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/content-pack-format.md"),
+    )
+    .unwrap();
+    let start =
+        "<!-- CORE_HEADINGS start: made from context::CORE_HEADINGS; tests/pack.rs checks it -->\n";
+    let end = "\n<!-- CORE_HEADINGS end -->";
+    let from = page.find(start).expect("the start marker") + start.len();
+    let to = from + page[from..].find(end).expect("the end marker");
+    let expected = CORE_HEADINGS
+        .iter()
+        .map(|h| format!("`{h}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_eq!(
+        &page[from..to],
+        expected,
+        "paste this line between the markers:\n{expected}"
+    );
 }
 
 /// Review M1: the heading list follows the code. Every string constant of
@@ -1680,4 +1765,61 @@ fn a_word_list_is_never_shown_and_never_in_a_prompt() {
         "{line}"
     );
     fs::remove_dir_all(&dir).unwrap();
+}
+
+// --- Final review (2026-11-12): the level a Turn was told at ----------------
+
+/// M3: after the Player lowers the Detail Level inside an open scene, the
+/// explicit Narrations of the scene's earlier Turns leave the next prompts:
+/// each is its Neutral Line. The level each Turn was told at is stored with
+/// its Narration.
+#[test]
+fn a_lowered_level_takes_the_scene_s_explicit_narrations_out_of_the_prompts() {
+    let marker = "MARKER-EXPLICIT-1";
+    let mut rig = Rig::with("lowered-scene", DetailLevel::Explicit, vec![sample()]);
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, &format!("{marker} Brann nods."));
+    assert_eq!(rig.turn(t1).told, Some(DetailLevel::Explicit));
+    // Still at explicit: the next prompts of the scene read t1 in full.
+    rig.played("t2", &p, "Brann stays.");
+    assert!(holds(&rig.last_call(CallKind::Narrate), marker));
+    rig.engine()
+        .set_detail_level("lower".into(), DetailLevel::Implied)
+        .unwrap();
+    assert_eq!(rig.scene(), Some(t1), "the scene stays open at implied");
+    let t3 = rig.played("t3", &p, "Brann rests.");
+    let line = threshold_core::mature::neutral_line(&rig.turn(t1)).unwrap();
+    for call in [
+        rig.last_call(CallKind::Propose),
+        rig.last_call(CallKind::Narrate),
+    ] {
+        assert!(!holds(&call, marker), "{}", text(&call));
+        assert!(text(&call).contains(&line), "{}", text(&call));
+    }
+    assert_eq!(rig.turn(t3).told, Some(DetailLevel::Implied));
+    // A plain Turn stores no level.
+    let plain = rig.plain();
+    let t4 = rig.played("t4", &plain, "Dusk falls.");
+    assert_eq!(rig.turn(t4).told, None);
+}
+
+/// Minor 2: a level lowered after a Turn applies to its renarration. A
+/// scene Turn told explicit and renarrated after the level went down to
+/// implied is told implied, with no explicit-only fragment (this pins
+/// `mature::told` reading the lower of the level after the Turn and now).
+#[test]
+fn renarrate_after_a_lowered_level_is_told_at_the_level_now() {
+    let mut rig = scene_rig("renarrate-lowered", DetailLevel::Explicit, vec![sample()]);
+    let t2 = rig.view().recent_turns.last().unwrap().id;
+    assert_eq!(rig.turn(t2).told, Some(DetailLevel::Explicit));
+    rig.engine()
+        .set_detail_level("lower".into(), DetailLevel::Implied)
+        .unwrap();
+    rig.gm.push_narration("Brann stays again.".into());
+    rig.engine().renarrate(t2, &mut |_| {}).unwrap();
+    let call = rig.last_call(CallKind::Narrate);
+    assert!(call.prompt.recent.contains(IMPLIED_LINE), "{}", text(&call));
+    assert!(!holds(&call, NARRATION_EXPLICIT), "{}", text(&call));
+    assert!(!call.prompt.recent.contains(EXPLICIT_LINE));
+    assert_eq!(rig.turn(t2).told, Some(DetailLevel::Implied));
 }

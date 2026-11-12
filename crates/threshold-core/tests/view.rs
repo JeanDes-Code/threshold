@@ -372,6 +372,62 @@ fn a_tag_with_text_after_the_quote_is_removed_when_it_hides_a_name() {
     }
 }
 
+/// Final review minor 1 (2026-11-12): the stored view drops the tag of a
+/// name the PC cannot use exactly as the stream does, whatever follows the
+/// colon: single quotes straight and curly, low and angle quotes, a quote
+/// in emphasis marks, a dash before the quote, a quote that closes on the
+/// next line, a stage note of any length. Such a line makes nobody
+/// nameable. A bubble stays strict: a single-quoted line of a name the PC
+/// knows stays prose, with its tag.
+#[test]
+fn a_tag_before_any_quote_form_is_removed_when_it_hides_a_name() {
+    let mut w = HiddenWorld::new();
+    let said = w.play("I listen.", &observe(), 0, vec![]);
+    let written = [
+        "Kestrel: 'Nobody knows my name.'",
+        "Kestrel: \u{2018}Stay in the light.\u{2019} He grins.",
+        "Vey: \u{201e}Pay the toll.\u{201c}",
+        "Vey: \u{2039}Pay.\u{203a} She turns.",
+        "Kestrel: *\"Stay.\"*",
+        "Kestrel: _\"Stay.\"_ The bell rings.",
+        "The Toll-Wolf: \u{2014} \"Pay.\"",
+        "Kestrel: - \"Pay now.\"",
+        "Kestrel: \"Stay,\nhere.\"",
+        "Vey: (she leans on the rail and watches the far road for a long while) \"Go.\"",
+        "Orsel: 'You are late.'",
+    ];
+    let narration = written.join("\n\n");
+    w.narrate(said, &narration);
+    let view = view_of(&w);
+    let shown: Vec<String> = blocks(&view, said).iter().map(prose).collect();
+    for hidden in ["Kestrel", "Vey", "Toll-Wolf"] {
+        assert!(
+            shown.iter().all(|l| !l.contains(hidden)),
+            "{hidden}: {shown:?}"
+        );
+    }
+    // The stream shows the same lines.
+    let set = unnameable_names(&w.view());
+    let streamed: Vec<String> = threshold_core::speech::strip_tags(&narration, &set)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(shown, streamed);
+    // A bubble stays strict: single quotes make no bubble, and a name the
+    // PC knows keeps its tag.
+    assert_eq!(shown.last().unwrap(), "Orsel: 'You are late.'");
+    // Nobody became nameable.
+    assert_eq!(
+        view.here
+            .iter()
+            .find(|h| h.entity_id == w.kestrel)
+            .unwrap()
+            .name,
+        None
+    );
+}
+
 /// A tag shared by a name the PC knows and a name it does not know is
 /// removed too: a bubble or a tag could tell the Player that both exist.
 #[test]

@@ -1910,7 +1910,7 @@ fn a_stored_proposal_with_the_old_flag_still_reads() {
         assert_eq!(stored_intimacy(&record), tag, "{record}");
         assert_eq!(stored_intimate(&record), tag == Intimacy::Intimate);
     }
-    let written = serde_json::to_value(&parsed_advance()).unwrap();
+    let written = serde_json::to_value(parsed_advance()).unwrap();
     assert_eq!(written["intimacy"], "advance");
     assert!(written.get("intimate").is_none());
 }

@@ -123,7 +123,9 @@ pub use proposal_prompt::{
 use std::collections::BTreeSet;
 
 use crate::{
-    domain::{AdventureSeed, Canon, EntityId, EntityKind, Trigger, alias_key, is_open_key},
+    domain::{
+        AdventureSeed, Canon, DetailLevel, EntityId, EntityKind, Trigger, alias_key, is_open_key,
+    },
     mature::{Cleared, TurnText, turn_text},
     normalize,
     pack::{ContentPack, InsertPoint, Target, rule_fragments},
@@ -193,10 +195,16 @@ pub(crate) struct Retrieval<'a> {
 
 impl<'a> Retrieval<'a> {
     /// What a prompt retrieves for `intent`. `cleared` is the prompt's own
-    /// clearance (G1 or `mature::narration_clearance`): the names of the
-    /// past Turns are read through `mature::turn_text` with it, as the
-    /// `recent` block shows those Turns.
-    pub fn new(view: &'a WorldView, intent: &str, cleared: Option<&Cleared>) -> Self {
+    /// clearance (G1 or `mature::narration_clearance`) and `level` its
+    /// effective Detail Level now: the names of the past Turns are read
+    /// through `mature::turn_text` with both, as the `recent` block shows
+    /// those Turns.
+    pub fn new(
+        view: &'a WorldView,
+        intent: &str,
+        cleared: Option<&Cleared>,
+        level: DetailLevel,
+    ) -> Self {
         let pc = view
             .entities
             .iter()
@@ -254,7 +262,7 @@ impl<'a> Retrieval<'a> {
         let mut named_text = vec![intent.to_owned()];
         let turns = &view.recent_turns;
         for turn in &turns[turns.len().saturating_sub(NAMED_TURNS)..] {
-            match turn_text(turn, view.scene_open, cleared) {
+            match turn_text(turn, view.scene_open, cleared, level) {
                 TurnText::Full { intent, narration } => {
                     named_text.push(intent.to_owned());
                     named_text.extend(narration.map(str::to_owned));
@@ -532,8 +540,13 @@ pub(crate) fn one_line(text: &str) -> String {
 /// and its Narration, or its Neutral Line in place of both. A Turn with no
 /// Intent (the Opening Turn) has no Player line: the PC did nothing in it. `scene` is the open
 /// scene of the prompt's state and `cleared` the prompt's clearance.
-fn render_turn(turn: &StoredTurn, scene: Option<TurnId>, cleared: Option<&Cleared>) -> String {
-    let (intent, narration) = match turn_text(turn, scene, cleared) {
+fn render_turn(
+    turn: &StoredTurn,
+    scene: Option<TurnId>,
+    cleared: Option<&Cleared>,
+    level: DetailLevel,
+) -> String {
+    let (intent, narration) = match turn_text(turn, scene, cleared, level) {
         TurnText::Line(line) => return format!("Turn {}\n{}\n", turn.seq, one_line(&line)),
         TurnText::Full { intent, narration } => (intent, narration),
     };
@@ -566,9 +579,14 @@ fn render_turn(turn: &StoredTurn, scene: Option<TurnId>, cleared: Option<&Cleare
 /// Turn alone.
 ///
 /// Each Turn goes through `mature::turn_text`: a Turn committed with
-/// `intimate` is shown in full only with `cleared` and inside the open
-/// scene of `view` (data shape 3.6).
-pub(crate) fn turns_window(view: &WorldView, before_seq: u64, cleared: Option<&Cleared>) -> String {
+/// `intimate` is shown in full only with `cleared`, inside the open scene of
+/// `view`, and when it was told at `level` or below (data shape 3.6).
+pub(crate) fn turns_window(
+    view: &WorldView,
+    before_seq: u64,
+    cleared: Option<&Cleared>,
+    level: DetailLevel,
+) -> String {
     let past: Vec<&StoredTurn> = view
         .recent_turns
         .iter()
@@ -586,7 +604,7 @@ pub(crate) fn turns_window(view: &WorldView, before_seq: u64, cleared: Option<&C
         let rendered: String = past
             .iter()
             .filter(|t| t.seq >= first)
-            .map(|t| render_turn(t, view.scene_open, cleared))
+            .map(|t| render_turn(t, view.scene_open, cleared, level))
             .collect();
         if rendered.len() <= TURNS_WINDOW_MAX_CHARS || first >= last {
             return if rendered.is_empty() {

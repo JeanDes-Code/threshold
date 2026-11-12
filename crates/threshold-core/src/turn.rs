@@ -135,6 +135,9 @@ pub enum TurnError {
     /// (`mature::confirmable`): the same error for a minor, a character the
     /// PC does not know and anything that is no character.
     NotConfirmable,
+    /// The `op_id` already names a Turn of another kind (final review minor
+    /// 5): that Turn is never narrated or changed through this command.
+    OpIdTaken,
 }
 
 impl fmt::Display for TurnError {
@@ -166,6 +169,9 @@ impl fmt::Display for TurnError {
             Self::NothingToFade => f.write_str("nothing to fade"),
             Self::Faded => f.write_str("this Turn was faded: it is not narrated again"),
             Self::NotConfirmable => f.write_str(crate::view::CANNOT_CONFIRM),
+            Self::OpIdTaken => {
+                f.write_str("this operation id already names a Turn of another kind")
+            }
         }
     }
 }
@@ -221,8 +227,9 @@ fn always_faded() -> bool {
 
 /// What one narration call gave.
 enum Narrated {
-    /// The Narration, read in full.
-    Read(String),
+    /// The Narration, read in full, and the level it was told at
+    /// (`mature::told_level`: `None` for a Turn told plain).
+    Read(String, Option<DetailLevel>),
     /// The Player faded it: no text is kept.
     Faded,
 }
@@ -388,7 +395,7 @@ impl Engine {
         ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
         let start = Instant::now();
-        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+        if let Some(stored) = self.stored_turn(&op_id, TurnKind::Play)? {
             return self.stored_outcome(stored, ctl);
         }
         self.stored_refusal(&op_id)?;
@@ -437,7 +444,7 @@ impl Engine {
         ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
         let start = Instant::now();
-        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+        if let Some(stored) = self.stored_turn(&op_id, TurnKind::Correction)? {
             return self.stored_outcome(stored, ctl);
         }
         self.stored_refusal(&op_id)?;
@@ -531,7 +538,17 @@ impl Engine {
             faded: &always_faded,
         };
         if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
-            let latest = self.store.turns(self.campaign)?.last().map(|t| t.id) == Some(stored.id);
+            // The latest Turn that tells: an OOC Turn the Player committed
+            // after the stream (a confirmation, a level) does not stop a
+            // late fade (ADR 0011, final review minor 8).
+            let latest = self
+                .store
+                .turns(self.campaign)?
+                .iter()
+                .rev()
+                .find(|t| t.record.kind.tells())
+                .map(|t| t.id)
+                == Some(stored.id);
             if latest && !stored.faded && stored.record.kind.fades() {
                 let narration = self.after_fade(stored.id, &op_id)?;
                 return Ok(TurnOutcome {
@@ -587,7 +604,7 @@ impl Engine {
         ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
         let start = Instant::now();
-        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+        if let Some(stored) = self.stored_turn(&op_id, TurnKind::Closing)? {
             return self.stored_outcome(stored, ctl);
         }
         let view = self.store.snapshot(self.campaign)?;
@@ -639,7 +656,7 @@ impl Engine {
         let ctl = &mut ctl;
         let start = Instant::now();
         let op_id: OpId = BEGIN_OP_ID.to_owned();
-        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+        if let Some(stored) = self.stored_turn(&op_id, TurnKind::Opening)? {
             return self.stored_outcome(stored, ctl);
         }
         if self
@@ -662,7 +679,7 @@ impl Engine {
         };
         let mut timings = Timings::default();
         let Some(turn_id) = self.commit_logged(record, Vec::new(), &mut timings)? else {
-            return self.duplicate_outcome(&op_id, ctl);
+            return self.duplicate_outcome(&op_id, TurnKind::Opening, ctl);
         };
         let view_after = self.store.snapshot(self.campaign)?;
         let step = Instant::now();
@@ -734,10 +751,28 @@ impl Engine {
         if stored.faded {
             return Err(TurnError::Faded);
         }
+        // A Setup or an OOC Turn tells nothing: it is never narrated (final
+        // review minor 4).
+        if !stored.record.kind.tells() {
+            return Err(StoreError::Invalid(
+                "this kind of Turn has no Narration to tell again".into(),
+            )
+            .into());
+        }
         let view_after = self.store.snapshot_before(self.campaign, stored.seq + 1)?;
         // The screens read the story against the state now, so the stream
         // filter does too.
         let now = self.store.snapshot(self.campaign)?;
+        // At `excluded` an intimate Turn committed earlier is not told
+        // again: it is its Neutral Line, with no narration call and no
+        // change to its row (final review minor 3). A retry of the same op
+        // comes here too (`stored_outcome`).
+        if now.detail == DetailLevel::Excluded
+            && stored.record.kind.has_intent()
+            && mature::stored_intimate(&stored.record.proposal_json)
+        {
+            return Ok(mature::neutral_line(&stored).unwrap_or_default());
+        }
         if stored.record.kind == TurnKind::Opening {
             let op_id = &stored.record.op_id;
             let narration = self.narrate_opening(op_id, &view_after, &now, ctl)?;
@@ -779,8 +814,8 @@ impl Engine {
             ctl,
         )?;
         match narrated {
-            Narrated::Read(narration) => {
-                self.store.set_narration(turn, &narration)?;
+            Narrated::Read(narration, told) => {
+                self.store.set_told_narration(turn, &narration, told)?;
                 Ok(narration)
             }
             Narrated::Faded => self.after_fade(turn, &stored.record.op_id),
@@ -795,11 +830,7 @@ impl Engine {
     /// character already confirmed, or a second call with the same `op_id`,
     /// commits nothing. It never changes an age. No model call.
     pub fn confirm_age(&mut self, op_id: OpId, entity: EntityId) -> Result<(), TurnError> {
-        if self
-            .store
-            .turn_by_campaign_op(self.campaign, &op_id)?
-            .is_some()
-        {
+        if self.stored_turn(&op_id, TurnKind::Ooc)?.is_some() {
             return Ok(());
         }
         let view = self.store.snapshot(self.campaign)?;
@@ -828,11 +859,7 @@ impl Engine {
     /// (`mature::told`). The level the Campaign already has, or a second
     /// call with the same `op_id`, commits nothing. No model call.
     pub fn set_detail_level(&mut self, op_id: OpId, level: DetailLevel) -> Result<(), TurnError> {
-        if self
-            .store
-            .turn_by_campaign_op(self.campaign, &op_id)?
-            .is_some()
-        {
+        if self.stored_turn(&op_id, TurnKind::Ooc)?.is_some() {
             return Ok(());
         }
         let view = self.store.snapshot(self.campaign)?;
@@ -994,17 +1021,32 @@ impl Engine {
         }
     }
 
-    /// The outcome of the Turn a Commit found already stored under `op_id`.
+    /// The outcome of the Turn a Commit found already stored under `op_id`,
+    /// which must be of `kind`.
     fn duplicate_outcome(
         &mut self,
         op_id: &OpId,
+        kind: TurnKind,
         ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
         let stored = self
-            .store
-            .turn_by_campaign_op(self.campaign, op_id)?
+            .stored_turn(op_id, kind)?
             .ok_or_else(|| StoreError::Invalid("duplicate op without a turn".into()))?;
         self.stored_outcome(stored, ctl)
+    }
+
+    /// The Turn stored under `op_id`, when one is. A Turn of a kind other
+    /// than `kind` is `OpIdTaken` (final review minor 5): a command never
+    /// narrates, tells again or changes a Turn of another kind that happens
+    /// to hold its `op_id`.
+    fn stored_turn(&self, op_id: &str, kind: TurnKind) -> Result<Option<StoredTurn>, TurnError> {
+        match self
+            .store
+            .turn_by_campaign_op(self.campaign, &op_id.to_owned())?
+        {
+            Some(turn) if turn.record.kind != kind => Err(TurnError::OpIdTaken),
+            found => Ok(found),
+        }
     }
 
     /// Commits the planned ops (after `head`), then narrates.
@@ -1019,11 +1061,12 @@ impl Engine {
     ) -> Result<TurnOutcome, TurnError> {
         let op_id = record.op_id.clone();
         let intent = record.intent.clone();
-        let closing = record.kind == TurnKind::Closing;
+        let kind = record.kind;
+        let closing = kind == TurnKind::Closing;
         let mut ops = head;
         ops.extend(planned.ops);
         let Some(turn_id) = self.commit_logged(record, ops.clone(), &mut timings)? else {
-            return self.duplicate_outcome(&op_id, ctl);
+            return self.duplicate_outcome(&op_id, kind, ctl);
         };
 
         let view_after = self.store.snapshot(self.campaign)?;
@@ -1047,8 +1090,8 @@ impl Engine {
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
         let (narration, faded) = match narrated {
-            Narrated::Read(narration) => {
-                self.store.set_narration(turn_id, &narration)?;
+            Narrated::Read(narration, told) => {
+                self.store.set_told_narration(turn_id, &narration, told)?;
                 (narration, false)
             }
             Narrated::Faded => (self.after_fade(turn_id, &op_id)?, true),
@@ -1118,6 +1161,9 @@ impl Engine {
         }
         let told = mature::told(view_after, now, committed.intimate, &self.packs);
         let cleared = mature::narration_clearance(view_after, now);
+        // The level past Turns are read at (final review M3): a scene Turn
+        // told above it is its Neutral Line in this prompt.
+        let level = mature::reading_level(view_after, now, &self.packs);
         // One rule (review minor, 2026-11-12): a Turn told as intimate, at
         // any level, gets the scene cap, the Turn that ends its scene and a
         // `renarrate` included; a Closing Turn gets the closing cap.
@@ -1138,6 +1184,7 @@ impl Engine {
             &told,
             cleared.as_ref(),
             committed.closing,
+            level,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
@@ -1172,11 +1219,12 @@ impl Engine {
         // last full sentence (data shape 3.10), without a last line that is
         // a speech mark cut short (review B2): the reader of a stored
         // Narration would show its tag as prose.
-        Ok(Narrated::Read(if cut {
+        let text = if cut {
             stored_cut(&narration).to_owned()
         } else {
             narration
-        }))
+        };
+        Ok(Narrated::Read(text, mature::told_level(&told)))
     }
 
     /// The opening narration call: `opening_prompt` on the state after the
@@ -1263,7 +1311,7 @@ impl Engine {
                 (ctx, schema)
             }
             Ask::Closing { .. } => {
-                let ctx = closing_context(view, cleared);
+                let ctx = closing_context(view, &self.packs, cleared);
                 let schema = closing_schema_for(&ctx.handles);
                 (ctx, schema)
             }

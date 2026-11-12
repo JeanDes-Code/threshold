@@ -450,7 +450,7 @@ pub struct DetailView { pub stored: DetailLevel, pub effective: DetailLevel }
 pub struct Act { /* as today */ pub faded: Option<String> }           // Some: `intent` is empty, the Journal shows the line
 pub struct RefusalView { pub kind: RefusalKind /* excluded | adults_only | unwilling */, pub text: String,
                          pub to_confirm: Vec<NameRef> }
-pub fn refusal(sight: &PcSight, kind: RefusalKind, blocked: &[EntityId]) -> RefusalView;
+pub fn refusal(sight: &PcSight, kind: RefusalKind, confirm: &[EntityId]) -> RefusalView;   // confirm: `mature::to_confirm`, never who blocked
 ```
 
 `SceneState` and `TurnBody` are the seam that the play-experience shape left (3.9). They exist in `view/mod.rs:142` and `:230` with one and two variants. They are the right seam: this page adds one variant to each and changes no field.
@@ -469,7 +469,7 @@ pub fn refusal(sight: &PcSight, kind: RefusalKind, blocked: &[EntityId]) -> Refu
 | Home, menu | the pack list: name, "explicit description: yes or no", recommended model, or the problem of a refused pack | pack text |
 | Seed review | the Detail Level select | no age rule changes with it |
 
-`to_confirm` lists a blocked character only when the PC perceives it here and `mature::confirmable` holds. A blocked character that is hidden or under 18 is in no list. The Player then reads the one fixed sentence of `adults_only` and no name.
+`to_confirm` reads what the PC perceives now, never who blocked the Turn (corrected after the final review, 2026-11-12, to match Task 8): it lists each character the PC perceives here and can name, for whom `mature::confirmable` holds and who has no Age Confirmation yet (`mature::to_confirm`, `Engine::refusal_view`). So the list is the same whatever hides behind a Refusal. A character who is hidden or under 18 is in no list. With an empty list, the Player reads the one fixed sentence of `adults_only` and no name.
 
 ### 3.12 Commands and the two buttons
 

@@ -34,7 +34,7 @@ Packs load once, at start. The system block never changes during a session, and 
 
 ### Where pack text may appear
 
-In a prompt, and in the prompt rows of the debug log, like any prompt (only `get_debug` reads them, in debug mode). Never on a Player screen, in the Journal, on a card, on the OOC sheet, in an error message, in a test snapshot, in an evaluation report, or in the repository. A refused pack shows its folder and a fixed sentence per rule (`PackRule::sentence`), with a file name or a `pack.toml` line number: never a line of the pack. The pack list shows a pack's `name` and `recommended_model` (one token of at most 80 characters, no space), which the author writes to be shown.
+In a prompt, and in the prompt rows of the debug log, like any prompt (only `get_debug` reads them, in debug mode). Never on a Player screen, in the Journal, on a card, on the OOC sheet, in an error message, in a test snapshot, in an evaluation report, or in the repository. A refused pack shows its folder and a fixed sentence per rule (`PackRule::sentence`), with a `pack.toml` line number, a fragment number (and, for rule 10, the line number in it) or a fixed key: never a line of the pack and never a file name (corrected after the final review, 2026-11-12). The pack list shows a pack's `name` and `recommended_model` (one token of at most 80 characters, no space), which the author writes to be shown.
 
 ## Considered options
 
@@ -64,3 +64,9 @@ What a pack line can still do: it is model input, so a model can still follow it
 ## Changed in Task 8 (2026-11-12): the level set in play
 
 The Player can change the Detail Level in play. `mature::told` now reads the lower of the level right after the Turn and the level now. A level lowered applies from the next narration call, a `renarrate` included. A level raised never reaches a Turn committed before it: a `renarrate` of an earlier scene Turn, or the same op sent again, is told at the level of its own Turn, so it never gets the explicit-only fragments (test `raising_the_level_tells_no_earlier_turn_explicit`). The next Turn after the change is told at the new level.
+
+## Changed after the final review (2026-11-12)
+
+- **Rule 10 is narrower.** It refused any fragment line that started with a heading word in any case, so ordinary notes such as "Time passes slowly." or "Now the rain stops." refused a pack. A line is now refused when it starts with a heading followed by a colon (any case), with a one-word heading in the very case the core writes it, alone or before a parenthesis or a number ("TIME", "NOW (dusk)", "Turn 3"), with a heading of several words in any case, or with a handle (`E12`). The refusal names the fragment and the line number and says that the line starts with a reserved heading word; never the line. `docs/content-pack-format.md` lists `context::CORE_HEADINGS`, and a test fails when the two differ.
+- **The level a Turn was told at is stored.** After the Player lowers the level inside an open scene, the explicit Narrations of the scene's earlier Turns stayed in the next prompts. `turn.told` (a nullable column of schema 4, added in place before version 4 shipped) records `implied` or `explicit` with each intimate Narration (`Store::set_told_narration`); `mature::turn_text` reads a scene Turn in full only when its told level is not above the effective level now (`mature::reading_level`), else its Neutral Line. A Turn with no recorded level counts as told `explicit`.
+- **A word list** (rule 14): see ADR 0008. Its terms reach no prompt.

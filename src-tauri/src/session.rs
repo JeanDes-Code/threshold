@@ -1015,7 +1015,8 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
         | TurnError::NoScene
         | TurnError::NothingToFade
         | TurnError::Faded
-        | TurnError::NotConfirmable => e.to_string(),
+        | TurnError::NotConfirmable
+        | TurnError::OpIdTaken => e.to_string(),
         TurnError::Model(error) => model_error(error),
         TurnError::NarrationFailed { error, .. } => format!(
             "the Turn is committed, but its narration failed: {}",

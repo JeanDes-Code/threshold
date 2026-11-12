@@ -46,26 +46,56 @@ pub enum TurnText<'a> {
 
 /// What a prompt (the `recent` block of both prompts) or the OOC sheet
 /// reads of `turn`. A Turn committed with `intimate` is read `Full` only by
-/// a prompt that holds a `Cleared` value and whose open scene (`scene`, the
-/// Turn that opened it) started at or before that Turn; every other reader
-/// gets its Neutral Line: a plain Turn after the scene, the OOC sheet, a
-/// prompt whose place is no longer cleared. Any other Turn is `Full`.
+/// a prompt that holds a `Cleared` value, whose open scene (`scene`, the
+/// Turn that opened it) started at or before that Turn, and whose
+/// effective Detail Level now (`level`) is not below the level the Turn was
+/// told at (`StoredTurn::told`; final review M3, 2026-11-12: after the
+/// Player lowers the level inside a scene, the scene's explicit Narrations
+/// leave the prompts). A Turn with no recorded level counts as told
+/// `explicit`. Every other reader gets its Neutral Line: a plain Turn after
+/// the scene, the OOC sheet, a prompt whose place is no longer cleared.
+/// Any other Turn is `Full`.
 pub fn turn_text<'a>(
     turn: &'a StoredTurn,
     scene: Option<TurnId>,
     cleared: Option<&Cleared>,
+    level: DetailLevel,
 ) -> TurnText<'a> {
     let full = TurnText::Full {
         intent: &turn.record.intent,
         narration: turn.narration.as_deref(),
     };
+    let readable = cleared.is_some()
+        && scene.is_some_and(|since| since <= turn.id)
+        && rank(turn.told.unwrap_or(DetailLevel::Explicit)) <= rank(level);
     match neutral_line(turn) {
         None => full,
         // A faded Turn is its line for every reader (ADR 0011).
         Some(line) if turn.faded => TurnText::Line(line),
-        Some(_) if cleared.is_some() && scene.is_some_and(|since| since <= turn.id) => full,
+        Some(_) if readable => full,
         Some(line) => TurnText::Line(line),
     }
+}
+
+/// The level a Narration is told at, for `Store::set_told_narration`:
+/// `implied` or `explicit` for an intimate Turn, `None` for a plain one.
+pub fn told_level(told: &Told) -> Option<DetailLevel> {
+    match told {
+        Told::Plain => None,
+        Told::Implied => Some(DetailLevel::Implied),
+        Told::Explicit(_) => Some(DetailLevel::Explicit),
+    }
+}
+
+/// The effective Detail Level a narration call reads past Turns at: the
+/// lower of the level right after the Turn and the level now, through the
+/// loaded packs (`effective`), as `told` reads it.
+pub fn reading_level(
+    view_after: &WorldView,
+    now: &WorldView,
+    packs: &[ContentPack],
+) -> DetailLevel {
+    effective(lower(view_after.detail, now.detail), packs)
 }
 
 /// The Neutral Line of `turn`, by kind: a Closing Turn, faded or not
@@ -166,12 +196,17 @@ pub fn told(
 /// The lower of two Detail Levels: `excluded`, then `implied`, then
 /// `explicit`.
 fn lower(a: DetailLevel, b: DetailLevel) -> DetailLevel {
-    let rank = |level| match level {
+    if rank(a) <= rank(b) { a } else { b }
+}
+
+/// The order of the Detail Levels: `excluded`, then `implied`, then
+/// `explicit`.
+fn rank(level: DetailLevel) -> u8 {
+    match level {
         DetailLevel::Excluded => 0,
         DetailLevel::Implied => 1,
         DetailLevel::Explicit => 2,
-    };
-    if rank(a) <= rank(b) { a } else { b }
+    }
 }
 
 /// True when a Turn's stored `proposal_json` holds a proposal committed with

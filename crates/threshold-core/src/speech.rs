@@ -135,6 +135,22 @@ pub fn leading_tag(line: &str) -> Option<(&str, &str)> {
         .then_some((name, said))
 }
 
+/// The tag and the text after its colon of any line, as the stream filter
+/// reads them (`TagFilter`): the text before the line's first colon, when
+/// it holds fewer than `TAG_HOLD_CHARS` characters, trimmed, and the text
+/// after the colon with its leading blanks dropped. Whatever follows the
+/// colon: any quote form, emphasis marks, a dash, a stage note of any
+/// length, or a quote that closes on a later line (final review minor 1,
+/// 2026-11-12). The readers of a stored Narration drop such a tag exactly
+/// when the stream does: when it is a name the PC cannot use
+/// (`world::pc_sight`), and never count it as a name the PC read
+/// (`world::story_names`). `None` with no colon, or with a colon too far
+/// for the stream to hold the text before it.
+pub fn line_tag(line: &str) -> Option<(&str, &str)> {
+    let (name, said) = line.split_once(':')?;
+    (name.chars().count() < TAG_HOLD_CHARS).then(|| (name.trim(), said.trim_start()))
+}
+
 fn mark(line: &str) -> Option<Line<'_>> {
     let (name, said) = tag(line)?;
     let said = said.trim();

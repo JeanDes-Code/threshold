@@ -42,7 +42,7 @@ pub use scene::{
 };
 pub use text::{
     CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, effective, neutral_line,
-    stored_intimacy, stored_intimate, told, turn_text,
+    reading_level, stored_intimacy, stored_intimate, told, told_level, turn_text,
 };
 pub use words::{Floor, ROMANCE_WORDS, folded, intimacy_floor, romance_floor};
 

@@ -1375,3 +1375,133 @@ fn the_sticky_tag_keeps_the_strongest_value() {
         "{refused:?}"
     );
 }
+
+// --- Final review (2026-11-12): minors 3, 4, 5 and the late fade ------------
+
+/// Minor 3: at `excluded`, `renarrate` of an intimate Turn committed
+/// earlier, and a retry of an op whose Narration is missing, make no
+/// narration call: each gives the Turn's Neutral Line, and the row keeps
+/// its text.
+#[test]
+fn at_excluded_an_earlier_intimate_turn_is_its_neutral_line_with_no_call() {
+    let mut rig = Rig::new("excluded-renarrate");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    // t2: committed, its Narration fails (no narration is queued).
+    rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    let failed = rig
+        .engine()
+        .play_turn("t2".into(), "I stay with Brann.", &mut |_| {});
+    let Err(TurnError::NarrationFailed { turn_id: t2, .. }) = failed else {
+        panic!("{failed:?}");
+    };
+    rig.engine()
+        .set_detail_level("off".into(), DetailLevel::Excluded)
+        .unwrap();
+    let calls = rig.calls(CallKind::Narrate).len();
+    let again = rig.engine().renarrate(t1, &mut |_| {}).unwrap();
+    assert_eq!(again, neutral_line(&rig.turn(t1)).unwrap());
+    assert_eq!(rig.turn(t1).narration.as_deref(), Some("Brann nods."));
+    let retry = rig
+        .engine()
+        .play_turn("t2".into(), "I stay with Brann.", &mut |_| {})
+        .unwrap();
+    assert_eq!(retry.narration, neutral_line(&rig.turn(t2)).unwrap());
+    assert_eq!(
+        rig.calls(CallKind::Narrate).len(),
+        calls,
+        "no narration call"
+    );
+}
+
+/// Minor 4: `renarrate` refuses a Turn of a kind that tells nothing (an
+/// OOC Turn, the Setup Turn), with no model call, and `set_narration`
+/// refuses those kinds too.
+#[test]
+fn renarrate_and_set_narration_refuse_a_turn_that_tells_nothing() {
+    let mut rig = Rig::new("tells-nothing");
+    rig.engine()
+        .set_detail_level("level".into(), DetailLevel::Explicit)
+        .unwrap();
+    let ooc = rig
+        .store()
+        .turn_by_campaign_op(rig.campaign, &"level".to_owned())
+        .unwrap()
+        .unwrap();
+    assert_eq!(ooc.record.kind, TurnKind::Ooc);
+    let setup = rig
+        .store()
+        .turns(rig.campaign)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.record.kind == TurnKind::Setup)
+        .unwrap();
+    for turn in [ooc.id, setup.id] {
+        assert!(rig.engine().renarrate(turn, &mut |_| {}).is_err());
+    }
+    assert!(rig.calls(CallKind::Narrate).is_empty());
+    drop(rig.engine.take());
+    let mut store = Store::open(&rig.path).unwrap();
+    for turn in [ooc.id, setup.id] {
+        assert!(store.set_narration(turn, "Text.").is_err());
+        assert_eq!(store.turn(turn).unwrap().unwrap().narration, None);
+    }
+}
+
+/// Minor 5: an op id of one kind of Turn is never taken by a command of
+/// another kind. `play_turn` with the op id of an OOC Turn makes no model
+/// call and narrates nothing; `confirm_age` and `set_detail_level` with the
+/// op id of a Play Turn give a plain error and change nothing.
+#[test]
+fn an_op_id_of_another_kind_is_refused() {
+    let mut rig = Rig::new("op-kinds");
+    rig.engine()
+        .set_detail_level("ooc-op".into(), DetailLevel::Explicit)
+        .unwrap();
+    let err = rig
+        .engine()
+        .play_turn("ooc-op".into(), "I wait.", &mut |_| {})
+        .unwrap_err();
+    assert!(matches!(err, TurnError::OpIdTaken), "{err:?}");
+    assert!(rig.gm.calls().is_empty(), "no model call");
+    let ooc = rig
+        .store()
+        .turn_by_campaign_op(rig.campaign, &"ooc-op".to_owned())
+        .unwrap()
+        .unwrap();
+    assert_eq!(ooc.narration, None);
+
+    let p = rig.plain();
+    rig.played("play-op", &p, "Dusk falls.");
+    let before = rig.view();
+    let brann = rig.brann;
+    for err in [
+        rig.engine()
+            .confirm_age("play-op".into(), brann)
+            .unwrap_err(),
+        rig.engine()
+            .set_detail_level("play-op".into(), DetailLevel::Excluded)
+            .unwrap_err(),
+    ] {
+        assert!(matches!(err, TurnError::OpIdTaken), "{err:?}");
+        assert!(!err.to_string().is_empty());
+    }
+    assert_eq!(rig.view().detail, before.detail);
+    assert_eq!(rig.view().turn_seq, before.turn_seq);
+}
+
+/// ADR 0011 (final review minor 8): a late fade fades the latest Turn that
+/// tells, even when an OOC Turn (a level, a confirmation) came after it.
+#[test]
+fn a_late_fade_skips_an_ooc_turn_after_the_streamed_turn() {
+    let mut rig = Rig::new("late-fade-ooc");
+    let p = rig.plain();
+    let t1 = rig.played("t1", &p, "Dusk falls.");
+    rig.engine()
+        .set_detail_level("level".into(), DetailLevel::Explicit)
+        .unwrap();
+    let outcome = rig.engine().fade("t1".into()).unwrap();
+    assert!(outcome.faded);
+    assert!(rig.turn(t1).faded);
+    assert_eq!(rig.turn(t1).narration, None);
+}

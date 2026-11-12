@@ -108,7 +108,11 @@ pub fn proposal_prompt(
 /// The handles that `proposal_prompt(view, _, intent)` shows. Packs never
 /// change them.
 pub fn handle_context(view: &crate::store::WorldView, intent: &str) -> HandleContext {
-    handles(&Retrieval::new(view, intent, None), intent, false)
+    handles(
+        &Retrieval::new(view, intent, None, DetailLevel::Excluded),
+        intent,
+        false,
+    )
 }
 
 /// The proposal prompt and its handles. `cleared` is G1's value
@@ -126,7 +130,7 @@ pub fn proposal_context(
     intent: &str,
     cleared: Option<&Cleared>,
 ) -> ProposalContext {
-    let r = Retrieval::new(view, intent, cleared);
+    let r = Retrieval::new(view, intent, cleared, effective(view.detail, packs));
     let prompt = Prompt {
         system: system(packs),
         stable: format!(
@@ -148,12 +152,16 @@ pub fn proposal_context(
 /// and scene blocks of any Turn, and a `recent` block whose Intent is
 /// `CLOSING_ASK`. `cleared` is G1's value, as for a Play Turn: with `Some`,
 /// the scene line opens `recent` and the Turns of the scene are shown in
-/// full. The schema is `closing_schema_for` of the handles.
+/// full. The schema is `closing_schema_for` of the handles. `packs` gives
+/// the effective Detail Level only (`mature::effective`): the closing
+/// prompt holds no pack fragment.
 pub fn closing_context(
     view: &crate::store::WorldView,
+    packs: &[ContentPack],
     cleared: Option<&Cleared>,
 ) -> ProposalContext {
-    let r = Retrieval::new(view, "", cleared);
+    let level = effective(view.detail, packs);
+    let r = Retrieval::new(view, "", cleared, level);
     let prompt = Prompt {
         system: PROPOSAL_RULES.to_owned(),
         stable: format!(
@@ -162,7 +170,7 @@ pub fn closing_context(
             names_block(r.view, NamesAudience::Gm)
         ),
         scene: scene(&r),
-        recent: recent_with(&r, "", CLOSING_ASK, cleared, &[]),
+        recent: recent_with(&r, "", CLOSING_ASK, cleared, &[], level),
     };
     ProposalContext {
         prompt,
@@ -170,9 +178,9 @@ pub fn closing_context(
     }
 }
 
-/// The prompt of `closing_context`.
+/// The prompt of `closing_context`, with no pack loaded.
 pub fn closing_prompt(view: &crate::store::WorldView, cleared: Option<&Cleared>) -> Prompt {
-    closing_context(view, cleared).prompt
+    closing_context(view, &[], cleared).prompt
 }
 
 fn handles(r: &Retrieval<'_>, intent: &str, scene: bool) -> HandleContext {
@@ -456,7 +464,8 @@ fn recent(
     packs: &[ContentPack],
 ) -> String {
     let ask = format!("INTENT\n{}\n", intent.trim());
-    recent_with(r, intent, &ask, cleared, packs)
+    let level = effective(r.view.detail, packs);
+    recent_with(r, intent, &ask, cleared, packs, level)
 }
 
 /// The `recent` block: past Turns, the clock, the offered items, then `ask`
@@ -468,6 +477,7 @@ fn recent_with(
     ask: &str,
     cleared: Option<&Cleared>,
     packs: &[ContentPack],
+    level: DetailLevel,
 ) -> String {
     let mut head = format!("NOW\nMinute {}\n", r.view.clock_min);
     if !r.mentioned.is_empty() {
@@ -504,6 +514,6 @@ fn recent_with(
     });
     format!(
         "{scene_head}{}{head}{tail}",
-        turns_window(r.view, r.view.turn_seq + 1, cleared)
+        turns_window(r.view, r.view.turn_seq + 1, cleared, level)
     )
 }
