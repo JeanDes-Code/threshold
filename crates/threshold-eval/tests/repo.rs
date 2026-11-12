@@ -312,10 +312,18 @@ fn the_scan_names_a_file_whose_path_holds_a_colon() {
     let pack = base.join("pack");
     std::fs::create_dir_all(&pack).unwrap();
     std::fs::write(pack.join("fragment.md"), format!("{line}\n")).unwrap();
+    // The scan's own git calls must read the small repository too: in a
+    // hook of a linked worktree, git exports GIT_DIR and GIT_INDEX_FILE,
+    // and the scan then read the real index.
     let out = Command::new("sh")
         .arg(root().join("scripts/qa/private_text_scan.sh"))
         .env("THRESHOLD_PRIVATE_PACK", &pack)
         .current_dir(&repo)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_PREFIX")
+        .env_remove("GIT_COMMON_DIR")
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stderr).into_owned();
