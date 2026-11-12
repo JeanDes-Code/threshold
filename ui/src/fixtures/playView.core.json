@@ -111,6 +111,7 @@
         ],
         "kind": "narration"
       },
+      "found": null,
       "intent": "",
       "kind": "opening",
       "reverted": false,
@@ -141,6 +142,7 @@
         ],
         "kind": "narration"
       },
+      "found": null,
       "intent": "I wait by the gate.",
       "kind": "play",
       "reverted": false,
@@ -176,6 +178,7 @@
         ],
         "kind": "narration"
       },
+      "found": null,
       "intent": "I ask Brann about the road.",
       "kind": "play",
       "reverted": false,
@@ -226,6 +229,7 @@
         ],
         "kind": "narration"
       },
+      "found": null,
       "intent": "I greet Orsel.",
       "kind": "play",
       "reverted": false,
@@ -234,13 +238,48 @@
     },
     {
       "body": {
-        "kind": "missing"
+        "blocks": [
+          {
+            "kind": "prose",
+            "parts": [
+              {
+                "kind": "text",
+                "text": "You read the board."
+              }
+            ]
+          }
+        ],
+        "kind": "narration"
       },
-      "intent": "I wait.",
+      "found": {
+        "items": [
+          {
+            "line": "Two copper at the gate.",
+            "title": "Carts"
+          },
+          {
+            "line": "",
+            "title": "Walkers"
+          }
+        ],
+        "source": "the toll board"
+      },
+      "intent": "I read the toll board.",
       "kind": "play",
       "reverted": false,
       "roll": null,
       "turn_id": 7
+    },
+    {
+      "body": {
+        "kind": "missing"
+      },
+      "found": null,
+      "intent": "I wait.",
+      "kind": "play",
+      "reverted": false,
+      "roll": null,
+      "turn_id": 8
     }
   ],
   "you": {

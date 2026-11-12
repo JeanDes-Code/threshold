@@ -115,6 +115,7 @@ pub struct DecisionProposal {
     pub verdict: Verdict,                   // allowed | impossible | check
     #[serde(default)] pub move_to: Option<Handle>,     // E* of a known place, or null; required in the schema (section 11)
     #[serde(default)] pub settles: Option<Settle>,     // none, or the one Open Item the Intent names and its outcome; required in the schema while an item is offered (section 11)
+    #[serde(default)] pub finds: Finds,                // what the PC finds: nothing, or a source and 1 to 5 items; required in the Play schema (section 16)
     #[serde(default)] pub blockers: Vec<Handle>,       // F*, max 2: what stands in the PC's way
     pub check: Option<CheckDraft>,                      // present iff verdict == check
     #[serde(default)] pub reactions: Vec<Reaction>,    // max 2
@@ -416,3 +417,23 @@ ADR 0001 has the measurements. In both prompts the past Turns open the `recent` 
 - A character's card shows its place as its "Where" line ("At The Copper Kettle.", or the departure text), not among its facts (`EntityCard::whereabouts`).
 - A Check whose stakes are both empty gives the narrator `context::NO_STAKE_LINE` after its result: the result is about what the Intent tries to do.
 
+
+## 16. What the PC finds (2026-11-12)
+
+ADR 0007 has the decision. The shape:
+
+```rust
+pub struct DecisionProposal { /* … */ #[serde(default)] pub finds: Finds, /* … */ }   // required in the Play schema; parse refuses a Play proposal without it
+pub struct Finds     { pub what: FindKind, pub source: String, pub items: Vec<FoundItem> } // source 1..=40 chars with found, empty with nothing; items 1..=5 with found
+pub enum   FindKind  { Nothing, Found }                                                 // nothing first
+pub struct FoundItem { pub title: String, pub line: String }                            // title 1..=60 chars, line <= 140
+```
+
+- **Settle and validate.** `checks::settle` drops an item with no title or over its limits, items past the fifth, then turns a value that `Finds::problem` still refuses into `nothing`; on a Turn whose tag is `advance` or `intimate` it drops `finds` whole (the gate reads handles only). `checks::validate` rejects the same shapes. `checks::settle_closing` drops `finds`.
+- **The record.** `checks::found(valid, roll, view)` gives the finds when the verdict lets the act happen (allowed, or a won Check), after `context::guard_found` (the guard of `guard_events`: an item that holds a secret value or names an entity the PC must not hear of goes; a source that does drops all). `turn::resolve` writes it under `found` in the Turn's `proposal_json`, next to `roll` and `wait_asked`. No ledger op, no fact, no projection column. `turn::stored_found(proposal_json)` is the one reader; an old record reads `None`.
+- **The narrator.** `context::found_lines` adds the outcome lines `- What the PC finds (<source>). Tell what it shows, briefly; add no other entry:` and `  - "<title>": <line>` to THIS TURN, after the engine's other outcome lines. `renarrate` reads the record.
+- **Later prompts.** `context::render_turn` adds `Found: <source>: "<title>": <line>; …` after a past Turn's Narration, only on the `Full` reading of `mature::turn_text`.
+- **`PcSight`.** `SightTurn::found` is the record of a story Turn that stands, is not faded and is read in full (`line` is `None`); `None` on any other Turn.
+- **Screens.** `StoryTurn::found: Option<FoundCard>` (`FoundCard { source, items: Vec<FoundRow { title, line }> }`): the Play story shows it under the Narration as a small card list, and a click on a row puts `I look closer at "<title>".` in the Intent field without sending it. `SceneEntry::found: Vec<FoundEntry { turn_id, source, items }>`: the Journal's Scene entry lists it under "Found". The OOC sheet's RECENT TURNS gives each Turn's `Found:` line, in the words of the prompts.
+
+The cost if this is wrong: the GM forgets found content once its Turn leaves the window (3 to 5 Turns), and may invent other content when the Player comes back to it. If play shows that, the next step is a fact the core builds from an item, on a slot of the source entity; it needs its own decision.

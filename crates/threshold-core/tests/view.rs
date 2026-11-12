@@ -1009,6 +1009,7 @@ fn journal_view_shows_pc_knowledge_only() {
             "acts",
             "clock_from",
             "clock_to",
+            "found",
             "learned",
             "place",
             "present",
@@ -1177,6 +1178,19 @@ fn play_view_json_matches_the_ui_types() {
     let mut w = HiddenWorld::new();
     let said = w.play("I greet Orsel.", &observe(), 0, vec![]);
     w.narrate(said, "Orsel: \"You are late.\"\n\nBrann laughs at Orsel.");
+    // A Turn that found something (ADR 0007, 2026-11-12): the story shows
+    // its card, so the UI fixture needs the shape.
+    let found = serde_json::json!({"what": "found", "source": "the toll board", "items": [
+        {"title": "Carts", "line": "Two copper at the gate."},
+        {"title": "Walkers", "line": ""},
+    ]});
+    let read = w.play(
+        "I read the toll board.",
+        &serde_json::json!({"proposal": {"action": "observe", "verdict": "allowed"}, "reactions": [], "events": [], "roll": null, "found": found}).to_string(),
+        0,
+        vec![],
+    );
+    w.narrate(read, "You read the board.");
     w.play("I wait.", &observe(), 0, vec![]);
     let json = serde_json::to_value(view_of(&w)).unwrap();
 
@@ -1219,7 +1233,15 @@ fn play_view_json_matches_the_ui_types() {
     assert_eq!(story.last().unwrap()["body"]["kind"], "missing");
     assert_eq!(
         keys(&story[0]),
-        ["body", "intent", "kind", "reverted", "roll", "turn_id"]
+        [
+            "body", "found", "intent", "kind", "reverted", "roll", "turn_id"
+        ]
+    );
+    let card = &story.iter().find(|t| t["turn_id"] == read).unwrap()["found"];
+    assert_eq!(card["source"], "the toll board");
+    assert_eq!(
+        card["items"][0],
+        serde_json::json!({"title": "Carts", "line": "Two copper at the gate."})
     );
 
     let path =

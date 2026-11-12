@@ -643,3 +643,151 @@ fn a_rejected_finds_never_commits() {
     );
     assert_eq!(found_of(&engine, outcome.unwrap().turn_id), None);
 }
+
+// --- Screens ------------------------------------------------------------------
+
+mod screens {
+    use super::{item, notices};
+    use crate::support::hidden::*;
+    use serde_json::json;
+    use threshold_core::{
+        domain::{ActionKind, FindKind, Finds, Intimacy, Verdict},
+        player::Marks,
+        store::TurnId,
+        view::{FoundCard, FoundRow, journal_view, ooc_sheet, play_view},
+    };
+
+    /// A `proposal_json` as the Engine stores a Turn that found `found`.
+    fn finding(found: &Finds, intimacy: Intimacy) -> String {
+        let mut p = crate::support::proposal(Verdict::Allowed);
+        p.action = ActionKind::Observe;
+        p.intimacy = intimacy;
+        p.finds = found.clone();
+        json!({ "proposal": p, "reactions": [], "events": [], "roll": null, "found": found })
+            .to_string()
+    }
+
+    fn card() -> FoundCard {
+        FoundCard {
+            source: "the notice board".into(),
+            items: vec![
+                FoundRow {
+                    title: "Court sits on market day".into(),
+                    line: "The magistrate hears small claims from the third bell.".into(),
+                },
+                FoundRow {
+                    title: "Lost: a grey mule".into(),
+                    line: "Answers to Pell. Reward at the toll house.".into(),
+                },
+            ],
+        }
+    }
+
+    fn read(w: &mut HiddenWorld) -> TurnId {
+        let turn = w.play(
+            "I read the notices on the board.",
+            &finding(&notices(), Intimacy::None),
+            5,
+            vec![],
+        );
+        w.narrate(turn, "You read the board by the gate.");
+        turn
+    }
+
+    #[test]
+    fn the_story_shows_what_the_pc_found_under_its_narration() {
+        let mut w = HiddenWorld::new();
+        let turn = read(&mut w);
+        let view = play_view(&w.sight(), &Marks::default());
+        for story in &view.story {
+            if story.turn_id == turn {
+                assert_eq!(story.found, Some(card()));
+            } else {
+                assert_eq!(story.found, None, "turn {}", story.turn_id);
+            }
+        }
+    }
+
+    #[test]
+    fn a_faded_reverted_or_unread_turn_shows_no_found_card() {
+        let mut w = HiddenWorld::new();
+        let faded = read(&mut w);
+        w.store.set_faded(faded).unwrap();
+        let reverted = read(&mut w);
+        w.revert(reverted, "I look at the gate instead.", 0);
+        // A Turn read as its Neutral Line. The core keeps no finds on such a
+        // Turn; a record from elsewhere still shows nothing.
+        let intimate = w.play(
+            "I read the notices on the board.",
+            &finding(&notices(), Intimacy::Intimate),
+            5,
+            vec![],
+        );
+        w.narrate(intimate, "You read the board.");
+        let sight = w.sight();
+        for turn in [faded, reverted, intimate] {
+            let seen = sight.story.iter().find(|t| t.turn == turn).unwrap();
+            assert_eq!(seen.found, None, "turn {turn}");
+        }
+        let view = play_view(&sight, &Marks::default());
+        assert!(view.story.iter().all(|t| t.found.is_none()));
+        let journal = journal_view(&sight, &Marks::default());
+        assert!(journal.scenes.iter().all(|s| s.found.is_empty()));
+        assert!(!ooc_sheet(&sight).contains("grey mule"));
+    }
+
+    #[test]
+    fn the_journal_lists_what_the_pc_found_in_its_scene() {
+        let mut w = HiddenWorld::new();
+        let turn = read(&mut w);
+        let journal = journal_view(&w.sight(), &Marks::default());
+        let scene = journal
+            .scenes
+            .iter()
+            .find(|s| s.acts.iter().any(|a| a.turn_id == turn))
+            .expect("the Scene of the Turn");
+        assert_eq!(scene.found.len(), 1);
+        assert_eq!(scene.found[0].turn_id, turn);
+        assert_eq!(scene.found[0].source, card().source);
+        assert_eq!(scene.found[0].items, card().items);
+        // Not a machine sentence among what the PC learned.
+        assert!(scene.learned.iter().all(|l| !l.text.contains("mule")));
+    }
+
+    #[test]
+    fn the_ooc_sheet_holds_what_recent_turns_found() {
+        let mut w = HiddenWorld::new();
+        read(&mut w);
+        let sheet = ooc_sheet(&w.sight());
+        let recent = &sheet[sheet.find("RECENT TURNS").unwrap()..];
+        assert!(
+            recent.contains(
+                "Found: the notice board: \"Court sits on market day\": The magistrate hears small claims from the third bell.; \"Lost: a grey mule\": Answers to Pell. Reward at the toll house.\n"
+            ),
+            "{recent}"
+        );
+    }
+
+    /// A record that does not read as a sound result (an older or broken
+    /// writer) shows nothing: a screen never shows more than the field
+    /// allows.
+    #[test]
+    fn a_record_that_breaks_the_limits_shows_nothing() {
+        let mut w = HiddenWorld::new();
+        let broken = Finds {
+            what: FindKind::Found,
+            source: "the notice board".into(),
+            items: (1..=6).map(|i| item(&format!("Entry {i}"), "")).collect(),
+        };
+        let turn = w.play(
+            "I read the notices on the board.",
+            &finding(&broken, Intimacy::None),
+            5,
+            vec![],
+        );
+        w.narrate(turn, "You read.");
+        let sight = w.sight();
+        let seen = sight.story.iter().find(|t| t.turn == turn).unwrap();
+        assert_eq!(seen.found, None);
+    }
+}

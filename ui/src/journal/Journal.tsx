@@ -177,6 +177,26 @@ function Timeline({ view, actions, pin }: { view: JournalView; actions: JournalA
                   <Facts lines={scene.learned} pin={pin} />
                 </section>
               )}
+              {scene.found.length > 0 && (
+                <section className="journal-part">
+                  <h3 className="play-label">Found</h3>
+                  <ul className="journal-found">
+                    {scene.found.map((entry) => (
+                      <li key={entry.turn_id}>
+                        <span className="journal-meta journal-found__source">{entry.source}</span>
+                        <ul className="journal-found__items">
+                          {entry.items.map((row, i) => (
+                            <li key={i} className="journal-found__item">
+                              <span className="journal-found__title">{row.title}</span>
+                              {row.line && <span className="journal-found__line">{row.line}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
               {(notes.length > 0 || noting === scene.turn_id) && (
                 <section className="journal-part">
                   <h3 className="play-label">Your notes</h3>

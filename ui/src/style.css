@@ -207,6 +207,31 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
   border-left: 2px solid var(--rule);
 }
 
+/* What the PC found in a Turn: a quiet card under the Narration. */
+.play-found {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--card-border); border-radius: var(--radius-2);
+  background: var(--card);
+}
+.play-found__source { overflow-wrap: anywhere; }
+.play-found__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.play-found__row {
+  display: flex; flex-direction: column; gap: 2px; width: 100%;
+  padding: var(--space-2); border: 0; border-radius: var(--radius-1);
+  background: transparent; color: var(--text); text-align: left; cursor: pointer;
+  font: inherit;
+}
+.play-found__row:hover { background: var(--well); }
+.play-found__title {
+  font-family: var(--font-ui); font-size: var(--text-sm); font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.play-found__line {
+  font-family: var(--font-story); font-size: var(--text-sm); line-height: var(--leading-ui);
+  color: var(--muted); overflow-wrap: anywhere;
+}
+
 /* Side panel. */
 .play-panel {
   display: flex; flex-direction: column; gap: var(--space-3);
@@ -449,6 +474,11 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 
 /* Fact lines: what was learned, what is open, what was known before. */
 .journal-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.journal-found, .journal-found__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.journal-found__source { display: block; margin-bottom: var(--space-1); overflow-wrap: anywhere; }
+.journal-found__item { display: flex; flex-direction: column; gap: 2px; }
+.journal-found__title { font-family: var(--font-ui); font-size: var(--text-sm); font-weight: 600; overflow-wrap: anywhere; }
+.journal-found__line { font-size: var(--text-sm); color: var(--muted); overflow-wrap: anywhere; }
 .journal-fact { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: var(--space-2); align-items: baseline; }
 .journal-fact--closed .journal-fact__text { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
 .journal-fact__check {

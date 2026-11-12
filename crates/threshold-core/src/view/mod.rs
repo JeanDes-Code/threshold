@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::{
     domain::{
-        ClockMin, CloseOutcome, DetailLevel, EntityId, EntityKind, STATE_KEYS, is_open_key,
+        ClockMin, CloseOutcome, DetailLevel, EntityId, EntityKind, Finds, STATE_KEYS, is_open_key,
         is_state_key, outcome_key, slot_sentence, you_sentence,
     },
     mature::effective,
@@ -217,6 +217,46 @@ pub struct StoryTurn {
     /// A later Correction reverted this Turn. Its body holds prose only.
     pub reverted: bool,
     pub body: TurnBody,
+    /// What the PC found in this Turn (`SightTurn::found`), shown under the
+    /// Narration as a small card list (ADR 0007, 2026-11-12).
+    pub found: Option<FoundCard>,
+}
+
+/// What the PC found in one Turn, as a screen shows it: the source, and one
+/// row per item.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FoundCard {
+    pub source: String,
+    pub items: Vec<FoundRow>,
+}
+
+/// One found item: its title, in the interface font, and its line.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FoundRow {
+    pub title: String,
+    pub line: String,
+}
+
+/// What one Turn of a Scene found, for the Journal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FoundEntry {
+    pub turn_id: TurnId,
+    pub source: String,
+    pub items: Vec<FoundRow>,
+}
+
+fn found_card(found: &Finds) -> FoundCard {
+    FoundCard {
+        source: one_line(&found.source),
+        items: found
+            .items
+            .iter()
+            .map(|item| FoundRow {
+                title: one_line(&item.title),
+                line: one_line(&item.line),
+            })
+            .collect(),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -435,6 +475,9 @@ pub struct SceneEntry {
     /// One per Play and Correction Turn. The Opening has no Intent.
     pub acts: Vec<Act>,
     pub learned: Vec<FactLine>,
+    /// What the PC found in the Scene's Turns, oldest first (ADR 0007,
+    /// 2026-11-12). The Journal lists it under "Found".
+    pub found: Vec<FoundEntry>,
 }
 
 /// What the PC did in one Turn: its Intent.
@@ -563,6 +606,18 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
             .flat_map(|m| &m.learned)
             .filter(|b| learned_line(sight, b))
             .filter_map(|b| fact_line(sight, b))
+            .collect(),
+        found: scene
+            .iter()
+            .filter_map(|m| {
+                let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
+                let card = found_card(turn.found.as_ref()?);
+                Some(FoundEntry {
+                    turn_id: m.turn,
+                    source: card.source,
+                    items: card.items,
+                })
+            })
             .collect(),
     })
 }
@@ -1024,6 +1079,7 @@ fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {
         roll: turn.roll,
         reverted: turn.reverted,
         body,
+        found: turn.found.as_ref().map(found_card),
     }
 }
 
@@ -1403,6 +1459,10 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
                 .filter(|line| !line.is_empty())
                 .collect();
             out.push_str(&format!("Narration: {}\n", text.join(" ")));
+            // What the Turn found, in the words of the prompts' past Turns.
+            if let Some(found) = &turn.found {
+                out.push_str(&crate::context::found_line(found));
+            }
         }
     }
 

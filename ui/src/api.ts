@@ -144,6 +144,27 @@ export interface StoryTurn {
   /** A later Correction reverted this Turn. Its body holds prose blocks only. */
   reverted: boolean;
   body: TurnBody;
+  /** What the PC found in this Turn: a small card list under the Narration. */
+  found: FoundCard | null;
+}
+
+/** What the PC found in one Turn: where it comes from, and one row per item. */
+export interface FoundCard {
+  source: string;
+  items: FoundRow[];
+}
+
+/** One found item: a short title and one line of what it says or shows. */
+export interface FoundRow {
+  title: string;
+  line: string;
+}
+
+/** What one Turn of a Scene found, for the Journal. */
+export interface FoundEntry {
+  turn_id: number;
+  source: string;
+  items: FoundRow[];
 }
 
 /** A PC Belief about the PC on a state key (never `location`). */
@@ -236,6 +257,8 @@ export interface SceneEntry {
   present: NameRef[];
   acts: Act[];
   learned: FactLine[];
+  /** What the PC found in the Scene's Turns, oldest first. */
+  found: FoundEntry[];
 }
 
 export interface ClosedItem {

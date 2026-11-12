@@ -1,6 +1,15 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
-import { rollText, type Block, type Part, type StoryTurn } from "../api";
-import { emphasis, nameText, npcColor, shouldFollow, streamShown, tabbableTurn, type StoryItem } from "./logic";
+import { rollText, type Block, type FoundCard, type Part, type StoryTurn } from "../api";
+import {
+  emphasis,
+  lookCloserDraft,
+  nameText,
+  npcColor,
+  shouldFollow,
+  streamShown,
+  tabbableTurn,
+  type StoryItem,
+} from "./logic";
 
 interface Props {
   items: StoryItem[];
@@ -8,11 +17,13 @@ interface Props {
   pendingIntent: string | null;
   onName: (entityId: number) => void;
   onRenarrate: (turnId: number) => void;
+  /** A row of a found card: puts this Intent draft in the field, unsent. */
+  onDraft: (draft: string) => void;
   busy: boolean;
 }
 
 /** The story column: each Turn's Intent, then its Narration. Follows the stream unless scrolled up. */
-export default function Story({ items, pendingIntent, onName, onRenarrate, busy }: Props) {
+export default function Story({ items, pendingIntent, onName, onRenarrate, onDraft, busy }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
 
@@ -38,6 +49,7 @@ export default function Story({ items, pendingIntent, onName, onRenarrate, busy 
               turn={item.turn}
               onName={onName}
               onRenarrate={onRenarrate}
+              onDraft={onDraft}
               busy={busy}
               tabbable={item.turn.turn_id === tabbable}
             />
@@ -80,12 +92,13 @@ interface TurnProps {
   turn: StoryTurn;
   onName: (entityId: number) => void;
   onRenarrate: (turnId: number) => void;
+  onDraft: (draft: string) => void;
   busy: boolean;
-  /** Its name links are in the tab order: only the last Turn's are. */
+  /** Its name links and found rows are in the tab order: only the last Turn's are. */
   tabbable: boolean;
 }
 
-function Turn({ turn, onName, onRenarrate, busy, tabbable }: TurnProps) {
+function Turn({ turn, onName, onRenarrate, onDraft, busy, tabbable }: TurnProps) {
   const classes = ["play-turn"];
   if (turn.reverted) classes.push("play-turn--reverted");
   return (
@@ -114,12 +127,49 @@ function Turn({ turn, onName, onRenarrate, busy, tabbable }: TurnProps) {
           </button>
         </div>
       )}
+      {turn.found && <Found card={turn.found} onDraft={onDraft} tabbable={tabbable} />}
       {turn.roll && (
         <p className={`play-roll ${turn.roll.success ? "play-roll--ok" : "play-roll--bad"}`}>
           {rollText(turn.roll)}
         </p>
       )}
     </article>
+  );
+}
+
+/**
+ * What the PC found in this Turn: a quiet card titled with the source, one row
+ * per item. A row puts a short Intent draft in the field; it sends nothing.
+ */
+function Found({
+  card,
+  onDraft,
+  tabbable,
+}: {
+  card: FoundCard;
+  onDraft: (draft: string) => void;
+  tabbable: boolean;
+}) {
+  return (
+    <section className="play-found" aria-label={`Found in ${card.source}`}>
+      <p className="play-label play-found__source">{card.source}</p>
+      <ul className="play-found__list">
+        {card.items.map((row, i) => (
+          <li key={i}>
+            <button
+              type="button"
+              className="play-found__row"
+              tabIndex={tabbable ? undefined : -1}
+              title="Put a draft in the Intent field"
+              onClick={() => onDraft(lookCloserDraft(row.title))}
+            >
+              <span className="play-found__title">{row.title}</span>
+              {row.line && <span className="play-found__line">{row.line}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -121,6 +121,25 @@ export function intentAfterRetry(retried: string, typed: string): string {
   return typed;
 }
 
+/**
+ * The Intent draft a row of a found card gives: "I look closer at "<title>".".
+ * Spaces are tidied, and a double quote in the title becomes a single one so
+ * the draft keeps one pair of quotes. It is only a draft: nothing is sent.
+ */
+export function lookCloserDraft(title: string): string {
+  const shown = title.trim().replace(/\s+/g, " ").replace(/"/g, "'");
+  return `I look closer at "${shown}".`;
+}
+
+/**
+ * The Intent field after a draft: the draft alone in an empty field, else
+ * after what the Player typed, so no typed word is lost.
+ */
+export function intentWithDraft(typed: string, draft: string): string {
+  const kept = typed.trim();
+  return kept === "" ? draft : `${kept} ${draft}`;
+}
+
 /** What the Player sent last from the action bar: an Intent or a Correction. */
 export type Sent = "intent" | "correction";
 

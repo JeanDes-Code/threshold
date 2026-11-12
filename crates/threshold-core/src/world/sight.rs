@@ -13,14 +13,15 @@ use super::beliefs::{Belief, belief, held};
 use crate::{
     context::seen_present,
     domain::{
-        Canon, ClockMin, DetailLevel, EntityId, EntityKind, FactSource, Key, Knowing, is_alias_key,
+        Canon, ClockMin, DetailLevel, EntityId, EntityKind, FactSource, Finds, Key, Knowing,
+        is_alias_key,
     },
     mature::{TurnText, turn_text},
     normalize,
     rules::RollResult,
     speech::{self, Line},
     store::{Entity, Fact, Knowledge, StoredTurn, TurnId, TurnKind, WorldView},
-    turn::{stored_roll, stored_settles},
+    turn::{stored_found, stored_roll, stored_settles},
 };
 
 /// A Turn that moves the World Clock by more than this starts a new Scene.
@@ -95,6 +96,10 @@ pub struct SightTurn {
     /// The Player faded this Turn's Narration (Fade to Black): `narration`
     /// is `None`, and every screen shows `line` in its place.
     pub faded: bool,
+    /// What the PC found in this Turn (ADR 0007, 2026-11-12): the Turn's
+    /// record (`turn::stored_found`), for a Turn that stands, is not faded
+    /// and is read in full (`line` is `None`). `None` on any other Turn.
+    pub found: Option<Finds>,
 }
 
 /// One line of a Narration, as the PC can read it.
@@ -401,19 +406,25 @@ pub fn pc_sight(
                     })
                     .collect()
             });
+            let line = match turn_text(t, None, None, DetailLevel::Excluded) {
+                TurnText::Line(line) => Some(line),
+                TurnText::Full { .. } => None,
+            };
+            let reverted = reverted.contains(&t.id);
+            let found = (!reverted && !t.faded && line.is_none())
+                .then(|| stored_found(&t.record.proposal_json))
+                .flatten();
             SightTurn {
                 turn: t.id,
                 kind: t.record.kind,
                 intent: t.record.intent.clone(),
                 roll: stored_roll(&t.record.proposal_json),
-                reverted: reverted.contains(&t.id),
+                reverted,
                 narration: t.narration.clone(),
                 lines,
-                line: match turn_text(t, None, None, DetailLevel::Excluded) {
-                    TurnText::Line(line) => Some(line),
-                    TurnText::Full { .. } => None,
-                },
+                line,
                 faded: t.faded,
+                found,
             }
         })
         .collect();

@@ -46,6 +46,7 @@ export const playView: PlayView = {
       intent: "",
       roll: null,
       reverted: false,
+      found: null,
       body: {
         kind: "narration",
         blocks: [
@@ -78,6 +79,7 @@ export const playView: PlayView = {
       intent: "I hand Maren the sealed manifest and ask whether the Gull has docked.",
       roll: null,
       reverted: false,
+      found: null,
       body: {
         kind: "narration",
         blocks: [
@@ -115,6 +117,7 @@ export const playView: PlayView = {
       intent: "I ask who keeps the berth roster at night.",
       roll: null,
       reverted: false,
+      found: null,
       body: { kind: "missing" },
     },
     {
@@ -123,6 +126,7 @@ export const playView: PlayView = {
       intent: "I climb over the counter to read the ledger myself.",
       roll: { seed: 41, difficulty: 14, value: 6, success: false },
       reverted: true,
+      found: null,
       body: {
         kind: "narration",
         blocks: [
@@ -143,6 +147,14 @@ export const playView: PlayView = {
       intent: "I ask Maren to let me read the ledger, politely.",
       roll: { seed: 77, difficulty: 12, value: 15, success: true },
       reverted: false,
+      found: {
+        source: "the harbour ledger",
+        items: [
+          { title: "The Gull, Captain Hale", line: "Due two tides ago. The berth number is struck out; nothing in its place." },
+          { title: "The Heron, Captain Ilse", line: "Docked at berth four this morning with forty crates of salt for the Guild." },
+          { title: "Night roster", line: "Signed at the sixth bell. Two porters wait on the Lantern Steps." },
+        ],
+      },
       body: {
         kind: "narration",
         blocks: [

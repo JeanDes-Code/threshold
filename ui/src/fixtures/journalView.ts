@@ -59,6 +59,17 @@ export const journalView: JournalView = {
         ledger,
         roster,
       ],
+      found: [
+        {
+          turn_id: 5,
+          source: "the harbour ledger",
+          items: [
+            { title: "The Gull, Captain Hale", line: "Due two tides ago. The berth number is struck out; nothing in its place." },
+            { title: "The Heron, Captain Ilse", line: "Docked at berth four this morning with forty crates of salt for the Guild." },
+            { title: "Night roster", line: "Signed at the sixth bell. Two porters wait on the Lantern Steps." },
+          ],
+        },
+      ],
     },
     {
       turn_id: 6,
@@ -83,6 +94,7 @@ export const journalView: JournalView = {
         fact(steps, "berth_nine", "Berth nine below the steps sits empty, its chain cut."),
         fact(pc, "mood", "Ada mood: uneasy"),
       ],
+      found: [],
     },
     {
       turn_id: 9,
@@ -95,6 +107,7 @@ export const journalView: JournalView = {
         { turn_id: 10, intent: "I follow the man in the grey coat into the alley.", faded: null, decision: true, closed: [] },
       ],
       learned: [fact(guild, "watch", "The Salt Guild changes the cellar watch at dawn.")],
+      found: [],
     },
   ],
   open: [debt, roster, arrival],

@@ -28,6 +28,8 @@ import {
   fadeable,
   impliedNotice,
   IMPLIED_NOTICE,
+  lookCloserDraft,
+  intentWithDraft,
   type TurnPhase,
 } from "./logic";
 
@@ -250,5 +252,27 @@ describe("confirmButtons", () => {
     expect(confirmButtons([{ entity_id: 9, kind: "npc", name: null }])).toEqual([]);
     for (const button of confirmButtons(toConfirm)) expect(button.label).not.toMatch(/\d/);
     expect(NOT_CONFIRMED_HEAD).toBe("Not confirmed as an adult:");
+  });
+});
+
+describe("what the PC found", () => {
+  it("a row gives a short Intent draft that names its title", () => {
+    expect(lookCloserDraft("Lost: a grey mule")).toBe('I look closer at "Lost: a grey mule".');
+    // Spaces are tidied, and a quote in the title does not break the quote.
+    expect(lookCloserDraft('  The "Gull"   manifest ')).toBe("I look closer at \"The 'Gull' manifest\".");
+  });
+
+  it("the draft fills an empty field and comes after what the Player typed", () => {
+    const draft = 'I look closer at "Tolls".';
+    expect(intentWithDraft("", draft)).toBe(draft);
+    expect(intentWithDraft("  \n", draft)).toBe(draft);
+    expect(intentWithDraft("I nod to Maren.", draft)).toBe(`I nod to Maren. ${draft}`);
+    expect(intentWithDraft("I nod to Maren.\n", draft)).toBe(`I nod to Maren. ${draft}`);
+  });
+
+  it("the Play fixture holds one Turn with a found card", () => {
+    const cards = playView.story.filter((turn) => turn.found !== null);
+    expect(cards.length).toBe(1);
+    expect(cards[0]?.found?.items.length).toBeGreaterThanOrEqual(2);
   });
 });

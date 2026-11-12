@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { errorText, type DetailLevel, type EntityCard, type NameRef, type PlayView, type Target } from "../api";
 import { currentScene } from "../marks/logic";
-import ActionBar from "./ActionBar";
+import ActionBar, { type IntentDraft } from "./ActionBar";
 import { storyItems, turnPhase } from "./logic";
 import SidePanel from "./SidePanel";
 import Story from "./Story";
@@ -81,6 +81,8 @@ export default function PlayScreen(props: PlayScreenProps) {
   const [selected, setSelected] = useState<number | null>(null);
   const [card, setCard] = useState<CardAnswer | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  // The last Intent draft a found card's row gave (ActionBar puts it in the field).
+  const [draft, setDraft] = useState<IntentDraft | null>(null);
 
   // The card reads the core again after each Turn: what the PC knows changes.
   // Until the answer comes, the panel keeps the last card of that entity.
@@ -132,6 +134,7 @@ export default function PlayScreen(props: PlayScreenProps) {
           pendingIntent={pendingIntent}
           onName={showCard}
           onRenarrate={props.onRenarrate}
+          onDraft={(text) => setDraft((last) => ({ text, seq: (last?.seq ?? 0) + 1 }))}
           busy={busy}
         />
         <aside className="play-panel" id="play-panel" aria-label="What you know">
@@ -182,6 +185,7 @@ export default function PlayScreen(props: PlayScreenProps) {
         onFade={props.onFade}
         onDismissAnswer={props.onDismissAnswer}
         hasScene={scene !== null}
+        draft={draft}
         onNote={(body, aboutScene) => props.onNote(body, aboutScene ? scene : null)}
       />
     </div>

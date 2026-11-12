@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { DetailLevel, NameRef, SceneState } from "../api";
 import NoteField from "../marks/NoteField";
 import { DETAIL_LEVELS, detailOf } from "../newCampaign";
@@ -10,6 +10,7 @@ import {
   elapsedSince,
   elapsedText,
   intentAfterTurn,
+  intentWithDraft,
   isSendKey,
   laterButtons,
   type Sent,
@@ -83,6 +84,18 @@ interface Props {
   hasScene: boolean;
   /** Saves a quick Note, about the current Scene or free; resolves with the refusal text or null. */
   onNote: (body: string, aboutScene: boolean) => Promise<string | null>;
+  /**
+   * An Intent draft from a found card's row: it goes into the Intent field,
+   * after what is typed there, and the field takes the focus. Nothing is
+   * sent. `seq` changes with each click, so the same row can draft twice.
+   */
+  draft?: IntentDraft | null;
+}
+
+/** One draft for the Intent field (`ActionBar`'s `draft`). */
+export interface IntentDraft {
+  text: string;
+  seq: number;
 }
 
 /** The Intent field, "Act", quiet buttons, and an empty slot on the right for later modules. */
@@ -110,6 +123,18 @@ export default function ActionBar(props: Props) {
   const [sent, setSent] = useState<Sent>("intent");
   const elapsed = useElapsed(props.startedMs);
   const later = laterButtons(scene, phase, props.canFade ?? true);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const draft = props.draft ?? null;
+  // A new draft goes into the field once, while rendering (no effect sets
+  // state); the effect only moves the focus.
+  const [draftSeen, setDraftSeen] = useState(0);
+  if (draft !== null && draft.seq !== draftSeen) {
+    setDraftSeen(draft.seq);
+    setIntent((typed) => intentWithDraft(typed, draft.text));
+  }
+  useEffect(() => {
+    if (draft !== null) field.current?.focus();
+  }, [draft]);
 
   const act = async () => {
     const text = intent.trim();
@@ -236,6 +261,7 @@ export default function ActionBar(props: Props) {
       ) : (
         <div className="play-bar__row">
           <textarea
+            ref={field}
             className="play-intent-field"
             rows={2}
             aria-label={`What does ${pcName} do?`}

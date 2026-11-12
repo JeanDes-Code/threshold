@@ -77,6 +77,7 @@ describe("currentScene", () => {
     roll: null,
     reverted: false,
     body: { kind: "missing" },
+    found: null,
     ...extra,
   });
 

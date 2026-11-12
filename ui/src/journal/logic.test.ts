@@ -36,6 +36,7 @@ const view: JournalView = {
         { turn_id: 5, intent: "I wait.", faded: null, decision: false, closed: [] },
       ],
       learned: [],
+      found: [],
     },
     {
       turn_id: 6,
@@ -45,6 +46,7 @@ const view: JournalView = {
       present: [],
       acts: [{ turn_id: 6, intent: "I walk to the steps.", faded: null, decision: true, closed: [] }],
       learned: [],
+      found: [],
     },
   ],
   open: [],
