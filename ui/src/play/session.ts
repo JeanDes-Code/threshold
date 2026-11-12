@@ -99,7 +99,11 @@ export interface TurnStore {
    * called, so nothing is sent. Resolves true when the Turn committed.
    */
   run(attempt: () => Attempt | null, intent: string | null): Promise<boolean>;
-  /** Narrates a committed Turn again. Its chunks come under `opId` only. */
+  /**
+   * Narrates a committed Turn again. Its chunks come under `opId` only. A
+   * fade while it streams works as for a Turn: when it ends, the fade is
+   * sent once more with `opId`.
+   */
   renarrate(opId: string, call: () => Promise<unknown>): Promise<void>;
   /**
    * "Fade to black". While a Turn runs, the stream text leaves the screen at
@@ -220,6 +224,9 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
     renarrate: async (opId, call) => {
       if (state.busy) return;
       const mine = generation;
+      // A renarration of the same Turn streams again, even after a fade of
+      // an earlier one.
+      fadedOps.delete(opId);
       set({
         busy: true,
         opId,
@@ -231,13 +238,28 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         startedMs: now(),
       });
       let notice: string | null = null;
+      let told = false;
       try {
         await call();
+        told = true;
       } catch (e) {
         // The Turn stays committed; only its narration failed again.
         notice = `Committed, narration interrupted: ${errorText(e)}`;
       }
       if (mine !== generation) return;
+      // The Player faded this renarration, and it may have ended before it
+      // read the flag: send the fade again with its op_id. The shell fades
+      // the Turn it told when that Turn is the latest; a fade it already
+      // took changes nothing.
+      const late = fadeCall;
+      if (told && fadedOps.has(opId) && late !== null) {
+        try {
+          await late(opId);
+        } catch (e) {
+          notice = `Fade to black failed: ${errorText(e)}`;
+        }
+        if (mine !== generation) return;
+      }
       set({ opId: null });
       const reloadNotice = await reload();
       if (mine !== generation) return;

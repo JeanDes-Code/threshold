@@ -17,6 +17,8 @@ interface Props {
   /** The mature content module decides its buttons from `scene` and `phase`. */
   scene: SceneState;
   phase: TurnPhase;
+  /** The Narration that streams can be faded: not the Opening's (`fadeable`). */
+  canFade?: boolean;
   /** When the running call started (the session store keeps it); null while idle. */
   startedMs: number | null;
   pcName: string;
@@ -91,7 +93,7 @@ export default function ActionBar(props: Props) {
   // What was sent last: a Retry resends it (review minor).
   const [sent, setSent] = useState<Sent>("intent");
   const elapsed = useElapsed(props.startedMs);
-  const later = laterButtons(scene, phase);
+  const later = laterButtons(scene, phase, props.canFade ?? true);
 
   const act = async () => {
     const text = intent.trim();

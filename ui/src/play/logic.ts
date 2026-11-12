@@ -1,6 +1,15 @@
 // Pure rules of the Play screen. The components hold no logic of their own.
 
-import type { DetailView, KnownLine, NameRef, PlayView, SceneState, StoryTurn } from "../api";
+import {
+  BEGIN_OP_ID,
+  renarrateOpId,
+  type DetailView,
+  type KnownLine,
+  type NameRef,
+  type PlayView,
+  type SceneState,
+  type StoryTurn,
+} from "../api";
 
 /**
  * "answering": the GM answers an out-of-character question; no Turn runs.
@@ -194,16 +203,32 @@ export interface LaterButton {
  * (data shape 3.12), from the scene and the phase only: the core sends no
  * list of actions. "End scene" shows in an Intimate Scene and works while
  * no call runs. "Fade to black" shows while a Narration streams or in an
- * Intimate Scene, and works while a Narration streams or, in a scene, while
- * no call runs.
+ * Intimate Scene, and works while a Narration streams that can be faded
+ * (`fadeable`) or, in a scene, while no call runs.
  */
-export function laterButtons(scene: SceneState, phase: TurnPhase): { end: LaterButton; fade: LaterButton } {
+export function laterButtons(
+  scene: SceneState,
+  phase: TurnPhase,
+  canFade = true,
+): { end: LaterButton; fade: LaterButton } {
   const intimate = scene.kind === "intimate";
   const narrating = phase === "narrating";
   return {
     end: { shown: intimate, enabled: intimate && phase === "idle" },
-    fade: { shown: narrating || intimate, enabled: narrating || (intimate && phase === "idle") },
+    fade: { shown: narrating || intimate, enabled: (narrating && canFade) || (intimate && phase === "idle") },
   };
+}
+
+/**
+ * True when the Narration that streams under `opId` can be faded. The
+ * Opening's never can (data shape 10): Begin, and a renarration of the
+ * Opening Turn, read no fade flag, so the button would do nothing there.
+ * With no stream (`null`) or any other op, true.
+ */
+export function fadeable(opId: string | null, story: StoryTurn[]): boolean {
+  if (opId === BEGIN_OP_ID) return false;
+  const opening = story.find((turn) => turn.kind === "opening");
+  return opening === undefined || opId !== renarrateOpId(opening.turn_id);
 }
 
 /**

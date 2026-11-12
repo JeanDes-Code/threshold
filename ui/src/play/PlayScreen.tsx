@@ -47,6 +47,8 @@ export interface PlayScreenProps {
   onFade: () => void;
   /** The Player faded the running Narration: its text is off the screen. */
   faded?: boolean;
+  /** The Narration that streams can be faded: not the Opening's. */
+  canFade?: boolean;
   onRenarrate: (turnId: number) => void;
   onDismissAnswer: () => void;
   /** Pins or unpins a target; the core then sends a new view. */
@@ -146,6 +148,7 @@ export default function PlayScreen(props: PlayScreenProps) {
       <ActionBar
         scene={view.scene}
         phase={props.faded && busy ? "fading" : turnPhase(busy, stream)}
+        canFade={props.canFade ?? true}
         startedMs={props.startedMs}
         pcName={view.pc_name}
         needsBegin={view.needs_begin}

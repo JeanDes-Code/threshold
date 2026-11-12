@@ -311,6 +311,36 @@ describe("createTurnStore", () => {
     expect(store.get().faded).toBe(false);
   });
 
+  it("a fade a renarration missed is sent again with its op_id once it ends", async () => {
+    const { store, log } = harness();
+    const opId = renarrateOpId(3);
+    const call = deferred<string>();
+    const done = store.renarrate(opId, () => call.promise);
+    store.chunk({ op_id: opId, text: "Told again." });
+    const sent: (string | null)[] = [];
+    await store.fade((op) => {
+      sent.push(op);
+      return Promise.resolve({ pending: true });
+    });
+    expect(store.get().stream).toBe("");
+    store.chunk({ op_id: opId, text: " More." });
+    expect(store.get().stream).toBe("");
+    // The renarration ended before it read the flag.
+    call.resolve("Told again. More.");
+    await done;
+    expect(sent).toEqual([opId, opId]);
+    expect(log.reloads).toBe(1);
+    expect(store.get().faded).toBe(false);
+
+    // A later renarration of the same Turn streams again.
+    const again = deferred<string>();
+    const next = store.renarrate(opId, () => again.promise);
+    store.chunk({ op_id: opId, text: "Told once more." });
+    expect(store.get().stream).toBe("Told once more.");
+    again.resolve("Told once more.");
+    await next;
+  });
+
   it("a fade with no Turn running sends no op_id", async () => {
     const { store } = harness();
     const sent: (string | null)[] = [];

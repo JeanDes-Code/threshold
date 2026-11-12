@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnownLine } from "../api";
+import { BEGIN_OP_ID, renarrateOpId, type KnownLine } from "../api";
 import { playView } from "../fixtures/playView";
 import {
   filterKnown,
@@ -23,6 +23,7 @@ import {
   emphasis,
   tabbableTurn,
   laterButtons,
+  fadeable,
   impliedNotice,
   IMPLIED_NOTICE,
   type TurnPhase,
@@ -200,6 +201,22 @@ describe("Task 5 fixes", () => {
     }
     expect(laterButtons(plain, "idle").fade).toEqual({ shown: false, enabled: false });
     expect(PHASE_TEXT.fading).not.toBe("");
+    // The Opening's Narration is never faded: the button is off while it streams.
+    expect(laterButtons(plain, "narrating", false).fade).toEqual({ shown: true, enabled: false });
+    expect(laterButtons(intimate, "narrating", false).fade).toEqual({ shown: true, enabled: false });
+    expect(laterButtons(intimate, "idle", false).fade).toEqual({ shown: true, enabled: true });
+  });
+
+  it("the Narration of Begin and of a renarrated Opening cannot be faded", () => {
+    const opening = playView.story.find((turn) => turn.kind === "opening")?.turn_id ?? -1;
+    const play = playView.story.find((turn) => turn.kind === "play")?.turn_id ?? -1;
+    expect(opening).toBeGreaterThan(0);
+    expect(play).toBeGreaterThan(0);
+    expect(fadeable(BEGIN_OP_ID, playView.story)).toBe(false);
+    expect(fadeable(renarrateOpId(opening), playView.story)).toBe(false);
+    expect(fadeable(renarrateOpId(play), playView.story)).toBe(true);
+    expect(fadeable("op-1", playView.story)).toBe(true);
+    expect(fadeable(null, playView.story)).toBe(true);
   });
 
   it("the implied notice shows once per session", () => {

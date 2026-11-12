@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { BEGIN_OP_ID, errorText, renarrateOpId, type PlayView, type Target } from "../api";
 import { api, play, turns } from "../tauri";
+import { fadeable } from "./logic";
 import PlayScreen from "./PlayScreen";
 import type { TurnState, TurnStore } from "./session";
 
@@ -105,6 +106,7 @@ export default function LivePlay(props: Props) {
       onEndScene={endScene}
       onFade={fade}
       faded={turn.faded}
+      canFade={fadeable(turn.opId, view.story)}
       onRenarrate={renarrate}
       onDismissAnswer={store.dismissAnswer}
       onPin={(target, on) => void pin(target, on)}
