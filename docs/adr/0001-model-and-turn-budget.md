@@ -78,3 +78,5 @@ The shell writes `threshold.toml` with the defaults only when the file is absent
 ## Changed on 2026-11-12: what the PC finds (ADR 0007)
 
 The proposal rules gain one line (`context::FINDS_FIELD_LINE`), in the system block: it is the same on every Turn, so the cached prefix holds. The per-Turn part gains the rest: the narrator's outcome block lists what the PC finds this Turn, and each past Turn of the window carries one `Found:` line after its Narration. The window's size bound (`TURNS_WINDOW_MAX_CHARS`) counts those lines. A plain Turn adds about 15 output tokens to the proposal; a lookup Turn adds what the model writes, up to about 250 tokens for 5 full items.
+
+After the live run of b245f71, the line defines the seven values of `from` (ADR 0007): 1,143 characters instead of 554, about 140 more prompt tokens in the system block. It is still the same on every Turn. Measured on the `finds` scenario after the change: Turn time p50 7.3 s, p90 9.3 s (`evals/reports/2026-11-finds.md`).
