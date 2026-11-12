@@ -34,6 +34,15 @@ pub struct DecisionProposal {
     /// offered; with none offered it is absent.
     #[serde(default)]
     pub settles: Option<Settle>,
+    /// What the PC finds in this Turn when the Intent looks for information
+    /// or content (`FINDS_DEFINITION`, ADR 0007, 2026-11-12). Required in
+    /// the per-Turn schema of a Play Turn, and `turn::parse` refuses a raw
+    /// Play proposal without the `finds` key. A stored proposal without it
+    /// reads `nothing`. It is world content, never a PC act: the core keeps
+    /// it on the Turn record only when the verdict lets the act happen
+    /// (`turn::stored_found`), and no fact comes from it.
+    #[serde(default)]
+    pub finds: Finds,
     #[serde(default)]
     #[schemars(length(max = 2))]
     pub blockers: Vec<Handle>,
@@ -296,6 +305,139 @@ impl CloseOutcome {
     /// Open Item's own stored text.
     pub fn text(self, item_text: &str) -> String {
         format!("{}: {}", self.head(), item_text.trim())
+    }
+}
+
+/// The text of `FINDS_DEFINITION`, as a literal, so the proposal rules can
+/// hold it with `concat!`.
+macro_rules! finds_definition_text {
+    () => {
+        "what the PC now sees when the player's intent of THIS Turn looks for information or content (searches, reads, opens, checks, looks through, asks for a list or a price): what = \"found\", source = where it comes from in a few words (the browser tab, the letter, the top drawer), items = 1 to 5 entries, each a short title and one line of what it says or shows. Invent plausible content that fits this world and that this source would show: never a hidden fact, and never what the PC does, says or feels. Else what = \"nothing\", source empty, items empty."
+    };
+}
+pub(crate) use finds_definition_text;
+
+/// The one definition of the `finds` field (ADR 0007, 2026-11-12), in plain
+/// words. The proposal rules (`context::FINDS_FIELD_LINE`) and the schema's
+/// description of `finds` hold this text; a test pins them together.
+pub const FINDS_DEFINITION: &str = finds_definition_text!();
+
+/// The longest `finds.source`, in characters.
+pub const FIND_SOURCE_MAX_CHARS: usize = 40;
+/// The longest title of a found item, in characters.
+pub const FIND_TITLE_MAX_CHARS: usize = 60;
+/// The longest line of a found item, in characters.
+pub const FIND_LINE_MAX_CHARS: usize = 140;
+/// The most items one Turn finds.
+pub const FIND_MAX_ITEMS: usize = 5;
+
+/// What the PC finds in one Turn: a source and up to `FIND_MAX_ITEMS`
+/// items. One per Turn: two lookups in one Intent share it, and `source`
+/// names them together (ADR 0007, 2026-11-12).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Finds {
+    pub what: FindKind,
+    /// Where the content comes from: "the browser tab", "the letter".
+    /// Empty when `what` is `nothing`.
+    #[serde(default)]
+    #[schemars(length(max = 40))]
+    pub source: String,
+    #[serde(default)]
+    #[schemars(length(max = 5))]
+    pub items: Vec<FoundItem>,
+}
+
+/// Whether the Turn found anything. `nothing` comes first: ADR 0007's
+/// lesson is that this model follows a required enum with an explicit
+/// "nothing" value far better than an optional field or a prompt rule.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FindKind {
+    #[default]
+    Nothing,
+    Found,
+}
+
+impl FindKind {
+    /// Every value, `nothing` first: the order of the per-Turn schema's enum.
+    pub const ALL: [Self; 2] = [Self::Nothing, Self::Found];
+
+    /// The value as the schema and the prompt spell it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Nothing => "nothing",
+            Self::Found => "found",
+        }
+    }
+}
+
+/// One entry the PC finds: a short title and one line of what it says or
+/// shows. Model text: the core never builds it, and never turns it into a
+/// fact.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FoundItem {
+    #[schemars(length(max = 60))]
+    pub title: String,
+    #[serde(default)]
+    #[schemars(length(max = 140))]
+    pub line: String,
+}
+
+impl Finds {
+    /// True when the Turn found something to show: `found` with items.
+    pub fn found(&self) -> bool {
+        self.what == FindKind::Found && !self.items.is_empty()
+    }
+
+    /// Why this value breaks the field's shape, or `None` when it is
+    /// sound: `nothing` holds no source and no item; `found` holds a
+    /// source of 1 to `FIND_SOURCE_MAX_CHARS` characters and 1 to
+    /// `FIND_MAX_ITEMS` items, each with a title of 1 to
+    /// `FIND_TITLE_MAX_CHARS` and a line of at most `FIND_LINE_MAX_CHARS`
+    /// characters. `checks::validate` rejects such a value;
+    /// `checks::settle` removes it.
+    pub fn problem(&self) -> Option<String> {
+        let chars = |text: &str| text.trim().chars().count();
+        match self.what {
+            FindKind::Nothing if !self.source.trim().is_empty() || !self.items.is_empty() => {
+                Some("finds: what is nothing, so source and items stay empty".into())
+            }
+            FindKind::Nothing => None,
+            FindKind::Found => {
+                let source = chars(&self.source);
+                if source == 0 || source > FIND_SOURCE_MAX_CHARS {
+                    return Some(format!(
+                        "finds.source has {source} characters; it takes 1 to {FIND_SOURCE_MAX_CHARS}"
+                    ));
+                }
+                if self.items.is_empty() || self.items.len() > FIND_MAX_ITEMS {
+                    return Some(format!(
+                        "finds.items has {} items; it takes 1 to {FIND_MAX_ITEMS}",
+                        self.items.len()
+                    ));
+                }
+                self.items.iter().find_map(FoundItem::problem)
+            }
+        }
+    }
+}
+
+impl FoundItem {
+    /// Why this item breaks the field's limits, if it does.
+    pub fn problem(&self) -> Option<String> {
+        let title = self.title.trim().chars().count();
+        let line = self.line.trim().chars().count();
+        if title == 0 || title > FIND_TITLE_MAX_CHARS {
+            Some(format!(
+                "finds.items.title has {title} characters; it takes 1 to {FIND_TITLE_MAX_CHARS}"
+            ))
+        } else if line > FIND_LINE_MAX_CHARS {
+            Some(format!(
+                "finds.items.line has {line} characters; it takes at most {FIND_LINE_MAX_CHARS}"
+            ))
+        } else {
+            None
+        }
     }
 }
 

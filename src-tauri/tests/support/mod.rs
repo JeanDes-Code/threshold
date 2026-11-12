@@ -28,6 +28,7 @@ pub fn base() -> DecisionProposal {
         move_to: None,
         leaves: vec![],
         settles: None,
+        finds: Default::default(),
         blockers: vec![],
         check: None,
         reactions: vec![],

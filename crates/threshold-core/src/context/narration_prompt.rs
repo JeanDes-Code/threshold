@@ -21,8 +21,8 @@ use super::{
 };
 use crate::{
     domain::{
-        ActionKind, DetailLevel, EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp,
-        Reaction, Verdict, is_open_key, is_state_key, outcome_key,
+        ActionKind, DetailLevel, EntityId, EntityKind, EntityRef, FindKind, Finds, FoundItem,
+        Handle, Knowing, LedgerOp, Reaction, Verdict, is_open_key, is_state_key, outcome_key,
     },
     mature::{Cleared, Told, effective},
     model::Prompt,
@@ -181,6 +181,85 @@ pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
         .filter(|text| !quotes(&secrets, text) && !names_any(&unheard, text))
         .cloned()
         .collect()
+}
+
+/// What the PC found in a Turn, as the Turn records it (ADR 0007,
+/// 2026-11-12). Each item is model text, like an event text, so it gets the
+/// guard of `guard_events`: an item whose title or line holds a secret
+/// value (`secret_values`) or names an entity the PC must not hear of
+/// (`names_unheard`) goes. A source that does either drops everything, and
+/// so does a result with no item left: `None`. The second value holds one
+/// note per item that went, with its place in the list and never its text.
+/// Only removes model output.
+pub fn guard_found(view: &WorldView, finds: &Finds) -> (Option<Finds>, Vec<String>) {
+    if !finds.found() {
+        return (None, Vec::new());
+    }
+    let secrets = secret_values(view);
+    let unheard = unheard_names(view);
+    let guarded = |text: &str| quotes(&secrets, text) || names_any(&unheard, text);
+    if guarded(&finds.source) {
+        return (
+            None,
+            vec!["removed finds: its source names what the PC must not hear of".into()],
+        );
+    }
+    let mut notes = Vec::new();
+    let items: Vec<FoundItem> = finds
+        .items
+        .iter()
+        .enumerate()
+        .filter(|(at, item)| {
+            let hidden = guarded(&item.title) || guarded(&item.line);
+            if hidden {
+                notes.push(format!(
+                    "removed finds item {}: it names what the PC must not hear of",
+                    at + 1
+                ));
+            }
+            !hidden
+        })
+        .map(|(_, item)| item.clone())
+        .collect();
+    if items.is_empty() {
+        return (None, notes);
+    }
+    (
+        Some(Finds {
+            what: FindKind::Found,
+            source: finds.source.clone(),
+            items,
+        }),
+        notes,
+    )
+}
+
+/// The start of the outcome lines that give the narrator what the PC found
+/// (ADR 0007, 2026-11-12). The source follows, then one line per item.
+pub const FOUND_LINE: &str = "- What the PC finds (";
+
+/// What the PC found this Turn, as outcome lines of THIS TURN: the source,
+/// then one line per item, title in quotes. The narrator tells them; the
+/// screens show them too, so a brief telling is enough.
+pub fn found_lines(finds: &Finds) -> String {
+    let mut out = format!(
+        "{FOUND_LINE}{}). Tell what it shows, briefly; add no other entry:\n",
+        one_line(&finds.source)
+    );
+    for item in &finds.items {
+        out.push_str(&format!("  - {}\n", item_text(item)));
+    }
+    out
+}
+
+/// One found item on one line: `"<title>": <line>`, or the title alone.
+pub(crate) fn item_text(item: &FoundItem) -> String {
+    let line = one_line(&item.line);
+    if line.is_empty() {
+        format!("\"{}\"", one_line(&item.title))
+    } else {
+        format!("\"{}\": {line}", one_line(&item.title))
+    }
 }
 
 /// The line the narrator gets when a World Event stopped the clock and

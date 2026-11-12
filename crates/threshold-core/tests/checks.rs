@@ -740,6 +740,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "move_to": null,
         "leaves": [],
         "settles": {"item": "none", "outcome": "open"},
+        "finds": {"what": "nothing", "source": "", "items": []},
         "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}, "willing": "unsure"}],
         "facts": [{"slot": {"subject": "N1", "key": "mood", "value": "calm"}, "seen": "pc", "because": ["F40"]}],
         "new_npcs": [{"id": "N1", "name": "Kett", "age": 34, "voice": "terse"}]
@@ -1701,7 +1702,8 @@ fn item_status_is_a_closed_list() {
     let validator = jsonschema::validator_for(&schema).unwrap();
     let mut p = serde_json::json!({
         "action": "talk", "verdict": "allowed", "contested": false, "intimacy": "none", "move_to": null,
-        "settles": {"item": "E1 pending_trip", "outcome": "refused"}
+        "settles": {"item": "E1 pending_trip", "outcome": "refused"},
+        "finds": {"what": "nothing", "source": "", "items": []}
     });
     assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));
     p["settles"]["outcome"] = "open".into();

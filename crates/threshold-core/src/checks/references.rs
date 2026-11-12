@@ -275,6 +275,16 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
         }
     }
 
+    // ADR 0007, 2026-11-12: `settle` removes what this rejects.
+    if p.intimacy.gated() && p.finds != crate::domain::Finds::default() {
+        err(
+            None,
+            "finds: a Turn the age rule runs for keeps no found content".into(),
+        );
+    } else if let Some(why) = p.finds.problem() {
+        err(None, why);
+    }
+
     if let Err(shape) = crate::validate_shape(p) {
         errs.push(Rejection::new(CheckKind::Schema, None, shape.to_string()));
     }

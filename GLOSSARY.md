@@ -128,6 +128,10 @@ _Avoid_: Block, censorship, rejection (a rejection gets a retry)
 The GM's structured interpretation of an Intent: what kind of action it is, whether it needs a Check, the Stakes and Factors, NPC reactions and the time it takes. It is not canon until committed.
 _Avoid_: Plan, tool call, response
 
+**Find**:
+What the PC finds in one Turn when the Intent looks for information or content: a search, a letter or a sign read, a drawer or a box opened, a shelf looked through, a list asked for. A source ("the letter") and one to five items, each a short title and one line. The GM states it in the Decision Proposal's `finds`; the core keeps it on the Turn when the act happens, and the story, the Journal and later prompts show it. It is world content, never a PC act, and it writes no fact.
+_Avoid_: Search result, loot, clue, discovery (Discovery is the interview)
+
 **Commit**:
 The act that makes a validated change part of the world's state and history.
 _Avoid_: Save, apply, write

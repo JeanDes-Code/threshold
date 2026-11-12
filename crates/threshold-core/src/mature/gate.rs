@@ -687,6 +687,12 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         move_to,
         leaves,
         settles,
+        // Free text, never a handle, so this collector cannot read it: a
+        // found item could name a character the gate never sees. So a
+        // proposal this gate runs for keeps no finds: `checks::settle`
+        // drops them and `checks::validate` rejects them (ADR 0007,
+        // 2026-11-12). The narrator and the screens get none from it.
+        finds: _,
         blockers,
         check,
         reactions,

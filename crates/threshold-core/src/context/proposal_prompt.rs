@@ -42,6 +42,19 @@ macro_rules! willing_field_text {
 /// under LATER ACTIONS. The owner reads it before the merge.
 pub const WILLING_FIELD_LINE: &str = willing_field_text!();
 
+/// The text of `FINDS_FIELD_LINE`, as a literal, so `PROPOSAL_RULES` can
+/// hold it with `concat!`.
+macro_rules! finds_field_text {
+    () => {
+        concat!("- finds: ", crate::domain::finds_definition_text!())
+    };
+}
+
+/// The one line that defines the required `finds` field:
+/// `domain::FINDS_DEFINITION` after the field's name (ADR 0007,
+/// 2026-11-12). Part of `PROPOSAL_RULES`, under LATER ACTIONS.
+pub const FINDS_FIELD_LINE: &str = finds_field_text!();
+
 /// The head of the proposal prompt's `recent` block inside a cleared
 /// Intimate Scene (data shape 3.10): one line, in neutral words. It reaches
 /// a prompt only with a `Cleared` value (`proposal_context`). It names the
@@ -96,6 +109,9 @@ LATER ACTIONS
 - move_to: when the player moves the PC to a place listed under PLACES, that place's handle; else null, and the PC stays. Never write the PC's location in facts or stakes.
 - leaves: each NPC who walks out of the PC's place in this Turn, with to = the handle of the place under ALL PLACES they go to, or away. Empty when nobody leaves. An NPC not listed stays here, whatever their plan says.
 - settles: what the player's intent of THIS Turn does to one item under OPEN ITEMS. item none when the intent settles none of them. Else that item, with outcome accepted, refused, done, failed or dropped when this intent accepts, refuses, does, fails or gives it up; outcome open when it only asks about it, talks about it or asks for more time. An item settled in an earlier Turn is not listed.
+",
+    finds_field_text!(),
+    "
 TIME
 - Always set minutes: the game time this action takes. A short exchange takes a few minutes; crossing town takes about 15.
 - For wait: use the duration the player names. If the player names none, use the minutes until something happens.

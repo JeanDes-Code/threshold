@@ -7,7 +7,8 @@
 use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
     domain::{
-        ActionKind, DecisionProposal, EntityKind, Handle, Intimacy, NO_ITEM, SlotDraft, Verdict,
+        ActionKind, DecisionProposal, EntityKind, FIND_MAX_ITEMS, Finds, Handle, Intimacy, NO_ITEM,
+        SlotDraft, Verdict,
     },
     mature::SCENE_CLOSE_MAX_MIN,
     normalize,
@@ -38,8 +39,47 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     }
     settle_closes(&mut p, view, &mut notes);
     settle_leaves(&mut p, view, &mut notes);
+    settle_finds(&mut p, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
+}
+
+/// `finds` (ADR 0007, 2026-11-12). A Turn the age rule runs for keeps none:
+/// the gate reads handles, and a found item is free text that could name a
+/// character it never sees. An item over its limits, or with no title,
+/// goes; past `FIND_MAX_ITEMS` the rest go. A value that is still not
+/// sound (`Finds::problem`: `nothing` with content, `found` with no item or
+/// a bad source) becomes `nothing`. Each change only removes model output,
+/// and a note never quotes the text.
+fn settle_finds(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+    if p.finds == Finds::default() {
+        return;
+    }
+    if p.intimacy.gated() {
+        p.finds = Finds::default();
+        notes.push("removed finds: a Turn the age rule runs for keeps no found content".into());
+        return;
+    }
+    let mut at = 0;
+    p.finds.items.retain(|item| {
+        at += 1;
+        let why = item.problem();
+        if let Some(why) = &why {
+            notes.push(format!("removed finds item {at}: {why}"));
+        }
+        why.is_none()
+    });
+    if p.finds.items.len() > FIND_MAX_ITEMS {
+        notes.push(format!(
+            "removed {} finds items past the cap of {FIND_MAX_ITEMS}",
+            p.finds.items.len() - FIND_MAX_ITEMS
+        ));
+        p.finds.items.truncate(FIND_MAX_ITEMS);
+    }
+    if let Some(why) = p.finds.problem() {
+        notes.push(format!("removed finds: {why}"));
+        p.finds = Finds::default();
+    }
 }
 
 /// The repairs of a Closing Turn's proposal (mature content data shape 3.7
@@ -82,6 +122,9 @@ pub fn settle_closing(
     }
     if p.schedule.take().is_some() {
         note("removed the scheduled event");
+    }
+    if std::mem::take(&mut p.finds) != Finds::default() {
+        note("removed finds");
     }
     for (field, len) in [
         ("new_npcs", std::mem::take(&mut p.new_npcs).len()),

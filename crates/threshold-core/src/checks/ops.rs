@@ -22,6 +22,36 @@ pub struct Resolved {
     pub reactions: Vec<Reaction>,
 }
 
+/// True when the verdict lets the act happen: allowed, or a Check whose
+/// Roll succeeds (ADR 0007). `move_to`, a closing `settles` and `finds`
+/// apply only then.
+fn lets_happen(p: &crate::domain::DecisionProposal, roll: Option<&RollResult>) -> bool {
+    match p.verdict {
+        Verdict::Allowed => true,
+        Verdict::Check => roll.is_some_and(|r| r.success),
+        Verdict::Impossible => false,
+    }
+}
+
+/// What a valid proposal's Turn records as found (ADR 0007, 2026-11-12):
+/// its `finds` when the verdict lets the act happen and it found something,
+/// after the guard of the narrator's event text (`context::guard_found`);
+/// else `None`. An impossible act or a lost Check finds nothing. The second
+/// value holds the guard's notes for the debug log. No ledger op comes from
+/// it: the Turn record keeps it, and every reader goes through
+/// `turn::stored_found`.
+pub fn found(
+    valid: super::Validated<'_>,
+    roll: Option<&RollResult>,
+    view: &WorldView,
+) -> (Option<crate::domain::Finds>, Vec<String>) {
+    let p = valid.proposal();
+    if !lets_happen(p, roll) {
+        return (None, Vec::new());
+    }
+    crate::context::guard_found(view, &p.finds)
+}
+
 /// Converts a proposal that passed `validate` into the ops of one Commit.
 ///
 /// `roll` is the Roll of the proposal's Check, if any. With a Check and no
@@ -36,11 +66,7 @@ pub fn to_ops(
     let success = roll.is_some_and(|r| r.success);
     // ADR 0007: the core moves the PC to `move_to` when the verdict lets the
     // action happen: allowed, or a Check that succeeds.
-    let lets_happen = match p.verdict {
-        Verdict::Allowed => true,
-        Verdict::Check => success,
-        Verdict::Impossible => false,
-    };
+    let lets_happen = lets_happen(p, roll);
     // `move_to` moves the PC only with the move action (changed after
     // review); `settle` drops it otherwise.
     let moved_to = p

@@ -21,13 +21,13 @@ use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     closing_schema_for,
     context::{
-        QUIET_EVENT_LINE, adventure_block, closing_context, guard_events, guard_plans,
+        QUIET_EVENT_LINE, adventure_block, closing_context, found_lines, guard_events, guard_plans,
         narration_prompt_with, one_line, opening_prompt, perceived_by_pc, proposal_context,
         seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, DetailLevel,
-        EntityId, EntityKind, EntityRef, FactSource, Handle, Intimacy, LedgerOp, Reaction,
+        EntityId, EntityKind, EntityRef, FactSource, Finds, Handle, Intimacy, LedgerOp, Reaction,
         SceneWhy, Verdict,
     },
     mature::{self, RefusalKind, Told},
@@ -304,6 +304,9 @@ struct Planned {
     /// The proposal's intimacy tag, after the strongest tag of the raw
     /// answers stuck.
     intimacy: Intimacy,
+    /// What the PC found this Turn, as the record keeps it
+    /// (`checks::found`).
+    found: Option<Finds>,
 }
 
 impl Planned {
@@ -331,6 +334,7 @@ impl Planned {
             verdict: Verdict::Allowed,
             wait_asked: None,
             intimacy: Intimacy::None,
+            found: None,
         }
     }
 }
@@ -801,6 +805,7 @@ impl Engine {
                     wait_cut_line(u32::try_from(minutes).unwrap_or(u32::MAX), asked)
                 })
                 .into_iter()
+                .chain(stored_found(&stored.record.proposal_json).map(|f| found_lines(&f)))
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
             closing: stored.record.kind == TurnKind::Closing,
@@ -1080,6 +1085,7 @@ impl Engine {
                 .wait_asked
                 .and_then(|asked| wait_cut_line(planned.minutes, asked))
                 .into_iter()
+                .chain(planned.found.as_ref().map(found_lines))
                 .collect(),
             intimate: planned.intimacy.intimate(),
             closing,
@@ -1345,7 +1351,7 @@ impl Engine {
             // JSON or not: cut, fenced, with trailing text, or with the key
             // twice (review M2). The retry is then checked with it.
             tagged = tagged.max(stated_intimacy(&raw));
-            let parsed = match parse(&raw) {
+            let parsed = match parse(&raw, matches!(ask, Ask::Play { .. })) {
                 Ok(p) if matches!(ask, Ask::Closing { .. }) => {
                     let (p, notes) = checks::settle_closing(p, view);
                     if !notes.is_empty() {
@@ -1472,6 +1478,20 @@ impl Engine {
         let raw = roll.map_or_else(|| "no check".into(), |r| format!("{r:?}"));
         self.log(op_id, "roll", &Prompt::default(), &raw, step)?;
 
+        // What the PC finds (ADR 0007, 2026-11-12): kept on the Turn record
+        // when the act happens, after the guard of the narrator's event
+        // text. No ledger op.
+        let (found, notes) = checks::found(valid, roll.as_ref(), view);
+        if !notes.is_empty() {
+            self.log(
+                op_id,
+                "settle",
+                &Prompt::default(),
+                &notes.join("\n"),
+                Instant::now(),
+            )?;
+        }
+
         let step = Instant::now();
         let resolved = checks::to_ops(valid, roll.as_ref(), view);
         let mut ops = resolved.ops;
@@ -1530,6 +1550,7 @@ impl Engine {
             "events": events,
             "roll": roll,
             "wait_asked": wait_asked,
+            "found": found,
         })
         .to_string();
         Ok(Planned {
@@ -1543,6 +1564,7 @@ impl Engine {
             verdict: p.verdict,
             wait_asked,
             intimacy: p.intimacy,
+            found,
         })
     }
 
@@ -1660,17 +1682,27 @@ fn schema_error(reason: String) -> Vec<Rejection> {
 /// and reads the old boolean for stored proposals, so without this rule a
 /// missing tag would read as `none` and skip the age rule (plan
 /// deviation 5).
-fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
+///
+/// The same holds for `finds` on a Play Turn (ADR 0007, 2026-11-12): a
+/// stored proposal without it reads `nothing`, a new one must state it.
+/// A Closing Turn's schema has no `finds` (`needs_finds` false).
+fn parse(raw: &str, needs_finds: bool) -> Result<DecisionProposal, Vec<Rejection>> {
     let raw = raw.trim();
     let p: DecisionProposal =
         serde_json::from_str(raw).map_err(|e| schema_error(format!("invalid JSON: {e}")))?;
-    let tagged = serde_json::from_str::<serde_json::Value>(raw)
-        .ok()
+    let value = serde_json::from_str::<serde_json::Value>(raw).ok();
+    let tagged = value
+        .as_ref()
         .and_then(|v| v.get("intimacy").cloned())
         .is_some_and(|v| serde_json::from_value::<Intimacy>(v).is_ok());
     if !tagged {
         return Err(schema_error(
             "intimacy is required: none, advance or intimate".to_owned(),
+        ));
+    }
+    if needs_finds && value.as_ref().and_then(|v| v.get("finds")).is_none() {
+        return Err(schema_error(
+            "finds is required: what nothing or found, source and items".to_owned(),
         ));
     }
     Ok(p)
@@ -1817,6 +1849,18 @@ pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
 pub fn stored_settles(proposal_json: &str) -> Option<crate::domain::Settle> {
     let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
     serde_json::from_value(record.get("proposal")?.get("settles")?.clone()).ok()
+}
+
+/// What a Turn found, as its `proposal_json` keeps it (ADR 0007,
+/// 2026-11-12): the `found` the core wrote when the act happened, after the
+/// guard. `None` for a Turn that found nothing, a Turn stored before the
+/// field, and any value that does not read as a sound result. Every reader
+/// of found content goes through this: the prompts' past Turns, the
+/// narrator of `renarrate`, and `world::pc_sight`.
+pub fn stored_found(proposal_json: &str) -> Option<Finds> {
+    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
+    let found: Finds = serde_json::from_value(record.get("found")?.clone()).ok()?;
+    (found.found() && found.problem().is_none()).then_some(found)
 }
 
 fn stored_reactions(proposal_json: &str) -> Vec<Reaction> {

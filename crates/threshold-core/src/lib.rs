@@ -183,6 +183,38 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         });
         require(&mut schema, "", "settles");
     }
+    // What the PC finds (ADR 0007, 2026-11-12): a required object whose
+    // `what` has `nothing` first, so a plain Turn costs a few tokens.
+    let kinds: Vec<&str> = domain::FindKind::ALL.iter().map(|k| k.word()).collect();
+    schema["properties"]["finds"] = json!({
+        "type": "object",
+        "description": domain::FINDS_DEFINITION,
+        "properties": {
+            "what": {"type": "string", "enum": kinds},
+            "source": {"type": "string", "maxLength": domain::FIND_SOURCE_MAX_CHARS},
+            "items": {
+                "type": "array",
+                "maxItems": domain::FIND_MAX_ITEMS,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": domain::FIND_TITLE_MAX_CHARS},
+                        "line": {"type": "string", "maxLength": domain::FIND_LINE_MAX_CHARS},
+                    },
+                    "required": ["title", "line"],
+                    "additionalProperties": false,
+                },
+            },
+        },
+        "required": ["what", "source", "items"],
+        "additionalProperties": false,
+    });
+    require(&mut schema, "", "finds");
+    if let Some(defs) = schema["$defs"].as_object_mut() {
+        for unused in ["Finds", "FindKind", "FoundItem"] {
+            defs.remove(unused);
+        }
+    }
     // A scheduled event says whether everyone at its place perceives what
     // it changes (review of bug pass 4: the visibility of an effect is
     // data, never read from the event's text).
@@ -282,8 +314,8 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
 /// the per-Turn schema of `ctx`, with what the code does not want the model
 /// to choose pinned or left out. `action` is `wait`, `verdict` `allowed`,
 /// `contested` is `false`, `intimacy` is `none`, `move_to` and `check` are
-/// `null`; `settles`, `new_npcs`, `schedule`, `cancel`, `leaves` and
-/// `blockers` are absent. Free: `minutes` (1 to
+/// `null`; `settles`, `new_npcs`, `schedule`, `cancel`, `leaves`,
+/// `blockers` and `finds` are absent. Free: `minutes` (1 to
 /// `mature::SCENE_CLOSE_MAX_MIN`), at most two `reactions` and one fact,
 /// which is never a `location` fact: a Closing Turn moves nobody.
 /// `checks::settle_closing` forces the same pins on the parsed proposal,
@@ -305,7 +337,7 @@ pub fn closing_schema_for(ctx: &HandleContext) -> serde_json::Value {
         "maximum": mature::SCENE_CLOSE_MAX_MIN,
     });
     let gone = [
-        "settles", "new_npcs", "schedule", "cancel", "leaves", "blockers",
+        "settles", "new_npcs", "schedule", "cancel", "leaves", "blockers", "finds",
     ];
     if let Some(props) = props.as_object_mut() {
         for key in gone {

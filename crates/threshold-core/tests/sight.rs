@@ -1016,7 +1016,7 @@ fn an_intent_that_asks_for_time_leaves_the_open_item_open() {
     let w = HiddenWorld::new();
     let ada = w.ada;
     let raw = format!(
-        r#"{{"action":"talk","contested":false,"intimacy":"none","move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"open"}},"verdict":"allowed","minutes":3}}"#
+        r#"{{"action":"talk","contested":false,"intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"open"}},"verdict":"allowed","minutes":3}}"#
     );
     let gm = RecordedGm::new(vec![raw], vec!["Brann nods and waits.".into()]);
     let (mut engine, campaign) = w.engine(&gm);
@@ -1247,7 +1247,7 @@ fn a_settles_the_turn_did_not_offer_closes_nothing() {
     ));
     assert!(schema.pointer("/properties/settles").is_none());
     let raw = format!(
-        r#"{{"action":"observe","contested":false,"intimacy":"none","move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"accepted"}},"verdict":"allowed","minutes":3}}"#
+        r#"{{"action":"observe","contested":false,"intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"move_to":null,"settles":{{"item":"E{ada} pending_meet","outcome":"accepted"}},"verdict":"allowed","minutes":3}}"#
     );
     let gm = RecordedGm::new(vec![raw], vec!["The sky is grey.".into()]);
     let (mut engine, campaign) = w.engine(&gm);

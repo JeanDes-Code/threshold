@@ -74,3 +74,7 @@ Replay of the 28 QA Intents, warm model (`evals/reports/2026-11-turn-time.md`): 
 The default `timeout_s` of `OllamaConfig` goes from 60 to 180 s. The owner's machine swaps the model out of memory between sessions; a call that waits for it to come back took 63 s and failed at 60, so the Turn failed while the model was only slow. The 15 s budget is a product target for a warm Turn, not a timeout: a call that runs past 15 s still finishes. The World Build keeps its own timeout (`build::BUILD_TIMEOUT_S`, 240 s).
 
 The shell writes `threshold.toml` with the defaults only when the file is absent (`session::load_config`). A file written before this change keeps `timeout_s = 60` until the Player edits it.
+
+## Changed on 2026-11-12: what the PC finds (ADR 0007)
+
+The proposal rules gain one line (`context::FINDS_FIELD_LINE`), in the system block: it is the same on every Turn, so the cached prefix holds. The per-Turn part gains the rest: the narrator's outcome block lists what the PC finds this Turn, and each past Turn of the window carries one `Found:` line after its Narration. The window's size bound (`TURNS_WINDOW_MAX_CHARS`) counts those lines. A plain Turn adds about 15 output tokens to the proposal; a lookup Turn adds what the model writes, up to about 250 tokens for 5 full items.

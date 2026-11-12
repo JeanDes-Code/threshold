@@ -84,6 +84,7 @@ pub const CORE_HEADINGS: &[&str] = &[
     "Turn",
     "Player:",
     "Narration:",
+    "Found:",
     "NOW",
     "Minute",
     "MENTIONED ENTITIES",
@@ -101,6 +102,7 @@ pub const CORE_HEADINGS: &[&str] = &[
     "The move does not happen",
     "The attempt does not happen",
     "The wait ends early",
+    "What the PC finds",
     "Time this Turn takes:",
     "NPC intentions",
     "OPENING",
@@ -110,15 +112,16 @@ pub const CORE_HEADINGS: &[&str] = &[
 
 pub(crate) use narration_prompt::intimate_rule_text;
 pub use narration_prompt::{
-    CLOSING_LINE, EXPLICIT_LINE, FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPLIED_LINE, IMPOSSIBLE_LINE,
-    INTIMATE_RULE, NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE, NOT_MOVED_LINE, PC_PLACE_LINE,
-    QUIET_EVENT_LINE, TIME_LINE, WON_CHECK_LINE, guard_events, guard_plans, names_unheard,
-    narration_prompt, narration_prompt_with, opening_prompt, perceived_by_pc,
+    CLOSING_LINE, EXPLICIT_LINE, FAILED_CHECK_LINE, FOUND_LINE, HERE_AFTER_LINE, IMPLIED_LINE,
+    IMPOSSIBLE_LINE, INTIMATE_RULE, NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE,
+    NOT_MOVED_LINE, PC_PLACE_LINE, QUIET_EVENT_LINE, TIME_LINE, WON_CHECK_LINE, found_lines,
+    guard_events, guard_found, guard_plans, names_unheard, narration_prompt, narration_prompt_with,
+    opening_prompt, perceived_by_pc,
 };
 pub use proposal_prompt::{
-    CLOSING_ASK, INTIMACY_FIELD_LINE, PROPOSAL_RULES, ProposalContext, SCENE_LINE,
-    WILLING_FIELD_LINE, closing_context, closing_prompt, handle_context, proposal_context,
-    proposal_prompt,
+    CLOSING_ASK, FINDS_FIELD_LINE, INTIMACY_FIELD_LINE, PROPOSAL_RULES, ProposalContext,
+    SCENE_LINE, WILLING_FIELD_LINE, closing_context, closing_prompt, handle_context,
+    proposal_context, proposal_prompt,
 };
 
 use std::collections::BTreeSet;
@@ -559,7 +562,24 @@ fn render_turn(
     if let Some(narration) = narration.filter(|n| !n.trim().is_empty()) {
         out.push_str(&format!("Narration: {}\n", narration.trim()));
     }
+    // What the Turn found (ADR 0007, 2026-11-12): the narrator may tell it
+    // briefly, so the record keeps the GM consistent while the Turn is in
+    // the window. Only a Turn read in full shows it.
+    if let Some(found) = crate::turn::stored_found(&turn.record.proposal_json) {
+        out.push_str(&found_line(&found));
+    }
     out
+}
+
+/// One past Turn's finds on one line: `Found: <source>: "<title>": <line>;
+/// …`. The OOC sheet uses the same words.
+pub(crate) fn found_line(found: &crate::domain::Finds) -> String {
+    let items: Vec<String> = found
+        .items
+        .iter()
+        .map(narration_prompt::item_text)
+        .collect();
+    format!("Found: {}: {}\n", one_line(&found.source), items.join("; "))
 }
 
 /// The past Turns before Turn `before_seq`, as the first block of a
