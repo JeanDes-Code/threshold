@@ -1432,3 +1432,71 @@ at = "intimate_scene"
 when = "explicit"
 file = "narration-explicit.md"
 "#;
+
+// --- Task 8: the Detail Level in play ------------------------------------------
+
+/// Task 8: raising the level inside an open scene tells no earlier Turn at
+/// the new level. Turn 2's Narration fails at `implied`; the Player raises
+/// the level to `explicit`; `renarrate(t2)`, and the same op sent again,
+/// are still told implied, with no explicit-only fragment. The next Turn is
+/// told at the new level.
+#[test]
+fn raising_the_level_tells_no_earlier_turn_explicit() {
+    for again in ["renarrate", "same op"] {
+        let mut rig = Rig::with("raise", DetailLevel::Implied, vec![sample()]);
+        let p = rig.intimate();
+        let t1 = rig.played("t1", &p, "Brann nods.");
+        rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+        let err = rig
+            .engine()
+            .play_turn("t2".into(), "I stay with Brann.", &mut |_| {})
+            .expect_err("the narration fails");
+        let TurnError::NarrationFailed { turn_id: t2, .. } = err else {
+            panic!("{err:?}");
+        };
+        rig.engine()
+            .set_detail_level("lvl".into(), DetailLevel::Explicit)
+            .unwrap();
+        assert_eq!(rig.scene(), Some(t1));
+        rig.gm.push_narration("Brann waits.".into());
+        match again {
+            "renarrate" => {
+                rig.engine().renarrate(t2, &mut |_| {}).unwrap();
+            }
+            _ => {
+                rig.engine()
+                    .play_turn("t2".into(), "I stay with Brann.", &mut |_| {})
+                    .unwrap();
+            }
+        }
+        let call = rig.last_call(CallKind::Narrate);
+        assert!(call.prompt.recent.starts_with(IMPLIED_LINE), "{again}");
+        for marker in [NARRATION_EXPLICIT, EXPLICIT_LINE] {
+            assert!(!holds(&call, marker), "{again}: the prompt holds {marker}");
+        }
+
+        rig.played("t3", &p, "Brann stays.");
+        assert!(holds(&rig.last_call(CallKind::Narrate), NARRATION_EXPLICIT));
+    }
+}
+
+/// Task 8: lowering the level applies from the next Turn. At `explicit` a
+/// scene Turn is told with the explicit fragments; after the Player lowers
+/// the level to `implied`, the next Turn of the same scene is told implied.
+#[test]
+fn lowering_the_level_applies_from_the_next_turn() {
+    let mut rig = Rig::with("lower", DetailLevel::Explicit, vec![sample()]);
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    assert!(holds(&rig.last_call(CallKind::Narrate), NARRATION_EXPLICIT));
+    rig.engine()
+        .set_detail_level("lvl".into(), DetailLevel::Implied)
+        .unwrap();
+    rig.played("t2", &p, "Brann stays.");
+    assert_eq!(rig.scene(), Some(t1));
+    let call = rig.last_call(CallKind::Narrate);
+    assert!(call.prompt.recent.starts_with(IMPLIED_LINE));
+    for marker in [NARRATION_EXPLICIT, EXPLICIT_LINE] {
+        assert!(!holds(&call, marker));
+    }
+}

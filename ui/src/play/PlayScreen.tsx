@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { errorText, type EntityCard, type PlayView, type Target } from "../api";
+import { errorText, type DetailLevel, type EntityCard, type NameRef, type PlayView, type Target } from "../api";
 import { currentScene } from "../marks/logic";
 import ActionBar from "./ActionBar";
 import { storyItems, turnPhase } from "./logic";
@@ -25,6 +25,12 @@ export interface PlayScreenProps {
   failure: string | null;
   /** The sentence of the last Refusal: not a failure, no retry. */
   refusal: string | null;
+  /** The characters the last Refusal offers to confirm, by name. */
+  toConfirm?: NameRef[];
+  /** "Confirm": the core confirms that one character is an adult. */
+  onConfirm?: (entityId: number) => void;
+  /** The Player changes the Detail Level in play. */
+  onDetail?: (level: DetailLevel) => void;
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
   /** The implied notice, until the Player closes it (`impliedNotice`). */
@@ -155,6 +161,10 @@ export default function PlayScreen(props: PlayScreenProps) {
         answer={answer}
         failure={props.failure}
         refusal={props.refusal}
+        toConfirm={props.toConfirm}
+        onConfirm={props.onConfirm}
+        detail={view.detail.stored}
+        onDetail={props.onDetail}
         notice={props.notice}
         levelNotice={props.levelNotice}
         onCloseLevelNotice={props.onCloseLevelNotice}

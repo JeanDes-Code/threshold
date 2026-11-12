@@ -5,6 +5,7 @@ import {
   errorText,
   gapsFromError,
   refusalFromError,
+  toConfirmFromError,
   parseBuildProgress,
   renarrateOpId,
   turnNotice,
@@ -276,6 +277,24 @@ describe("refusalFromError", () => {
     expect(refusalFromError(new Error("x"))).toBeNull();
     expect(refusalFromError([{ kind: "age_unconfirmed", at: "pc.age" }])).toBeNull();
     expect(refusalFromError({ refusal: 3 })).toBeNull();
+  });
+});
+
+describe("toConfirmFromError", () => {
+  it("reads the names a Refusal offers to confirm, and keeps the sentence", () => {
+    const hessa = { entity_id: 4, kind: "npc", name: "Hessa" };
+    const e = { refusal: REFUSAL, kind: "adults_only", to_confirm: [hessa] };
+    expect(toConfirmFromError(e)).toEqual([hessa]);
+    expect(refusalFromError(e)).toBe(REFUSAL);
+    expect(errorText(e)).toBe(REFUSAL);
+  });
+
+  it("is empty for a Refusal with no list, a malformed list, or any other error", () => {
+    expect(toConfirmFromError({ refusal: REFUSAL })).toEqual([]);
+    expect(toConfirmFromError({ refusal: REFUSAL, to_confirm: [{ entity_id: "x" }] })).toEqual([]);
+    expect(toConfirmFromError({ refusal: REFUSAL, to_confirm: [{ entity_id: 2, kind: "npc", name: null }] })).toEqual([]);
+    expect(toConfirmFromError(new Error("x"))).toEqual([]);
+    expect(toConfirmFromError({ to_confirm: [{ entity_id: 2, kind: "npc", name: "Doul" }] })).toEqual([]);
   });
 });
 

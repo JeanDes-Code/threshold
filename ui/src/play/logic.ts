@@ -232,6 +232,29 @@ export function fadeable(opId: string | null, story: StoryTurn[]): boolean {
 }
 
 /**
+ * The heading of the Confirm control of an `adults_only` Refusal: the core's
+ * `view::NOT_CONFIRMED_HEAD`.
+ */
+export const NOT_CONFIRMED_HEAD = "Not confirmed as an adult:";
+
+/** One "Confirm" button of a Refusal. */
+export interface ConfirmButton {
+  entityId: number;
+  label: string;
+}
+
+/**
+ * The "Confirm" buttons of a Refusal: one per character the core offers, in
+ * its order, each saying "adult" and never a number (owner's decision 2). A
+ * name the PC cannot use gets no button.
+ */
+export function confirmButtons(toConfirm: NameRef[]): ConfirmButton[] {
+  return toConfirm.flatMap((who) =>
+    who.name === null ? [] : [{ entityId: who.entity_id, label: `Confirm that ${who.name} is an adult` }],
+  );
+}
+
+/**
  * The notice of data shape 3.11: the Campaign asks for explicit description
  * and no loaded Content Pack gives it, so scenes are told by implication.
  */

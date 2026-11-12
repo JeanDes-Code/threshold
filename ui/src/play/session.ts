@@ -10,9 +10,11 @@
 import {
   errorText,
   refusalFromError,
+  toConfirmFromError,
   turnNotice,
   type Api,
   type Attempt,
+  type NameRef,
   type NarrationChunk,
   type PlayView,
 } from "../api";
@@ -46,6 +48,11 @@ export interface TurnState {
    * call clears it.
    */
   refusal: string | null;
+  /**
+   * The characters the last Refusal offers to confirm as adults, by name
+   * (Task 8). A confirmation takes one out; the next call clears it.
+   */
+  toConfirm: NameRef[];
   /** The failed Turn can be sent again under its op_id. */
   canRetry: boolean;
   /** A Turn that committed with a problem, or a command that failed. */
@@ -73,6 +80,7 @@ export const IDLE_TURN: TurnState = {
   pendingIntent: null,
   failure: null,
   refusal: null,
+  toConfirm: [],
   canRetry: false,
   notice: null,
   answer: null,
@@ -122,6 +130,8 @@ export interface TurnStore {
   notify(text: string | null): void;
   dismissFailure(): void;
   dismissAnswer(): void;
+  /** The core confirmed this character: the Refusal no longer offers it. */
+  confirmed(entityId: number): void;
   /** Forgets everything, a running call included. Call it when another Campaign opens. */
   reset(): void;
 }
@@ -174,6 +184,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         pendingIntent: intent,
         failure: null,
         refusal: null,
+        toConfirm: [],
         canRetry: false,
         notice: null,
         startedMs: now(),
@@ -182,6 +193,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
       let notice: string | null = null;
       let failure: string | null = null;
       let refusal: string | null = null;
+      let toConfirm: NameRef[] = [];
       let read = false;
       try {
         const summary = await made.result;
@@ -190,6 +202,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         read = !summary.faded;
       } catch (e) {
         refusal = refusalFromError(e);
+        toConfirm = toConfirmFromError(e);
         if (refusal === null) failure = errorText(e);
       }
       if (mine !== generation) return committed;
@@ -213,6 +226,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         pendingIntent: null,
         failure,
         refusal,
+        toConfirm,
         canRetry: failure !== null && deps.canRetry(),
         notice: reloadNotice ?? notice,
         faded: false,
@@ -233,6 +247,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         stream: "",
         failure: null,
         refusal: null,
+        toConfirm: [],
         canRetry: false,
         notice: null,
         startedMs: now(),
@@ -281,7 +296,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         return;
       }
       const mine = generation;
-      set({ busy: true, faded: true, failure: null, refusal: null, notice: null, startedMs: now() });
+      set({ busy: true, faded: true, failure: null, refusal: null, toConfirm: [], notice: null, startedMs: now() });
       let notice: string | null = null;
       try {
         await call(null);
@@ -324,6 +339,8 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
     },
 
     dismissAnswer: () => set({ answer: null }),
+
+    confirmed: (entityId) => set({ toConfirm: state.toConfirm.filter((who) => who.entity_id !== entityId) }),
 
     reset: () => {
       generation += 1;

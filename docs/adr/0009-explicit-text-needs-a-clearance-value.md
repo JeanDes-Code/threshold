@@ -60,3 +60,7 @@ In a prompt, and in the prompt rows of the debug log, like any prompt (only `get
 - **Loader edges.** A fragment's 1,200 characters are counted after trimming its blanks, and the file is read only up to 16,384 bytes (`FRAGMENT_MAX_BYTES`): a padded file now loads, a huge one is refused unread. A file with a second hard link refuses the pack (rule 1), as a symbolic link does: either can sit outside the pack. A pack name with an invisible character or a blank other than a space is refused (rule 4), so it cannot load beside its twin.
 
 What a pack line can still do: it is model input, so a model can still follow it. The age rule, the gates, the telling switch and every Commit check stay code that takes no pack. A line that forges a heading in the middle of a line, or with look-alike letters from another script, is not caught; the rule line covers it, as it covers any pack line.
+
+## Changed in Task 8 (2026-11-12): the level set in play
+
+The Player can change the Detail Level in play. `mature::told` now reads the lower of the level right after the Turn and the level now. A level lowered applies from the next narration call, a `renarrate` included. A level raised never reaches a Turn committed before it: a `renarrate` of an earlier scene Turn, or the same op sent again, is told at the level of its own Turn, so it never gets the explicit-only fragments (test `raising_the_level_tells_no_earlier_turn_explicit`). The next Turn after the change is told at the new level.

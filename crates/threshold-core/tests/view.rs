@@ -2199,3 +2199,54 @@ fn a_faded_turn_shows_its_line_and_no_text() {
     let pinned = serde_json::to_string(&view.pinned).unwrap();
     assert!(!pinned.contains("I look around the square."), "{pinned}");
 }
+
+/// Task 8 (data shape 3.11): the Confirm control of a Refusal lists only
+/// characters the PC perceives here AND can name, with an adult stored age
+/// and no Age Confirmation (`mature::to_confirm`). On the hidden world:
+/// Orsel and Brann (perceived, named, unconfirmed adults) are listed; the
+/// hidden Vey, the stranger Kestrel, the perceived minor Wren and the absent
+/// Pip are not. The other kinds list nobody, and no list shows an age.
+#[test]
+fn a_refusal_names_only_perceived_characters() {
+    use threshold_core::{
+        mature::{RefusalKind, to_confirm},
+        view::{REFUSAL_ADULTS_ONLY, refusal},
+    };
+    let mut w = HiddenWorld::new();
+    let ada = w.ada;
+    let mut ops = newcomer("Wren", "gate square", &[ada]);
+    if let LedgerOp::AddEntity { age, .. } = &mut ops[0] {
+        *age = Some(16);
+    }
+    let met = w.play("I wait.", &observe(), 0, ops);
+    w.narrate(met, "Wren sets down a basket by the gate.");
+    let wren = id_of(&w.view(), "Wren");
+    let sight = w.sight();
+    assert!(sight.present.contains(&wren) && sight.present.contains(&w.kestrel));
+
+    let ids = to_confirm(&w.view());
+    let shown = refusal(&sight, RefusalKind::AdultsOnly, &ids);
+    assert_eq!(shown.text, REFUSAL_ADULTS_ONLY);
+    let mut names: Vec<String> = shown
+        .to_confirm
+        .iter()
+        .map(|n| n.name.clone().expect("a name"))
+        .collect();
+    names.sort();
+    assert_eq!(names, ["Ada", "Brann", "Orsel"]);
+    for kind in [RefusalKind::Excluded, RefusalKind::Unwilling] {
+        assert!(
+            refusal(&sight, kind, &ids).to_confirm.is_empty(),
+            "{kind:?}"
+        );
+    }
+    let json = serde_json::to_string(&shown).unwrap();
+    for hidden in HIDDEN.iter().chain(&["Wren"]) {
+        assert!(!json.contains(hidden), "{hidden} leaks: {json}");
+    }
+    assert!(!json.contains("age"), "{json}");
+    for e in w.view().entities.iter().filter(|e| e.age.is_some()) {
+        let age = e.age.unwrap().to_string();
+        assert!(!shown.text.contains(&age));
+    }
+}

@@ -23,8 +23,11 @@ use crate::{
 /// the reading of the Campaign included (data shape 3.6).
 pub const PLAY_VIEW_MAX_MS: u64 = 50;
 
-/// The Player's sentence for a Refusal at Detail Level `excluded`.
-pub const REFUSAL_EXCLUDED: &str = "This Campaign excludes Intimate Scenes.";
+/// The Player's sentence for a Refusal at Detail Level `excluded`. It says
+/// where the Player changes the level in play: the select of the "Ask the
+/// GM" panel (Task 8).
+pub const REFUSAL_EXCLUDED: &str =
+    "This Campaign excludes Intimate Scenes. You can change the Detail Level under Ask the GM.";
 
 /// The Player's sentence for a Refusal by the age rule. It names nobody: a
 /// hidden character or a minor may be the one who blocks, and the sentence
@@ -33,6 +36,55 @@ pub const REFUSAL_ADULTS_ONLY: &str = "An Intimate Scene cannot happen here.";
 
 /// The Player's sentence for a Refusal by the stance rule.
 pub const REFUSAL_UNWILLING: &str = "Nobody here goes along with this.";
+
+/// The heading of the Confirm control of an `adults_only` Refusal (data
+/// shape 5): the names follow it, one "Confirm" button each. The UI holds
+/// the same text in `ui/src/play/logic.ts`.
+pub const NOT_CONFIRMED_HEAD: &str = "Not confirmed as an adult:";
+
+/// The Player's sentence when the core refuses an Age Confirmation in play
+/// (data shape 5). The same for a character under 18, one the PC does not
+/// know, and anything that is no character: it says neither which nor why.
+pub const CANNOT_CONFIRM: &str = "This character cannot be confirmed as an adult.";
+
+/// A Refusal as the Play screen shows it (data shape 3.11): its kind, its
+/// one fixed sentence, and the characters the Player may confirm as adults
+/// from the Refusal. No age, no id of a character the PC does not know, and
+/// nothing about who blocked.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RefusalView {
+    pub kind: crate::mature::RefusalKind,
+    pub text: String,
+    pub to_confirm: Vec<NameRef>,
+}
+
+/// The Refusal of `kind` for the Play screen. `confirm` holds the ids the
+/// core offers to confirm (`mature::to_confirm`); `refusal` keeps those the
+/// PC perceives here (`PcSight::present`) and can name, for an
+/// `adults_only` Refusal only. The caller never passes the ids that
+/// blocked the Turn, so the list says nothing about a hidden cause.
+pub fn refusal(
+    sight: &PcSight,
+    kind: crate::mature::RefusalKind,
+    confirm: &[EntityId],
+) -> RefusalView {
+    let to_confirm = if kind == crate::mature::RefusalKind::AdultsOnly {
+        sight
+            .present
+            .iter()
+            .filter(|id| confirm.contains(id))
+            .filter_map(|id| name_ref(sight, *id))
+            .filter(|who| who.name.is_some())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    RefusalView {
+        kind,
+        text: refusal_text(kind).to_owned(),
+        to_confirm,
+    }
+}
 
 /// The one fixed sentence of a Refusal (data shape 5). No name, no id and
 /// no age: the shell shows it as it is, in debug mode too.

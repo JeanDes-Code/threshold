@@ -142,8 +142,11 @@ pub fn effective(stored: DetailLevel, packs: &[ContentPack]) -> DetailLevel {
 ///
 /// A Turn that ends a scene is never told at `Explicit`, and neither is a
 /// `renarrate` of a Turn of a scene that has ended. `now` and `packs` are
-/// read at each call: a pack removed or a level changed during a scene
-/// takes effect on the next Narration.
+/// read at each call: a pack removed or a level lowered during a scene
+/// takes effect on the next Narration. The level is the lower of the level
+/// after the Turn and the level now (Task 8): a level raised in play never
+/// reaches a Turn committed before it, so a `renarrate` of an earlier
+/// scene Turn is never told more explicitly than its own Turn was.
 pub fn told(
     view_after: &WorldView,
     now: &WorldView,
@@ -153,10 +156,22 @@ pub fn told(
     if !intimate {
         return Told::Plain;
     }
-    if effective(now.detail, packs) != DetailLevel::Explicit {
+    let level = lower(view_after.detail, now.detail);
+    if effective(level, packs) != DetailLevel::Explicit {
         return Told::Implied;
     }
     narration_clearance(view_after, now).map_or(Told::Implied, Told::Explicit)
+}
+
+/// The lower of two Detail Levels: `excluded`, then `implied`, then
+/// `explicit`.
+fn lower(a: DetailLevel, b: DetailLevel) -> DetailLevel {
+    let rank = |level| match level {
+        DetailLevel::Excluded => 0,
+        DetailLevel::Implied => 1,
+        DetailLevel::Explicit => 2,
+    };
+    if rank(a) <= rank(b) { a } else { b }
 }
 
 /// True when a Turn's stored `proposal_json` holds a proposal committed with

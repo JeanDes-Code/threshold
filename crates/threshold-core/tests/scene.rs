@@ -1252,3 +1252,52 @@ fn a_cut_narration_never_shows_a_name_the_full_text_hides() {
         assert!(full.starts_with(&stored), "cut at {at}: {stored:?}");
     }
 }
+
+// --- Task 8: the Detail Level in play ------------------------------------------
+
+/// Data shape 3.4, row 8: `set_detail_level(excluded)` closes an open scene
+/// in the same OOC Turn, and the next intimate Turn is refused for the
+/// level. Lowering to `implied` closes nothing.
+#[test]
+fn excluded_closes_the_open_scene() {
+    let mut rig = Rig::with("excluded-closes", DetailLevel::Explicit, Vec::new());
+    let p = rig.intimate();
+    let t1 = rig.played("s1", &p, "Brann nods.");
+    assert_eq!(rig.scene(), Some(t1));
+
+    rig.engine()
+        .set_detail_level("lvl-1".into(), DetailLevel::Implied)
+        .unwrap();
+    assert_eq!(rig.scene(), Some(t1), "implied keeps the scene");
+
+    rig.engine()
+        .set_detail_level("lvl-2".into(), DetailLevel::Excluded)
+        .unwrap();
+    assert_eq!(rig.scene(), None);
+    let ooc = rig.store().turns(rig.campaign).unwrap().pop().unwrap();
+    assert_eq!(ooc.record.kind, TurnKind::Ooc);
+    assert_eq!(
+        rig.store().turn_ops(ooc.id).unwrap(),
+        [
+            LedgerOp::SetDetailLevel {
+                level: DetailLevel::Excluded
+            },
+            LedgerOp::SetScene {
+                open: false,
+                why: SceneWhy::Excluded
+            },
+        ]
+    );
+    assert!(matches!(rig.sight().scene, None));
+    let err = rig.play("s2", &p, "-").expect_err("excluded");
+    assert!(
+        matches!(
+            err,
+            TurnError::Refused {
+                kind: threshold_core::mature::RefusalKind::Excluded,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+}

@@ -163,6 +163,28 @@ describe("createTurnStore", () => {
     expect(store.get().refusal).toBeNull();
   });
 
+  it("a Refusal keeps the names it offers to confirm, and a confirmation takes one out", async () => {
+    const { store } = harness(true);
+    const turn = attempt("op-1");
+    const done = store.run(turn.make, "I lean closer.");
+    const hessa = { entity_id: 4, kind: "npc" as const, name: "Hessa" };
+    const doul = { entity_id: 5, kind: "npc" as const, name: "Doul" };
+    turn.result.reject({ refusal: "An Intimate Scene cannot happen here.", kind: "adults_only", to_confirm: [hessa, doul] });
+    await done;
+    expect(store.get().toConfirm).toEqual([hessa, doul]);
+    store.confirmed(4);
+    expect(store.get().toConfirm).toEqual([doul]);
+    expect(store.get().refusal).toBe("An Intimate Scene cannot happen here.");
+
+    // The next Turn clears the list with the sentence.
+    const next = attempt("op-2");
+    const sent = store.run(next.make, "I wave.");
+    expect(store.get().toConfirm).toEqual([]);
+    next.result.resolve(committed);
+    await sent;
+    expect(store.get().toConfirm).toEqual([]);
+  });
+
   it("a failure with nothing to send again offers no retry", async () => {
     const { store } = harness(false);
     const turn = attempt("op-1");

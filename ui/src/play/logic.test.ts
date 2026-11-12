@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { BEGIN_OP_ID, renarrateOpId, type KnownLine } from "../api";
 import { playView } from "../fixtures/playView";
 import {
+  confirmButtons,
+  NOT_CONFIRMED_HEAD,
   filterKnown,
   isSendKey,
   nameText,
@@ -230,5 +232,23 @@ describe("Task 5 fixes", () => {
     expect(impliedNotice({ stored: "implied", effective: "implied" }, false)).toBeNull();
     expect(impliedNotice({ stored: "excluded", effective: "excluded" }, false)).toBeNull();
     expect(IMPLIED_NOTICE).not.toMatch(/\d/);
+  });
+});
+
+describe("confirmButtons", () => {
+  it("the refusal box lists a Confirm button per name and none for an empty list", () => {
+    const toConfirm = [
+      { entity_id: 3, kind: "npc" as const, name: "Hessa" },
+      { entity_id: 1, kind: "pc" as const, name: "Wren" },
+    ];
+    expect(confirmButtons(toConfirm)).toEqual([
+      { entityId: 3, label: "Confirm that Hessa is an adult" },
+      { entityId: 1, label: "Confirm that Wren is an adult" },
+    ]);
+    expect(confirmButtons([])).toEqual([]);
+    // A name the PC cannot use never gets a button, and no label shows a number.
+    expect(confirmButtons([{ entity_id: 9, kind: "npc", name: null }])).toEqual([]);
+    for (const button of confirmButtons(toConfirm)) expect(button.label).not.toMatch(/\d/);
+    expect(NOT_CONFIRMED_HEAD).toBe("Not confirmed as an adult:");
   });
 });

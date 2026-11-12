@@ -1,9 +1,12 @@
 import { useEffect, useId, useState } from "react";
-import type { SceneState } from "../api";
+import type { DetailLevel, NameRef, SceneState } from "../api";
 import NoteField from "../marks/NoteField";
+import { DETAIL_LEVELS, detailOf } from "../newCampaign";
 import {
+  NOT_CONFIRMED_HEAD,
   PHASE_TEXT,
   afterRetry,
+  confirmButtons,
   elapsedSince,
   elapsedText,
   intentAfterTurn,
@@ -32,6 +35,17 @@ interface Props {
    * heading, no Retry. The Intent is back in the field to change it.
    */
   refusal: string | null;
+  /**
+   * The characters the last Refusal offers to confirm as adults, by name:
+   * one "Confirm" button each, under `NOT_CONFIRMED_HEAD`. No age.
+   */
+  toConfirm?: NameRef[];
+  /** "Confirm": the core confirms that one character is an adult. */
+  onConfirm?: (entityId: number) => void;
+  /** The stored Detail Level: the select of the "Ask the GM" panel shows it. */
+  detail?: DetailLevel;
+  /** The Player changes the Detail Level in play; the core writes it. */
+  onDetail?: (level: DetailLevel) => void;
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
   /**
@@ -86,7 +100,9 @@ export default function ActionBar(props: Props) {
   const oocId = useId();
   const fixId = useId();
   const noteId = useId();
+  const detailId = useId();
   const busy = phase !== "idle";
+  const confirms = confirmButtons(props.toConfirm ?? []);
   // The text a failed Turn gave back to the field: a Retry that commits
   // takes it out again.
   const [returned, setReturned] = useState("");
@@ -155,9 +171,25 @@ export default function ActionBar(props: Props) {
         </section>
       )}
       {refusal !== null && (
-        <p className="play-refusal" role="status">
-          {refusal}
-        </p>
+        <div className="play-refusal" role="status">
+          <p>{refusal}</p>
+          {confirms.length > 0 && (
+            <div className="play-refusal__confirm">
+              <span>{NOT_CONFIRMED_HEAD}</span>
+              {confirms.map((button) => (
+                <button
+                  key={button.entityId}
+                  type="button"
+                  className="play-btn play-btn--outline"
+                  disabled={busy || !props.onConfirm}
+                  onClick={() => props.onConfirm?.(button.entityId)}
+                >
+                  {button.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {notice !== null && (
         <section className="play-alert" role="status">
@@ -349,6 +381,26 @@ export default function ActionBar(props: Props) {
           >
             Ask
           </button>
+        </div>
+      )}
+      {asking && props.detail !== undefined && (
+        <div className="play-bar__row play-bar__row--ooc">
+          <label className="play-bar__label" htmlFor={detailId}>
+            Detail Level for intimate scenes
+          </label>
+          <select
+            id={detailId}
+            className="play-ooc-field play-detail-select"
+            value={props.detail}
+            disabled={busy || !props.onDetail}
+            onChange={(e) => props.onDetail?.(detailOf(e.target.value))}
+          >
+            {DETAIL_LEVELS.map(([level, label]) => (
+              <option key={level} value={level}>
+                {label}
+              </option>
+            ))}
+          </select>
         </div>
       )}
     </footer>

@@ -16,7 +16,9 @@ use threshold_core::{
     domain::{ActionKind, DetailLevel},
     pack::PackRule,
     store::{Store, TurnKind},
-    view::{REFUSAL_ADULTS_ONLY, REFUSAL_EXCLUDED, SceneState, TurnBody},
+    view::{
+        CANNOT_CONFIRM, REFUSAL_ADULTS_ONLY, REFUSAL_EXCLUDED, RefusalView, SceneState, TurnBody,
+    },
 };
 
 /// An intimate proposal with no reaction: the age rule refuses it before the
@@ -40,8 +42,12 @@ fn names(s: &Session) -> Vec<String> {
 }
 
 fn refusal(s: &mut Session, op: &str) -> String {
+    refusal_view(s, op).text
+}
+
+fn refusal_view(s: &mut Session, op: &str) -> RefusalView {
     match s.submit_intent(op.into(), "I lean closer.", &mut |_| {}) {
-        Err(AppError::Refused(text)) => text,
+        Err(AppError::Refused(view)) => view,
         other => panic!("expected a refusal, got {other:?}"),
     }
 }
@@ -95,7 +101,7 @@ fn a_refusal_is_its_own_result_kind() {
         .expect_err("refused");
     assert_eq!(
         serde_json::to_value(&err).unwrap(),
-        serde_json::json!({ "refusal": REFUSAL_EXCLUDED })
+        serde_json::json!({ "refusal": REFUSAL_EXCLUDED, "kind": "excluded", "to_confirm": [] })
     );
     assert_eq!(err.to_string(), REFUSAL_EXCLUDED);
 
@@ -539,6 +545,113 @@ fn the_data_folder_packs_reach_every_engine() {
             }
         } else {
             assert!(rows.is_empty(), "no packs folder: no row");
+        }
+    }
+}
+
+// --- Task 8: settings in play ------------------------------------------------
+
+/// Task 8: an `adults_only` Refusal reaches the UI with the characters the
+/// Player may confirm, by name and with no age. "Confirm" through the
+/// shell is the core's op: the Refusal then lists the others only, and the
+/// command answers a character it cannot confirm with one fixed sentence.
+#[test]
+fn a_refusal_carries_the_characters_to_confirm() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town_at_implied(&mut s, dir.path());
+    let db = s.summary().unwrap().db_path;
+    gm.push_proposal(support::intimate_with_hessa(&db));
+    let refused = refusal_view(&mut s, "op-1");
+    assert_eq!(refused.text, REFUSAL_ADULTS_ONLY);
+    let names = |view: &RefusalView| -> Vec<String> {
+        let mut names: Vec<String> = view
+            .to_confirm
+            .iter()
+            .map(|n| n.name.clone().expect("a name"))
+            .collect();
+        names.sort();
+        names
+    };
+    // Everyone in the town hall: the PC, Orsel, Doul and Hessa. Not Tobin,
+    // at the mill.
+    assert_eq!(names(&refused), ["Doul", "Hessa", "Orsel", "Wren"]);
+    let json = serde_json::to_value(AppError::Refused(refused.clone())).unwrap();
+    assert_eq!(json["refusal"], REFUSAL_ADULTS_ONLY);
+    assert_eq!(json["kind"], "adults_only");
+    assert_eq!(json["to_confirm"].as_array().unwrap().len(), 4);
+    assert!(!json.to_string().contains("age"), "{json}");
+
+    let hessa = support::entity(&db, "Hessa");
+    let view = s.confirm_age_in_play(hessa, "c-1".into()).unwrap();
+    assert!(!view.can_correct, "a settings change closes the Correction");
+    gm.push_proposal(support::intimate_with_hessa(&db));
+    assert_eq!(
+        names(&refusal_view(&mut s, "op-2")),
+        ["Doul", "Orsel", "Wren"]
+    );
+
+    // A character the core cannot confirm: one fixed sentence.
+    let archive = support::entity(&db, "Tithe archive");
+    let err = s.confirm_age_in_play(archive, "c-2".into()).unwrap_err();
+    assert_eq!(err.to_string(), CANNOT_CONFIRM);
+    assert_eq!(gm.calls().len(), 2, "no model call for a setting");
+}
+
+/// Task 8: the Detail Level changes in play through the core's op; the
+/// Play view shows the stored level; `excluded` refuses the next intimate
+/// Turn with the sentence that says where to change it.
+#[test]
+fn set_detail_level_changes_the_play_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town_in_a_scene(&mut s, dir.path(), &gm);
+    let view = s
+        .set_detail_level(DetailLevel::Explicit, "lvl-1".into())
+        .unwrap();
+    assert_eq!(view.detail.stored, DetailLevel::Explicit);
+    assert!(matches!(view.scene, SceneState::Intimate { .. }));
+    let view = s
+        .set_detail_level(DetailLevel::Excluded, "lvl-2".into())
+        .unwrap();
+    assert_eq!(view.detail.stored, DetailLevel::Excluded);
+    assert_eq!(view.scene, SceneState::Plain, "excluded closes the scene");
+    let db = s.summary().unwrap().db_path;
+    gm.push_proposal(support::intimate_with_hessa(&db));
+    let refused = refusal_view(&mut s, "op-1");
+    assert_eq!(refused.text, REFUSAL_EXCLUDED);
+    assert!(refused.text.contains("Ask the GM"));
+    assert!(refused.to_confirm.is_empty());
+}
+
+fn rust_sources(dir: &Path, found: &mut Vec<std::path::PathBuf>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            rust_sources(&path, found);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            found.push(path);
+        }
+    }
+}
+
+/// Task 8: only the core writes the mature ops. No file of the shell builds
+/// a `ConfirmAge`, a `SetDetailLevel` or a `SetScene` op: each settings
+/// command calls an Engine method.
+#[test]
+fn no_shell_file_writes_a_mature_op() {
+    let mut files = Vec::new();
+    rust_sources(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+    assert!(!files.is_empty());
+    for file in files {
+        let text = std::fs::read_to_string(&file).unwrap();
+        for op in ["ConfirmAge", "SetDetailLevel", "SetScene"] {
+            assert!(!text.contains(op), "{} names {op}", file.display());
         }
     }
 }

@@ -344,6 +344,12 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
   margin: var(--space-2) 0;
   font-size: var(--text-sm); color: var(--muted);
 }
+.play-refusal p { margin: 0; }
+.play-refusal__confirm {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.play-detail-select { flex: 0 1 auto; }
 
 /* Narrow window: the panel folds under the "Panel" button. 760px is --narrow in tokens.css. */
 @media (max-width: 760px) {

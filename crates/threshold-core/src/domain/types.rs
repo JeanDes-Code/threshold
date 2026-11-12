@@ -1,3 +1,4 @@
+use super::DetailLevel;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -512,6 +513,13 @@ pub enum LedgerOp<E = EntityRef> {
         open: bool,
         why: SceneWhy,
     },
+    /// The Player changes the Detail Level in play (data shape 3.1). The
+    /// projection `campaign.detail_level` follows it; a rebuild starts from
+    /// the seed's `detail` and replays it. Only `Engine::set_detail_level`
+    /// writes it, in an OOC Turn. It changes no age and no confirmation.
+    SetDetailLevel {
+        level: DetailLevel,
+    },
 }
 
 fn map_all<E, T, X>(items: Vec<E>, f: &mut impl FnMut(E) -> Result<T, X>) -> Result<Vec<T>, X> {
@@ -735,6 +743,7 @@ impl<E> LedgerOp<E> {
             },
             Self::RevertTurn { turn_id } => LedgerOp::RevertTurn { turn_id },
             Self::SetScene { open, why } => LedgerOp::SetScene { open, why },
+            Self::SetDetailLevel { level } => LedgerOp::SetDetailLevel { level },
         })
     }
 }

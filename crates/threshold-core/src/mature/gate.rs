@@ -18,7 +18,7 @@ use crate::{
     },
     normalize,
     store::{Claim, Entity, Fact, Knowledge, WorldView},
-    world::pc_knowledge,
+    world::{pc_can_name, pc_knowledge},
 };
 
 /// The proof that every character of a place is cleared. Only `clearance`
@@ -130,6 +130,48 @@ pub fn checked_here(view: &WorldView) -> BTreeSet<EntityId> {
             .filter(|id| view.entities.iter().any(|e| e.id == *id && is_character(e))),
     );
     here
+}
+
+/// True when the Player may confirm in play that `entity` is an adult
+/// (Age Confirmation, data shape 3.2): it is a PC or an NPC, its stored age
+/// is `domain::ADULT_AGE` or more, and the PC perceives it at the PC's place
+/// now (`context::seen_present`) or can name it (`world::pc_can_name`). A
+/// character the PC does not know, hidden or not, never is, whatever its
+/// age. It reads no confirmation: confirming twice changes nothing. The
+/// store refuses the op for a minor too (plan deviation 6).
+pub fn confirmable(view: &WorldView, entity: EntityId) -> bool {
+    let Some(e) = view.entities.iter().find(|e| e.id == entity) else {
+        return false;
+    };
+    is_character(e)
+        && is_adult(e.age)
+        && (seen_present(view).contains(&entity) || pc_can_name(view).contains(&entity))
+}
+
+/// The characters a Refusal may offer to confirm (data shape 3.11): those
+/// the PC perceives at the PC's place now and can name, who are
+/// `confirmable` and have no Age Confirmation yet, in id order.
+///
+/// It reads what the PC perceives and nothing else: never the characters
+/// who blocked the Refusal. So the list is the same whether or not a hidden
+/// character, a minor, a namesake or someone the proposal named elsewhere is
+/// the real cause, and a Refusal tells the Player nothing about them. Every
+/// character it lists blocks an `AdultsOnly` Refusal anyway: `clearance`
+/// covers everyone the PC believes is here (`checked_here`).
+pub fn to_confirm(view: &WorldView) -> Vec<EntityId> {
+    let named = pc_can_name(view);
+    let mut ids: Vec<EntityId> = seen_present(view)
+        .into_iter()
+        .filter(|id| named.contains(id) && confirmable(view, *id))
+        .filter(|id| {
+            view.entities
+                .iter()
+                .any(|e| e.id == *id && !e.age_confirmed)
+        })
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }
 
 /// The gate's place rule (review M1): two location values name one place

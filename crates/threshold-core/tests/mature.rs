@@ -32,7 +32,7 @@ use threshold_core::{
     rules::D10,
     store::{Store, WorldView},
     turn::{Engine, TurnError},
-    view::{REFUSAL_ADULTS_ONLY, refusal_text},
+    view::{CANNOT_CONFIRM, REFUSAL_ADULTS_ONLY, refusal_text},
     world::{advance, arrival, with_arrival, with_witnessed_events, written_slots},
 };
 
@@ -1500,4 +1500,376 @@ fn the_same_op_after_a_refusal_makes_no_model_call() {
     let fresh = refused(engine.play_turn("t2".into(), "I lean closer.", &mut |_| {}));
     assert_eq!(fresh, first);
     assert_eq!(gm.calls().len(), 2, "a new op runs the model");
+}
+
+// --- Task 8: settings in play ------------------------------------------------
+
+/// A character the PC sees at the gate square, with `age` and no Age
+/// Confirmation. The PC perceives it and cannot name it yet.
+fn seen_npc(rig: &mut Rig, name: &str, age: u16) -> u64 {
+    let ada = rig.ada;
+    rig.edit(vec![
+        LedgerOp::AddEntity {
+            local: Some(1),
+            kind: EntityKind::Npc,
+            name: name.into(),
+            age: Some(age),
+            other_names: vec![],
+            age_confirmed: false,
+        },
+        LedgerOp::AddFact {
+            slot: Slot {
+                subject: EntityRef::New(1),
+                key: "location".into(),
+                value: "gate square".into(),
+            },
+            text: format!("{name} stands at the gate square."),
+            canon: Canon::Established,
+            source: FactSource::Proposal,
+            seen_by: vec![EntityRef::Id(ada)],
+            causes: vec![],
+        },
+    ]);
+    rig.view().entity_by_name(name).unwrap().id
+}
+
+fn turn_rows(rig: &Rig) -> Vec<threshold_core::store::StoredTurn> {
+    rig.store().turns(rig.campaign).unwrap()
+}
+
+fn confirmed(rig: &Rig, id: u64) -> bool {
+    rig.view()
+        .entities
+        .iter()
+        .find(|e| e.id == id)
+        .is_some_and(|e| e.age_confirmed)
+}
+
+fn not_confirmable(r: Result<(), TurnError>) {
+    let err = r.expect_err("not confirmable");
+    assert!(matches!(err, TurnError::NotConfirmable), "{err:?}");
+    assert_eq!(err.to_string(), CANNOT_CONFIRM);
+}
+
+/// Task 8: the core refuses to confirm a character whose stored age is
+/// under 18, a place, and an id the world does not hold. The sentence is
+/// the same in each case and says neither which nor why; no Turn row is
+/// written. (The store gives every character an age.)
+#[test]
+fn a_stored_minor_cannot_be_confirmed() {
+    let mut rig = Rig::new("confirm-minor");
+    let minor = seen_npc(&mut rig, "Wren", 17);
+    let place = rig.place("Mill Yard");
+    assert!(seen_present(&rig.view()).contains(&minor));
+    let before = turn_rows(&rig).len();
+    for (n, id) in [minor, place, 999].into_iter().enumerate() {
+        not_confirmable(rig.engine().confirm_age(format!("c-{n}"), id));
+    }
+    assert_eq!(turn_rows(&rig).len(), before, "no Turn row");
+    assert!(!confirmed(&rig, minor));
+    assert!(!threshold_core::mature::confirmable(&rig.view(), minor));
+}
+
+/// Task 8: a character the PC neither perceives nor can name cannot be
+/// confirmed, whatever its age: a hidden seed NPC, and an adult who stands
+/// at the PC's place unseen. The answer is the minor's answer.
+#[test]
+fn a_hidden_character_cannot_be_confirmed() {
+    let mut rig = Rig::new("confirm-hidden");
+    let unseen = rig.add_npc("Moss", 30, false, "gate square");
+    let view = rig.view();
+    assert!(view.present().contains(&unseen));
+    assert!(!seen_present(&view).contains(&unseen));
+    let before = turn_rows(&rig).len();
+    let vale = rig.vale;
+    not_confirmable(rig.engine().confirm_age("c-1".into(), unseen));
+    not_confirmable(rig.engine().confirm_age("c-2".into(), vale));
+    assert_eq!(turn_rows(&rig).len(), before, "no Turn row");
+    assert!(!confirmed(&rig, unseen));
+    for id in [unseen, vale] {
+        assert!(!threshold_core::mature::confirmable(&rig.view(), id));
+    }
+}
+
+/// Task 8, path 9: an NPC the model made in play blocks every intimate Turn
+/// until the Player confirms it in play; the Refusal offers it by name, and
+/// after the confirmation the same proposal passes.
+#[test]
+fn confirm_age_in_play_clears_an_npc_made_in_play() {
+    let mut rig = Rig::new("confirm-in-play");
+    let mut p = rig.plain();
+    p.new_npcs = vec![new_npc(1, "Kett", 34)];
+    p.reactions = vec![reaction(Handle::NewNpc(1), Stance::Comply, None)];
+    rig.played("t1", &p, "Kett waves from the wall.");
+    let kett = rig.view().entity_by_name("Kett").unwrap().id;
+    assert!(!confirmed(&rig, kett), "a model-stated age is unconfirmed");
+
+    let mut q = rig.intimate();
+    q.reactions = vec![reaction(e(kett), Stance::Comply, None)];
+    let err = rig.play("t2", &q, "Kett stays.").expect_err("Kett blocks");
+    let TurnError::Refused { kind, blocked } = err else {
+        panic!("{err:?}");
+    };
+    assert_eq!((kind, blocked), (RefusalKind::AdultsOnly, vec![kett]));
+    let offered = rig.engine().refusal_view(kind).unwrap();
+    assert_eq!(offered.text, REFUSAL_ADULTS_ONLY);
+    let names: Vec<Option<String>> = offered.to_confirm.iter().map(|n| n.name.clone()).collect();
+    assert_eq!(names, [Some("Kett".to_owned())]);
+
+    rig.engine().confirm_age("c-1".into(), kett).unwrap();
+    assert!(confirmed(&rig, kett));
+    assert!(
+        rig.engine()
+            .refusal_view(kind)
+            .unwrap()
+            .to_confirm
+            .is_empty()
+    );
+    rig.gm.push_proposal(serde_json::to_string(&q).unwrap());
+    rig.engine()
+        .play_turn("t3".into(), "I stay with Kett.", &mut |_| {})
+        .expect("the same proposal passes");
+}
+
+/// Task 8 (data shape 3.9): a setting changed in play is an OOC Turn: empty
+/// Intent, `{}`, no clock change, no model call. It is in no story, no
+/// Moment and no Turn count, and it closes "Correct last Turn" until the
+/// next Play Turn (owner's decision).
+#[test]
+fn an_ooc_turn_is_in_no_story_and_closes_correct_last() {
+    let mut rig = Rig::new("ooc-turn");
+    let p = rig.plain();
+    rig.played("t1", &p, "Dusk falls.");
+    let sight = rig.sight();
+    assert!(sight.can_correct);
+    let (story, moments) = (sight.story.len(), sight.moments.len());
+    let calls = rig.gm.calls().len();
+    let clock = rig.view().clock_min;
+
+    rig.engine()
+        .set_detail_level("lvl-1".into(), DetailLevel::Explicit)
+        .unwrap();
+    let ooc = turn_rows(&rig).pop().unwrap();
+    assert_eq!(ooc.record.kind, threshold_core::store::TurnKind::Ooc);
+    assert_eq!(ooc.record.intent, "");
+    assert_eq!(ooc.record.proposal_json, "{}");
+    assert_eq!(
+        (ooc.record.clock_before, ooc.record.clock_after),
+        (clock, clock)
+    );
+    assert_eq!(
+        rig.store().turn_ops(ooc.id).unwrap(),
+        [LedgerOp::SetDetailLevel {
+            level: DetailLevel::Explicit
+        }]
+    );
+    assert_eq!(rig.view().detail, DetailLevel::Explicit);
+    assert_eq!(rig.gm.calls().len(), calls, "no model call");
+    let sight = rig.sight();
+    assert_eq!((sight.story.len(), sight.moments.len()), (story, moments));
+    assert!(!sight.can_correct);
+    let err = rig
+        .engine()
+        .correct_last("fix-1".into(), "I wait.", "it was wrong", &mut |_| {})
+        .expect_err("closed after a settings change");
+    assert!(matches!(err, TurnError::NotCorrectable(_)), "{err:?}");
+
+    // The same op again commits nothing more.
+    let rows = turn_rows(&rig).len();
+    rig.engine()
+        .set_detail_level("lvl-1".into(), DetailLevel::Explicit)
+        .unwrap();
+    assert_eq!(turn_rows(&rig).len(), rows);
+
+    // A confirmation is an OOC Turn too.
+    let moss = seen_npc(&mut rig, "Moss", 30);
+    rig.engine().confirm_age("c-1".into(), moss).unwrap();
+    let ooc = turn_rows(&rig).pop().unwrap();
+    assert_eq!(ooc.record.kind, threshold_core::store::TurnKind::Ooc);
+    assert_eq!(
+        rig.store().turn_ops(ooc.id).unwrap(),
+        [LedgerOp::ConfirmAge { entity: moss }]
+    );
+    assert_eq!(rig.gm.calls().len(), calls, "no model call");
+    assert!(!rig.sight().can_correct);
+
+    // The next Play Turn opens "Correct last Turn" again.
+    rig.played("t2", &p, "Night comes.");
+    assert!(rig.sight().can_correct);
+    let peek = threshold_core::store::peek(&rig.path).unwrap();
+    assert_eq!(peek.turn_count, 2, "OOC Turns count no Turn");
+}
+
+/// Task 8: a Correction plans on the state before the Turn it corrects, so
+/// at the Detail Level of that Turn. With the OOC Turn of a settings change
+/// last, there is nothing to correct (data shape 3.9).
+#[test]
+fn a_correction_plans_at_the_level_of_its_turn() {
+    let mut rig = Rig::new("correct-level");
+    let p = rig.plain();
+    rig.played("t1", &p, "Dusk falls.");
+    rig.engine()
+        .set_detail_level("lvl-1".into(), DetailLevel::Excluded)
+        .unwrap();
+    let err = rig
+        .engine()
+        .correct_last("fix-1".into(), "I stay.", "wrong", &mut |_| {})
+        .expect_err("the OOC Turn is last");
+    assert!(matches!(err, TurnError::NotCorrectable(_)), "{err:?}");
+
+    // Turn 2 is played at `excluded`: its Correction plans there too.
+    rig.played("t2", &p, "Night comes.");
+    let q = rig.intimate();
+    rig.gm.push_proposal(serde_json::to_string(&q).unwrap());
+    let err = rig
+        .engine()
+        .correct_last("fix-2".into(), "I stay with Brann.", "wrong", &mut |_| {})
+        .expect_err("refused at excluded");
+    assert!(
+        matches!(
+            err,
+            TurnError::Refused {
+                kind: RefusalKind::Excluded,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+
+    // Back at `implied`, Turn 3 and its Correction plan at `implied`.
+    rig.engine()
+        .set_detail_level("lvl-2".into(), DetailLevel::Implied)
+        .unwrap();
+    rig.played("t3", &p, "The lamps burn low.");
+    rig.gm.push_proposal(serde_json::to_string(&q).unwrap());
+    rig.gm.push_narration("Brann stays.".into());
+    rig.engine()
+        .correct_last("fix-3".into(), "I stay with Brann.", "wrong", &mut |_| {})
+        .expect("planned at implied");
+}
+
+/// Task 8: the level set in play is a ledger op: a rebuild of the
+/// projections keeps it, and the state before the change still has the old
+/// level.
+#[test]
+fn set_detail_level_survives_rebuild() {
+    let mut rig = Rig::new("level-rebuild");
+    let p = rig.plain();
+    rig.played("t1", &p, "Dusk falls.");
+    rig.engine()
+        .set_detail_level("lvl-1".into(), DetailLevel::Explicit)
+        .unwrap();
+    let ooc = turn_rows(&rig).pop().unwrap();
+    drop(rig.engine.take());
+    let mut store = Store::open(&rig.path).unwrap();
+    store.rebuild_projections(rig.campaign).unwrap();
+    assert_eq!(
+        store.snapshot(rig.campaign).unwrap().detail,
+        DetailLevel::Explicit
+    );
+    assert_eq!(
+        store.snapshot_before(rig.campaign, ooc.seq).unwrap().detail,
+        DetailLevel::Implied
+    );
+    rig.engine = Some(rig.make_engine(store));
+}
+
+/// Task 8: no path lowers the gate. A Detail Level change clears nobody: an
+/// unconfirmed adult the PC sees here blocks at `explicit` and at `implied`
+/// alike, and stays unconfirmed; at `excluded` every intimate Turn is
+/// refused for the level.
+#[test]
+fn a_detail_level_change_clears_nobody() {
+    let mut rig = Rig::new("level-clears-nobody");
+    let moss = seen_npc(&mut rig, "Moss", 30);
+    let p = rig.intimate();
+    for (n, level) in [DetailLevel::Explicit, DetailLevel::Implied]
+        .into_iter()
+        .enumerate()
+    {
+        rig.engine()
+            .set_detail_level(format!("lvl-{n}"), level)
+            .unwrap();
+        let err = rig.play(&format!("t-{n}"), &p, "-").expect_err("Moss");
+        let TurnError::Refused { kind, blocked } = err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(kind, RefusalKind::AdultsOnly, "{level:?}");
+        assert!(blocked.contains(&moss), "{level:?}");
+        assert!(!confirmed(&rig, moss));
+    }
+    rig.engine()
+        .set_detail_level("lvl-x".into(), DetailLevel::Excluded)
+        .unwrap();
+    let err = rig.play("t-x", &p, "-").expect_err("excluded");
+    assert!(
+        matches!(
+            err,
+            TurnError::Refused {
+                kind: RefusalKind::Excluded,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+}
+
+/// Task 8: the Confirm list of a Refusal reads what the PC perceives now,
+/// never who blocked. On the hidden world, a Refusal caused in part by the
+/// hidden Vey lists the same names as one caused by the perceived adults
+/// alone; and a Refusal caused by Vey alone lists nobody, exactly as one
+/// caused by a stranger the PC cannot name.
+#[test]
+fn the_confirm_list_is_the_same_whatever_hides_behind_a_refusal() {
+    fn refused(confirm: impl Fn(&HiddenWorld) -> Vec<u64>) -> (Vec<u64>, String) {
+        let mut w = HiddenWorld::new();
+        let ops = confirm(&w)
+            .into_iter()
+            .map(|id| LedgerOp::ConfirmAge {
+                entity: EntityRef::Id(id),
+            })
+            .collect();
+        play_ops(&mut w, ops);
+        let mut p = proposal(Verdict::Allowed);
+        p.intimate = true;
+        p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
+        let gm = RecordedGm::new(vec![serde_json::to_string(&p).unwrap()], vec![]);
+        let (mut engine, _) = w.engine(&gm);
+        engine
+            .set_detail_level("lvl".into(), DetailLevel::Implied)
+            .unwrap();
+        let err = engine
+            .play_turn("t1".into(), "I lean closer.", &mut |_| {})
+            .expect_err("refused");
+        let TurnError::Refused { kind, blocked } = err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(kind, RefusalKind::AdultsOnly);
+        let view = engine.refusal_view(kind).unwrap();
+        (blocked, serde_json::to_string(&view).unwrap())
+    }
+    let all_but = |w: &HiddenWorld, left: &[u64]| -> Vec<u64> {
+        [w.ada, w.orsel, w.brann, w.vey, w.kestrel]
+            .into_iter()
+            .filter(|id| !left.contains(id))
+            .collect()
+    };
+    // Vey (hidden) and the perceived Orsel and Brann block; then only them.
+    let (with_vey, a) = refused(|w| all_but(w, &[w.vey, w.orsel, w.brann]));
+    let (without_vey, b) = refused(|w| all_but(w, &[w.orsel, w.brann]));
+    assert_ne!(with_vey, without_vey, "the causes differ");
+    assert_eq!(a, b, "the Player sees the same");
+    assert!(a.contains("\"Orsel\"") && a.contains("\"Brann\""), "{a}");
+    // Only the hidden Vey blocks; then only the stranger Kestrel.
+    let (vey, c) = refused(|w| all_but(w, &[w.vey]));
+    let (kestrel, d) = refused(|w| all_but(w, &[w.kestrel]));
+    assert_ne!(vey, kestrel, "the causes differ");
+    assert_eq!(c, d, "the Player sees the same");
+    assert!(c.contains("\"to_confirm\":[]"), "{c}");
+    for json in [a, b, c, d] {
+        for hidden in support::hidden::HIDDEN {
+            assert!(!json.contains(hidden), "{hidden} leaks: {json}");
+        }
+        assert!(!json.contains("age"), "{json}");
+    }
 }

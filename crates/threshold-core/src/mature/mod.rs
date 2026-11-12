@@ -20,7 +20,9 @@
 //! adds the effective Detail Level (`effective`) and explicit telling
 //! (`Told::Explicit`): explicit text reaches a prompt only with a `Cleared`
 //! value (ADR 0009). `text` names `pack` for that one rule; `gate` names
-//! none.
+//! none. Task 8 adds the Age Confirmation in play (`confirmable`) and the
+//! characters a Refusal may offer to confirm (`to_confirm`), which read
+//! what the PC perceives and never who blocked.
 
 mod gate;
 mod scene;
@@ -28,7 +30,10 @@ mod text;
 
 use serde::{Deserialize, Serialize};
 
-pub use gate::{Blocked, Cleared, Presence, after, check, check_after, checked_here, clearance};
+pub use gate::{
+    Blocked, Cleared, Presence, after, check, check_after, checked_here, clearance, confirmable,
+    to_confirm,
+};
 pub use scene::{
     CLOSING_NARRATION_MAX_TOKENS, SCENE_CLOSE_DEFAULT_MIN, SCENE_CLOSE_MAX_MIN,
     SCENE_NARRATION_MAX_TOKENS, default_close, narration_clearance, open_scene, scene_gate,

@@ -694,6 +694,8 @@ Every row of shape section 5 (gates) and section 6 (paths), plus the guards this
 | Review 2: a Closing Turn moves nobody | `checks::settle_closing`, `closing_schema_for` | 5 | `a_closing_turn_moves_nobody` |
 | Review 2: one token cap rule | `Engine::narrate` | 4, 5 | `a_scene_narration_is_capped` |
 | Review 2: the loader shows no pack-chosen name, counts a fragment after trimming, refuses a hard link and an invisible name | `pack::shown_folder`, `fragment_text`, `refuse_code`, rule 4 | 7 | `a_pack_problem_never_quotes_the_pack`; `a_padded_fragment_counts_its_chars_after_trimming`; `a_hard_link_in_a_pack_refuses_it`; `pack_rules_refuse_the_whole_pack` (`invisible-name`, `same-name-but-invisible`) |
+| Task 8: the Confirm list of a Refusal reads what the PC perceives, never who blocked | `mature::to_confirm`, `view::refusal`, `Engine::refusal_view` | 8 | `the_confirm_list_is_the_same_whatever_hides_behind_a_refusal`; `a_refusal_names_only_perceived_characters`; `a_refusal_carries_the_characters_to_confirm` |
+| Task 8: a level change clears nobody; a level raised never reaches an earlier Turn; a level lowered applies from the next narration | `Engine::set_detail_level`; `mature::told` (the lower of the level after the Turn and now) | 8 | `a_detail_level_change_clears_nobody`; `raising_the_level_tells_no_earlier_turn_explicit`; `lowering_the_level_applies_from_the_next_turn` |
 
 ---
 
@@ -750,3 +752,7 @@ Each change, and why. The reviewer of Task 1 checks the first five.
 16. **`validate` reads `view.scene_open`** for the plan limit, not the G1 result. When G1 fails the schema already holds 90.
 17. **The `TurnKind` match sites** are more than the six the shape lists, and their line numbers moved. Task 5 lists today's sites and asks for a fresh search.
 18. **The evaluation scenarios need two new fields**, `extra_npcs` and `confirm`, because the town fixture has no minor and no confirmed age.
+19. **A Refusal carries its `RefusalView` in its own result kind** (`AppError::Refused`, serialized `{refusal, kind, to_confirm}`) and in the `turn_refused` event, not in `turn_failed`: since review M3 a Refusal is not a failed Turn (Task 8).
+20. **`view::refusal` takes the ids of `mature::to_confirm`, not `blocked`.** The list reads what the PC perceives now, so it cannot differ with a hidden cause. `Engine::refusal_view` builds it; the shell only maps it (Task 8).
+21. **The PC is in the Confirm list** when its age is unconfirmed (a fixture Campaign): the Player can name and perceive the PC, and the PC blocks like any character (Task 8).
+22. **`set_detail_level` and `confirm_age` commit nothing** when the level is already set or the character already confirmed, so a no-op does not close "Correct last Turn" (Task 8).

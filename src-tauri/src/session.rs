@@ -14,6 +14,7 @@ use serde::{Serialize, Serializer, ser::SerializeMap};
 use threshold_core::{
     Gm,
     build::Gap,
+    domain::DetailLevel,
     fixture::{load_adventure_seed, load_world_setup},
     model::GmError,
     pack::{self, ContentPack, PackProblem},
@@ -22,7 +23,7 @@ use threshold_core::{
     setup::{create_campaign_file, remove_part},
     store::{self, CampaignId, DebugEntry, Store, StoreError, StoredTurn, TurnKind, WorldView},
     turn::{Engine, TurnControl, TurnError, TurnOutcome, stored_roll},
-    view::{self, CharacterView, EntityCard, JournalView, PlayView},
+    view::{self, CharacterView, EntityCard, JournalView, PlayView, RefusalView},
     world::{PcSight, pc_sight},
 };
 use threshold_ollama::OllamaConfig;
@@ -91,8 +92,10 @@ pub enum AppError {
     /// `approve_draft` on a draft that still has gaps: every gap.
     Gaps(Vec<Gap>),
     /// A Refusal (glossary): the Turn was not played, and it did not fail.
-    /// The one fixed sentence of its kind (`view::refusal_text`).
-    Refused(String),
+    /// The one fixed sentence of its kind (`view::refusal_text`), and the
+    /// characters the Player may confirm from it (`view::RefusalView`,
+    /// Task 8).
+    Refused(RefusalView),
     Failed(String),
 }
 
@@ -106,7 +109,8 @@ impl fmt::Display for AppError {
                 "the draft cannot be approved: {} gap(s) to fix",
                 gaps.len()
             ),
-            Self::Refused(text) | Self::Failed(text) => f.write_str(text),
+            Self::Refused(refusal) => f.write_str(&refusal.text),
+            Self::Failed(text) => f.write_str(text),
         }
     }
 }
@@ -118,15 +122,18 @@ pub(crate) fn failed(e: impl fmt::Display) -> AppError {
 impl std::error::Error for AppError {}
 
 /// An error reaches the UI as its text, except `Gaps`, the list of gaps,
-/// and `Refused`, `{"refusal": <sentence>}`: a Refusal is its own result
-/// kind, not a failed Turn (review M3).
+/// and `Refused`, `{"refusal": <sentence>, "kind": …, "to_confirm": […]}`:
+/// a Refusal is its own result kind, not a failed Turn (review M3), and it
+/// carries the names the Player may confirm, never an age (Task 8).
 impl Serialize for AppError {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Gaps(gaps) => gaps.serialize(s),
-            Self::Refused(text) => {
-                let mut map = s.serialize_map(Some(1))?;
-                map.serialize_entry("refusal", text)?;
+            Self::Refused(refusal) => {
+                let mut map = s.serialize_map(Some(3))?;
+                map.serialize_entry("refusal", &refusal.text)?;
+                map.serialize_entry("kind", &refusal.kind)?;
+                map.serialize_entry("to_confirm", &refusal.to_confirm)?;
                 map.end()
             }
             _ => s.collect_str(self),
@@ -709,6 +716,39 @@ impl Session {
         }
     }
 
+    /// "Confirm" in play (Task 8): the Player confirms that one character
+    /// is an adult. The core writes the op in an OOC Turn, or answers
+    /// `view::CANNOT_CONFIRM` for a character it cannot confirm. Then the
+    /// Play view, as after any command that changes the Campaign.
+    pub fn confirm_age_in_play(
+        &mut self,
+        entity_id: u64,
+        op_id: String,
+    ) -> Result<PlayView, AppError> {
+        let debug = self.debug();
+        let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
+        open.engine
+            .confirm_age(op_id, entity_id)
+            .map_err(|e| player_error(&e, debug))?;
+        self.get_play_view()
+    }
+
+    /// The Detail Level select of the "Ask the GM" panel (Task 8): the core
+    /// writes the level in an OOC Turn, and closes an open Intimate Scene
+    /// at `excluded`. No model reads it. Then the Play view.
+    pub fn set_detail_level(
+        &mut self,
+        level: DetailLevel,
+        op_id: String,
+    ) -> Result<PlayView, AppError> {
+        let debug = self.debug();
+        let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
+        open.engine
+            .set_detail_level(op_id, level)
+            .map_err(|e| player_error(&e, debug))?;
+        self.get_play_view()
+    }
+
     pub fn ask_ooc(&mut self, text: &str) -> Result<String, AppError> {
         let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
@@ -934,6 +974,13 @@ fn committed(
                 faded: false,
             })
         }
+        // A Refusal carries what the Player may confirm from it, read from
+        // the state now (`Engine::refusal_view`), never who blocked.
+        Err(TurnError::Refused { kind, .. }) => Err(AppError::Refused(
+            engine
+                .refusal_view(kind)
+                .map_err(|e| player_error(&e, debug))?,
+        )),
         Err(e) => Err(player_error(&e, debug)),
     }
 }
@@ -967,7 +1014,8 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
         | TurnError::PlayStarted
         | TurnError::NoScene
         | TurnError::NothingToFade
-        | TurnError::Faded => e.to_string(),
+        | TurnError::Faded
+        | TurnError::NotConfirmable => e.to_string(),
         TurnError::Model(error) => model_error(error),
         TurnError::NarrationFailed { error, .. } => format!(
             "the Turn is committed, but its narration failed: {}",
@@ -991,7 +1039,11 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
         // name, no id, no age (mature content module, Task 1). It is its
         // own result kind, not a failure (review M3).
         TurnError::Refused { kind, .. } => {
-            return AppError::Refused(view::refusal_text(*kind).to_owned());
+            return AppError::Refused(RefusalView {
+                kind: *kind,
+                text: view::refusal_text(*kind).to_owned(),
+                to_confirm: Vec::new(),
+            });
         }
     };
     AppError::Failed(text)

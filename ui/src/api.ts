@@ -517,10 +517,19 @@ export interface TurnFailed {
   reason: string;
 }
 
-/** The `turn_refused` event: a Refusal, not a failed Turn. */
+/** Why the core refused a Turn: the Detail Level, the age rule, or nobody goes along. */
+export type RefusalKind = "excluded" | "adults_only" | "unwilling";
+
+/**
+ * The `turn_refused` event: a Refusal, not a failed Turn. `to_confirm` holds
+ * the characters the Player may confirm as adults from it, by name and with
+ * no age (an `adults_only` Refusal only).
+ */
 export interface TurnRefused {
   op_id: string;
   text: string;
+  kind: RefusalKind;
+  to_confirm: NameRef[];
 }
 
 /** One attempt at a Turn: its op_id, known before the result arrives. */
@@ -612,6 +621,16 @@ export function createApi(invoke: Invoke) {
     renarrate: (turnId: number) => invoke<string>("renarrate", { turn_id: turnId }),
     /** "Fade to black": sets the fade flag with no lock; see `FadeResult`. */
     fadeToBlack: (opId: string) => invoke<FadeResult>("fade_to_black", { op_id: opId }),
+    /**
+     * "Confirm" in play: the core confirms that one character is an adult,
+     * in an OOC Turn, and returns the new Play view. It refuses, with one
+     * fixed sentence, a character it cannot confirm.
+     */
+    confirmAgeInPlay: (entityId: number, opId: string) =>
+      invoke<PlayView>("confirm_age_in_play", { entity_id: entityId, op_id: opId }),
+    /** The Detail Level in play, in an OOC Turn; returns the new Play view. */
+    setDetailLevel: (level: DetailLevel, opId: string) =>
+      invoke<PlayView>("set_detail_level", { level, op_id: opId }),
     getCharacter: () => invoke<CharacterView>("get_character"),
     /** One card. Refused with one fixed text for an entity the PC does not know. */
     getEntityCard: (entityId: number) =>
@@ -669,6 +688,28 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  */
 export function refusalFromError(e: unknown): string | null {
   return isRecord(e) && typeof e.refusal === "string" ? e.refusal : null;
+}
+
+/**
+ * The characters a Refusal offers to confirm, each with a name the PC can
+ * use; empty for a Refusal with no list and for any other error. The shell
+ * sends them with the sentence: `{refusal, kind, to_confirm}` (Task 8).
+ */
+export function toConfirmFromError(e: unknown): NameRef[] {
+  if (refusalFromError(e) === null || !isRecord(e) || !Array.isArray(e.to_confirm)) return [];
+  const names: NameRef[] = [];
+  for (const item of e.to_confirm as unknown[]) {
+    if (
+      !isRecord(item) ||
+      typeof item.entity_id !== "number" ||
+      typeof item.kind !== "string" ||
+      typeof item.name !== "string"
+    ) {
+      return [];
+    }
+    names.push({ entity_id: item.entity_id, kind: item.kind as EntityKind, name: item.name });
+  }
+  return names;
 }
 
 /** The gaps of an `approve_draft` error, or null for any other error. */

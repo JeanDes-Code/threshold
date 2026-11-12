@@ -548,6 +548,14 @@ fn apply(
             )?;
             false
         }
+        // The Detail Level the Player set in play (data shape 3.1).
+        LedgerOp::SetDetailLevel { level } => {
+            db.execute(
+                "UPDATE campaign SET detail_level=?2 WHERE id=?1",
+                params![c, enum_text(level)?],
+            )?;
+            false
+        }
     };
     Ok(made.then(|| db.last_insert_rowid() as u64))
 }

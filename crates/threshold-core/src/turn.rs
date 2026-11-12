@@ -26,8 +26,8 @@ use crate::{
         seen_present,
     },
     domain::{
-        ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, EntityId, EntityKind,
-        EntityRef, FactSource, Handle, LedgerOp, Reaction, SceneWhy, Verdict,
+        ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, DetailLevel,
+        EntityId, EntityKind, EntityRef, FactSource, Handle, LedgerOp, Reaction, SceneWhy, Verdict,
     },
     mature::{self, RefusalKind, Told},
     model::{Gm, GmError, Prompt, Stream},
@@ -39,6 +39,7 @@ use crate::{
         CampaignId, CommitError, DebugEntry, OpId, Store, StoreError, StoredTurn, TurnId, TurnKind,
         TurnRecord, WorldView,
     },
+    view::RefusalView,
     world::{self, PcSight},
 };
 
@@ -129,6 +130,10 @@ pub enum TurnError {
     NothingToFade,
     /// `renarrate` of a faded Turn: a Fade to Black cannot be undone.
     Faded,
+    /// An Age Confirmation in play that the core refuses
+    /// (`mature::confirmable`): the same error for a minor, a character the
+    /// PC does not know and anything that is no character.
+    NotConfirmable,
 }
 
 impl fmt::Display for TurnError {
@@ -159,6 +164,7 @@ impl fmt::Display for TurnError {
             Self::NoScene => f.write_str("no Intimate Scene is open"),
             Self::NothingToFade => f.write_str("nothing to fade"),
             Self::Faded => f.write_str("this Turn was faded: it is not narrated again"),
+            Self::NotConfirmable => f.write_str(crate::view::CANNOT_CONFIRM),
         }
     }
 }
@@ -776,6 +782,123 @@ impl Engine {
                 Ok(narration)
             }
             Narrated::Faded => self.after_fade(turn, &stored.record.op_id),
+        }
+    }
+
+    /// Age Confirmation in play (data shape 3.2): the Player confirms that
+    /// `entity` is an adult. The core writes `ConfirmAge` in an OOC Turn
+    /// (`commit_ooc`) when `mature::confirmable` holds, and `NotConfirmable`
+    /// otherwise, with no Turn row: the same answer for a character under
+    /// 18, one the PC does not know, and anything that is no character. A
+    /// character already confirmed, or a second call with the same `op_id`,
+    /// commits nothing. It never changes an age. No model call.
+    pub fn confirm_age(&mut self, op_id: OpId, entity: EntityId) -> Result<(), TurnError> {
+        if self
+            .store
+            .turn_by_campaign_op(self.campaign, &op_id)?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let view = self.store.snapshot(self.campaign)?;
+        if !mature::confirmable(&view, entity) {
+            return Err(TurnError::NotConfirmable);
+        }
+        if view
+            .entities
+            .iter()
+            .any(|e| e.id == entity && e.age_confirmed)
+        {
+            return Ok(());
+        }
+        let op = LedgerOp::ConfirmAge {
+            entity: EntityRef::Id(entity),
+        };
+        self.commit_ooc(op_id, &view, vec![op]).map(|_| ())
+    }
+
+    /// The Player changes the Detail Level in play (data shape 3.1, 3.9):
+    /// `SetDetailLevel` in an OOC Turn. At `excluded`, an open Intimate
+    /// Scene closes in the same Turn (`SetScene`, `why: Excluded`, data
+    /// shape 3.4 row 8). No level clears anyone: the age rule reads ages and
+    /// confirmations only. A level lowered applies from the next narration
+    /// on; a level raised never reaches a Turn committed before it
+    /// (`mature::told`). The level the Campaign already has, or a second
+    /// call with the same `op_id`, commits nothing. No model call.
+    pub fn set_detail_level(&mut self, op_id: OpId, level: DetailLevel) -> Result<(), TurnError> {
+        if self
+            .store
+            .turn_by_campaign_op(self.campaign, &op_id)?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let view = self.store.snapshot(self.campaign)?;
+        if view.detail == level {
+            return Ok(());
+        }
+        let mut ops = vec![LedgerOp::SetDetailLevel { level }];
+        if level == DetailLevel::Excluded && view.scene_open.is_some() {
+            ops.push(LedgerOp::SetScene {
+                open: false,
+                why: SceneWhy::Excluded,
+            });
+        }
+        self.commit_ooc(op_id, &view, ops).map(|_| ())
+    }
+
+    /// The Refusal of `kind` as the Play screen shows it (data shape 3.11):
+    /// its sentence, and for `adults_only` the characters the PC perceives
+    /// here and can name that the Player may confirm (`mature::to_confirm`).
+    /// It reads the state now and never the characters who blocked the
+    /// Turn, so a hidden cause changes nothing the Player reads.
+    pub fn refusal_view(&self, kind: RefusalKind) -> Result<RefusalView, TurnError> {
+        let view = self.store.snapshot(self.campaign)?;
+        let turns = self.store.turns(self.campaign)?;
+        let reverted: HashSet<TurnId> = self
+            .store
+            .reverted_turns(self.campaign)?
+            .into_iter()
+            .collect();
+        let confirm = mature::to_confirm(&view);
+        Ok(match crate::world::pc_sight(&view, &turns, &reverted) {
+            Some(sight) => crate::view::refusal(&sight, kind, &confirm),
+            None => RefusalView {
+                kind,
+                text: crate::view::refusal_text(kind).to_owned(),
+                to_confirm: Vec::new(),
+            },
+        })
+    }
+
+    /// Commits one OOC Turn (data shape 3.9): a setting the Player changed
+    /// in play. Empty Intent, `{}`, no clock change, no model call. It is in
+    /// no story, no Moment and no Turn count, and as the latest Turn it
+    /// closes "Correct last Turn" until the next Play Turn (owner's
+    /// decision). A Turn already stored under `op_id` is returned as it is.
+    fn commit_ooc(
+        &mut self,
+        op_id: OpId,
+        view: &WorldView,
+        ops: Vec<LedgerOp>,
+    ) -> Result<TurnId, TurnError> {
+        let record = TurnRecord {
+            campaign_id: self.campaign,
+            op_id: op_id.clone(),
+            kind: TurnKind::Ooc,
+            intent: String::new(),
+            proposal_json: "{}".into(),
+            clock_before: view.clock_min,
+            clock_after: view.clock_min,
+        };
+        let mut timings = Timings::default();
+        match self.commit_logged(record, ops, &mut timings)? {
+            Some(id) => Ok(id),
+            None => Ok(self
+                .store
+                .turn_by_campaign_op(self.campaign, &op_id)?
+                .ok_or_else(|| StoreError::Invalid("duplicate op without a turn".into()))?
+                .id),
         }
     }
 

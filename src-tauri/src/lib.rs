@@ -25,11 +25,12 @@ use session::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
     build::{BUILD_TIMEOUT_S, EntryRef, KnownFact, Progress},
-    domain::AdventureSeed,
+    domain::{AdventureSeed, DetailLevel},
+    mature::RefusalKind,
     player::{Note, Target},
     rules::RollResult,
     turn::BEGIN_OP_ID,
-    view::{CharacterView, EntityCard, JournalView, PlayView},
+    view::{CharacterView, EntityCard, JournalView, NameRef, PlayView},
 };
 use threshold_ollama::OllamaGm;
 
@@ -69,11 +70,14 @@ struct TurnFailed {
     reason: String,
 }
 
-/// A Refusal: not a failed Turn (review M3).
+/// A Refusal: not a failed Turn (review M3). `to_confirm` holds the
+/// characters the Player may confirm from it, by name (Task 8).
 #[derive(Clone, Serialize)]
 struct TurnRefused {
     op_id: String,
     text: String,
+    kind: RefusalKind,
+    to_confirm: Vec<NameRef>,
 }
 
 #[derive(Serialize)]
@@ -140,11 +144,13 @@ fn report(app: &AppHandle, op_id: &str, result: &Result<TurnSummary, AppError>) 
                 roll: turn.roll,
             },
         ),
-        Err(AppError::Refused(text)) => app.emit(
+        Err(AppError::Refused(refusal)) => app.emit(
             "turn_refused",
             TurnRefused {
                 op_id: op_id.to_owned(),
-                text: text.clone(),
+                text: refusal.text.clone(),
+                kind: refusal.kind,
+                to_confirm: refusal.to_confirm.clone(),
             },
         ),
         Err(e) => app.emit(
@@ -293,6 +299,29 @@ async fn fade_to_black(
     tauri::async_runtime::spawn_blocking(move || session::fade_to_black(&shared, &gate, op_id))
         .await
         .map_err(|e| AppError::Failed(e.to_string()))?
+}
+
+/// "Confirm" in play (Task 8): the Player confirms that one character he
+/// sees and can name is an adult. The draft command `confirm_age` keeps its
+/// name; this one is the play command. Returns the Play view.
+#[tauri::command(rename_all = "snake_case")]
+async fn confirm_age_in_play(
+    state: State<'_, Shared>,
+    entity_id: u64,
+    op_id: String,
+) -> Result<PlayView, AppError> {
+    blocking(&state, move |s| s.confirm_age_in_play(entity_id, op_id)).await
+}
+
+/// The Detail Level in play (Task 8), from the select of the "Ask the GM"
+/// panel. Returns the Play view.
+#[tauri::command(rename_all = "snake_case")]
+async fn set_detail_level(
+    state: State<'_, Shared>,
+    level: DetailLevel,
+    op_id: String,
+) -> Result<PlayView, AppError> {
+    blocking(&state, move |s| s.set_detail_level(level, op_id)).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -522,6 +551,8 @@ pub fn run() {
             correct_last,
             end_scene,
             fade_to_black,
+            confirm_age_in_play,
+            set_detail_level,
             ask_ooc,
             renarrate,
             get_character,

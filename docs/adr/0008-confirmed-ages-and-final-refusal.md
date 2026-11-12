@@ -53,3 +53,10 @@ A review of Tasks 1 and 2 found ways around the gate. Each change below makes th
 - **OOC.** The OOC rules end with the narrator's stable neutral line (`context::INTIMATE_RULE`).
 
 What stays open: a wrong tag (`intimate: false` on an intimate Intent) still runs no age rule. The wider tag wording and the raw-text sticky tag lower that risk; the evaluation measures it.
+
+## Changed in Task 8 (2026-11-12): settings in play
+
+- **Age Confirmation in play.** `Engine::confirm_age` writes `ConfirmAge` in an OOC Turn when `mature::confirmable` holds: a PC or an NPC, a stored age of 18 or more, and the PC perceives it here now or can name it. Any other entity, a hidden one or a minor included, gets `TurnError::NotConfirmable` and one fixed sentence (`view::CANNOT_CONFIRM`) that says neither which nor why. No Turn row, no model call. The screen says "adult" and never shows a number.
+- **The Refusal offers names.** An `adults_only` Refusal reaches the Play screen as `view::RefusalView`: its sentence, and one "Confirm" button for each character in `mature::to_confirm`: those the PC perceives here and can name, with an adult stored age and no confirmation yet. The list reads what the PC perceives now and never the ids that blocked the Turn. So it is the same whether or not a hidden character, a minor, a namesake or a character named elsewhere is the real cause (test `the_confirm_list_is_the_same_whatever_hides_behind_a_refusal`). Each character it lists blocks the Turn anyway: `clearance` covers everyone the PC believes is here.
+- **The Detail Level in play.** `Engine::set_detail_level` writes `SetDetailLevel` in an OOC Turn, and at `excluded` closes an open scene in the same Turn (`SceneWhy::Excluded`). A level change clears nobody. The `excluded` sentence now says where to change the level: under "Ask the GM".
+- **An OOC Turn** has an empty Intent, no clock change and no model call. It is in no story, no Moment and no Turn count. As the latest Turn it closes "Correct last Turn" until the next Play Turn (owner's decision).
