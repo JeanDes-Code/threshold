@@ -274,3 +274,42 @@ Limits:
 - Turn times are about 1 s higher than attempt 9 at p50 on this small fixture. The small fixture's prompts gain the `ALL PLACES` line, the rule lines of `leaves` and the here line; the large world's replay is faster (p50 13.0 s to 9.0 s).
 
 Limits: one fixture, one phrasing per step, 4 runs; the judge is the same local model.
+
+## Attempt 11: the move back to the town hall (mature module rounds, 2026-11-12)
+
+- Code: the mature module rounds of `evals/reports/2026-11-mature-content.md`, attempts 2 to 6 (commit 37a4c1b to e83a377). Model loaded with one small request before each round, 11 to 12 GB of RAM available.
+- Since the `intimacy` change, step 7 ("I walk back up the road to the Varn town hall.") left the PC at the mill in some runs. We read the raw logs, rebuilt the runs offline and probed the model.
+
+| Round | Runs | Step 6 (to the mill) reached | Step 7 (back) reached | Runs where step 7 missed |
+|---|---|---|---|---|
+| Attempt 2 | 4 | 4 / 4 | 3 / 4 | run 4 |
+| Attempt 3 | 4 | 4 / 4 | 3 / 4 | run 4 |
+| Attempt 4 (stance defined) | 8 | 8 / 8 | 7 / 8 | run 4 |
+| Attempt 5 (second stance wording) | 8 | 8 / 8 | 6 / 8 | runs 2 and 4 |
+| Attempt 6 (final code, `willing`) | 4 | 4 / 4 | 4 / 4 | none |
+
+What the raw logs show, for every miss:
+
+- The proposal is `action: move`, verdict `allowed`, `move_to: null`. The core then keeps the PC in place, as ADR 0007 says. No check rejected anything.
+- Step 6 had moved the PC to the mill in every run, so the PC was where the Intent assumes.
+- The town hall (E2) was in the `move_to` enum: the PLACES line of the rebuilt prompt lists it, as in the runs that reached it.
+- Rebuilt from the logged proposals, the step-7 prompt of run 4 differs from run 3's only in the PC's reputation word and the minute (attempts 2 and 3). The run seed drives the dice only; run 4 won its Roll in attempts 2, 3 and 4 and lost it in attempt 5, so its state is not the same from round to round.
+- From attempt 5 on, the raw log keeps each Narration. We rebuilt run 4 and run 3 of attempt 5 with their real Narrations and sent the exact step-7 request 10 times each, on the final code: the model chose E2 10 times of 10 for both.
+
+The sampling is random (temperature 1, no fixed seed). We found no cause in the core's state, the places list, or the new field. We read it as model noise: 5 misses in 28 tries of step 7 over attempts 2 to 6, 2 of them in the 8 tries of attempt 5. The repetition on run 4 is not explained. Before the mature module, attempts 4 and 6 of this report also had 7 of 8 moves.
+
+| Count (attempt 6, 4 runs) | Attempt 10 | Attempt 6 of the mature report |
+|---|---|---|
+| play_basics: moves to the asked place | 8 / 8 | 8 / 8 |
+| play_basics: false closes, false moves | 0 / 4, 0 / 4 | 0 / 4, 0 / 4 |
+| play_basics: contests with a Roll, told with their result | 4 / 4, 4 / 4 | 4 / 4, 4 / 4 |
+| play_basics: pending items closed | 4 / 4 | 4 / 4 |
+| play_basics: unknown-place moves that left the PC in place | 3 / 4 | 4 / 4 |
+| play_basics: Narrations that open with the time | 6 / 32 | 0 / 32 |
+| play_basics: Turns failed; time p50 / p90 / max | 0 / 32; 8.0 / 10.3 / 10.7 s | 0 / 32; 7.3 / 8.8 / 10.4 s |
+| speech: mark rate; wrong marks (judge) | 42 / 42; 1 / 34 | 50 / 50; 0 / 39 |
+| speech: Turns failed | 2 / 40 | 1 / 40 (npc folds on Hessa) |
+
+- Attempts 4 and 5 of the mature report defined the stance in the proposal rules. Then the NPC-folds check lost "I tell Orsel yes" in 4 and 5 of 8 runs, and 4 and 3 of 8 items closed. The final code has no stance definition.
+
+Limits: one fixture, one phrasing per step; the probe used 10 calls per prompt, so a miss rate under about 1 in 4 on that prompt cannot be ruled out; the judge is the same local model.
