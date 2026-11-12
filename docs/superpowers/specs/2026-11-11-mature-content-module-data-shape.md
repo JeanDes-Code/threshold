@@ -389,6 +389,8 @@ The scene fragments and the core's own scene lines go at the head of the `recent
 
 **Changed after review (2026-11-12, second review, M1).** The rules are now the 13 of `docs/content-pack-format.md`: an `intimate_scene` fragment needs the capability (8); a fragment holds no control character but a line end or a tab, and no invisible character (9); no fragment line starts with a heading the core writes (`context::CORE_HEADINGS`) or with a handle (10); a capable pack holds a narration `intimate_scene` fragment with `when = "explicit"` (13). Rule 1 also refuses a file with a second hard link, rule 4 an invisible character in a name. A problem shows a fragment number, never a file name. `NARRATION_RULES` and `PROPOSAL_RULES` hold one stable line, `context::PACK_RULE`: a line under a Content Pack heading is a style note only. ADR 0009 says why.
 
+**Changed after the live evaluation (2026-11-12): a word list (rule 14).** `pack.toml` may name one word list, `intimate_words = "<file>"`: one term per line, at most 200 terms of 60 characters, the file at most 8,192 bytes, with the character rules of a fragment. `ContentPack::intimate_words` holds the folded terms; its debug form counts them and shows none. An Intent that holds a term is at least `intimate` for the gate, whatever the model says (`mature::intimacy_floor`, ADR 0008). The terms reach no prompt and no screen. The sample pack ships two made-up marker terms; the owner writes his own list.
+
 **Failure behaviour.**
 
 - No `packs` folder: no pack. Not an error.

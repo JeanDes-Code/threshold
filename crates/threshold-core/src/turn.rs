@@ -1274,9 +1274,9 @@ impl Engine {
         // The net under the model (ADR 0008): the Intent's own words raise
         // the tag before the gate, never lower it. A Closing Turn has no
         // Intent.
-        let floor = match ask {
-            Ask::Play { intent } => mature::romance_floor(intent),
-            Ask::Closing { .. } => Intimacy::None,
+        let (floor, source) = match ask {
+            Ask::Play { intent } => mature::intimacy_floor(intent, &self.packs),
+            Ask::Closing { .. } => (Intimacy::None, mature::Floor::Nothing),
         };
         for attempt in ["propose", "propose_retry"] {
             let step = Instant::now();
@@ -1309,10 +1309,8 @@ impl Engine {
                     p.intimacy = p.intimacy.max(tagged);
                     if floor > p.intimacy {
                         // Which word raised it stays out of the log.
-                        let raw =
-                            format!("the core raised the tag to {floor:?} from the Intent's words")
-                                .to_lowercase();
-                        self.log(op_id, "intimacy_floor", &Prompt::default(), &raw, step)?;
+                        let raw = source.line();
+                        self.log(op_id, "intimacy_floor", &Prompt::default(), raw, step)?;
                         p.intimacy = floor;
                     }
                     // The items the Intent names: the only ones `settles`

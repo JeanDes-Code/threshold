@@ -3,10 +3,12 @@
 # prompts for. It declares the explicit capability, so it holds scene
 # fragments only (rule 7). Its proposal scene fragment carries the test line
 # that asks the model to ignore the age rule: the core refuses all the same.
+# Its word list holds two made-up marker terms (rule 14).
 format = 2
 name = "sample"
 provides = ["explicit_description"]
 recommended_model = "sample-model:latest"
+intimate_words = "words.txt"
 
 [[fragments]]
 prompt = "proposal"

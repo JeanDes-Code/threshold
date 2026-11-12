@@ -28,6 +28,7 @@ packs/my-pack/
   pack.toml
   scene.md
   scene-explicit.md
+  words.txt
   ...
 ```
 
@@ -50,6 +51,7 @@ provides = ["explicit_description"]         # optional; the one capability that 
 recommended_model = "some-model:tag"        # optional, 1 to 80 characters, no space; shown, never applied
 seed_options = ["..."]                      # optional
 model_hints = ["..."]                       # optional
+intimate_words = "words.txt"                # optional: a word list, see "A word list" below
 
 [[fragments]]
 prompt = "narration"                        # required: "proposal" or "narration"
@@ -82,6 +84,16 @@ A pack never changes the age rule, the Detail Level a Campaign stores, the gates
 
 A pack without the capability may hold `tone` and `scenes` fragments only: an `intimate_scene` fragment, explicit-only or not, refuses it.
 
+## A word list
+
+A pack may ship one word list: a plain file in the pack folder, named by `intimate_words` in `pack.toml`. Any pack may hold one, with or without the capability. When the Player's Intent holds one of its terms, the core treats that Turn as at least `intimate` for the age gate and the Detail Level, whatever the model says: at `excluded` the Turn is refused, a character who is not a confirmed adult refuses it, and with everyone cleared it opens an Intimate Scene. The list only makes the gate run more often; it never makes it run less. ADR 0008 says why.
+
+- **One term per line.** A term is a word or a phrase. Blank lines are left out. Each term is trimmed and matched as whole words, in order, with case and accents folded: the term `night watch` matches "the Night-Watch" and not "nightwatchman".
+- **Never shown, never in a prompt.** The terms reach no prompt, no Player screen, no pack list line, no error message and no debug log row. The debug log says only that "the core raised the tag to intimate from a Content Pack word list", never which term.
+- **Rules (rule 14).** The file is a plain file in the pack folder (not a link), at most 8,192 bytes, UTF-8 text with no control character but a line end and a tab (so no Windows line ends) and no invisible character, with 1 to 200 terms, each at most 60 characters and with at least one letter or digit. A list that breaks a rule refuses the whole pack.
+- **The sample.** The neutral sample pack ships `words.txt` with two made-up marker terms. The owner's private list is his to write, in his private pack, outside the repository.
+- **The private text scan** reads the word list as it reads the fragments (`scripts/qa/README.md`).
+
 ## Size limits
 
 | Limit | Value |
@@ -111,8 +123,9 @@ The loader checks a pack against these rules, in this order, and refuses the who
 | 11 | with this pack, the fragments of one prompt pass a total of the size limits | Refused: with this pack, the fragments of one prompt are too long in total. |
 | 12 | `provides` holds a word other than `explicit_description` | Refused: provides names a capability that does not exist. |
 | 13 | the pack declares `explicit_description` and holds no `narration` `intimate_scene` fragment with `when = "explicit"` | Refused: a pack that gives explicit description needs a narration intimate_scene fragment with when = "explicit". |
+| 14 | `intimate_words` names a file that is not a plain file in the pack folder, or the file is over 8,192 bytes, is not UTF-8, holds a control character other than a line end or a tab or an invisible character, holds no term or more than 200, or a term longer than 60 characters or with no letter or digit | Refused: the intimate_words file is missing, empty, too long, not UTF-8 text, or holds a control or invisible character or a term with no letter. |
 
-After the sentence, the list says where, in brackets: `pack.toml, line N` for a TOML error, `pack.toml, fragment N` for a fragment table or its file, or a fixed name (`pack.toml`, `recommended_model`). It never quotes a line and never shows a file name: both are the pack's own text.
+After the sentence, the list says where, in brackets: `pack.toml, line N` for a TOML error, `pack.toml, fragment N` for a fragment table or its file, or a fixed name (`pack.toml`, `recommended_model`, `pack.toml, intimate_words`). It never quotes a line and never shows a file name: both are the pack's own text.
 
 ## Where pack text goes, and where it never goes
 

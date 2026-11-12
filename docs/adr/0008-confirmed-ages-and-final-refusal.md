@@ -83,3 +83,14 @@ A middle value helps the model, but the tag stays model output. The core now rea
 The net over-blocks by design. Measured on the repository's scenario files, it fires on no plain Intent of any scenario (test `romance_words_never_match_a_plain_scenario_intent`), the two hard negatives of `intimate_tag` included. The live rates are in `evals/reports/2026-11-mature-content.md`.
 
 Cost: an Intent with one of these words in another sense ("I embrace the plan") is an advance: a plain Turn where everyone here is cleared, a Refusal where a character here is not.
+
+## Changed after the live evaluation (2026-11-12): a Content Pack may ship a word list
+
+Data shape decision 6 named the next step if the live model failed the tag's pass line: a word list in the owner's private pack. This is that mechanism; the list itself is his to write.
+
+- A pack names one optional word list in `pack.toml` (`intimate_words = "<file>"`): one term per line, with the size and character rules of `docs/content-pack-format.md` (rule 14). Any pack may hold one.
+- When the Player's Intent holds a term of a loaded pack's list (whole words, in order, case and accents folded), `mature::intimacy_floor` raises the Turn's tag to `intimate` before the gate, whatever the model says. The Turn is then intimate for everything: the `excluded` level refuses it, the age rule and the stance rule run, and a cleared Turn opens an Intimate Scene and is told by implication or explicitly.
+- The terms are never shown and never reach a prompt: `pack::WordList` prints only its count, a refused list names the key and never the file or a term, and the debug row says only that a Content Pack word list raised the tag.
+- The neutral sample pack ships two made-up marker terms for the tests. The repository holds no real list.
+
+A pack can then make the gate run more often, and never less.

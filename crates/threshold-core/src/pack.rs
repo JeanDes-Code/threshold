@@ -72,6 +72,16 @@ pub const TONE_FRAGMENTS_MAX_CHARS: usize = 2_400;
 /// The longest pack name, in chars.
 pub const NAME_MAX_CHARS: usize = 60;
 
+/// The largest word list file the loader reads, in bytes (rule 14): a
+/// larger one is refused unread.
+pub const WORDS_MAX_BYTES: u64 = 8 * 1024;
+
+/// The most terms a word list holds (rule 14).
+pub const WORDS_MAX_TERMS: usize = 200;
+
+/// The longest term of a word list, in chars after trimming (rule 14).
+pub const WORD_MAX_CHARS: usize = 60;
+
 /// The longest recommended model, in chars.
 pub const MODEL_MAX_CHARS: usize = 80;
 
@@ -125,6 +135,34 @@ pub struct Fragment {
     pub text: String,
 }
 
+/// The terms of a pack's word list (rule 14, ADR 0008), each as its folded
+/// words (`mature::folded`). They are never shown and never in a prompt:
+/// the debug form says how many terms there are, never which.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct WordList(Vec<Vec<String>>);
+
+impl WordList {
+    /// The terms, as folded words.
+    pub(crate) fn terms(&self) -> &[Vec<String>] {
+        &self.0
+    }
+
+    /// How many terms the list holds.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::fmt::Debug for WordList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "WordList({} terms)", self.0.len())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContentPack {
     /// The pack's folder under `packs/`, for the pack list.
@@ -136,6 +174,10 @@ pub struct ContentPack {
     pub recommended_model: Option<String>,
     pub seed_options: Vec<String>,
     pub model_hints: Vec<String>,
+    /// The pack's word list (rule 14): an Intent that holds one of its
+    /// terms is at least `intimate` for the gate
+    /// (`mature::intimacy_floor`). Never shown, never in a prompt.
+    pub intimate_words: WordList,
 }
 
 impl ContentPack {
@@ -193,6 +235,13 @@ pub enum PackRule {
     /// M1, 2026-11-12): it would turn explicit telling on with the core's
     /// explicit line alone.
     CapableWithoutExplicit,
+    /// Rule 14: `intimate_words` names a file that is not a plain file in
+    /// the pack folder, or a file over `WORDS_MAX_BYTES`, that is not UTF-8
+    /// text, that holds a control character other than a line end or a tab
+    /// or an invisible character, no term, more than `WORDS_MAX_TERMS`
+    /// terms, a term longer than `WORD_MAX_CHARS` or a term with no letter
+    /// or digit (live evaluation of 2026-11-12).
+    Words,
 }
 
 impl PackRule {
@@ -235,6 +284,9 @@ impl PackRule {
             Self::Capability => "Refused: provides names a capability that does not exist.",
             Self::CapableWithoutExplicit => {
                 "Refused: a pack that gives explicit description needs a narration intimate_scene fragment with when = \"explicit\"."
+            }
+            Self::Words => {
+                "Refused: the intimate_words file is missing, empty, too long, not UTF-8 text, or holds a control or invisible character or a term with no letter."
             }
         }
     }
@@ -421,6 +473,8 @@ struct RawManifest {
     model_hints: Vec<String>,
     #[serde(default)]
     fragments: Vec<RawFragment>,
+    /// The word list file (rule 14).
+    intimate_words: Option<String>,
     /// Reserved for project 3: read and ignored.
     #[serde(default, rename = "interview")]
     _interview: Option<toml::Value>,
@@ -605,6 +659,14 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
     if capable && !explicit_narration {
         return refused(PackRule::CapableWithoutExplicit, None);
     }
+    // Rule 14. Where: the key, never the file name.
+    let intimate_words = match raw.intimate_words.as_deref() {
+        None => WordList::default(),
+        Some(file) => word_list(dir, file).ok_or((
+            PackRule::Words,
+            Some("pack.toml, intimate_words".to_owned()),
+        ))?,
+    };
     Ok(ContentPack {
         folder: folder.to_owned(),
         name,
@@ -613,7 +675,48 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
         recommended_model: model.map(str::to_owned),
         seed_options: raw.seed_options,
         model_hints: raw.model_hints,
+        intimate_words,
     })
+}
+
+/// The word list `file` of the pack in `dir` (rule 14): one term per line,
+/// blank lines left out, each term trimmed and folded as the gate reads an
+/// Intent (`mature::folded`). `None` when the rule refuses it.
+fn word_list(dir: &Path, file: &str) -> Option<WordList> {
+    use std::io::Read;
+    if !plain_file_name(file) {
+        return None;
+    }
+    let path = dir.join(file);
+    let meta = fs::symlink_metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > WORDS_MAX_BYTES {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(&path)
+        .ok()?
+        .take(WORDS_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > WORDS_MAX_BYTES {
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    if text
+        .chars()
+        .any(|c| invisible(c) || (c.is_control() && c != '\n' && c != '\t'))
+    {
+        return None;
+    }
+    let mut terms = Vec::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let words = crate::mature::folded(line);
+        if words.is_empty() || line.chars().count() > WORD_MAX_CHARS {
+            return None;
+        }
+        terms.push(words);
+    }
+    (!terms.is_empty() && terms.len() <= WORDS_MAX_TERMS).then_some(WordList(terms))
 }
 
 /// The 1-based line of byte `at` in `source`.

@@ -6,7 +6,7 @@
 //! `advance` costs one plain Turn, or one Refusal where a character is not
 //! cleared; a missed tag runs no age rule.
 
-use crate::{domain::Intimacy, normalize};
+use crate::{domain::Intimacy, normalize, pack::ContentPack};
 
 /// The Romance Words (glossary): neutral words and phrases that mark a
 /// romantic or sexual advance or invitation in an Intent. Each term is
@@ -90,7 +90,7 @@ pub const ROMANCE_WORDS: &[&str] = &[
 
 /// The words of `text` as the net reads them: lower case, accents dropped,
 /// split on every character that is not a letter or a digit.
-pub(crate) fn folded(text: &str) -> Vec<String> {
+pub fn folded(text: &str) -> Vec<String> {
     normalize::name_words(text)
 }
 
@@ -112,5 +112,47 @@ pub fn romance_floor(intent: &str) -> Intimacy {
         Intimacy::Advance
     } else {
         Intimacy::None
+    }
+}
+
+/// The tag the Intent's words give, and where it comes from (ADR 0008):
+/// `intimate` when the Intent holds a term of a loaded pack's word list
+/// (`ContentPack::intimate_words`), else `advance` when it holds a Romance
+/// Word, else `none`. The Turn's tag is the stronger of this and the
+/// model's (`turn::plan`); the core never lowers a model value.
+pub fn intimacy_floor(intent: &str, packs: &[ContentPack]) -> (Intimacy, Floor) {
+    let words = folded(intent);
+    let pack_hit = packs
+        .iter()
+        .flat_map(|p| p.intimate_words.terms())
+        .any(|term| holds(&words, term));
+    if pack_hit {
+        (Intimacy::Intimate, Floor::PackWords)
+    } else if romance_floor(intent) == Intimacy::Advance {
+        (Intimacy::Advance, Floor::RomanceWords)
+    } else {
+        (Intimacy::None, Floor::Nothing)
+    }
+}
+
+/// Which list raised the tag. The debug log names the list, never the word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Floor {
+    Nothing,
+    /// The core's Romance Words: at least `advance`.
+    RomanceWords,
+    /// A loaded Content Pack's word list: at least `intimate`.
+    PackWords,
+}
+
+impl Floor {
+    /// The debug line when this floor raised a model value. It names the
+    /// list and the value, never the word.
+    pub fn line(self) -> &'static str {
+        match self {
+            Self::PackWords => "the core raised the tag to intimate from a Content Pack word list",
+            Self::RomanceWords => "the core raised the tag to advance from its Romance Words",
+            Self::Nothing => "",
+        }
     }
 }
