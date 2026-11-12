@@ -68,3 +68,9 @@ The layout now:
 A proposal is still read in full when the window steps (one Turn in three) or when the Turn before changed the scene (a fact, a key, an attitude, who is here), because the scene comes before the Turns. Putting the scene after the Turns would put about 900 tokens after the point where two prompts part, past the window.
 
 Replay of the 28 QA Intents, warm model (`evals/reports/2026-11-turn-time.md`): Turn time p50 13.0 s → 9.0 s, p90 15.2 s → 13.1 s, max 17.1 s → 13.6 s, Turns over 15 s 4 → 0; first word of the Narration p50 9.9 s → 5.3 s; 15 of 28 proposals and most narrations read from the cache.
+
+## Changed on 2026-11-12: the HTTP timeout of a model call is 180 s
+
+The default `timeout_s` of `OllamaConfig` goes from 60 to 180 s. The owner's machine swaps the model out of memory between sessions; a call that waits for it to come back took 63 s and failed at 60, so the Turn failed while the model was only slow. The 15 s budget is a product target for a warm Turn, not a timeout: a call that runs past 15 s still finishes. The World Build keeps its own timeout (`build::BUILD_TIMEOUT_S`, 240 s).
+
+The shell writes `threshold.toml` with the defaults only when the file is absent (`session::load_config`). A file written before this change keeps `timeout_s = 60` until the Player edits it.

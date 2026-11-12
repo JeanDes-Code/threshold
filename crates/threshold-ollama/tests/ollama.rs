@@ -78,7 +78,9 @@ fn default_config_matches_threshold() {
     assert_eq!(config.model, "gemma4:26b-a4b-it-qat");
     assert_eq!(config.num_ctx, 16_384);
     assert_eq!(config.keep_alive, "30m");
-    assert_eq!(config.timeout_s, 60);
+    // ADR 0001 (2026-11-12): a call that waits for the model to swap back
+    // in took 63 s on the owner's machine and failed at 60.
+    assert_eq!(config.timeout_s, 180);
 }
 
 #[test]

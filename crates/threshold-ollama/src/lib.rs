@@ -36,7 +36,9 @@ impl Default for OllamaConfig {
             model: "gemma4:26b-a4b-it-qat".into(),
             num_ctx: 16_384,
             keep_alive: "30m".into(),
-            timeout_s: 60,
+            // ADR 0001 (2026-11-12): the owner's machine swaps the model
+            // out; a call that waits for it took 63 s and failed at 60.
+            timeout_s: 180,
         }
     }
 }
