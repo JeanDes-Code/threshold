@@ -110,9 +110,11 @@ const HELPERS: &[&str] = &[
 ];
 
 /// What "your" names when the sentence speaks of the PC's inner state.
+/// Body words ("your breath", "your chest") are left out: on the baseline
+/// run they named only effort ("your breath coming in ragged gasps").
 const INNER_PARTS: &[&str] = &[
-    "heart", "chest", "stomach", "pulse", "mind", "thoughts", "nerves", "breath", "gut", "spirits",
-    "mood", "doubts", "fears", "hopes", "unease", "relief",
+    "heart", "mind", "thoughts", "nerves", "spirits", "mood", "doubts", "fears", "hopes", "unease",
+    "relief",
 ];
 
 /// The words of `text`, lower case, apostrophes kept inside words.
@@ -293,6 +295,10 @@ mod tests {
         assert!(!states_pc_feeling("You ask her and she nods.", "Wren"));
         assert!(!states_pc_feeling(
             "Orsel looks at you. He thinks it over.",
+            "Wren"
+        ));
+        assert!(!states_pc_feeling(
+            "You strain, your breath coming in ragged gasps.",
             "Wren"
         ));
     }
