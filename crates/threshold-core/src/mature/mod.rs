@@ -12,8 +12,10 @@
 //! telling of an intimate Turn (`told`, in `text`). Task 4 adds the
 //! Intimate Scene (`scene`): the gate before the proposal call (G1), the
 //! one op a Turn adds to open or close a scene, and what each reader gets
-//! of a Turn committed with `intimate` (`turn_text`). The buttons come in
-//! later tasks.
+//! of a Turn committed with `intimate` (`turn_text`). Task 5 adds the
+//! Closing Turn of "End scene": its limits and the core's own closing
+//! (`default_close`), and `open_scene`, the scene as every reader outside
+//! the ledger sees it.
 
 mod gate;
 mod scene;
@@ -22,8 +24,15 @@ mod text;
 use serde::{Deserialize, Serialize};
 
 pub use gate::{Blocked, Cleared, Presence, after, check, check_after, checked_here, clearance};
-pub use scene::{SCENE_NARRATION_MAX_TOKENS, narration_clearance, scene_gate, scene_op};
-pub use text::{INTIMATE_TEMPLATE, Told, TurnText, neutral_line, stored_intimate, told, turn_text};
+pub use scene::{
+    CLOSING_NARRATION_MAX_TOKENS, SCENE_CLOSE_DEFAULT_MIN, SCENE_CLOSE_MAX_MIN,
+    SCENE_NARRATION_MAX_TOKENS, default_close, narration_clearance, open_scene, scene_gate,
+    scene_op,
+};
+pub use text::{
+    CLOSING_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, neutral_line, stored_intimate, told,
+    turn_text,
+};
 
 use crate::{
     checks::{CheckKind, Rejection},

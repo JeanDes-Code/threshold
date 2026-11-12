@@ -82,7 +82,7 @@ export interface DebugView {
 // The Play view: a mirror of shape 3.6 and 3.7. Every tagged enum is tagged
 // by `kind`. The core builds it from PC Knowledge only; the UI parses no text.
 
-export type TurnKind = "setup" | "play" | "correction" | "ooc" | "opening";
+export type TurnKind = "setup" | "play" | "correction" | "ooc" | "opening" | "closing";
 
 /** A person, place or Faction as the PC knows it. `name` is null when the PC cannot name it. */
 export interface NameRef {
@@ -492,7 +492,7 @@ export interface Attempt {
 
 export interface PendingTurn {
   opId: string;
-  cmd: "submit_intent" | "correct_last";
+  cmd: "submit_intent" | "correct_last" | "end_scene";
   args: Record<string, unknown>;
 }
 
@@ -501,6 +501,8 @@ export interface TurnClient {
   submit(text: string): Attempt;
   /** Corrects the last Turn under a fresh op_id. */
   correct(clarified: string, why: string): Attempt;
+  /** "End scene": the Closing Turn of the open Intimate Scene, under a fresh op_id. */
+  endScene(): Attempt;
   /** Sends the failed Turn again under the same op_id; null if none failed. */
   retry(): Attempt | null;
   /** The Turn that failed and can be retried, if any. */
@@ -544,6 +546,7 @@ export function createTurnClient(
   return {
     submit: (text) => fresh("submit_intent", { text }),
     correct: (clarified, why) => fresh("correct_last", { clarified, why }),
+    endScene: () => fresh("end_scene", {}),
     retry: () => (pending ? send(pending) : null),
     pending: () => pending,
     reset: () => {

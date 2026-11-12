@@ -8,6 +8,7 @@ import {
   elapsedText,
   intentAfterTurn,
   isSendKey,
+  laterButtons,
   type Sent,
   type TurnPhase,
 } from "./logic";
@@ -51,6 +52,8 @@ interface Props {
   /** Closes the failure, and forgets the Turn that could be sent again. */
   onDismissFailure: () => void;
   onBegin: () => void;
+  /** "End scene": the Closing Turn of the open Intimate Scene. */
+  onEndScene: () => void;
   onDismissAnswer: () => void;
   /** A Scene is shown: a quick Note can be about it. */
   hasScene: boolean;
@@ -80,6 +83,7 @@ export default function ActionBar(props: Props) {
   // What was sent last: a Retry resends it (review minor).
   const [sent, setSent] = useState<Sent>("intent");
   const elapsed = useElapsed(props.startedMs);
+  const later = laterButtons(scene, phase);
 
   const act = async () => {
     const text = intent.trim();
@@ -219,7 +223,18 @@ export default function ActionBar(props: Props) {
           >
             Note
           </button>
-          <div className="action-bar__later" />
+          <div className="action-bar__later">
+            {later.end.shown && (
+              <button
+                type="button"
+                className="play-btn play-btn--outline"
+                disabled={!later.end.enabled}
+                onClick={props.onEndScene}
+              >
+                End scene
+              </button>
+            )}
+          </div>
         </div>
       )}
 

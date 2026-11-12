@@ -16,14 +16,14 @@ mod proposal_prompt;
 
 pub(crate) use narration_prompt::intimate_rule_text;
 pub use narration_prompt::{
-    FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPLIED_LINE, IMPOSSIBLE_LINE, INTIMATE_RULE,
+    CLOSING_LINE, FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPLIED_LINE, IMPOSSIBLE_LINE, INTIMATE_RULE,
     NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE, NOT_MOVED_LINE, PC_PLACE_LINE,
     QUIET_EVENT_LINE, TIME_LINE, WON_CHECK_LINE, guard_events, guard_plans, names_unheard,
     narration_prompt, narration_prompt_with, opening_prompt, perceived_by_pc,
 };
 pub use proposal_prompt::{
-    INTIMATE_FIELD_LINE, PROPOSAL_RULES, ProposalContext, SCENE_LINE, handle_context,
-    proposal_context, proposal_prompt,
+    CLOSING_ASK, INTIMATE_FIELD_LINE, PROPOSAL_RULES, ProposalContext, SCENE_LINE, closing_context,
+    closing_prompt, handle_context, proposal_context, proposal_prompt,
 };
 
 use std::collections::BTreeSet;
@@ -404,8 +404,8 @@ pub(crate) fn one_line(text: &str) -> String {
 }
 
 /// One recent Turn, as `mature::turn_text` gives it to a prompt: its Intent
-/// and its Narration, or its Neutral Line in place of both. The Opening
-/// Turn has no Player line: the PC did nothing in it. `scene` is the open
+/// and its Narration, or its Neutral Line in place of both. A Turn with no
+/// Intent (the Opening Turn) has no Player line: the PC did nothing in it. `scene` is the open
 /// scene of the prompt's state and `cleared` the prompt's clearance.
 fn render_turn(turn: &StoredTurn, scene: Option<TurnId>, cleared: Option<&Cleared>) -> String {
     let (intent, narration) = match turn_text(turn, scene, cleared) {

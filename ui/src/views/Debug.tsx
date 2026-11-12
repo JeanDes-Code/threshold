@@ -49,7 +49,7 @@ function TurnDebug({ turns }: { turns: StoryTurn[] }) {
       >
         {turns.map((l) => (
           <option key={l.turn_id} value={l.turn_id}>
-            {l.turn_id}: {l.kind === "opening" ? "(opening)" : l.intent.slice(0, 60)}
+            {l.turn_id}: {l.kind === "opening" || l.kind === "closing" ? `(${l.kind})` : l.intent.slice(0, 60)}
           </option>
         ))}
       </select>

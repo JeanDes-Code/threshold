@@ -20,7 +20,7 @@ use threshold_core::{
     rules::{D10, RollResult},
     setup::{create_campaign_file, remove_part},
     store::{self, CampaignId, Store, StoreError, StoredTurn, TurnKind, WorldView},
-    turn::{Engine, TurnError, TurnOutcome, stored_roll},
+    turn::{Engine, TurnControl, TurnError, TurnOutcome, stored_roll},
     view::{self, CharacterView, EntityCard, JournalView, PlayView},
     world::{PcSight, pc_sight},
 };
@@ -431,6 +431,23 @@ impl Session {
         committed(&open.engine, played, debug)
     }
 
+    /// "End scene": the Closing Turn of the open Intimate Scene. Its short
+    /// Narration streams like an Intent's.
+    pub fn end_scene(
+        &mut self,
+        op_id: String,
+        on_chunk: &mut dyn FnMut(&str),
+    ) -> Result<TurnSummary, AppError> {
+        let debug = self.debug();
+        let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &|| false,
+        };
+        let played = open.engine.end_scene(op_id, &mut ctl);
+        committed(&open.engine, played, debug)
+    }
+
     pub fn ask_ooc(&mut self, text: &str) -> Result<String, AppError> {
         let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
@@ -675,7 +692,8 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
         TurnError::EmptyIntent
         | TurnError::IntentTooLong
         | TurnError::NotCorrectable(_)
-        | TurnError::PlayStarted => e.to_string(),
+        | TurnError::PlayStarted
+        | TurnError::NoScene => e.to_string(),
         TurnError::Model(error) => model_error(error),
         TurnError::NarrationFailed { error, .. } => format!(
             "the Turn is committed, but its narration failed: {}",

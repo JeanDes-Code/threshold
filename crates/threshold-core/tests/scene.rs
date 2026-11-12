@@ -12,17 +12,24 @@ use std::{
 
 use support::*;
 use threshold_core::{
-    CallKind, RecordedCall, RecordedGm,
-    checks::{CheckKind, validate},
-    context::{IMPLIED_LINE, SCENE_LINE, opening_prompt},
+    CallKind, Gm, GmError, HandleContext, Prompt, RecordedCall, RecordedGm, Stream,
+    checks::{CheckKind, settle_closing, validate},
+    closing_schema_for,
+    context::{CLOSING_ASK, CLOSING_LINE, IMPLIED_LINE, SCENE_LINE, opening_prompt},
     domain::{
         ActionKind, Canon, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef,
-        FactSource, LedgerOp, SCENE_PLAN_MAX_CHARS, SceneWhy, Slot, Stance, Trigger, Verdict,
+        FactSource, Handle, LedgerOp, SCENE_PLAN_MAX_CHARS, SceneWhy, Seen, Slot, Stance, Trigger,
+        Verdict,
     },
-    mature::{INTIMATE_TEMPLATE, SCENE_NARRATION_MAX_TOKENS, neutral_line, stored_intimate},
+    mature::{
+        CLOSING_NARRATION_MAX_TOKENS, INTIMATE_TEMPLATE, SCENE_CLOSE_DEFAULT_MIN,
+        SCENE_CLOSE_MAX_MIN, SCENE_NARRATION_MAX_TOKENS, neutral_line, stored_intimate,
+    },
     rules::D10,
     store::{Store, StoredTurn, TurnId, TurnKind, TurnRecord, WorldView},
-    turn::{Engine, TurnError, TurnOutcome, create_campaign},
+    turn::{Engine, TurnControl, TurnError, TurnOutcome, create_campaign},
+    view::{SceneState, journal_view, play_view},
+    world::{PcSight, pc_sight},
 };
 
 /// A marker word in a scene Narration: it must never reach a prompt that
@@ -92,6 +99,42 @@ impl Rig {
             vec![],
             self.campaign,
         )
+    }
+
+    /// The Engine on the same file with another model.
+    fn with_gm(&mut self, gm: Box<dyn Gm + Send>) {
+        drop(self.engine.take());
+        let store = Store::open(&self.path).unwrap();
+        self.engine = Some(Engine::new(store, gm, Box::new(D10), vec![], self.campaign));
+    }
+
+    /// "End scene" with `p` as the closing proposal and `narration` as the
+    /// closing Narration.
+    fn end_scene(
+        &mut self,
+        op: &str,
+        p: &DecisionProposal,
+        narration: &str,
+    ) -> Result<TurnOutcome, TurnError> {
+        self.gm.push_proposal(serde_json::to_string(p).unwrap());
+        self.gm.push_narration(narration.into());
+        let mut ctl = TurnControl {
+            on_chunk: &mut |_| {},
+            faded: &|| false,
+        };
+        self.engine().end_scene(op.into(), &mut ctl)
+    }
+
+    /// The PC's sight now: the one input of every Player screen.
+    fn sight(&self) -> PcSight {
+        let store = self.store();
+        let turns = store.turns(self.campaign).unwrap();
+        let reverted = store
+            .reverted_turns(self.campaign)
+            .unwrap()
+            .into_iter()
+            .collect();
+        pc_sight(&self.view(), &turns, &reverted).unwrap()
     }
 
     fn commit_raw(&mut self, store: &mut Store, ops: Vec<LedgerOp>) {
@@ -285,6 +328,15 @@ impl Rig {
     fn plain(&self) -> DecisionProposal {
         let mut p = proposal(Verdict::Allowed);
         p.minutes = 5;
+        p
+    }
+
+    /// A closing proposal: Brann takes it calmly, in ten minutes.
+    fn closing(&self) -> DecisionProposal {
+        let mut p = proposal(Verdict::Allowed);
+        p.action = ActionKind::Wait;
+        p.minutes = 10;
+        p.reactions = vec![reaction(e(self.brann), Stance::Comply, None)];
         p
     }
 
@@ -517,7 +569,7 @@ fn last_turn_rule(store: &Store, campaign: u64) -> Option<TurnId> {
         .turns(campaign)
         .unwrap()
         .into_iter()
-        .filter(|t| matches!(t.record.kind, TurnKind::Play | TurnKind::Correction))
+        .filter(|t| t.record.kind.has_intent() || t.record.kind == TurnKind::Closing)
         .filter(|t| !reverted.contains(&t.id))
         .collect();
     let mut since = None;
@@ -857,4 +909,392 @@ fn a_scene_turn_makes_one_call_of_each_kind() {
             CallKind::Narrate
         ]
     );
+}
+
+// --- End scene (Task 5) -------------------------------------------------------
+
+/// A model that fails every call.
+struct Down;
+
+impl Gm for Down {
+    fn propose(&self, _: &Prompt, _: &serde_json::Value) -> Result<String, GmError> {
+        Err(GmError::Unreachable("down".into()))
+    }
+
+    fn narrate(
+        &self,
+        _: &Prompt,
+        _: Option<u32>,
+        _: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
+        Err(GmError::Unreachable("down".into()))
+    }
+}
+
+/// Data shape 3.4 row 7: "End scene" commits a Closing Turn that closes the
+/// scene. Its proposal prompt holds the scene in full and the core's
+/// closing line in place of an Intent; its Narration is told plain, under
+/// the closing line, with no Player intent and the closing token cap.
+#[test]
+fn end_scene_closes_the_scene() {
+    let mut rig = Rig::new("end-scene");
+    let p = rig.intimate();
+    rig.played("t1", &p, &format!("{MARKER} Brann nods."));
+    let p = rig.closing();
+    let out = rig.end_scene("close-1", &p, "Brann steps back.").unwrap();
+    assert_eq!(rig.scene(), None);
+    assert_eq!(rig.scene_ops(out.turn_id), [(false, SceneWhy::EndScene)]);
+    let turn = rig.turn(out.turn_id);
+    assert_eq!(turn.record.kind, TurnKind::Closing);
+    assert_eq!(turn.record.intent, "");
+    assert_eq!(turn.narration.as_deref(), Some("Brann steps back."));
+    assert_eq!(turn.record.clock_after - turn.record.clock_before, 10);
+
+    let propose = rig.last_call(CallKind::Propose);
+    assert!(propose.prompt.recent.starts_with(SCENE_LINE));
+    assert!(propose.prompt.recent.contains(MARKER), "the scene in full");
+    assert!(propose.prompt.recent.contains(CLOSING_ASK));
+    assert!(!propose.prompt.recent.contains("INTENT\n"));
+    assert_eq!(
+        propose.schema["properties"]["action"]["enum"],
+        serde_json::json!(["wait"])
+    );
+
+    let narrate = rig.last_call(CallKind::Narrate);
+    assert!(
+        narrate.prompt.recent.starts_with(CLOSING_LINE),
+        "{}",
+        narrate.prompt.recent
+    );
+    assert!(!narrate.prompt.recent.contains("Player intent"));
+    assert!(!narrate.prompt.recent.contains(IMPLIED_LINE));
+    assert!(!prompt_text(&narrate).contains(MARKER), "told plain");
+    assert_eq!(narrate.max_tokens, Some(CLOSING_NARRATION_MAX_TOKENS));
+    assert_eq!(CLOSING_NARRATION_MAX_TOKENS, 90);
+    for line in [CLOSING_LINE, CLOSING_ASK] {
+        assert!(!line.trim_end().contains('\n'), "one line: {line}");
+    }
+}
+
+/// No scene: `NoScene`, and no model call.
+#[test]
+fn end_scene_without_a_scene_fails() {
+    let mut rig = Rig::new("no-scene");
+    let p = rig.closing();
+    let err = rig
+        .end_scene("close-1", &p, "Brann steps back.")
+        .unwrap_err();
+    assert!(matches!(err, TurnError::NoScene), "{err:?}");
+    assert!(rig.gm.calls().is_empty());
+    assert!(
+        rig.store()
+            .turn_by_campaign_op(rig.campaign, &"close-1".to_owned())
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// The button always works: with a model that fails every call, the core
+/// commits its default closing (the default minutes and the `SetScene` op,
+/// no reaction, no fact). The Turn is committed; its Narration failed.
+#[test]
+fn end_scene_closes_when_the_model_fails() {
+    let mut rig = Rig::new("end-down");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let before = rig.view().clock_min;
+    rig.with_gm(Box::new(Down));
+    let mut ctl = TurnControl {
+        on_chunk: &mut |_| {},
+        faded: &|| false,
+    };
+    let err = rig
+        .engine()
+        .end_scene("close-1".into(), &mut ctl)
+        .unwrap_err();
+    let TurnError::NarrationFailed { turn_id, .. } = err else {
+        panic!("expected a committed Turn with no Narration, got {err:?}");
+    };
+    assert_eq!(rig.scene(), None);
+    let ops = rig.store().turn_ops(turn_id).unwrap();
+    assert_eq!(
+        ops,
+        [
+            LedgerOp::AdvanceClock {
+                minutes: SCENE_CLOSE_DEFAULT_MIN
+            },
+            LedgerOp::SetScene {
+                open: false,
+                why: SceneWhy::EndScene
+            },
+        ]
+    );
+    assert_eq!(
+        rig.view().clock_min,
+        before + u64::from(SCENE_CLOSE_DEFAULT_MIN)
+    );
+    let turn = rig.turn(turn_id);
+    assert_eq!(turn.record.kind, TurnKind::Closing);
+    assert_eq!(turn.narration, None);
+
+    // Two rejected attempts end the same way.
+    let mut rig = Rig::new("end-rejected");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let mut bad = rig.closing();
+    bad.reactions = vec![reaction(e(rig.ada), Stance::Comply, None)];
+    bad.facts = vec![fact(slot(e(rig.ada), "mood", "calm"), Seen::Pc, vec![])];
+    rig.gm.push_proposal(serde_json::to_string(&bad).unwrap());
+    let out = rig.end_scene("close-2", &bad, "Brann steps back.").unwrap();
+    assert_eq!(rig.scene(), None);
+    assert_eq!(
+        rig.store().turn_ops(out.turn_id).unwrap(),
+        [
+            LedgerOp::AdvanceClock {
+                minutes: SCENE_CLOSE_DEFAULT_MIN
+            },
+            LedgerOp::SetScene {
+                open: false,
+                why: SceneWhy::EndScene
+            },
+        ]
+    );
+}
+
+/// The closing schema pins what code does not want the model to choose.
+#[test]
+fn the_closing_schema_pins_what_code_does_not_want() {
+    let ctx = HandleContext {
+        entities: vec![Handle::Entity(1), Handle::Entity(2)],
+        facts: vec![Handle::Fact(1)],
+        events: vec![Handle::WorldEvent(1)],
+        goals: vec![Handle::Goal(1)],
+        new_slots: 1,
+        places: vec![Handle::Entity(3)],
+        open_items: vec!["E1.pending_meet".into()],
+        leavers: vec![Handle::Entity(2)],
+        destinations: vec![Handle::Entity(3)],
+        scene: true,
+    };
+    let schema = closing_schema_for(&ctx);
+    let props = &schema["properties"];
+    assert_eq!(props["action"]["enum"], serde_json::json!(["wait"]));
+    assert_eq!(props["verdict"]["enum"], serde_json::json!(["allowed"]));
+    assert_eq!(props["contested"]["enum"], serde_json::json!([false]));
+    assert_eq!(props["intimate"]["enum"], serde_json::json!([false]));
+    assert_eq!(props["move_to"], serde_json::json!({"type": "null"}));
+    assert_eq!(props["check"], serde_json::json!({"type": "null"}));
+    for key in [
+        "settles", "new_npcs", "schedule", "cancel", "leaves", "blockers",
+    ] {
+        assert!(props.get(key).is_none(), "{key} is absent");
+        assert!(
+            !schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(key)),
+            "{key} is not required"
+        );
+    }
+    assert_eq!(props["reactions"]["maxItems"], 2);
+    assert_eq!(props["facts"]["maxItems"], 1);
+    assert_eq!(props["minutes"]["minimum"], 1);
+    assert_eq!(props["minutes"]["maximum"], SCENE_CLOSE_MAX_MIN);
+    for key in ["intimate", "contested", "move_to", "minutes"] {
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(key)),
+            "{key} is required"
+        );
+    }
+    // The handles stay those of the prompt.
+    assert_eq!(
+        schema["$defs"]["Reaction"]["properties"]["npc"]["enum"],
+        serde_json::json!(["E1", "E2", "N1"])
+    );
+}
+
+/// `settle_closing` forces the same pins on the parsed proposal, because the
+/// validator must not trust the grammar: one note per change.
+#[test]
+fn settle_forces_the_closing_pins() {
+    let rig = Rig::new("settle-pins");
+    let mut p = rig.closing();
+    p.action = ActionKind::Act;
+    p.intimate = true;
+    p.new_npcs = vec![new_npc(1, "Kett", 30)];
+    p.minutes = 999;
+    let (p, notes) = settle_closing(p, &rig.view());
+    assert_eq!(p.action, ActionKind::Wait);
+    assert!(!p.intimate);
+    assert!(p.new_npcs.is_empty());
+    assert_eq!(p.minutes, SCENE_CLOSE_MAX_MIN);
+    assert_eq!(SCENE_CLOSE_MAX_MIN, 240);
+    assert_eq!(notes.len(), 4, "{notes:?}");
+
+    // A closing with no minutes takes one.
+    let mut p = rig.closing();
+    p.minutes = 0;
+    assert_eq!(settle_closing(p, &rig.view()).0.minutes, 1);
+
+    // Every other pin.
+    let mut p = rig.closing();
+    p.verdict = Verdict::Check;
+    p.contested = true;
+    p.check = Some(check(
+        None,
+        slot(e(rig.brann), "mood", "a"),
+        slot(e(rig.brann), "mood", "b"),
+    ));
+    p.reactions
+        .push(reaction(e(rig.vale), Stance::Neutral, None));
+    p.reactions
+        .push(reaction(e(rig.vale), Stance::Neutral, None));
+    p.facts = vec![
+        fact(slot(e(rig.brann), "mood", "calm"), Seen::Present, vec![]),
+        fact(slot(e(rig.brann), "hair", "loose"), Seen::Present, vec![]),
+    ];
+    let (p, notes) = settle_closing(p, &rig.view());
+    assert_eq!(p.verdict, Verdict::Allowed);
+    assert!(!p.contested);
+    assert!(p.check.is_none());
+    assert_eq!(p.reactions.len(), 2);
+    assert_eq!(p.facts.len(), 1);
+    assert_eq!(notes.len(), 5, "{notes:?}");
+}
+
+/// A Closing Turn sets no voluntary act of the PC: a fact on the PC's
+/// `mood` is an agency rejection, `fatigue` passes (data shape 3.7 step 4).
+#[test]
+fn a_closing_turn_sets_no_pc_choice() {
+    let mut rig = Rig::new("closing-agency");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let view = rig.view();
+    let with_fact = |key: &str| {
+        let mut p = rig.closing();
+        p.facts = vec![fact(slot(e(rig.ada), key, "x"), Seen::Pc, vec![])];
+        settle_closing(p, &view).0
+    };
+    let mood = with_fact("mood");
+    let errs = validate(&mood, &view).err().unwrap_or_default();
+    assert!(
+        errs.iter().any(|r| r.check == CheckKind::Agency),
+        "{errs:?}"
+    );
+    let fatigue = with_fact("fatigue");
+    assert!(validate(&fatigue, &view).is_ok());
+
+    let mut p = rig.closing();
+    p.facts = vec![fact(slot(e(rig.ada), "fatigue", "tired"), Seen::Pc, vec![])];
+    let out = rig.end_scene("close-1", &p, "You rest.").unwrap();
+    assert!(
+        rig.store()
+            .turn_ops(out.turn_id)
+            .unwrap()
+            .iter()
+            .any(|op| matches!(op, LedgerOp::AddFact { slot, .. } if slot.key == "fatigue"))
+    );
+}
+
+/// A Closing Turn has no Intent: "Correct last Turn" does not offer it.
+#[test]
+fn a_closing_turn_cannot_be_corrected() {
+    let mut rig = Rig::new("closing-correct");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let p = rig.closing();
+    rig.end_scene("close-1", &p, "Brann steps back.").unwrap();
+    assert!(!rig.sight().can_correct);
+    let plain = rig.plain();
+    rig.gm.push_proposal(serde_json::to_string(&plain).unwrap());
+    let err = rig
+        .engine()
+        .correct_last("c1".into(), "I wait.", "slower", &mut |_| {})
+        .unwrap_err();
+    assert!(matches!(err, TurnError::NotCorrectable(_)), "{err:?}");
+}
+
+/// A Closing Turn is a Moment of the story with no Intent, and no Act in
+/// the Journal.
+#[test]
+fn a_closing_turn_is_no_act_in_the_journal() {
+    let mut rig = Rig::new("closing-journal");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    let p = rig.closing();
+    let close = rig
+        .end_scene("close-1", &p, "Brann steps back.")
+        .unwrap()
+        .turn_id;
+    let sight = rig.sight();
+    assert!(sight.moments.iter().any(|m| m.turn == close));
+    let story = sight.story.iter().find(|t| t.turn == close).unwrap();
+    assert_eq!(story.kind, TurnKind::Closing);
+    // Later prompts and the OOC sheet read its Neutral Line.
+    assert!(
+        story
+            .line
+            .as_deref()
+            .is_some_and(|l| l.contains("10 minutes")),
+        "{:?}",
+        story.line
+    );
+    let marks = Default::default();
+    let journal = journal_view(&sight, &marks);
+    let acts: Vec<TurnId> = journal
+        .scenes
+        .iter()
+        .flat_map(|s| s.acts.iter().map(|a| a.turn_id))
+        .collect();
+    assert!(acts.contains(&t1));
+    assert!(!acts.contains(&close), "{acts:?}");
+    let view = play_view(&sight, &marks);
+    assert_eq!(view.scene, SceneState::Plain);
+    let story = view.story.iter().find(|t| t.turn_id == close).unwrap();
+    assert_eq!(story.intent, "");
+}
+
+// --- A failed gate leaves no scene on a Player screen ---------------------------
+
+/// G1 fails (another program brought an unconfirmed NPC into the place),
+/// then G2 refuses the Turn, so nothing commits and the ledger still holds
+/// the open scene. No reader outside the ledger treats it as open: the Play
+/// screen shows a plain scene, the plan limit is the plain one, and the
+/// next prompt holds no scene text. The next Turn that commits closes it.
+#[test]
+fn a_refused_turn_after_a_failed_gate_shows_no_scene() {
+    let mut rig = Rig::new("gate-refused");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, &format!("{MARKER} Brann nods."));
+    rig.add_npc("Kett", 34, false, "gate square");
+    let p = rig.intimate();
+    let err = rig.play("t2", &p, "Brann stays.").unwrap_err();
+    assert!(matches!(err, TurnError::Refused { .. }), "{err:?}");
+    assert_eq!(rig.scene(), Some(t1), "the ledger is unchanged");
+    assert_eq!(rig.sight().scene, None);
+    assert_eq!(
+        play_view(&rig.sight(), &Default::default()).scene,
+        SceneState::Plain
+    );
+    assert_eq!(threshold_core::mature::open_scene(&rig.view()), None);
+
+    let mut long = rig.plain();
+    long.reactions = vec![reaction(e(rig.brann), Stance::Comply, None)];
+    long.reactions[0].plan = "x".repeat(91);
+    let errs = validate(&long, &rig.view()).err().unwrap_or_default();
+    assert!(
+        errs.iter().any(|r| r.check == CheckKind::References),
+        "the plain plan limit: {errs:?}"
+    );
+
+    let p = rig.plain();
+    let t3 = rig.played("t3", &p, "Dusk.");
+    let call = rig.last_call(CallKind::Propose);
+    assert!(!prompt_text(&call).contains(SCENE_LINE));
+    assert!(!prompt_text(&call).contains(MARKER));
+    assert_eq!(rig.scene_ops(t3), [(false, SceneWhy::Gate)]);
+    assert_eq!(rig.scene(), None);
 }

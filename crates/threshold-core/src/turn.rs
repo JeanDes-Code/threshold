@@ -19,13 +19,15 @@ use serde_json::json;
 
 use crate::{
     checks::{self, CheckKind, Rejection, Validated},
+    closing_schema_for,
     context::{
-        QUIET_EVENT_LINE, adventure_block, guard_events, guard_plans, narration_prompt_with,
-        one_line, opening_prompt, perceived_by_pc, proposal_context, seen_present,
+        QUIET_EVENT_LINE, adventure_block, closing_context, guard_events, guard_plans,
+        narration_prompt_with, one_line, opening_prompt, perceived_by_pc, proposal_context,
+        seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, EntityId, EntityKind,
-        EntityRef, FactSource, Handle, LedgerOp, Reaction, Verdict,
+        EntityRef, FactSource, Handle, LedgerOp, Reaction, SceneWhy, Verdict,
     },
     mature::{self, RefusalKind, Told},
     model::{Gm, GmError, Prompt, Stream},
@@ -113,6 +115,8 @@ pub enum TurnError {
         kind: RefusalKind,
         blocked: Vec<EntityId>,
     },
+    /// "End scene" with no Intimate Scene open.
+    NoScene,
 }
 
 impl fmt::Display for TurnError {
@@ -140,6 +144,7 @@ impl fmt::Display for TurnError {
                 )
             }
             Self::Refused { kind, .. } => f.write_str(crate::view::refusal_text(*kind)),
+            Self::NoScene => f.write_str("no Intimate Scene is open"),
         }
     }
 }
@@ -215,6 +220,30 @@ struct Committed<'a> {
     extra: Vec<String>,
     /// The Turn was committed with `intimate`: G4 (`mature::told`) reads it.
     intimate: bool,
+    /// A Closing Turn: told plain under `context::CLOSING_LINE`, with no
+    /// Intent and `mature::CLOSING_NARRATION_MAX_TOKENS`.
+    closing: bool,
+}
+
+/// What a Turn asks the GM model to decide (data shape 3.7): the Player's
+/// Intent, or the end of the open scene. Both share `plan`; a Closing Turn
+/// has its own prompt (`context::closing_context`), schema
+/// (`closing_schema_for`) and repairs (`checks::settle_closing`), and its
+/// Commit closes the scene for `why`.
+#[derive(Clone, Copy, Debug)]
+enum Ask<'a> {
+    Play { intent: &'a str },
+    Closing { why: SceneWhy },
+}
+
+impl Ask<'_> {
+    /// The Intent of a Play Turn; empty for a Closing Turn.
+    fn intent(&self) -> &str {
+        match self {
+            Self::Play { intent } => intent,
+            Self::Closing { .. } => "",
+        }
+    }
 }
 
 /// The result of the steps before the Commit.
@@ -232,6 +261,35 @@ struct Planned {
     wait_asked: Option<u32>,
     /// The proposal's `intimate`, after the tag of the first attempt stuck.
     intimate: bool,
+}
+
+impl Planned {
+    /// The core's own closing (`mature::default_close`), when the model gave
+    /// no closing the checks accept. Its record holds a `wait` that is
+    /// `allowed`, no reaction and no event.
+    fn default_close(why: SceneWhy) -> Self {
+        let minutes = mature::SCENE_CLOSE_DEFAULT_MIN;
+        Self {
+            ops: mature::default_close(why),
+            proposal_json: json!({
+                "proposal": {"action": "wait", "verdict": "allowed", "minutes": minutes, "intimate": false},
+                "reactions": [],
+                "events": [],
+                "roll": null,
+                "wait_asked": null,
+                "default_close": true,
+            })
+            .to_string(),
+            roll: None,
+            reactions: Vec::new(),
+            events: Vec::new(),
+            minutes,
+            action: ActionKind::Wait,
+            verdict: Verdict::Allowed,
+            wait_asked: None,
+            intimate: false,
+        }
+    }
 }
 
 /// The OOC rules. The last line is `context::INTIMATE_RULE`, the narrator's
@@ -302,7 +360,7 @@ impl Engine {
         let view = self.store.snapshot(self.campaign)?;
         let seed = turn_seed(self.store.campaign_seed(self.campaign)?, view.turn_seq + 1);
         let mut timings = Timings::default();
-        let planned = self.plan(&op_id, &view, intent, seed, &mut timings);
+        let planned = self.plan(&op_id, &view, Ask::Play { intent }, seed, &mut timings);
         let planned = self.logged_refusal(&op_id, planned)?;
         let record = TurnRecord {
             campaign_id: self.campaign,
@@ -369,7 +427,10 @@ impl Engine {
             |roll| Ok(roll.seed),
         )?;
         let mut timings = Timings::default();
-        let planned = self.plan(&op_id, &view, clarified_intent, seed, &mut timings);
+        let ask = Ask::Play {
+            intent: clarified_intent,
+        };
+        let planned = self.plan(&op_id, &view, ask, seed, &mut timings);
         let mut planned = self.logged_refusal(&op_id, planned)?;
         for op in &mut planned.ops {
             as_correction(op);
@@ -392,6 +453,70 @@ impl Engine {
             clock_after: view.clock_min + ClockMin::from(planned.minutes),
         };
         self.finish(record, planned, head, timings, start, ctl)
+    }
+
+    /// "End scene" (data shape 3.7): commits a Closing Turn that ends the
+    /// open Intimate Scene, then tells it in a short plain Narration. The
+    /// Closing Turn has no Intent and sets no act of the PC. It runs `plan`
+    /// as any Turn, with the closing prompt, schema and repairs. When the
+    /// model fails, or both its attempts are rejected, the core commits its
+    /// own closing (`mature::default_close`): the button never depends on a
+    /// model answer. Either way the Commit closes the scene with
+    /// `why: EndScene`. A second call with the same `op_id` returns the
+    /// stored Turn. `NoScene` when no scene is open, with no model call.
+    pub fn end_scene(
+        &mut self,
+        op_id: OpId,
+        ctl: &mut TurnControl<'_>,
+    ) -> Result<TurnOutcome, TurnError> {
+        self.close_scene(op_id, SceneWhy::EndScene, ctl)
+    }
+
+    /// The Closing Turn of "End scene" (and of a Fade to Black), for `why`.
+    fn close_scene(
+        &mut self,
+        op_id: OpId,
+        why: SceneWhy,
+        ctl: &mut TurnControl<'_>,
+    ) -> Result<TurnOutcome, TurnError> {
+        let start = Instant::now();
+        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+            return self.stored_outcome(stored, ctl);
+        }
+        let view = self.store.snapshot(self.campaign)?;
+        // The ledger's scene, not `mature::open_scene`: closing a scene that
+        // G1 no longer clears is always safe, and its prompt then holds no
+        // scene text (G1 in `plan`).
+        if view.scene_open.is_none() {
+            return Err(TurnError::NoScene);
+        }
+        let seed = turn_seed(self.store.campaign_seed(self.campaign)?, view.turn_seq + 1);
+        let mut timings = Timings::default();
+        let planned = match self.plan(&op_id, &view, Ask::Closing { why }, seed, &mut timings) {
+            Ok(planned) => planned,
+            Err(TurnError::Store(e)) => return Err(TurnError::Store(e)),
+            Err(e) => {
+                let raw = format!("the core closes the scene: {e}");
+                self.log(
+                    &op_id,
+                    "default_close",
+                    &Prompt::default(),
+                    &raw,
+                    Instant::now(),
+                )?;
+                Planned::default_close(why)
+            }
+        };
+        let record = TurnRecord {
+            campaign_id: self.campaign,
+            op_id,
+            kind: TurnKind::Closing,
+            intent: String::new(),
+            proposal_json: planned.proposal_json.clone(),
+            clock_before: view.clock_min,
+            clock_after: view.clock_min + ClockMin::from(planned.minutes),
+        };
+        self.finish(record, planned, Vec::new(), timings, start, ctl)
     }
 
     /// Begin: commits the Opening Turn (zero ops, empty Intent, no World
@@ -532,6 +657,7 @@ impl Engine {
                 .into_iter()
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
+            closing: stored.record.kind == TurnKind::Closing,
         };
         let narration = self.narrate(
             &stored.record.op_id,
@@ -656,6 +782,7 @@ impl Engine {
     ) -> Result<TurnOutcome, TurnError> {
         let op_id = record.op_id.clone();
         let intent = record.intent.clone();
+        let closing = record.kind == TurnKind::Closing;
         let mut ops = head;
         ops.extend(planned.ops);
         let Some(turn_id) = self.commit_logged(record, ops.clone(), &mut timings)? else {
@@ -675,6 +802,7 @@ impl Engine {
                 .into_iter()
                 .collect(),
             intimate: planned.intimate,
+            closing,
         };
         let narration = self
             .narrate(&op_id, &view_after, &view_after, &committed, &intent, ctl)
@@ -742,8 +870,12 @@ impl Engine {
         }
         let told = mature::told(view_after, now, committed.intimate);
         let cleared = mature::narration_clearance(view_after, now);
-        let max_tokens = (told == Told::Implied && view_after.scene_open.is_some())
-            .then_some(mature::SCENE_NARRATION_MAX_TOKENS);
+        let max_tokens = if committed.closing {
+            Some(mature::CLOSING_NARRATION_MAX_TOKENS)
+        } else {
+            (told == Told::Implied && view_after.scene_open.is_some())
+                .then_some(mature::SCENE_NARRATION_MAX_TOKENS)
+        };
         let prompt = narration_prompt_with(
             view_after,
             &self.packs,
@@ -755,6 +887,7 @@ impl Engine {
             &committed.extra,
             &told,
             cleared.as_ref(),
+            committed.closing,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
@@ -821,14 +954,20 @@ impl Engine {
     /// is planned as a plain one and its own Commit closes the scene
     /// (`resolve`, plan deviation 1). The clearance lives in this call
     /// only: it is never stored.
+    ///
+    /// A Closing Turn (`Ask::Closing`) shares every step. It reads the
+    /// closing prompt and schema, its repairs are `checks::settle_closing`,
+    /// and the engine's time rules of an Intent (`engine_time`, the default
+    /// Check, opposition) do not run: it has no Intent.
     fn plan(
         &mut self,
         op_id: &str,
         view: &WorldView,
-        intent: &str,
+        ask: Ask<'_>,
         seed: u64,
         timings: &mut Timings,
     ) -> Result<Planned, TurnError> {
+        let intent = ask.intent();
         let gate = mature::scene_gate(view);
         if let Err(blocked) = &gate {
             let raw = format!("scene not cleared: {:?}", blocked.who);
@@ -842,8 +981,18 @@ impl Engine {
         }
         let gate_failed = gate.is_err();
         let cleared = gate.as_ref().ok().and_then(Option::as_ref);
-        let ctx = proposal_context(view, &self.packs, intent, cleared);
-        let schema = proposal_schema_for(&ctx.handles);
+        let (ctx, schema) = match ask {
+            Ask::Play { intent } => {
+                let ctx = proposal_context(view, &self.packs, intent, cleared);
+                let schema = proposal_schema_for(&ctx.handles);
+                (ctx, schema)
+            }
+            Ask::Closing { .. } => {
+                let ctx = closing_context(view, cleared);
+                let schema = closing_schema_for(&ctx.handles);
+                (ctx, schema)
+            }
+        };
         let mut prompt = ctx.prompt;
         let mut wait_asked = None;
         let mut tagged = false;
@@ -867,6 +1016,13 @@ impl Engine {
             // twice (review M2). The retry is then checked as intimate.
             tagged |= states_intimate(&raw);
             let parsed = match parse(&raw) {
+                Ok(p) if matches!(ask, Ask::Closing { .. }) => {
+                    let (p, notes) = checks::settle_closing(p, view);
+                    if !notes.is_empty() {
+                        self.log(op_id, "settle", &Prompt::default(), &notes.join("\n"), step)?;
+                    }
+                    Ok(p)
+                }
                 Ok(mut p) => {
                     p.intimate |= tagged;
                     // The items the Intent names: the only ones `settles`
@@ -914,6 +1070,7 @@ impl Engine {
                         seed,
                         wait_asked,
                         gate_failed,
+                        ask,
                         timings,
                     );
                 }
@@ -966,6 +1123,7 @@ impl Engine {
         seed: u64,
         wait_asked: Option<u32>,
         gate_failed: bool,
+        ask: Ask<'_>,
         timings: &mut Timings,
     ) -> Result<Planned, TurnError> {
         let p = valid.proposal();
@@ -1010,10 +1168,15 @@ impl Engine {
             }
             self.log(op_id, "gate_after", &Prompt::default(), "ok", step)?;
         }
-        if let Some(op) = presence
-            .as_ref()
-            .and_then(|presence| mature::scene_op(view, p, presence, gate_failed))
-        {
+        // A Closing Turn closes the scene for its own reason; any other
+        // Turn changes it as `mature::scene_op` says.
+        let scene_op = match ask {
+            Ask::Closing { why } => Some(LedgerOp::SetScene { open: false, why }),
+            Ask::Play { .. } => presence
+                .as_ref()
+                .and_then(|presence| mature::scene_op(view, p, presence, gate_failed)),
+        };
+        if let Some(op) = scene_op {
             self.log(
                 op_id,
                 "scene",

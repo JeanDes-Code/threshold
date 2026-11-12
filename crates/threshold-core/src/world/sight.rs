@@ -146,8 +146,9 @@ pub struct PcSight {
     pub needs_begin: bool,
     /// The latest Turn is a standing Play Turn (`Engine::correct_last`).
     pub can_correct: bool,
-    /// The Turn that opened the Intimate Scene, while one is open
-    /// (`WorldView::scene_open`).
+    /// The Turn that opened the Intimate Scene, while one is open and G1
+    /// still clears it (`mature::open_scene`): a scene the gate no longer
+    /// clears is on no Player screen.
     pub scene: Option<TurnId>,
     /// The stored Detail Level (`WorldView::detail`).
     pub detail: DetailLevel,
@@ -438,7 +439,7 @@ pub fn pc_sight(
         can_correct: ordered
             .last()
             .is_some_and(|t| t.record.kind == TurnKind::Play && !reverted.contains(&t.id)),
-        scene: view.scene_open,
+        scene: crate::mature::open_scene(view),
         detail: view.detail,
     })
 }

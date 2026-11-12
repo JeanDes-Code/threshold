@@ -259,6 +259,53 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
     schema
 }
 
+/// The schema of a Closing Turn's proposal (mature content data shape 3.7):
+/// the per-Turn schema of `ctx`, with what the code does not want the model
+/// to choose pinned or left out. `action` is `wait`, `verdict` `allowed`,
+/// `contested` and `intimate` are `false`, `move_to` and `check` are
+/// `null`; `settles`, `new_npcs`, `schedule`, `cancel`, `leaves` and
+/// `blockers` are absent. Free: `minutes` (1 to
+/// `mature::SCENE_CLOSE_MAX_MIN`), at most two `reactions` and one fact.
+/// `checks::settle_closing` forces the same pins on the parsed proposal,
+/// because the validator does not trust the grammar.
+pub fn closing_schema_for(ctx: &HandleContext) -> serde_json::Value {
+    use serde_json::json;
+
+    let mut schema = proposal_schema_for(ctx);
+    let props = &mut schema["properties"];
+    props["action"] = json!({"type": "string", "enum": ["wait"]});
+    props["verdict"] = json!({"type": "string", "enum": ["allowed"]});
+    props["contested"] = json!({"type": "boolean", "enum": [false]});
+    props["intimate"] = json!({"type": "boolean", "enum": [false]});
+    props["move_to"] = json!({"type": "null"});
+    props["check"] = json!({"type": "null"});
+    props["minutes"] = json!({
+        "type": "integer",
+        "minimum": 1,
+        "maximum": mature::SCENE_CLOSE_MAX_MIN,
+    });
+    let gone = [
+        "settles", "new_npcs", "schedule", "cancel", "leaves", "blockers",
+    ];
+    if let Some(props) = props.as_object_mut() {
+        for key in gone {
+            props.remove(key);
+        }
+    }
+    for (key, max) in [("reactions", 2), ("facts", 1)] {
+        if let Some(list) = schema["properties"].get_mut(key) {
+            list["maxItems"] = json!(max);
+        }
+    }
+    if let Some(required) = schema["required"].as_array_mut() {
+        required.retain(|k| !gone.iter().any(|g| k == g));
+    }
+    for key in ["action", "verdict", "minutes", "check"] {
+        require(&mut schema, "", key);
+    }
+    schema
+}
+
 /// Adds `key` to the `required` list of the object schema at `path`.
 fn require(schema: &mut serde_json::Value, path: &str, key: &str) {
     let required = schema

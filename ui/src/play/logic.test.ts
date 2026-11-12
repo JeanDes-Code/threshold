@@ -22,6 +22,8 @@ import {
   OPEN_CAP,
   emphasis,
   tabbableTurn,
+  laterButtons,
+  type TurnPhase,
 } from "./logic";
 
 describe("play logic", () => {
@@ -172,5 +174,15 @@ describe("Task 5 fixes", () => {
     expect(last && last.kind === "turn" && tabbableTurn(items)).toBe(last && last.kind === "turn" ? last.turn.turn_id : null);
     expect(tabbableTurn(storyItems(playView, "Orsel"))).toBe(null);
   });
-});
 
+  it("End scene shows in an intimate scene and is enabled only when idle", () => {
+    const intimate = { kind: "intimate", since_turn: 7 } as const;
+    const phases: TurnPhase[] = ["idle", "deciding", "narrating", "answering"];
+    for (const phase of phases) {
+      const plain = laterButtons({ kind: "plain" }, phase);
+      expect(plain.end).toEqual({ shown: false, enabled: false });
+      const scene = laterButtons(intimate, phase);
+      expect(scene.end).toEqual({ shown: true, enabled: phase === "idle" });
+    }
+  });
+});

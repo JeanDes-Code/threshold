@@ -38,6 +38,8 @@ export interface PlayScreenProps {
   /** Closes the failure, and forgets the Turn that could be sent again. */
   onDismissFailure: () => void;
   onBegin: () => void;
+  /** "End scene": the Closing Turn of the open Intimate Scene. */
+  onEndScene: () => void;
   onRenarrate: (turnId: number) => void;
   onDismissAnswer: () => void;
   /** Pins or unpins a target; the core then sends a new view. */
@@ -154,6 +156,7 @@ export default function PlayScreen(props: PlayScreenProps) {
         onRetry={props.onRetry}
         onDismissFailure={props.onDismissFailure}
         onBegin={props.onBegin}
+        onEndScene={props.onEndScene}
         onDismissAnswer={props.onDismissAnswer}
         hasScene={scene !== null}
         onNote={(body, aboutScene) => props.onNote(body, aboutScene ? scene : null)}

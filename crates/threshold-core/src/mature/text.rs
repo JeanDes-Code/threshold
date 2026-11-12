@@ -7,13 +7,18 @@
 //! the OOC sheet reads of a Turn, and its neutral line.
 
 use super::gate::Cleared;
-use crate::store::{StoredTurn, TurnId, WorldView};
+use crate::store::{StoredTurn, TurnId, TurnKind, WorldView};
 
 /// The Neutral Line of a Turn committed with `intimate` (glossary). The
 /// core fills `{minutes}` with the minutes between the Turn's
 /// `clock_before` and `clock_after` ("5 minutes"). It holds no name, no
 /// fact value and no model text. The owner reads it before the merge.
 pub const INTIMATE_TEMPLATE: &str = "An intimate moment passes ({minutes}). It is not retold here.";
+
+/// The Neutral Line of a Closing Turn (glossary). The core fills
+/// `{minutes}` as for `INTIMATE_TEMPLATE`. It holds no name, no fact value,
+/// no model text and no act of the PC. The owner reads it before the merge.
+pub const CLOSING_TEMPLATE: &str = "The intimate scene ends ({minutes}).";
 
 /// What a reader gets for one Turn: its Intent and its Narration in full,
 /// or one Neutral Line in place of both.
@@ -49,13 +54,17 @@ pub fn turn_text<'a>(
 }
 
 /// The Neutral Line of `turn`: `Some` for a Play or Correction Turn
-/// committed with `intimate` (`INTIMATE_TEMPLATE`), `None` for any other
-/// Turn. Made from the Turn row only; no model call.
+/// committed with `intimate` (`INTIMATE_TEMPLATE`) and for a Closing Turn
+/// (`CLOSING_TEMPLATE`), `None` for any other Turn. Made from the Turn row
+/// only; no model call.
 pub fn neutral_line(turn: &StoredTurn) -> Option<String> {
-    let told = turn.record.kind.has_intent();
-    if !(told && stored_intimate(&turn.record.proposal_json)) {
+    let template = if turn.record.kind == TurnKind::Closing {
+        CLOSING_TEMPLATE
+    } else if turn.record.kind.has_intent() && stored_intimate(&turn.record.proposal_json) {
+        INTIMATE_TEMPLATE
+    } else {
         return None;
-    }
+    };
     let minutes = turn
         .record
         .clock_after
@@ -65,7 +74,7 @@ pub fn neutral_line(turn: &StoredTurn) -> Option<String> {
     } else {
         format!("{minutes} minutes")
     };
-    Some(INTIMATE_TEMPLATE.replace("{minutes}", &minutes))
+    Some(template.replace("{minutes}", &minutes))
 }
 
 /// How the narrator tells one Turn.

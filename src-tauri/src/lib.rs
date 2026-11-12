@@ -246,6 +246,22 @@ async fn correct_last(
     result
 }
 
+/// "End scene": the Closing Turn of the open Intimate Scene. It streams
+/// `narration_chunk` under `op_id`, then reports `turn_committed` or
+/// `turn_failed`, as `submit_intent` does.
+#[tauri::command(rename_all = "snake_case")]
+async fn end_scene(
+    app: AppHandle,
+    state: State<'_, Shared>,
+    op_id: String,
+) -> Result<TurnSummary, AppError> {
+    let mut sink = chunk_sink(&app, &op_id);
+    let id = op_id.clone();
+    let result = blocking(&state, move |s| s.end_scene(id, &mut sink)).await;
+    report(&app, &op_id, &result);
+    result
+}
+
 #[tauri::command(rename_all = "snake_case")]
 async fn ask_ooc(state: State<'_, Shared>, text: String) -> Result<String, AppError> {
     blocking(&state, move |s| s.ask_ooc(&text)).await
@@ -468,6 +484,7 @@ pub fn run() {
             get_play_view,
             submit_intent,
             correct_last,
+            end_scene,
             ask_ooc,
             renarrate,
             get_character,

@@ -47,9 +47,10 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
     // The plan limit, as the per-Turn schema states it: at most
     // `PLAN_MAX_CHARS`, or 1 to `SCENE_PLAN_MAX_CHARS` while an Intimate
     // Scene is open (data shape 3.3). The validator never trusts the
-    // grammar. It reads `view.scene_open`, not the result of G1 (plan
-    // deviation 16).
-    let (min, max) = if view.scene_open.is_some() {
+    // grammar. It reads the scene as G1 sees it (`mature::open_scene`), as
+    // the schema does: a scene that G1 no longer clears has the plain limit
+    // (changed in Task 5; plan deviation 16 read `view.scene_open`).
+    let (min, max) = if crate::mature::open_scene(view).is_some() {
         (1, SCENE_PLAN_MAX_CHARS)
     } else {
         (0, PLAN_MAX_CHARS)

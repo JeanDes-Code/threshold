@@ -2611,6 +2611,9 @@ fn kind_helpers_match_the_old_rules() {
         (TurnKind::Ooc, false, false),
         (TurnKind::Opening, true, false),
     ];
+    // Task 5 adds the Closing Turn: a Narration, no Intent.
+    assert!(TurnKind::Closing.tells());
+    assert!(!TurnKind::Closing.has_intent());
     for (kind, tells, has_intent) in table {
         assert_eq!(kind.tells(), tells, "{kind:?} tells");
         assert_eq!(kind.has_intent(), has_intent, "{kind:?} has an Intent");

@@ -124,6 +124,7 @@ export default function PlayPreview() {
           return true;
         }}
         onBegin={replay}
+        onEndScene={replay}
         onRenarrate={replay}
         onDismissAnswer={() => setAnswer(null)}
         onPin={pin}

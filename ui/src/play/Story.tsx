@@ -90,8 +90,10 @@ function Turn({ turn, onName, onRenarrate, busy, tabbable }: TurnProps) {
   if (turn.reverted) classes.push("play-turn--reverted");
   return (
     <article className={classes.join(" ")}>
-      {/* An Opening Turn has no Intent: only its Narration shows. */}
-      {turn.kind !== "opening" && <Intent text={turn.intent} correction={turn.kind === "correction"} />}
+      {/* An Opening or Closing Turn has no Intent: only its Narration shows. */}
+      {(turn.kind === "play" || turn.kind === "correction") && (
+        <Intent text={turn.intent} correction={turn.kind === "correction"} />
+      )}
       {turn.reverted && <p className="play-turn__tag">Reverted by the Correction below</p>}
       {turn.body.kind === "narration" ? (
         turn.body.blocks.map((block, i) => (

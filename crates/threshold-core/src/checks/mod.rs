@@ -20,7 +20,7 @@ use crate::{
 pub(crate) use agency::is_involuntary_key;
 pub use contest::{checks_now, contest_note, default_check, oppose};
 pub use ops::{Resolved, to_ops};
-pub use settle::settle;
+pub use settle::{settle, settle_closing};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckKind {

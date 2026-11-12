@@ -36,6 +36,9 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
   // "Begin": the GM narrates the opening scene, as the Opening Turn.
   const begin = () => void store.run(() => ({ opId: BEGIN_OP_ID, result: api.begin() }), null);
 
+  // "End scene": a Closing Turn, streamed as an Intent's Turn.
+  const endScene = () => void store.run(() => turns.endScene(), null);
+
   const renarrate = (turnId: number) =>
     void store.renarrate(renarrateOpId(turnId), () => api.renarrate(turnId));
 
@@ -88,6 +91,7 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
       onRetry={retry}
       onDismissFailure={store.dismissFailure}
       onBegin={begin}
+      onEndScene={endScene}
       onRenarrate={renarrate}
       onDismissAnswer={store.dismissAnswer}
       onPin={(target, on) => void pin(target, on)}

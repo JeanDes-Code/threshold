@@ -5,12 +5,13 @@ mod support;
 
 use std::path::Path;
 
-use support::{base, session, town, town_dir};
+use support::{base, session, town, town_at_implied, town_in_a_scene};
 use threshold_app::session::{AppError, Session};
 use threshold_core::{
     RecordedGm,
-    store::Store,
-    view::{REFUSAL_ADULTS_ONLY, REFUSAL_EXCLUDED},
+    domain::ActionKind,
+    store::{Store, TurnKind},
+    view::{REFUSAL_ADULTS_ONLY, REFUSAL_EXCLUDED, SceneState},
 };
 
 /// An intimate proposal with no reaction: the age rule refuses it before the
@@ -19,16 +20,6 @@ fn intimate() -> String {
     let mut p = base();
     p.intimate = true;
     serde_json::to_string(&p).unwrap()
-}
-
-/// The town fixture with its seed at Detail Level `implied`. Every age of a
-/// fixture Campaign is unconfirmed.
-fn town_at_implied(s: &mut Session, dir: &Path) {
-    let seed = std::fs::read_to_string(town_dir().join("adventure-seed.toml")).unwrap();
-    let seed_path = dir.join("adventure-seed.toml");
-    std::fs::write(&seed_path, format!("detail = \"implied\"\n{seed}")).unwrap();
-    s.new_campaign(&seed_path, &town_dir().join("world.toml"), 11)
-        .unwrap();
 }
 
 /// Every entity name of the open Campaign.
@@ -107,4 +98,48 @@ fn a_refusal_is_its_own_result_kind() {
     assert_eq!(gm.calls().len(), 1, "the same op runs no model call");
     assert_eq!(refusal(&mut s, "op-2"), REFUSAL_EXCLUDED);
     assert_eq!(gm.calls().len(), 2, "a new op is judged afresh");
+}
+
+/// "End scene" through the shell (Task 5): the closing Narration streams
+/// through the same sink as an Intent, the Turn commits, and the Play view
+/// shows the scene closed, the Closing Turn with no Intent, and nothing to
+/// correct.
+#[test]
+fn end_scene_streams_and_commits() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town_in_a_scene(&mut s, dir.path(), &gm);
+    let view = s.get_play_view().unwrap();
+    assert!(
+        matches!(view.scene, SceneState::Intimate { .. }),
+        "{:?}",
+        view.scene
+    );
+
+    let mut p = base();
+    p.action = ActionKind::Wait;
+    p.minutes = 10;
+    gm.push_proposal(serde_json::to_string(&p).unwrap());
+    gm.push_narration("The hall is quiet again.".into());
+    let mut chunks = String::new();
+    let turn = s
+        .end_scene("close-1".into(), &mut |c| chunks.push_str(c))
+        .unwrap();
+    assert_eq!(chunks, "The hall is quiet again.");
+    assert_eq!(turn.narration.as_deref(), Some("The hall is quiet again."));
+
+    let view = s.get_play_view().unwrap();
+    assert_eq!(view.scene, SceneState::Plain);
+    assert!(!view.can_correct);
+    let last = view.story.last().unwrap();
+    assert_eq!(last.turn_id, turn.turn_id);
+    assert_eq!(last.kind, TurnKind::Closing);
+    assert_eq!(last.intent, "");
+
+    // No scene: a plain error, and no model call.
+    let calls = gm.calls().len();
+    let err = s.end_scene("close-2".into(), &mut |_| {}).unwrap_err();
+    assert_eq!(err.to_string(), "no Intimate Scene is open");
+    assert_eq!(gm.calls().len(), calls);
 }

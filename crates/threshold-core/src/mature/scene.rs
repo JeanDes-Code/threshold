@@ -10,7 +10,7 @@ use crate::{
     context::seen_present,
     domain::{DecisionProposal, EntityId, EntityKind, LedgerOp, SceneWhy},
     normalize,
-    store::WorldView,
+    store::{TurnId, WorldView},
 };
 
 /// The token cap of a Narration told by implication inside an Intimate
@@ -19,6 +19,46 @@ use crate::{
 /// 15 s Turn budget reads it: at about 43 tokens per second, 280 tokens are
 /// about 6.5 s of generation (ADR 0010).
 pub const SCENE_NARRATION_MAX_TOKENS: u32 = 280;
+
+/// The minutes of the core's default closing (`default_close`), when the
+/// model gives no closing it can commit (data shape 3.7, a first value).
+pub const SCENE_CLOSE_DEFAULT_MIN: u32 = 15;
+
+/// The most minutes a Closing Turn may take: `checks::settle_closing` clamps
+/// the proposal's `minutes` to 1 to this (data shape 3.7, a first value).
+pub const SCENE_CLOSE_MAX_MIN: u32 = 240;
+
+/// The token cap of the short Narration of a Closing Turn (data shape 3.7,
+/// a first value): about 6 s at 43 tokens per second.
+pub const CLOSING_NARRATION_MAX_TOKENS: u32 = 90;
+
+/// The open scene as every reader outside the ledger sees it: the scene of
+/// `view` while G1 passes on it (`scene_gate`), else `None`. The Player
+/// screens, the plan limit of `checks::validate` and the buttons read this.
+///
+/// A scene stays open in the ledger after G1 fails when the Turn that found
+/// it is then refused (G2 or G3): nothing commits. The next Turn that
+/// commits closes it (`scene_op`, `why: Gate`). In between, no reader treats
+/// it as open: no prompt holds its text (G1 and `narration_clearance` find
+/// no clearance), and no screen shows it.
+pub fn open_scene(view: &WorldView) -> Option<TurnId> {
+    view.scene_open.filter(|_| scene_gate(view).is_ok())
+}
+
+/// The ops of the core's own closing, when the model fails or both its
+/// attempts are rejected (data shape 3.7, "the button always works"): the
+/// World Clock moves `SCENE_CLOSE_DEFAULT_MIN` minutes and the scene
+/// closes for `why` (`EndScene` or `FadeToBlack`). No reaction, no fact,
+/// no PC act. A World Event that falls due in those minutes fires in the
+/// next Turn. The Player's choice to stop never waits on a model answer.
+pub fn default_close(why: SceneWhy) -> Vec<LedgerOp> {
+    vec![
+        LedgerOp::AdvanceClock {
+            minutes: SCENE_CLOSE_DEFAULT_MIN,
+        },
+        LedgerOp::SetScene { open: false, why },
+    ]
+}
 
 /// G1: the clearance of an open scene, before the proposal call of a Turn.
 /// `Ok(None)` when no scene is open; `Ok(Some(_))` when every character the

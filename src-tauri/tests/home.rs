@@ -4,7 +4,7 @@ use std::path::Path;
 
 mod support;
 
-use support::{allowed, session, town};
+use support::{allowed, session, town, town_in_a_scene};
 use threshold_app::session::OLD_FILE;
 use threshold_core::{RecordedGm, store};
 
@@ -226,4 +226,21 @@ fn a_side_file_that_cannot_move_is_reported() {
     std::fs::write(blocked.join("keep"), b"x").unwrap();
     let err = s.remove_campaign("campaign-old.sqlite").unwrap_err();
     assert!(err.to_string().contains("-wal"), "{err}");
+}
+
+/// A Closing Turn has no Intent: the home card does not count it as a Turn
+/// (mature content module, Task 5).
+#[test]
+fn a_closing_turn_counts_no_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town_in_a_scene(&mut s, dir.path(), &gm);
+    assert_eq!(s.list_campaigns()[0].turn_count, 1);
+    gm.push_proposal(allowed());
+    gm.push_narration("The hall is quiet again.".into());
+    s.end_scene("close-1".into(), &mut |_| {}).unwrap();
+    let card = s.list_campaigns().remove(0);
+    assert_eq!(card.turn_count, 1, "the Closing Turn counts no Turn");
+    assert!(!card.needs_begin);
 }

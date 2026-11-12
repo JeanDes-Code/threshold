@@ -1,6 +1,6 @@
 // Pure rules of the Play screen. The components hold no logic of their own.
 
-import type { KnownLine, NameRef, PlayView, StoryTurn } from "../api";
+import type { KnownLine, NameRef, PlayView, SceneState, StoryTurn } from "../api";
 
 /** "answering": the GM answers an out-of-character question; no Turn runs. */
 export type TurnPhase = "idle" | "deciding" | "narrating" | "answering";
@@ -178,3 +178,23 @@ export function tabbableTurn(items: StoryItem[]): number | null {
   return last?.kind === "turn" ? last.turn.turn_id : null;
 }
 
+
+/** One button of the action bar's right slot. */
+export interface LaterButton {
+  shown: boolean;
+  enabled: boolean;
+}
+
+/**
+ * The buttons of the mature content module in the action bar's right slot
+ * (data shape 3.12), from the scene and the phase only: the core sends no
+ * list of actions. "End scene" shows in an Intimate Scene and works while
+ * no call runs. "Fade to black" comes with the next task: hidden for now.
+ */
+export function laterButtons(scene: SceneState, phase: TurnPhase): { end: LaterButton; fade: LaterButton } {
+  const intimate = scene.kind === "intimate";
+  return {
+    end: { shown: intimate, enabled: intimate && phase === "idle" },
+    fade: { shown: false, enabled: false },
+  };
+}

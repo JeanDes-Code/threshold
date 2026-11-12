@@ -71,6 +71,12 @@ pub const INTIMATE_RULE: &str = intimate_rule_text!();
 /// owner reads it before the merge.
 pub const IMPLIED_LINE: &str = "INTIMATE TURN (implied): tell only that the moment happens and how the characters are with each other, then pass over it without describing it. Add no act, word or feeling of the PC beyond the player intent.\n";
 
+/// The head of the narration's `recent` block for a Closing Turn (data
+/// shape 3.7 step 6): the Player ended the scene; the narrator tells briefly
+/// how it ends, with no Intent to tell. One line, in neutral words. The
+/// owner reads it before the merge.
+pub const CLOSING_LINE: &str = "SCENE ENDS: the player chose to end the intimate scene. In a few plain sentences, tell how it closes and what the NPCs here do, then pass over the time. Tell nothing intimate, and no act, word or feeling of the PC.\n";
+
 /// The lines that follow `NARRATION_RULES` in the opening prompt.
 pub const OPENING_RULES: &str = "\
 This is the opening of the adventure: there is no THIS TURN. Narrate the start given under OPENING.
@@ -319,11 +325,14 @@ pub fn narration_prompt(
         &[],
         told,
         None,
+        false,
     )
 }
 
 /// `narration_prompt` with outcome lines the engine adds after the
 /// perceived ops: a wait cut short (`turn::wait_cut_line`, bug pass 5).
+/// `closing` tells a Closing Turn: `CLOSING_LINE` opens `recent`, and an
+/// empty `intent` gives no `Player intent` line.
 /// `told` is the telling `mature::told` chose (G4): `Implied` opens the
 /// `recent` block with `IMPLIED_LINE`. `cleared` is the clearance of the
 /// open scene (`mature::narration_clearance`): with `Some`, the earlier
@@ -342,9 +351,11 @@ pub fn narration_prompt_with(
     extra: &[String],
     told: &Told,
     cleared: Option<&Cleared>,
+    closing: bool,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
     let head = match told {
+        Told::Plain if closing => CLOSING_LINE,
         Told::Plain => "",
         Told::Implied => IMPLIED_LINE,
     };
@@ -643,7 +654,12 @@ fn recent(
     extra: &[String],
     cleared: Option<&Cleared>,
 ) -> String {
-    let mut tail = format!("THIS TURN\nPlayer intent: {}\n", one_line(intent));
+    // A Closing Turn has no Intent, so no Player intent line.
+    let mut tail = String::from("THIS TURN\n");
+    let intent = one_line(intent);
+    if !intent.is_empty() {
+        tail.push_str(&format!("Player intent: {intent}\n"));
+    }
     let verdict = turn.map(|(_, verdict)| verdict);
     let impossible = (verdict == Some(Verdict::Impossible)).then(|| IMPOSSIBLE_LINE.to_owned());
     let mut outcome: Vec<String> = impossible

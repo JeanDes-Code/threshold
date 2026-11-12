@@ -1978,8 +1978,22 @@ const SCENE_MARKER: &str = "MARKER-SCENE-1";
 
 /// The hidden world, then one Play Turn committed with `intimate` that
 /// opens an Intimate Scene, read in full.
+///
+/// Every adult character is confirmed first: a screen shows an open scene
+/// only while the gate clears it (`mature::open_scene`, Task 5).
 fn in_a_scene() -> (HiddenWorld, TurnId) {
     let mut w = HiddenWorld::new();
+    let confirm: Vec<LedgerOp> = w
+        .view()
+        .entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+        .filter(|e| e.age.is_some_and(|age| age >= 18))
+        .map(|e| LedgerOp::ConfirmAge {
+            entity: threshold_core::domain::EntityRef::Id(e.id),
+        })
+        .collect();
+    w.commit(TurnKind::Setup, "", "{}", 0, confirm);
     let mut record: Value = serde_json::from_str(&observe()).unwrap();
     record["proposal"]["intimate"] = Value::Bool(true);
     let turn = w.play(

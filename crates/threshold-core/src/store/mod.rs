@@ -87,12 +87,19 @@ pub enum TurnKind {
     /// Begin: the opening Narration of the start state, with zero ops and
     /// an empty Intent (data shape 3.7). Stored as `opening`.
     Opening,
+    /// The Turn that ends an Intimate Scene ("End scene" or "Fade to
+    /// black"): a Narration and no Intent (mature content data shape 3.7).
+    /// Stored as `closing`.
+    Closing,
 }
 
 impl TurnKind {
     /// True for a Turn that has a Narration: it is part of the story.
     pub fn tells(self) -> bool {
-        matches!(self, Self::Opening | Self::Play | Self::Correction)
+        matches!(
+            self,
+            Self::Opening | Self::Play | Self::Correction | Self::Closing
+        )
     }
 
     /// True for a Turn that carries a Player's Intent: an act of the PC.

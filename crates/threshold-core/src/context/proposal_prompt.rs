@@ -35,6 +35,12 @@ pub const INTIMATE_FIELD_LINE: &str = intimate_field_text!();
 /// before the merge.
 pub const SCENE_LINE: &str = "INTIMATE SCENE (open): the Turns of this scene below are shown in full. Each NPC takes part only as far as their own stance and plan go; a reaction plan holds 1 to 200 characters. Decide nothing the PC does, says or feels.\n";
 
+/// The line that takes the place of the Intent in the proposal prompt of a
+/// Closing Turn (mature content data shape 3.7 step 1): the Player ends the
+/// scene. One line, in neutral words. It gives the PC no act, word or
+/// feeling. The owner reads it before the merge.
+pub const CLOSING_ASK: &str = "SCENE ENDS: the player ends the intimate scene here, as a choice outside the story. Propose how each NPC here takes it (at most two reactions) and how many minutes pass until the scene is over. The PC does, says and feels nothing new.\n";
+
 /// The rules part of the system prompt. Its first lines are the wording
 /// measured by the live probe (`threshold-ollama/examples/probe.rs`); the
 /// VERDICT and LATER ACTIONS parts answer two failures that probe found: a
@@ -129,6 +135,38 @@ pub fn proposal_context(
         prompt,
         handles: handles(&r, intent, cleared.is_some()),
     }
+}
+
+/// The proposal prompt of a Closing Turn and its handles (data shape 3.7
+/// step 1): the proposal rules with no Content Pack fragment, the stable
+/// and scene blocks of any Turn, and a `recent` block whose Intent is
+/// `CLOSING_ASK`. `cleared` is G1's value, as for a Play Turn: with `Some`,
+/// the scene line opens `recent` and the Turns of the scene are shown in
+/// full. The schema is `closing_schema_for` of the handles.
+pub fn closing_context(
+    view: &crate::store::WorldView,
+    cleared: Option<&Cleared>,
+) -> ProposalContext {
+    let r = Retrieval::new(view, "");
+    let prompt = Prompt {
+        system: PROPOSAL_RULES.to_owned(),
+        stable: format!(
+            "{}{}",
+            adventure_block(r.view, r.pc),
+            names_block(r.view, NamesAudience::Gm)
+        ),
+        scene: scene(&r),
+        recent: recent_with(&r, "", CLOSING_ASK, cleared),
+    };
+    ProposalContext {
+        prompt,
+        handles: handles(&r, "", cleared.is_some()),
+    }
+}
+
+/// The prompt of `closing_context`.
+pub fn closing_prompt(view: &crate::store::WorldView, cleared: Option<&Cleared>) -> Prompt {
+    closing_context(view, cleared).prompt
 }
 
 fn handles(r: &Retrieval<'_>, intent: &str, scene: bool) -> HandleContext {
@@ -406,6 +444,13 @@ fn scene(r: &Retrieval<'_>) -> String {
 }
 
 fn recent(r: &Retrieval<'_>, intent: &str, cleared: Option<&Cleared>) -> String {
+    let ask = format!("INTENT\n{}\n", intent.trim());
+    recent_with(r, intent, &ask, cleared)
+}
+
+/// The `recent` block: past Turns, the clock, the offered items, then `ask`
+/// (the Intent of a Play Turn, or `CLOSING_ASK`).
+fn recent_with(r: &Retrieval<'_>, intent: &str, ask: &str, cleared: Option<&Cleared>) -> String {
     let mut head = format!("NOW\nMinute {}\n", r.view.clock_min);
     if !r.mentioned.is_empty() {
         head.push_str("MENTIONED ENTITIES (not present)\n");
@@ -429,7 +474,7 @@ fn recent(r: &Retrieval<'_>, intent: &str, cleared: Option<&Cleared>) -> String 
             tail.push_str(&format!("{}: {text}\n", open_item_ref(subject, &key)));
         }
     }
-    tail.push_str(&format!("INTENT\n{}\n", intent.trim()));
+    tail.push_str(ask);
     // The past Turns first, then the clock and the Intent: the next Turn's
     // prompt differs from this one only after the newest Turn (bug pass 5,
     // M4). Inside a cleared scene the scene line comes before them.

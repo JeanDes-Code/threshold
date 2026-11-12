@@ -6,7 +6,8 @@
 
 use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
-    domain::{ActionKind, DecisionProposal, EntityKind, Handle, NO_ITEM, SlotDraft},
+    domain::{ActionKind, DecisionProposal, EntityKind, Handle, NO_ITEM, SlotDraft, Verdict},
+    mature::SCENE_CLOSE_MAX_MIN,
     normalize,
     store::WorldView,
     world,
@@ -38,6 +39,80 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     spell_places(&mut p, view, &mut notes);
     (p, notes)
 }
+
+/// The repairs of a Closing Turn's proposal (mature content data shape 3.7
+/// step 3): the pins of `closing_schema_for` first, then `settle`. Each pin
+/// only takes model output away or fixes a value the core owns, so it adds
+/// no PC act. `minutes` is clamped to 1 to `mature::SCENE_CLOSE_MAX_MIN`.
+/// One note per change.
+pub fn settle_closing(
+    mut p: DecisionProposal,
+    view: &WorldView,
+) -> (DecisionProposal, Vec<String>) {
+    let mut notes = Vec::new();
+    let mut note = |what: &str| notes.push(format!("closing: {what}"));
+    if p.action != ActionKind::Wait {
+        note(&format!("action {:?} set to wait", p.action));
+        p.action = ActionKind::Wait;
+    }
+    if p.verdict != Verdict::Allowed {
+        note(&format!("verdict {:?} set to allowed", p.verdict));
+        p.verdict = Verdict::Allowed;
+    }
+    if p.contested {
+        note("contested set to false");
+        p.contested = false;
+    }
+    if p.intimate {
+        note("intimate set to false");
+        p.intimate = false;
+    }
+    if let Some(place) = p.move_to.take() {
+        note(&format!("removed move_to {place}"));
+    }
+    if p.check.take().is_some() {
+        note("removed the check");
+    }
+    if p.settles.take().is_some() {
+        note("removed settles");
+    }
+    if p.schedule.take().is_some() {
+        note("removed the scheduled event");
+    }
+    for (field, len) in [
+        ("new_npcs", std::mem::take(&mut p.new_npcs).len()),
+        ("cancel", std::mem::take(&mut p.cancel).len()),
+        ("leaves", std::mem::take(&mut p.leaves).len()),
+        ("blockers", std::mem::take(&mut p.blockers).len()),
+    ] {
+        if len > 0 {
+            note(&format!("removed {len} {field}"));
+        }
+    }
+    for (field, len, max) in [
+        ("reactions", p.reactions.len(), CLOSING_MAX_REACTIONS),
+        ("facts", p.facts.len(), CLOSING_MAX_FACTS),
+    ] {
+        if len > max {
+            note(&format!("kept the first {max} of {len} {field}"));
+        }
+    }
+    p.reactions.truncate(CLOSING_MAX_REACTIONS);
+    p.facts.truncate(CLOSING_MAX_FACTS);
+    let minutes = p.minutes.clamp(1, SCENE_CLOSE_MAX_MIN);
+    if minutes != p.minutes {
+        note(&format!("minutes {} set to {minutes}", p.minutes));
+        p.minutes = minutes;
+    }
+    let (p, more) = settle(p, view);
+    notes.extend(more);
+    (p, notes)
+}
+
+/// The most reactions and facts a Closing Turn's proposal keeps, as
+/// `closing_schema_for` says.
+const CLOSING_MAX_REACTIONS: usize = 2;
+const CLOSING_MAX_FACTS: usize = 1;
 
 /// The key `age` is reserved (mature content module, data shape 3.3): the
 /// adults-only rule reads the stored age of an entity only, never a fact,

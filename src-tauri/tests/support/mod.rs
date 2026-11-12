@@ -109,3 +109,77 @@ pub fn narration(turn: &StoryTurn) -> Option<String> {
             .join("\n\n"),
     )
 }
+
+/// The town fixture with its seed at Detail Level `implied`. Every age of a
+/// fixture Campaign is unconfirmed.
+pub fn town_at_implied(s: &mut Session, dir: &Path) {
+    let seed = std::fs::read_to_string(town_dir().join("adventure-seed.toml")).unwrap();
+    let seed_path = dir.join("adventure-seed.toml");
+    std::fs::write(&seed_path, format!("detail = \"implied\"\n{seed}")).unwrap();
+    s.new_campaign(&seed_path, &town_dir().join("world.toml"), 11)
+        .unwrap();
+}
+
+/// Confirms the age of every adult character of the open Campaign, through
+/// the core's op, as the Player would in play (Task 8).
+pub fn confirm_all(s: &Session) {
+    use threshold_core::{
+        domain::{EntityKind, EntityRef, LedgerOp},
+        store::{TurnKind, TurnRecord},
+    };
+    let db = s.summary().unwrap().db_path;
+    let mut store = Store::open(Path::new(&db)).unwrap();
+    let campaign = *store.campaigns().unwrap().last().unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let ops: Vec<LedgerOp> = view
+        .entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+        .filter(|e| e.age.is_some_and(|age| age >= 18))
+        .map(|e| LedgerOp::ConfirmAge {
+            entity: EntityRef::Id(e.id),
+        })
+        .collect();
+    store
+        .commit(
+            TurnRecord {
+                campaign_id: campaign,
+                op_id: "confirm-all".into(),
+                kind: TurnKind::Setup,
+                intent: String::new(),
+                proposal_json: "{}".into(),
+                clock_before: view.clock_min,
+                clock_after: view.clock_min,
+            },
+            ops,
+        )
+        .unwrap();
+}
+
+/// An intimate proposal in which Hessa, who stands in the town hall with
+/// Wren, goes along.
+pub fn intimate_with_hessa(db: &str) -> String {
+    use threshold_core::domain::{Reaction, Stance};
+    let mut p = base();
+    p.intimate = true;
+    p.minutes = 5;
+    p.reactions = vec![Reaction {
+        npc: Handle::Entity(entity(db, "Hessa")),
+        stance: Stance::Comply,
+        plan: "stays".into(),
+        cause: None,
+    }];
+    serde_json::to_string(&p).unwrap()
+}
+
+/// The town at `implied`, every adult confirmed, and one intimate Turn that
+/// opens an Intimate Scene.
+pub fn town_in_a_scene(s: &mut Session, dir: &Path, gm: &RecordedGm) {
+    town_at_implied(s, dir);
+    confirm_all(s);
+    let db = s.summary().unwrap().db_path;
+    gm.push_proposal(intimate_with_hessa(&db));
+    gm.push_narration("Hessa smiles.".into());
+    s.submit_intent("scene-1".into(), "I sit with Hessa.", &mut |_| {})
+        .unwrap();
+}
