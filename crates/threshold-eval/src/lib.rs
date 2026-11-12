@@ -129,30 +129,86 @@ pub struct Config {
     pub scenarios_dir: Option<PathBuf>,
 }
 
-/// `path` as an absolute path with its folder resolved; the file itself
-/// may not exist yet.
-fn absolute(path: &Path) -> PathBuf {
-    let p = if path.is_absolute() {
+/// `path` resolved for real (review B1, 2026-11-12): made absolute against
+/// the working folder, then walked part by part. Each part that exists is
+/// canonicalised, so a symbolic link of a folder is followed; a `..` goes
+/// to the parent of the real folder so far, or drops the last part when it
+/// does not exist yet. Nothing is created. `Err` when the last part exists
+/// and is a symbolic link: a link target is refused, not followed.
+pub fn resolve(path: &Path) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let absolute = if path.is_absolute() {
         path.to_owned()
     } else {
-        std::env::current_dir().map_or_else(|_| path.to_owned(), |cwd| cwd.join(path))
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(path)
     };
-    if p.is_dir() {
-        return p.canonicalize().unwrap_or(p);
+    let parts: Vec<Component> = absolute.components().collect();
+    let mut real = PathBuf::new();
+    for (n, part) in parts.iter().enumerate() {
+        match part {
+            Component::Prefix(_) | Component::RootDir => real.push(part.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                real.pop();
+            }
+            Component::Normal(name) => {
+                real.push(name);
+                let last = n + 1 == parts.len();
+                match std::fs::symlink_metadata(&real) {
+                    Ok(meta) if last && meta.file_type().is_symlink() => {
+                        return Err(format!(
+                            "{} is a symbolic link; give the real path",
+                            path.display()
+                        ));
+                    }
+                    Ok(_) => real = real.canonicalize().map_err(|e| e.to_string())?,
+                    Err(_) => {}
+                }
+            }
+        }
     }
-    let dir = p.parent().map(Path::to_owned).unwrap_or_default();
-    let dir = dir.canonicalize().unwrap_or(dir);
-    dir.join(p.file_name().unwrap_or_default())
+    Ok(real)
 }
 
-/// True when `path` lies outside the repository `root`.
+/// True when `path` lies inside a git work tree: a folder from `path` up to
+/// the file system root holds a `.git` entry, a folder (a checkout) or a
+/// file (a worktree or a submodule).
+fn in_git_work_tree(path: &Path) -> bool {
+    path.ancestors()
+        .any(|dir| std::fs::symlink_metadata(dir.join(".git")).is_ok())
+}
+
+/// True when `path` lies outside the repository `root`, both resolved
+/// (`resolve`). A path that does not resolve counts as inside. For the
+/// folders a run reads (`--packs`, `--scenarios-dir`): outside, the run is
+/// private.
 pub fn is_outside(root: &Path, path: &Path) -> bool {
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
-    !absolute(path).starts_with(&root)
+    let root = resolve(root).unwrap_or_else(|_| root.to_owned());
+    resolve(path).is_ok_and(|p| !p.starts_with(&root))
 }
 
-/// Refuses a path inside the repository `root` for `what`: a raw log, the
-/// report of a private run. The one copy of the outside-path rule.
+/// The one copy of the outside-path rule for a file a run writes, a raw log
+/// or the report of a private run (review B1, 2026-11-12). The target is
+/// resolved for real (`resolve`: no symbolic link as the last part, `..`
+/// walked on the real folders) and must lie outside every git work tree:
+/// this repository, another checkout or a worktree of it, any repository.
+/// It creates nothing. `Ok` gives the resolved path: write to that one.
+pub fn check_target(root: &Path, path: &Path, what: &str) -> Result<PathBuf, String> {
+    let real = resolve(path).map_err(|e| format!("{what}: {e}"))?;
+    let root = resolve(root).unwrap_or_else(|_| root.to_owned());
+    if real.starts_with(&root) || in_git_work_tree(&real) {
+        return Err(format!(
+            "{what} {} is inside the repository or another git work tree; give a path outside it",
+            path.display()
+        ));
+    }
+    Ok(real)
+}
+
+/// Refuses a file a run reads inside the repository `root` for `what`: the
+/// replay scenario's Campaign file and Intents.
 pub fn check_outside(root: &Path, path: &Path, what: &str) -> Result<(), String> {
     if is_outside(root, path) {
         Ok(())
@@ -164,9 +220,10 @@ pub fn check_outside(root: &Path, path: &Path, what: &str) -> Result<(), String>
     }
 }
 
-/// Refuses a raw log path inside the repository root (`Config::raw_log`).
-pub fn check_raw_log(root: &Path, path: &Path) -> Result<(), String> {
-    check_outside(root, path, "the raw log")
+/// Refuses a raw log path inside a git work tree (`Config::raw_log`,
+/// `check_target`), and gives the resolved path.
+pub fn check_raw_log(root: &Path, path: &Path) -> Result<PathBuf, String> {
+    check_target(root, path, "the raw log")
 }
 
 /// The outside-path rule of a private run (plan Task 9): when `--packs` or
@@ -189,7 +246,7 @@ pub fn check_private_out(
     let out = out.ok_or(
         "--packs or --scenarios-dir names a folder outside the repository: give --out with a path outside it too",
     )?;
-    check_outside(root, out, "the report of a private run")?;
+    check_target(root, out, "the report of a private run")?;
     Ok(true)
 }
 
@@ -209,9 +266,10 @@ pub fn run(
             return Err(format!("unknown scenario {name}"));
         }
     }
-    if let Some(path) = &config.raw_log {
-        check_raw_log(&config.root, path)?;
-    }
+    let raw_log = match &config.raw_log {
+        Some(path) => Some(check_raw_log(&config.root, path)?),
+        None => None,
+    };
     // Private: a pack folder or a scenario folder outside the repository.
     // The progress lines then carry no check reason and no error text.
     let private = config
@@ -252,6 +310,7 @@ pub fn run(
         totals: Totals::default(),
         packs,
         private,
+        raw_log,
     };
     let mut sections = BTreeMap::new();
     // agency_leaks reads the totals of every other scenario, so it runs last.
@@ -365,6 +424,8 @@ struct Ctx<'a> {
     /// A private run (`check_private_out`): progress lines print no check
     /// reason, no error text and no token.
     private: bool,
+    /// The raw log, resolved and checked (`check_raw_log`).
+    raw_log: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -492,7 +553,7 @@ impl Ctx<'_> {
             _ => None,
         };
         let outcome = result.map_err(|e| e.to_string());
-        if let Some(path) = &self.config.raw_log {
+        if let Some(path) = &self.raw_log {
             let rows: String = s
                 .engine
                 .store()
@@ -509,11 +570,18 @@ impl Ctx<'_> {
                 // JSON, and a row cut over lines reads as a cut answer.
                 .map(|row| format!("{op_id} {}: {}\n", row.step, row.raw.replace('\n', "\\n")))
                 .collect();
-            let written = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .and_then(|mut file| std::io::Write::write_all(&mut file, rows.as_bytes()));
+            // The checked path is a file or nothing: a link put there
+            // since the check is not followed (review B1).
+            let linked = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+            let written = if linked {
+                Err(std::io::Error::other("the raw log became a symbolic link"))
+            } else {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .and_then(|mut file| std::io::Write::write_all(&mut file, rows.as_bytes()))
+            };
             if let Err(e) = written {
                 (self.log)(&format!("raw log {}: {e}", path.display()));
             }
@@ -661,10 +729,16 @@ impl Ctx<'_> {
         played
     }
 
-    /// Asks the judge; a failure counts as `None` and is logged.
+    /// Asks the judge; a failure counts as `None` and is logged. A judge
+    /// error can quote the model's answer (`GmJudge`), so a private run logs
+    /// only that the judge failed (review minor, 2026-11-12).
     fn ask(&mut self, task: &str, choices: &[&str]) -> Option<String> {
         match self.judge.choose(task, choices) {
             Ok(answer) => Some(answer),
+            Err(_) if self.private => {
+                (self.log)("judge error (text withheld in a private run)");
+                None
+            }
             Err(e) => {
                 (self.log)(&format!("judge error: {e}"));
                 None

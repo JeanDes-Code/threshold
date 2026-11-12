@@ -42,7 +42,8 @@ use std::{fs, path::PathBuf, process::ExitCode};
 
 use threshold_core::{Gm, build::BUILD_TIMEOUT_S};
 use threshold_eval::{
-    Config, GmJudge, NOT_IN_ALL, SCENARIOS, check_private_out, check_raw_log, find_root, run, today,
+    Config, GmJudge, NOT_IN_ALL, SCENARIOS, check_private_out, check_raw_log, check_target,
+    find_root, resolve, run, today,
 };
 use threshold_ollama::{OllamaConfig, OllamaGm};
 
@@ -116,19 +117,28 @@ fn real_main() -> Result<(), String> {
     }
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = find_root(&cwd).ok_or("run from the repository: evals/scenarios not found")?;
-    let raw_log = raw_log.map(|p| cwd.join(p));
-    if let Some(path) = &raw_log {
-        check_raw_log(&root, path)?;
-    }
+    // Every path a run writes is resolved and checked before anything is
+    // created (review B1): no folder of it exists until the checks pass.
+    let raw_log = match raw_log.map(|p| cwd.join(p)) {
+        Some(path) => Some(check_raw_log(&root, &path)?),
+        None => None,
+    };
     let packs_dir = packs_dir.map(|p| cwd.join(p));
     let scenarios_dir = scenarios_dir.map(|p| cwd.join(p));
     let out = out.map(|p| cwd.join(p));
-    check_private_out(
+    let private = check_private_out(
         &root,
         packs_dir.as_deref(),
         scenarios_dir.as_deref(),
         out.as_deref(),
     )?;
+    // The report: the checked path of a private run; else the path given,
+    // or the default under `evals/reports`, never through a link.
+    let out = match out {
+        Some(path) if private => check_target(&root, &path, "the report of a private run")?,
+        Some(path) => resolve(&path)?,
+        None => resolve(&root.join("evals/reports").join(format!("{}.md", today())))?,
+    };
 
     let warm = OllamaGm::new(ollama.clone());
     warm.warm_up().map_err(|e| format!("warm-up: {e}"))?;
@@ -158,7 +168,7 @@ fn real_main() -> Result<(), String> {
         eprintln!("{line}")
     })?;
 
-    let path = out.unwrap_or_else(|| root.join("evals/reports").join(format!("{}.md", today())));
+    let path = out;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }

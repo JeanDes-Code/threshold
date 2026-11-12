@@ -1542,6 +1542,93 @@ fn raw_log_goes_to_a_file_outside_the_repository_only() {
     );
 }
 
+/// Review B1 (2026-11-12): the outside-path guard resolves the whole
+/// target before it writes or creates anything. A symbolic link outside
+/// that points inside, a `..` path that walks into a folder inside that
+/// does not exist yet, and a path inside any git work tree (another
+/// checkout or a worktree of this repository, with `.git` as a folder or a
+/// file) are refused, for the raw log and for the report of a private run.
+/// No folder is created by a refused check.
+#[test]
+fn the_outside_path_guard_resolves_the_whole_target() {
+    use threshold_eval::{check_private_out, check_raw_log, check_target};
+    let root = root();
+    let base = std::env::temp_dir().join(format!("threshold-guard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let base = base.canonicalize().unwrap();
+    let packs = base.join("packs");
+    std::fs::create_dir_all(&packs).unwrap();
+    let refused = |path: &Path| {
+        assert!(
+            check_raw_log(&root, path).is_err(),
+            "raw log {}",
+            path.display()
+        );
+        assert!(
+            check_private_out(&root, Some(&packs), None, Some(path)).is_err(),
+            "report {}",
+            path.display()
+        );
+        assert!(check_target(&root, path, "the target").is_err());
+    };
+
+    // 1. A symbolic link outside that points inside, to a file that does
+    //    not exist yet and to a folder that does.
+    #[cfg(unix)]
+    {
+        let inside_file = root.join("evals/reports/guard-link.md");
+        let link = base.join("report.md");
+        std::os::unix::fs::symlink(&inside_file, &link).unwrap();
+        refused(&link);
+        assert!(!inside_file.exists());
+        let dir_link = base.join("reports");
+        std::os::unix::fs::symlink(root.join("evals/reports"), &dir_link).unwrap();
+        refused(&dir_link.join("guard.md"));
+    }
+
+    // 2. `..` through a folder that does not exist, into a new folder
+    //    inside the repository.
+    let mut walk = base.join("missing");
+    for _ in base.components() {
+        walk.push("..");
+    }
+    let relative = root
+        .strip_prefix("/")
+        .unwrap()
+        .join("guard-new/sub/report.md");
+    let dotdot = walk.join(&relative);
+    refused(&dotdot);
+    assert!(
+        !root.join("guard-new").exists(),
+        "the check created a folder"
+    );
+
+    // 3. Another git work tree: `.git` as a folder (a checkout) or as a
+    //    file (a worktree).
+    for (name, folder) in [("checkout", true), ("worktree", false)] {
+        let tree = base.join(name);
+        std::fs::create_dir_all(&tree).unwrap();
+        if folder {
+            std::fs::create_dir_all(tree.join(".git")).unwrap();
+        } else {
+            std::fs::write(tree.join(".git"), "gitdir: /elsewhere\n").unwrap();
+        }
+        refused(&tree.join("deep/raw.log"));
+        assert!(!tree.join("deep").exists(), "the check created a folder");
+    }
+
+    // A plain outside path passes, and the check gives the resolved path.
+    let fine = base.join("out/report.md");
+    assert_eq!(
+        check_target(&root, &fine, "the target").unwrap(),
+        base.join("out/report.md")
+    );
+    assert!(check_raw_log(&root, &fine).is_ok());
+    assert!(!base.join("out").exists());
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
 /// Bug pass 3: the open-items counts, on recorded answers. The acceptance
 /// closes its item; the refusal closes nothing; a keep step closes another
 /// item it offers, which is a wrong close. A close of an item the step did
@@ -1632,6 +1719,7 @@ mod mature {
         mature::{Ended, Step, agency_count, bends_will, npc_will_count, tag_count, tag_report},
         run,
     };
+    use threshold_eval::{Judge, JudgeError};
 
     /// A tagged proposal with no reaction: the age rule refuses it when a
     /// character here is not cleared, and the stance rule otherwise.
@@ -2180,6 +2268,56 @@ mod mature {
                 "{marker}: {lines:?}"
             );
         }
+    }
+
+    /// A judge that fails with a text that quotes the model.
+    struct QuotingJudge;
+
+    impl Judge for QuotingJudge {
+        fn choose(&self, _task: &str, _choices: &[&str]) -> Result<String, JudgeError> {
+            Err(JudgeError(
+                "answer \"JUDGEMODELTEXT\" is not an allowed choice".into(),
+            ))
+        }
+    }
+
+    /// Review minor (2026-11-12): a judge error can quote model text, so a
+    /// private run logs only that the judge failed.
+    #[test]
+    fn a_private_run_prints_no_judge_error_text() {
+        let dir = outside("judge");
+        let repo = root().join("evals/scenarios");
+        std::fs::copy(
+            repo.join("scene_agency.toml"),
+            dir.join("scene_agency.toml"),
+        )
+        .unwrap();
+        let s = threshold_eval::mature::arm_session(&root(), &repo, "scene_agency", "partner", 1)
+            .unwrap();
+        let maren = super::id(&s.0.store().snapshot(s.1).unwrap(), "Maren");
+        let tagged = format!(
+            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null}}]}}"#
+        );
+        let gm = RecordedGm::new(vec![tagged; 50], vec!["Text.".to_owned(); 50]);
+        let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+        let mut lines = Vec::new();
+        run(
+            &config(&["scene_agency"], Some(dir.clone())),
+            &make,
+            &make,
+            &QuotingJudge,
+            &mut |l| lines.push(l.to_owned()),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            lines.iter().any(|l| l.starts_with("judge error")),
+            "the judge ran: {lines:?}"
+        );
+        assert!(
+            lines.iter().all(|l| !l.contains("JUDGEMODELTEXT")),
+            "{lines:?}"
+        );
     }
 
     #[test]

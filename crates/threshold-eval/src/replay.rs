@@ -19,7 +19,7 @@ use threshold_core::{
     turn::{Engine, METRICS_STEP},
 };
 
-use super::{Ctx, Session, check_raw_log, scan::percentile, secs};
+use super::{Ctx, Session, check_outside, scan::percentile, secs};
 
 /// The numbers of one committed Turn.
 #[derive(Default)]
@@ -70,8 +70,8 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     let (Some(campaign), Some(intents)) = (&ctx.config.campaign, &ctx.config.intents) else {
         return Err("replay needs --campaign <file> and --intents <file>".into());
     };
-    check_raw_log(&ctx.config.root, campaign)?;
-    check_raw_log(&ctx.config.root, intents)?;
+    check_outside(&ctx.config.root, campaign, "the Campaign file")?;
+    check_outside(&ctx.config.root, intents, "the Intents file")?;
     let intents: Vec<String> = fs::read_to_string(intents)
         .map_err(|e| format!("{}: {e}", intents.display()))?
         .lines()
