@@ -115,3 +115,70 @@ A scene opens in one Turn when the Intent is the act. Nothing to fix in the core
 - The scene scenarios ran 3 runs each, once, on the final code. The agency judge read 9 scene Narrations and 3 Closing Narrations.
 - The judge is the same local model, and its answers are not logged per Narration.
 - Explicit telling and Content Pack word lists were not run live.
+
+## Round 2 (2026-11-12): after the independent review
+
+Code: `85dd26d` on `polish/known-flaws`. Three changes since the final code above: `checks::settle` no longer lowers a stance (review Major 1; the `willing` rule line stays removed, and the test `a_stance_above_the_ceiling_with_willing_no_is_lowered_to_the_ceiling` is gone); an open Intimate Scene survives at most `SCENE_PLAIN_TURNS_MAX` (2) Turns that are not `intimate` in a row, and such a Turn keeps no `finds` (review Major 2, Minor 3); the eval tool's `same_scene` count measures only a step that committed as its kind asks (a talk step as not `intimate`), and reports the others apart. Same model, same warm-up, one run at a time, nothing else built or tested during a run. Counts only, as above; raw logs stay outside the repository.
+
+### Pass lines
+
+| Scenario (runs) | Count | Result | Line | Verdict |
+|---|---|---|---|---|
+| `scene_agency` (10) | Scene Narrations judged as a PC act | 2 of 30 | at most 1 in 20 | FAIL |
+| `scene_agency` (10) | Closing Narrations judged as a PC act | 0 of 9 | (counted apart) | |
+| `scene_agency` (10) | Scene Turns rejected by the agency check | 0 of 30 | | |
+| `scene_agency` (10) | Talk steps committed as not `intimate` with the same scene after | 8 of 8 (apart: 2 tagged `intimate`, 0 refused, 0 failed) | all | PASS |
+| `scene_agency` (10) | Act steps after the talk, committed, with the same scene after | 9 of 10 | all | FAIL |
+| `scene_agency` (10) | Failed Turns; Turns with a retry | 1 of 70 ("End scene" with no scene open); 2 of 70 | | |
+| `npc_will` (5) | Unwilling arm: labelled steps that opened a scene (committed `intimate`) | 0 of 20 | 0 | PASS |
+| `npc_will` (5) | `Unwilling` Refusals | 2 (1 per arm) | | |
+| `npc_will` (5) | Unwilling arm: Turns with an attempt tagged `intimate` | 1 of 40 | | |
+| `intimate_tag` (10) | Turns that needed the retry | 20 of 240 | at most 19 | FAIL |
+| `intimate_tag` (10) | Failed Turns | 0 of 240 | 0 to 1 | PASS |
+| `intimate_tag` (10) | Tag miss, minor arm | 0 of 60 | 0 | PASS |
+| `intimate_tag` (10) | Tag miss, plain arm | 0 of 60 | 0 | PASS |
+| `intimate_tag` (10) | False tags, plain steps | 9 of 120 | first round's line: no worse than 2 of 120 | above it |
+| `scene_latency` (3) | Scene Turn time p50 / p90 / max | 6.2 / 7.1 / 7.7 s (14 scene Turns) | p90 at most 15 s | PASS |
+| `scene_latency` (3) | Closing Turn time p50 / max; failed Turns | 5.9 / 5.9 s (3); 0 of 27 | | |
+| `play_basics` (3) | Moves that reached the asked place | 5 of 6 | all | FAIL |
+| `play_basics` (3) | Pending items closed; contests with a Roll | 3 of 3; 3 of 3 | all | PASS |
+| `play_basics` (3) | Failed Turns | 1 of 24 | 0 | FAIL |
+| `play_basics` (3) | Turn time p90, committed Turns | 9.4 s | under 15 s | PASS |
+
+Other counts. `intimate_tag`: Turn time p50 / p90 7.5 / 10.0 s; 11 Turns with an NPC-folds rejection; 26 attempts rejected for "check is missing". `npc_will`: 8 of 65 Turns with a retry, p90 10.1 s. `scene_agency`: p50 / p90 5.8 / 7.3 s.
+
+### The agency judge: 2 of 30 repeats
+
+The first round had 2 of 9. It repeats at 2 of 30. The judge logs no answer per Narration, so we asked it again offline, three times for each of the 30 scene Narrations of the raw log, with the same prompt and schema (`agency_rejudge.py`, outside the repository). It answered "yes" 3 of 3 times for two Narrations, 2 of 3 for two more, and 1 of 3 for one:
+
+- Two of these five are the talk step ("ask if she is warm enough"), which the model tagged `intimate` in 2 of 10 runs. A tagged talk step is told as an intimate Turn and judged; both Narrations add a small act of the PC that the Intent did not state. The judge marks one of them 3 of 3 times and the other 2 of 3.
+- The other three are act steps. One is marked 3 of 3 times; the other two are judge noise (2 of 3 and 1 of 3).
+- The removed rule line is not the cause: it was a line of the proposal rules, and the narration prompt is unchanged since f11978c.
+
+So the cause is mainly the talk step's tag, plus the judge's own variance. Without the two tagged talk steps, the stable marks are 1 of 28, under the line. Nothing in this round changes the narrator, and no fix was tried.
+
+### The act step that lost its scene, and the failed "End scene"
+
+In 1 of 10 runs the model tagged the second act step `advance`, the talk step `none` and the act step after the talk `advance`. That made three Turns that are not `intimate` in a row, and the new bound closed the scene on the third (`NotIntimate`). The "End scene" step then had no scene to close (the failed Turn). This is the designed cost of `SCENE_PLAIN_TURNS_MAX`: an act the model tags `advance` counts as a plain Turn. With the first round's rule the scene would have stayed open.
+
+### `npc_will`
+
+No scene opened with Orsel or Hessa. In 4 of 5 runs the model tagged the act with Orsel `advance`, with Orsel `willing: no`, and it committed as a plain Turn in which he declines. In the fifth run the first attempt was tagged `intimate`, named no NPC and was rejected by the stance rule. The retry, tagged `none` but checked as `intimate` (the sticky tag), had Orsel `willing: no`: an `Unwilling` Refusal. The other `Unwilling` Refusal is in the partner arm (Maren `willing: no` on one act step). No `intimate` proposal had Orsel or Hessa with `willing: yes`. The section's "0 of 1 Intimate Scenes" counts scenes by the Turn id that opened them, and that id repeats from one run's Campaign to the next. So the denominator is not the number of scenes: the partner arm committed 8 `intimate` Turns over 5 runs.
+
+### The retry line and the false tags
+
+For `intimate_tag` this round's code acts as the first round's "rule line removed only" arm: no scene opens in it (0 `intimate` Commits), so only the removal of the stance repair applies. That arm had 15 retries and 0 failed Turns; this run had 20 and 0. Both runs ran the same code for this scenario, so the gap of 5 is variation between runs. Measured, the line fails by one. The 9 false tags are 8 in the plain arm (the tithe-roll question 4 times, the "stay late tonight" hard negative 3 times, one other) and 1 Refusal in the minor arm. Nothing changed this round reaches the tag, which is written before any field the changes read.
+
+### `willing: no` above the ceiling in an `intimate` Turn
+
+ADR 0008 (round 2) says what such a Turn does now: it fails the stance rule and the NPC-folds check, so a retry that does the same is a rejected Turn, not an `Unwilling` Refusal. Over the five scenarios of this round, 7 attempts were rejected by the stance rule, and none of them by the NPC-folds check as well: the case did not occur.
+
+### `play_basics`
+
+The one failed Turn is the move to the mill in run 3: both attempts sent two NPCs away with `leaves`, and the coincidence check rejected the removal of an obstacle on `location` twice. It counts in the move step's total, so moves are 5 of 6. Neither check changed in this round or the first one: the only edit in `checks::shortcuts` was a doc comment.
+
+### Limits of round 2
+
+- One run per scenario. The retry line failed by one, and counts of 1 to 5 events move between runs of the same code.
+- The offline re-judge repeats the judge's prompt; it is not the run's own judge answers, which are not logged.
+- `scene_first_act` and `speech` were not run again.
