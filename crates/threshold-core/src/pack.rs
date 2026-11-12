@@ -26,9 +26,12 @@
 //! ```
 //!
 //! `load_all` refuses a whole pack on the first rule it breaks, and its
-//! `PackProblem` names the folder, the rule and a file name or a line
-//! number: never a line of the pack. `docs/content-pack-format.md` is the
-//! same format, written for the author of a private pack.
+//! `PackProblem` names the folder (`shown_folder`), the rule and a line or
+//! fragment number: never a line of the pack and never a file name the pack
+//! chose. A fragment holds no control or invisible character and no line
+//! that starts with a heading the core writes (`forges_a_heading`).
+//! `docs/content-pack-format.md` is the same format, written for the author
+//! of a private pack.
 
 use std::{
     collections::HashSet,
@@ -38,13 +41,23 @@ use std::{
 
 use serde::Deserialize;
 
-use crate::{mature::Cleared, normalize};
+use crate::{context::CORE_HEADINGS, mature::Cleared, normalize};
 
 /// The one pack format this code reads.
 pub const FORMAT: i64 = 2;
 
-/// The longest fragment, in chars (about 300 tokens).
+/// The longest fragment, in chars after trimming the blanks at its start
+/// and its end (about 300 tokens).
 pub const FRAGMENT_MAX_CHARS: usize = 1_200;
+
+/// The largest fragment file the loader reads, in bytes, before it trims
+/// anything: a file over it is refused unread (rule 9). It leaves room for
+/// `FRAGMENT_MAX_CHARS` chars of four bytes each and blank padding.
+pub const FRAGMENT_MAX_BYTES: u64 = 16 * 1024;
+
+/// The longest folder name the pack list shows, in chars; a longer one is
+/// cut (`shown_folder`).
+pub const FOLDER_SHOWN_MAX_CHARS: usize = 60;
 
 /// The longest total of the `intimate_scene` fragments of one prompt, over
 /// all loaded packs, in chars (about 400 tokens). They sit in the `recent`
@@ -133,20 +146,22 @@ impl ContentPack {
 }
 
 /// Why `load_all` refused a pack: one variant per validation rule of data
-/// shape 3.8, the first split in two.
+/// shape 3.8 and `docs/content-pack-format.md`, the first split in two.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackRule {
     /// Rule 1: a file with a code extension.
     Code,
-    /// Rule 1: a symbolic link.
-    Symlink,
+    /// Rule 1: a symbolic link, or a file with more than one hard link
+    /// (review minor, 2026-11-12): either can point outside the pack.
+    Link,
     /// Rule 2: `pack.toml` is missing, is not UTF-8 TOML, has a key the
     /// format does not name, or a value of the wrong kind.
     Manifest,
     /// Rule 3: `format` is not 2.
     Format,
-    /// Rule 4: the name is empty, too long, not one line, or the name of a
-    /// pack loaded before it.
+    /// Rule 4: the name is empty, too long, holds a control or invisible
+    /// character or a blank other than a space, or is the name of a pack
+    /// loaded before it.
     Name,
     /// Rule 5: a fragment has no `prompt`, an unknown `prompt`, `at` or
     /// `when`, or a `file` that is not a plain file in the pack folder.
@@ -156,17 +171,28 @@ pub enum PackRule {
     /// Rule 7: a pack that declares `explicit_description` holds a fragment
     /// outside `intimate_scene`.
     CapableOutsideScene,
-    /// Rule 8: an explicit-only fragment in a pack without the capability.
-    ExplicitWithoutCapability,
-    /// Rule 9: a fragment file is empty, is not UTF-8 text, or is longer
-    /// than `FRAGMENT_MAX_CHARS`.
+    /// Rule 8: an `intimate_scene` fragment, explicit-only or not, in a
+    /// pack without the capability (review M1, 2026-11-12).
+    SceneWithoutCapability,
+    /// Rule 9: a fragment file is over `FRAGMENT_MAX_BYTES`, is empty, is
+    /// not UTF-8 text, is longer than `FRAGMENT_MAX_CHARS`, or holds a
+    /// control character other than a line end or a tab, or an invisible
+    /// character.
     FragmentText,
-    /// Rule 10: with this pack, the fragments of one prompt pass
+    /// Rule 10: a line of a fragment starts with a heading the core writes
+    /// in a prompt (`forges_a_heading`, review M1, 2026-11-12).
+    CoreHeading,
+    /// Rule 11: with this pack, the fragments of one prompt pass
     /// `SCENE_FRAGMENTS_MAX_CHARS` (scene) or `TONE_FRAGMENTS_MAX_CHARS`
     /// (tone and scenes).
     TooLong,
-    /// Rule 11: `provides` holds an unknown word.
+    /// Rule 12: `provides` holds an unknown word.
     Capability,
+    /// Rule 13: a pack that declares `explicit_description` holds no
+    /// narration `intimate_scene` fragment with `when = "explicit"` (review
+    /// M1, 2026-11-12): it would turn explicit telling on with the core's
+    /// explicit line alone.
+    CapableWithoutExplicit,
 }
 
 impl PackRule {
@@ -175,13 +201,15 @@ impl PackRule {
     pub fn sentence(self) -> &'static str {
         match self {
             Self::Code => "Refused: a Content Pack holds no code file.",
-            Self::Symlink => "Refused: a Content Pack holds no symbolic link.",
+            Self::Link => {
+                "Refused: a Content Pack holds no symbolic link and no file with more than one hard link."
+            }
             Self::Manifest => {
                 "Refused: pack.toml is missing, is not valid TOML, or has a key or value that format 2 does not have."
             }
             Self::Format => "Refused: this pack is not in Content Pack format 2.",
             Self::Name => {
-                "Refused: the pack name is empty, longer than 60 characters, or already used by another pack."
+                "Refused: the pack name is empty, longer than 60 characters, holds an invisible character, or is already used by another pack."
             }
             Self::Fragment => {
                 "Refused: a fragment needs a known prompt, insert point and when, and a file in the pack folder."
@@ -192,23 +220,31 @@ impl PackRule {
             Self::CapableOutsideScene => {
                 "Refused: a pack that gives explicit description may hold intimate_scene fragments only."
             }
-            Self::ExplicitWithoutCapability => {
-                "Refused: an explicit-only fragment needs provides = [\"explicit_description\"]."
+            Self::SceneWithoutCapability => {
+                "Refused: an intimate_scene fragment needs provides = [\"explicit_description\"]."
             }
             Self::FragmentText => {
-                "Refused: a fragment file is empty, is not UTF-8 text, or is longer than 1,200 characters."
+                "Refused: a fragment file is empty, is not UTF-8 text, is longer than 1,200 characters, or holds a control or invisible character."
+            }
+            Self::CoreHeading => {
+                "Refused: a line of a fragment starts with a heading that the app writes in its prompts."
             }
             Self::TooLong => {
                 "Refused: with this pack, the fragments of one prompt are too long in total."
             }
             Self::Capability => "Refused: provides names a capability that does not exist.",
+            Self::CapableWithoutExplicit => {
+                "Refused: a pack that gives explicit description needs a narration intimate_scene fragment with when = \"explicit\"."
+            }
         }
     }
 }
 
-/// A refused pack: its folder, the rule, and where (a file name inside the
-/// pack, or a line of `pack.toml`). Never a line of the pack: a Player may
-/// paste the pack list into a public issue.
+/// A refused pack: its folder as the pack list shows it (`shown_folder`),
+/// the rule, and where: a line of `pack.toml`, a fragment table by its
+/// number, or a fixed name. Never a line of the pack and never a name the
+/// pack chose, such as a file name: a Player may paste the pack list into a
+/// public issue (review minor, 2026-11-12).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackProblem {
     pub folder: String,
@@ -251,12 +287,93 @@ pub fn load_all(dir: &Path) -> (Vec<ContentPack>, Vec<PackProblem>) {
     let mut packs: Vec<ContentPack> = Vec::new();
     let mut problems = Vec::new();
     for (folder, path) in folders {
+        let folder = shown_folder(&folder);
         match load(&folder, &path, &packs) {
             Ok(pack) => packs.push(pack),
             Err((rule, at)) => problems.push(PackProblem { folder, rule, at }),
         }
     }
     (packs, problems)
+}
+
+/// A folder name as the pack list, the standard error and the debug log
+/// show it: each control or invisible character becomes `?`, and a name
+/// over `FOLDER_SHOWN_MAX_CHARS` chars is cut and ends with `...`. The
+/// folder name is chosen by whoever made the folder.
+pub fn shown_folder(name: &str) -> String {
+    let mut shown: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || invisible(c) {
+                '?'
+            } else {
+                c
+            }
+        })
+        .take(FOLDER_SHOWN_MAX_CHARS)
+        .collect();
+    if name.chars().count() > FOLDER_SHOWN_MAX_CHARS {
+        shown.push_str("...");
+    }
+    shown
+}
+
+/// True for a character that shows nothing or changes how the text around
+/// it shows: a soft hyphen, a zero-width space or joiner, a direction mark
+/// or override, a word joiner, a variation selector, a byte order mark, a
+/// Hangul filler, an interlinear annotation mark, a tag character.
+pub fn invisible(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}'
+        | '\u{034F}'
+        | '\u{061C}'
+        | '\u{115F}'
+        | '\u{1160}'
+        | '\u{17B4}'
+        | '\u{17B5}'
+        | '\u{180B}'..='\u{180F}'
+        | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{206F}'
+        | '\u{3164}'
+        | '\u{FE00}'..='\u{FE0F}'
+        | '\u{FEFF}'
+        | '\u{FFA0}'
+        | '\u{FFF0}'..='\u{FFFB}'
+        | '\u{1BCA0}'..='\u{1BCA3}'
+        | '\u{1D173}'..='\u{1D17A}'
+        | '\u{E0000}'..='\u{E0FFF}')
+}
+
+/// True when `line` starts with a heading the core writes in a proposal or
+/// a narration prompt (`context::CORE_HEADINGS`), in any case (review M1,
+/// 2026-11-12). Before the match, the line loses what comes before its
+/// first letter or digit (blanks, `#`, `*`, `-`, `>`, quote marks), every
+/// run of blanks becomes one space, and a blank before a colon goes. A
+/// heading that ends with a colon matches up to its colon; any other
+/// heading matches when no letter or digit follows it. A line that starts
+/// with a handle the core writes (`E12`, `F3`, `G1`, `W2`, `N1`) matches too.
+pub fn forges_a_heading(line: &str) -> bool {
+    let start = line.trim_start_matches(|c: char| !c.is_alphanumeric());
+    let mut norm = String::with_capacity(start.len());
+    for word in start.split_whitespace() {
+        if !norm.is_empty() && !word.starts_with(':') {
+            norm.push(' ');
+        }
+        norm.push_str(&word.to_lowercase());
+    }
+    let handle = {
+        let mut chars = norm.chars();
+        matches!(chars.next(), Some('e' | 'f' | 'g' | 'w' | 'n'))
+            && chars.next().is_some_and(|c| c.is_ascii_digit())
+    };
+    handle
+        || CORE_HEADINGS.iter().any(|heading| {
+            let heading = heading.to_lowercase();
+            norm.strip_prefix(heading.as_str()).is_some_and(|rest| {
+                heading.ends_with(':') || !rest.starts_with(char::is_alphanumeric)
+            })
+        })
 }
 
 /// The `intimate_scene` fragments of `packs` for `prompt`: the `always`
@@ -328,7 +445,7 @@ fn refused<T>(rule: PackRule, at: impl Into<Option<String>>) -> Result<T, Refuse
 /// their order, and the first one broken refuses the whole pack.
 fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack, Refused> {
     // Rule 1.
-    refuse_code(dir, dir)?;
+    refuse_code(dir)?;
     // Rule 2.
     let manifest = dir.join("pack.toml");
     let Ok(bytes) = fs::read(&manifest) else {
@@ -367,7 +484,9 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
         .any(|p| normalize::name(&p.name) == normalize::name(&name));
     if name.is_empty()
         || name.chars().count() > NAME_MAX_CHARS
-        || name.chars().any(char::is_control)
+        || name
+            .chars()
+            .any(|c| c.is_control() || invisible(c) || (c.is_whitespace() && c != ' '))
         || taken
     {
         return refused(PackRule::Name, None);
@@ -422,22 +541,27 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
             format!("pack.toml, fragment {}", n + 1),
         );
     }
-    // Rule 8.
+    // Rule 8: an `intimate_scene` fragment, whatever its `when`, needs
+    // the capability (review M1).
     if !capable
         && let Some(n) = entries
             .iter()
-            .position(|(_, _, when, _)| *when == When::Explicit)
+            .position(|(_, at, _, _)| *at == InsertPoint::IntimateScene)
     {
         return refused(
-            PackRule::ExplicitWithoutCapability,
+            PackRule::SceneWithoutCapability,
             format!("pack.toml, fragment {}", n + 1),
         );
     }
-    // Rule 9.
+    // Rule 9. Where: the fragment's number, never its file name.
     let mut fragments = Vec::new();
-    for (prompt, at, when, file) in entries {
-        let text = fragment_text(&dir.join(file))
-            .ok_or((PackRule::FragmentText, Some(file.to_owned())))?;
+    for (n, (prompt, at, when, file)) in entries.into_iter().enumerate() {
+        let at_fragment = || Some(format!("pack.toml, fragment {}", n + 1));
+        let text = fragment_text(&dir.join(file)).ok_or((PackRule::FragmentText, at_fragment()))?;
+        // Rule 10.
+        if text.lines().any(forges_a_heading) {
+            return Err((PackRule::CoreHeading, at_fragment()));
+        }
         fragments.push(Fragment {
             prompt,
             at,
@@ -445,7 +569,7 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
             text,
         });
     }
-    // Rule 10.
+    // Rule 11.
     for prompt in [Target::Proposal, Target::Narration] {
         let total = |scene: bool| -> usize {
             before
@@ -460,7 +584,7 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
             return refused(PackRule::TooLong, None);
         }
     }
-    // Rule 11.
+    // Rule 12.
     let mut provides = Vec::new();
     let mut seen = HashSet::new();
     for word in &raw.provides {
@@ -471,6 +595,15 @@ fn load(folder: &str, dir: &Path, before: &[ContentPack]) -> Result<ContentPack,
             "explicit_description" => {}
             _ => return refused(PackRule::Capability, None),
         }
+    }
+    // Rule 13: a capable pack holds an explicit-only narration fragment.
+    let explicit_narration = fragments.iter().any(|f| {
+        f.prompt == Target::Narration
+            && f.at == InsertPoint::IntimateScene
+            && f.when == When::Explicit
+    });
+    if capable && !explicit_narration {
+        return refused(PackRule::CapableWithoutExplicit, None);
     }
     Ok(ContentPack {
         folder: folder.to_owned(),
@@ -499,29 +632,39 @@ fn plain_file_name(file: &str) -> bool {
     )
 }
 
-/// The trimmed text of a fragment file: `None` when it cannot be read, is
-/// not UTF-8, is empty, or is longer than `FRAGMENT_MAX_CHARS`. A file far
-/// over the limit is not read at all.
+/// The text of a fragment file, trimmed of the blanks at its start and its
+/// end: `None` when the file is over `FRAGMENT_MAX_BYTES` (it is not read
+/// then), cannot be read, is not UTF-8, is empty, is longer than
+/// `FRAGMENT_MAX_CHARS` chars once trimmed, or holds a control character
+/// other than a line end or a tab, or an invisible character (`invisible`).
 fn fragment_text(path: &Path) -> Option<String> {
-    let len = fs::metadata(path).ok()?.len();
-    if len > (FRAGMENT_MAX_CHARS as u64) * 4 + 64 {
+    use std::io::Read;
+    if fs::metadata(path).ok()?.len() > FRAGMENT_MAX_BYTES {
         return None;
     }
-    let text = String::from_utf8(fs::read(path).ok()?).ok()?;
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .ok()?
+        .take(FRAGMENT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > FRAGMENT_MAX_BYTES {
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
     let text = text.trim();
-    (!text.is_empty() && text.chars().count() <= FRAGMENT_MAX_CHARS).then(|| text.to_owned())
+    let clean = text
+        .chars()
+        .all(|c| !(invisible(c) || (c.is_control() && c != '\n' && c != '\t')));
+    (clean && !text.is_empty() && text.chars().count() <= FRAGMENT_MAX_CHARS)
+        .then(|| text.to_owned())
 }
 
 /// Walks `dir` and refuses any symbolic link (file or folder: it could point
-/// outside the pack) and any entry whose extension is in `CODE_EXTENSIONS`
-/// (case does not matter). `at` is the path inside the pack, `root` first.
-fn refuse_code(root: &Path, dir: &Path) -> Result<(), Refused> {
-    let inside = |path: &Path| {
-        path.strip_prefix(root)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned()
-    };
+/// outside the pack), any file with more than one hard link (the same), and
+/// any entry whose extension is in `CODE_EXTENSIONS` (case does not
+/// matter). The refusal names no file: a file name is the pack's own text.
+fn refuse_code(dir: &Path) -> Result<(), Refused> {
     let Ok(entries) = fs::read_dir(dir) else {
         return refused(PackRule::Manifest, None);
     };
@@ -535,17 +678,33 @@ fn refuse_code(root: &Path, dir: &Path) -> Result<(), Refused> {
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| CODE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()));
         if is_code {
-            return refused(PackRule::Code, inside(&path));
+            return refused(PackRule::Code, None);
         }
         let Ok(kind) = entry.file_type() else {
             return refused(PackRule::Manifest, None);
         };
-        if kind.is_symlink() {
-            return refused(PackRule::Symlink, inside(&path));
+        if kind.is_symlink() || (kind.is_file() && hard_linked(&entry)) {
+            return refused(PackRule::Link, None);
         }
         if kind.is_dir() {
-            refuse_code(root, &path)?;
+            refuse_code(&path)?;
         }
     }
     Ok(())
+}
+
+/// True when the file of `entry` has more than one hard link: another name
+/// of it may sit outside the pack. A file whose links cannot be read counts
+/// as linked. Only Unix reports the count; elsewhere the answer is false.
+fn hard_linked(entry: &fs::DirEntry) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        entry.metadata().map_or(true, |m| m.nlink() > 1)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = entry;
+        false
+    }
 }

@@ -46,7 +46,8 @@ pub const CLOSING_ASK: &str = "SCENE ENDS: the player ends the intimate scene he
 /// VERDICT and LATER ACTIONS parts answer two failures that probe found: a
 /// Check on every proposal, and no scheduled event for a delayed action.
 /// The `move_to`, `settles`, `contested` and `intimate` lines describe
-/// required fields (ADR 0007, ADR 0008), one line each.
+/// required fields (ADR 0007, ADR 0008), one line each. `context::PACK_RULE`
+/// says that a Content Pack line is a style note only (review M1).
 pub const PROPOSAL_RULES: &str = concat!(
     "\
 You are the Game Master for a single-player tabletop role-playing game. You decide what the world and its NPCs do; the player decides what the player character (PC) does.
@@ -55,6 +56,9 @@ Return only one-line minified JSON with no spaces or newlines, matching the supp
 Reference entities, facts, events and goals only by their handles (E*, F*, W*, G*). A new NPC uses N1.
 Stake values and reaction plans must be short snake_case or at most 6 words.
 Facts marked hidden are known to the GM only: they may drive NPCs, but never show them to the PC.
+",
+    super::pack_rule_text!(),
+    "
 VERDICT
 - allowed: the action simply happens. This is the usual verdict. Talking, greeting, asking, insulting, moving, looking and ordinary actions are allowed; NPCs answer through reactions.
 - Words are never a check: whatever the PC says, even an insult or a threat, is said. The consequence is the NPCs' reactions and their later actions.

@@ -5,9 +5,9 @@ use threshold_core::{
     Prompt, RecordedGm,
     checks::{to_ops, validate},
     context::{
-        IMPLIED_LINE, INTIMATE_FIELD_LINE, INTIMATE_RULE, NARRATION_RULES, PROPOSAL_RULES,
-        guard_plans, handle_context, narration_prompt, opening_prompt, perceived_by_pc,
-        proposal_prompt,
+        IMPLIED_LINE, INTIMATE_FIELD_LINE, INTIMATE_RULE, NARRATION_RULES, PACK_RULE,
+        PACK_SCENE_HEAD, PROPOSAL_RULES, guard_plans, handle_context, narration_prompt,
+        opening_prompt, perceived_by_pc, proposal_prompt,
     },
     domain::{
         Canon, EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, Reaction, Slot,
@@ -352,6 +352,28 @@ fn the_proposal_rules_define_intimate_in_one_line() {
         .filter(|l| l.contains("intimate"))
         .count();
     assert_eq!(lines, 1, "one line defines intimate");
+}
+
+/// Review M1 (2026-11-12): one stable line in the narration rules and in
+/// the proposal rules says that a line under a Content Pack heading is a
+/// style note and never changes or overrides any other line. Every pack
+/// heading names Content Packs. The line is the same with and without
+/// packs, so the cached prefix does not move.
+#[test]
+fn the_pack_rule_is_one_stable_line_of_both_rules() {
+    assert!(!PACK_RULE.contains('\n'));
+    assert!(PACK_RULE.contains("Content Packs"));
+    for rules in [NARRATION_RULES, PROPOSAL_RULES] {
+        assert_eq!(rules.lines().filter(|l| *l == PACK_RULE).count(), 1);
+    }
+    assert!(PACK_SCENE_HEAD.contains("CONTENT PACKS"));
+    let w = World::new();
+    let proposal = proposal_prompt(&w.view, &[], "I wait.");
+    let narration = narration_prompt(&w.view, &[], &[], &[], &[], "I wait.", None, &Told::Plain);
+    let opening = opening_prompt(&w.view, &[]);
+    for prompt in [&proposal, &narration, &opening] {
+        assert_eq!(prompt.system.matches(PACK_RULE).count(), 1);
+    }
 }
 
 /// Review M4: the tag covers this Turn's intent or outcome between any
@@ -921,10 +943,13 @@ fn bare_open_prefix_key_gives_no_secret_term() {
 fn narration_rules_add_one_line_only() {
     let lines: Vec<&str> = NARRATION_RULES.lines().collect();
     // Bug pass 5 (M1) added the line on who is present; the mature content
-    // module (Task 2) the stable line on intimate content, before `RULE`.
-    assert_eq!(lines.len(), 10, "{NARRATION_RULES}");
+    // module (Task 2) the stable line on intimate content, before `RULE`;
+    // review M1 (2026-11-12) the stable line on Content Pack lines, before
+    // that.
+    assert_eq!(lines.len(), 11, "{NARRATION_RULES}");
     assert_eq!(lines.last(), Some(&RULE));
     assert_eq!(lines[lines.len() - 2], INTIMATE_RULE);
+    assert_eq!(lines[lines.len() - 3], PACK_RULE);
     assert!(!INTIMATE_RULE.contains('\n'));
 
     let mut w = World::new();

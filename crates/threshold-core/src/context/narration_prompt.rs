@@ -41,8 +41,8 @@ macro_rules! intimate_rule_text {
 }
 pub(crate) use intimate_rule_text;
 
-/// The narrator's rules. The line before the last is `INTIMATE_RULE`; the
-/// last is `speech::RULE`, the speech mark.
+/// The narrator's rules. The last three lines are `context::PACK_RULE`,
+/// `INTIMATE_RULE` and `speech::RULE`, the speech mark.
 pub const NARRATION_RULES: &str = concat!(
     "\
 You are the narrator of a single-player tabletop role-playing game. Write what the player character (PC) perceives, in the second person, in the story language.
@@ -54,6 +54,8 @@ Only the people the outcome lists as here are present. Nobody comes or goes unle
 Never say that more time passed than the time line of THIS TURN states. Do not open with the time; tell it only when it matters.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
 ",
+    super::pack_rule_text!(),
+    "\n",
     intimate_rule_text!(),
     "\n",
     crate::speech::rule_text!(),

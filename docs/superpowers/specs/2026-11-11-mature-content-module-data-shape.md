@@ -372,6 +372,8 @@ The scene fragments and the core's own scene lines go at the head of the `recent
 10. With this pack, the scene fragments of one prompt pass `SCENE_FRAGMENTS_MAX_CHARS`.
 11. `provides` holds an unknown word.
 
+**Changed after review (2026-11-12, second review, M1).** The rules are now the 13 of `docs/content-pack-format.md`: an `intimate_scene` fragment needs the capability (8); a fragment holds no control character but a line end or a tab, and no invisible character (9); no fragment line starts with a heading the core writes (`context::CORE_HEADINGS`) or with a handle (10); a capable pack holds a narration `intimate_scene` fragment with `when = "explicit"` (13). Rule 1 also refuses a file with a second hard link, rule 4 an invisible character in a name. A problem shows a fragment number, never a file name. `NARRATION_RULES` and `PROPOSAL_RULES` hold one stable line, `context::PACK_RULE`: a line under a Content Pack heading is a style note only. ADR 0009 says why.
+
 **Failure behaviour.**
 
 - No `packs` folder: no pack. Not an error.
