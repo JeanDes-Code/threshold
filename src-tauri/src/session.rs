@@ -201,24 +201,86 @@ pub struct FadeResult {
     pub pending: bool,
 }
 
-/// "Fade to black" (data shape 3.12): raises the fade flag with no lock,
-/// then tries the session lock. A running Turn holds it: the result is
-/// `pending`, and that Turn reads the flag at its next chunk and finishes
-/// the fade. When the lock is free, the flag goes down again and the
-/// Engine fades with no Turn running (`Session::fade`). The shell runs this
-/// in a blocking task.
+/// The fade control of the app (data shape 3.12): the fade flag a running
+/// Turn reads, and the op_id of the Turn command that runs now. Both live
+/// outside the session lock, so "Fade to black" never waits for a Turn.
+///
+/// Review minor (2026-11-12): the button used `try_lock` and took any
+/// holder of the session lock for a running Turn, and then left the flag
+/// up. Now a Turn command marks itself as running (`start`), and the flag
+/// rises only while one does (`press`). The mark and the flag go down
+/// together when the command ends, so the flag is never left up.
+#[derive(Debug, Default)]
+pub struct FadeGate {
+    flag: AtomicBool,
+    running: Mutex<Option<String>>,
+}
+
+/// A Turn command that runs: it ends, and clears the flag and the mark,
+/// when it is dropped.
+pub struct Running<'a>(&'a FadeGate);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        let mut running = lock(&self.0.running);
+        *running = None;
+        self.0.flag.store(false, Ordering::SeqCst);
+    }
+}
+
+impl FadeGate {
+    /// True while the Player's fade is up for the running Turn.
+    pub fn raised(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
+
+    /// The flag itself. Only a test raises it by hand, to check that each
+    /// Turn command clears a flag left up.
+    pub fn flag(&self) -> &AtomicBool {
+        &self.flag
+    }
+
+    /// A Turn command of `op_id` starts: the flag goes down, and the gate
+    /// knows that a Turn runs until the returned value is dropped.
+    pub fn start(&self, op_id: &str) -> Running<'_> {
+        let mut running = lock(&self.running);
+        self.flag.store(false, Ordering::SeqCst);
+        *running = Some(op_id.to_owned());
+        Running(self)
+    }
+
+    /// The op_id of the Turn command that runs now, if any.
+    pub fn running(&self) -> Option<String> {
+        lock(&self.running).clone()
+    }
+
+    /// "Fade to black" pressed: when a Turn runs, the flag rises for it and
+    /// the result is true. With no Turn running, nothing changes.
+    pub fn press(&self) -> bool {
+        let running = lock(&self.running);
+        if running.is_some() {
+            self.flag.store(true, Ordering::SeqCst);
+        }
+        running.is_some()
+    }
+}
+
+/// "Fade to black" (data shape 3.12). While a Turn command runs
+/// (`FadeGate::press`), it raises the fade flag, takes no lock and returns
+/// `pending`: that Turn reads the flag at its next chunk and finishes the
+/// fade. With no Turn running, it takes the session lock as any command
+/// does, waiting for a holder that is not a Turn, and the Engine fades with
+/// no Turn running (`Session::fade`). The shell runs this in a blocking
+/// task.
 pub fn fade_to_black(
     shared: &Mutex<Session>,
-    flag: &AtomicBool,
+    gate: &FadeGate,
     op_id: String,
 ) -> Result<FadeResult, AppError> {
-    flag.store(true, Ordering::SeqCst);
-    let mut session = match shared.try_lock() {
-        Ok(session) => session,
-        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-        Err(std::sync::TryLockError::WouldBlock) => return Ok(FadeResult { pending: true }),
-    };
-    session.fade(op_id)
+    if gate.press() {
+        return Ok(FadeResult { pending: true });
+    }
+    lock(shared).fade(op_id)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -306,10 +368,10 @@ pub struct Session {
     open: Option<Open>,
     /// Shared with the shell, so toggling never waits for a running Turn.
     debug: Arc<AtomicBool>,
-    /// The fade flag (Fade to Black): `fade_to_black` raises it with no
-    /// lock; each Turn command clears it when it starts and reads it
-    /// through `TurnControl`.
-    fade: Arc<AtomicBool>,
+    /// The fade control (Fade to Black): `fade_to_black` reads it with no
+    /// lock; each Turn command marks itself as running in it, which clears
+    /// the flag, and reads the flag through `TurnControl`.
+    fade: Arc<FadeGate>,
     /// The Content Packs of `<data_dir>/packs`, loaded once at start and
     /// given to every Engine (data shape 3.8).
     packs: Vec<ContentPack>,
@@ -338,7 +400,7 @@ impl Session {
             make_gm,
             open: None,
             debug: Arc::new(AtomicBool::new(false)),
-            fade: Arc::new(AtomicBool::new(false)),
+            fade: Arc::new(FadeGate::default()),
             packs,
             pack_problems,
         }
@@ -543,15 +605,9 @@ impl Session {
         })
     }
 
-    /// The fade flag, cleared: a Turn command calls it when it starts.
-    fn fresh_fade(&self) -> Arc<AtomicBool> {
-        self.fade.store(false, Ordering::SeqCst);
-        self.fade.clone()
-    }
-
-    /// The fade flag itself, for the shell to raise without locking the
+    /// The fade control, for the shell to press without locking the
     /// session.
-    pub fn fade_flag(&self) -> Arc<AtomicBool> {
+    pub fn fade_gate(&self) -> Arc<FadeGate> {
         self.fade.clone()
     }
 
@@ -562,11 +618,12 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let debug = self.debug();
-        let fade = self.fresh_fade();
+        let fade = self.fade.clone();
+        let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let mut ctl = TurnControl {
             on_chunk,
-            faded: &|| fade.load(Ordering::SeqCst),
+            faded: &|| fade.raised(),
         };
         let played = open.engine.play_turn_with(op_id, text, &mut ctl);
         committed(&open.engine, played, debug)
@@ -576,6 +633,10 @@ impl Session {
     /// the stored Turn.
     pub fn begin(&mut self, on_chunk: &mut dyn FnMut(&str)) -> Result<TurnSummary, AppError> {
         let debug = self.debug();
+        // The Opening reads no fade flag (data shape 10); it runs all the
+        // same, so a fade pressed now waits for nothing.
+        let fade = self.fade.clone();
+        let _running = fade.start(threshold_core::turn::BEGIN_OP_ID);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let played = open.engine.begin(on_chunk);
         committed(&open.engine, played, debug)
@@ -589,11 +650,12 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let debug = self.debug();
-        let fade = self.fresh_fade();
+        let fade = self.fade.clone();
+        let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let mut ctl = TurnControl {
             on_chunk,
-            faded: &|| fade.load(Ordering::SeqCst),
+            faded: &|| fade.raised(),
         };
         let played = open
             .engine
@@ -609,11 +671,12 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let debug = self.debug();
-        let fade = self.fresh_fade();
+        let fade = self.fade.clone();
+        let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let mut ctl = TurnControl {
             on_chunk,
-            faded: &|| fade.load(Ordering::SeqCst),
+            faded: &|| fade.raised(),
         };
         let played = open.engine.end_scene(op_id, &mut ctl);
         committed(&open.engine, played, debug)
@@ -621,11 +684,25 @@ impl Session {
 
     /// "Fade to black" with no Turn running (`fade_to_black` holds the
     /// lock): with a scene open, a Closing Turn born faded; with none,
-    /// nothing, and no model call.
+    /// nothing, and no model call. `op_id` may be the op_id of a
+    /// renarration's chunks (`renarrate_op_id`): the late fade of a
+    /// renarration that ended before it read the flag. It then names the
+    /// Turn that renarration told (review minor, 2026-11-12).
     pub fn fade(&mut self, op_id: String) -> Result<FadeResult, AppError> {
         let debug = self.debug();
-        self.fresh_fade();
+        let fade = self.fade.clone();
+        let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
+        let op_id = match op_id
+            .strip_prefix(RENARRATE_OP_PREFIX)
+            .and_then(|id| id.parse::<u64>().ok())
+        {
+            Some(turn_id) => match open.engine.store().turn(turn_id).map_err(failed)? {
+                Some(turn) if turn.record.campaign_id == open.campaign => turn.record.op_id,
+                _ => return Ok(FadeResult { pending: false }),
+            },
+            None => op_id,
+        };
         match open.engine.fade(op_id) {
             Ok(_) | Err(TurnError::NothingToFade) => Ok(FadeResult { pending: false }),
             Err(e) => Err(player_error(&e, debug)),
@@ -646,11 +723,12 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, AppError> {
         let debug = self.debug();
-        let fade = self.fresh_fade();
+        let fade = self.fade.clone();
+        let _running = fade.start(&renarrate_op_id(turn_id));
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let mut ctl = TurnControl {
             on_chunk,
-            faded: &|| fade.load(Ordering::SeqCst),
+            faded: &|| fade.raised(),
         };
         open.engine
             .renarrate_with(turn_id, &mut ctl)

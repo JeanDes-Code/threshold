@@ -19,8 +19,8 @@ use std::{
 use drafts::{DraftLine, DraftView, Drafts};
 use serde::Serialize;
 use session::{
-    AppError, CampaignCard, CampaignSummary, DebugLine, DebugView, FadeResult, PackLine, Session,
-    TurnSummary, clock_nanos, load_config, lock, renarrate_op_id,
+    AppError, CampaignCard, CampaignSummary, DebugLine, DebugView, FadeGate, FadeResult, PackLine,
+    Session, TurnSummary, clock_nanos, load_config, lock, renarrate_op_id,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
@@ -40,9 +40,9 @@ struct Shared(Arc<Mutex<Session>>);
 /// toggling never waits for a running Turn.
 struct DebugFlag(Arc<AtomicBool>);
 
-/// The fade flag (Fade to Black), shared with the session but raised
+/// The fade control (Fade to Black), shared with the session but pressed
 /// without its lock, as the debug toggle is.
-struct FadeFlag(Arc<AtomicBool>);
+struct FadeControl(Arc<FadeGate>);
 
 /// The model's warm-up state: "warming", "ready", or the error text.
 struct ModelStatus(Arc<Mutex<String>>);
@@ -277,19 +277,20 @@ async fn end_scene(
     result
 }
 
-/// "Fade to black": raises the fade flag with no lock. A running Turn stops
-/// its stream and finishes the fade (`pending: true`); with no Turn running,
-/// the Engine fades now (data shape 3.12). The UI hides the stream text
+/// "Fade to black": while a Turn runs, raises the fade flag with no lock;
+/// that Turn stops its stream and finishes the fade (`pending: true`). With
+/// no Turn running, the Engine fades now, under the session lock (data
+/// shape 3.12, `session::fade_to_black`). The UI hides the stream text
 /// itself and calls `get_play_view` after.
 #[tauri::command(rename_all = "snake_case")]
 async fn fade_to_black(
     state: State<'_, Shared>,
-    flag: State<'_, FadeFlag>,
+    gate: State<'_, FadeControl>,
     op_id: String,
 ) -> Result<FadeResult, AppError> {
     let shared = state.0.clone();
-    let flag = flag.0.clone();
-    tauri::async_runtime::spawn_blocking(move || session::fade_to_black(&shared, &flag, op_id))
+    let gate = gate.0.clone();
+    tauri::async_runtime::spawn_blocking(move || session::fade_to_black(&shared, &gate, op_id))
         .await
         .map_err(|e| AppError::Failed(e.to_string()))?
 }
@@ -488,7 +489,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         Box::new(move || Box::new(OllamaGm::new(config.clone()))),
     );
     app.manage(DebugFlag(session.debug_flag()));
-    app.manage(FadeFlag(session.fade_flag()));
+    app.manage(FadeControl(session.fade_gate()));
     app.manage(PackList(session.list_packs()));
     let session = Arc::new(Mutex::new(session));
     // A Cancel stops the running draft or build call at once.

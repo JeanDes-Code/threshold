@@ -202,7 +202,7 @@ fn fade_while_a_turn_runs_is_pending_and_the_turn_finishes_faded() {
         Box::new(move || Box::new(gated.clone()) as Box<dyn Gm + Send>),
     );
     town(&mut s);
-    let flag = s.fade_flag();
+    let gate = s.fade_gate();
     let shared = Arc::new(Mutex::new(s));
     inner.push_proposal(serde_json::to_string(&base()).unwrap());
     inner.push_narration("Dusk: the hall empties and the lamps go out.".into());
@@ -218,7 +218,7 @@ fn fade_while_a_turn_runs_is_pending_and_the_turn_finishes_faded() {
         (summary, shown)
     });
     reached.recv().unwrap();
-    let result = fade_to_black(&shared, &flag, "fade-1".into()).unwrap();
+    let result = fade_to_black(&shared, &gate, "fade-1".into()).unwrap();
     assert_eq!(result, FadeResult { pending: true });
     open.send(()).unwrap();
     let (summary, shown) = turn.join().unwrap();
@@ -250,19 +250,16 @@ fn fade_when_idle_runs_engine_fade() {
     let gm = RecordedGm::new(vec![], vec![]);
     let mut s = session(dir.path(), &gm);
     town_in_a_scene(&mut s, dir.path(), &gm);
-    let flag = s.fade_flag();
+    let gate = s.fade_gate();
     let shared = Arc::new(Mutex::new(s));
     let mut p = base();
     p.action = ActionKind::Wait;
     p.minutes = 10;
     gm.push_proposal(serde_json::to_string(&p).unwrap());
     let before = gm.calls().len();
-    let result = fade_to_black(&shared, &flag, "fade-1".into()).unwrap();
+    let result = fade_to_black(&shared, &gate, "fade-1".into()).unwrap();
     assert_eq!(result, FadeResult { pending: false });
-    assert!(
-        !flag.load(std::sync::atomic::Ordering::SeqCst),
-        "the flag is cleared"
-    );
+    assert!(!gate.raised(), "the flag is down");
     let kinds: Vec<CallKind> = gm.calls()[before..].iter().map(|c| c.kind).collect();
     assert_eq!(
         kinds,
@@ -277,7 +274,7 @@ fn fade_when_idle_runs_engine_fade() {
 
     // No scene now: nothing to fade, and no model call.
     let before = gm.calls().len();
-    let result = fade_to_black(&shared, &flag, "fade-2".into()).unwrap();
+    let result = fade_to_black(&shared, &gate, "fade-2".into()).unwrap();
     assert_eq!(result, FadeResult { pending: false });
     assert_eq!(gm.calls().len(), before);
 }
@@ -297,10 +294,10 @@ fn a_fade_that_reaches_the_shell_after_the_turn_ended_fades_it() {
         .submit_intent("op-1".into(), "I wait.", &mut |_| {})
         .unwrap();
     assert!(!summary.faded);
-    let flag = s.fade_flag();
+    let gate = s.fade_gate();
     let shared = Arc::new(Mutex::new(s));
     let calls = gm.calls().len();
-    let result = fade_to_black(&shared, &flag, "op-1".into()).unwrap();
+    let result = fade_to_black(&shared, &gate, "op-1".into()).unwrap();
     assert_eq!(result, FadeResult { pending: false });
     assert_eq!(gm.calls().len(), calls, "no model call");
     let view = shared.lock().unwrap().get_play_view().unwrap();
@@ -311,6 +308,121 @@ fn a_fade_that_reaches_the_shell_after_the_turn_ended_fades_it() {
         !serde_json::to_string(&view)
             .unwrap()
             .contains("MARKER-FADE-3")
+    );
+}
+
+/// Review M2 (2026-11-12): each Turn command clears the fade flag when it
+/// starts, so a flag left up never fades the next Turn. The flag is raised
+/// by hand here, as nothing else leaves it up.
+#[test]
+fn a_flag_left_up_fades_no_later_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let gate = s.fade_gate();
+
+    gate.flag().store(true, std::sync::atomic::Ordering::SeqCst);
+    gm.push_proposal(serde_json::to_string(&base()).unwrap());
+    gm.push_narration("Dusk falls on the hall.".into());
+    let summary = s
+        .submit_intent("op-1".into(), "I wait.", &mut |_| {})
+        .unwrap();
+    assert!(!summary.faded, "submit_intent clears the flag");
+    assert_eq!(
+        summary.narration.as_deref(),
+        Some("Dusk falls on the hall.")
+    );
+    assert!(!gate.raised());
+
+    gate.flag().store(true, std::sync::atomic::Ordering::SeqCst);
+    gm.push_narration("Night falls on the hall.".into());
+    let narration = s.renarrate(summary.turn_id, &mut |_| {}).unwrap();
+    assert_eq!(narration, "Night falls on the hall.", "renarrate clears it");
+    let view = s.get_play_view().unwrap();
+    let last = view.story.last().unwrap();
+    assert!(
+        matches!(last.body, TurnBody::Narration { .. }),
+        "{:?}",
+        last.body
+    );
+    assert!(!gate.raised());
+}
+
+/// Review minor (2026-11-12): `fade_to_black` tells a running Turn from any
+/// other holder of the session lock. With no Turn running it waits for the
+/// lock and runs the idle fade, and it never leaves the flag up.
+#[test]
+fn a_fade_while_another_command_holds_the_lock_runs_the_idle_fade() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town_in_a_scene(&mut s, dir.path(), &gm);
+    let gate = s.fade_gate();
+    let shared = Arc::new(Mutex::new(s));
+    let mut p = base();
+    p.action = ActionKind::Wait;
+    p.minutes = 10;
+    gm.push_proposal(serde_json::to_string(&p).unwrap());
+
+    // Another command (a view call, say) holds the lock; no Turn runs.
+    let held = shared.lock().unwrap();
+    let (fading, done) = (shared.clone(), gate.clone());
+    let fade = thread::spawn(move || fade_to_black(&fading, &done, "fade-1".into()));
+    thread::sleep(std::time::Duration::from_millis(150));
+    assert!(!fade.is_finished(), "it waits for the lock");
+    assert!(!gate.raised(), "no Turn runs: the flag stays down");
+    drop(held);
+    let result = fade.join().unwrap().unwrap();
+    assert_eq!(result, FadeResult { pending: false });
+    assert!(!gate.raised());
+    let view = shared.lock().unwrap().get_play_view().unwrap();
+    assert_eq!(
+        view.scene,
+        SceneState::Plain,
+        "the idle fade closed the scene"
+    );
+    let last = view.story.last().unwrap();
+    assert_eq!(last.kind, TurnKind::Closing);
+    assert!(matches!(last.body, TurnBody::Faded { .. }));
+}
+
+/// Review minor (2026-11-12): the UI sends a late fade of a renarration
+/// under the op_id its chunks came with. The shell fades the Turn that
+/// renarration told, when it is the latest Turn.
+#[test]
+fn a_late_fade_of_a_renarration_fades_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    gm.push_proposal(serde_json::to_string(&base()).unwrap());
+    let summary = s
+        .submit_intent("op-1".into(), "I wait.", &mut |_| {})
+        .unwrap();
+    assert!(summary.narration_error.is_some(), "the narration fails");
+    let turn_id = summary.turn_id;
+    gm.push_narration("MARKER-FADE-4 The hall empties.".into());
+    s.renarrate(turn_id, &mut |_| {}).unwrap();
+    let gate = s.fade_gate();
+    let shared = Arc::new(Mutex::new(s));
+    let calls = gm.calls().len();
+    let op = threshold_app::session::renarrate_op_id(turn_id);
+    let result = fade_to_black(&shared, &gate, op).unwrap();
+    assert_eq!(result, FadeResult { pending: false });
+    assert_eq!(gm.calls().len(), calls, "no model call");
+    let view = shared.lock().unwrap().get_play_view().unwrap();
+    let last = view.story.last().unwrap();
+    assert_eq!(last.turn_id, turn_id);
+    assert!(
+        matches!(last.body, TurnBody::Faded { .. }),
+        "{:?}",
+        last.body
+    );
+    assert!(
+        !serde_json::to_string(&view)
+            .unwrap()
+            .contains("MARKER-FADE-4")
     );
 }
 
