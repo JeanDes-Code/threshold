@@ -88,6 +88,19 @@ pub enum TurnKind {
     /// an empty Intent (data shape 3.7). Stored as `opening`.
     Opening,
 }
+
+impl TurnKind {
+    /// True for a Turn that has a Narration: it is part of the story.
+    pub fn tells(self) -> bool {
+        matches!(self, Self::Opening | Self::Play | Self::Correction)
+    }
+
+    /// True for a Turn that carries a Player's Intent: an act of the PC.
+    pub fn has_intent(self) -> bool {
+        matches!(self, Self::Play | Self::Correction)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnRecord {
     pub campaign_id: CampaignId,
@@ -363,12 +376,10 @@ pub fn peek(path: &Path) -> Result<CampaignPeek, StoreError> {
     let reverted = store.reverted_turns(campaign)?;
     let turn_count = turns
         .iter()
-        .filter(|t| matches!(t.record.kind, TurnKind::Play | TurnKind::Correction))
+        .filter(|t| t.record.kind.has_intent())
         .filter(|t| !reverted.contains(&t.id))
         .count() as u32;
-    let needs_begin = !turns
-        .iter()
-        .any(|t| matches!(t.record.kind, TurnKind::Opening | TurnKind::Play));
+    let needs_begin = !turns.iter().any(|t| t.record.kind.tells());
     Ok(CampaignPeek {
         pc_name: seed.pc.name,
         premise: seed.premise,

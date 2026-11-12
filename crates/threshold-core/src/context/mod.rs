@@ -33,7 +33,7 @@ use crate::{
     mature::{Cleared, TurnText, turn_text},
     normalize,
     pack::{ContentPack, InsertPoint},
-    store::{Entity, Fact, Goal, StoredTurn, TurnId, TurnKind, VoiceCard, WorldEvent, WorldView},
+    store::{Entity, Fact, Goal, StoredTurn, TurnId, VoiceCard, WorldEvent, WorldView},
     world::{hidden, holders_of, pc_can_name, pc_knowledge},
 };
 
@@ -412,7 +412,7 @@ fn render_turn(turn: &StoredTurn, scene: Option<TurnId>, cleared: Option<&Cleare
         TurnText::Line(line) => return format!("Turn {}\n{}\n", turn.seq, one_line(&line)),
         TurnText::Full { intent, narration } => (intent, narration),
     };
-    let mut out = if turn.record.kind == TurnKind::Opening {
+    let mut out = if !turn.record.kind.has_intent() {
         format!("Turn {} (opening)\n", turn.seq)
     } else {
         format!("Turn {}\nPlayer: {}\n", turn.seq, one_line(intent))

@@ -450,7 +450,7 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
         present,
         acts: scene
             .iter()
-            .filter(|m| m.kind != TurnKind::Opening)
+            .filter(|m| m.kind.has_intent())
             .filter_map(|m| {
                 let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
                 Some(Act {
@@ -718,7 +718,7 @@ pub fn resolve_target(sight: &PcSight, marks: &Marks, target: &Target) -> Option
             sight
                 .moments
                 .iter()
-                .any(|m| m.turn == turn && m.kind != TurnKind::Opening)
+                .any(|m| m.turn == turn && m.kind.has_intent())
                 .then_some(Target::Act { turn_id: turn })
         }
         Target::Belief { subject_id, key } => sight
@@ -838,7 +838,7 @@ fn pin_words(sight: &PcSight, marks: &Marks, target: &Target) -> Option<(String,
                 .find(|scene| scene.first().is_some_and(|m| m.turn == *turn_id))?;
             let first_act = scene
                 .iter()
-                .filter(|m| m.kind != TurnKind::Opening)
+                .filter(|m| m.kind.has_intent())
                 .find_map(|m| intent(m.turn))
                 .unwrap_or_default();
             Some((scene_place(*turn_id)?, first_act))
@@ -1272,7 +1272,7 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
                 out.push_str(&format!("{}\n", one_line(line)));
                 continue;
             }
-            if turn.kind != TurnKind::Opening {
+            if turn.kind.has_intent() {
                 out.push_str(&format!("Player: {}\n", one_line(&turn.intent)));
             }
             let text: Vec<String> = turn

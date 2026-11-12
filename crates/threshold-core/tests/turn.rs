@@ -12,7 +12,7 @@ use threshold_core::{
     },
     mature::RefusalKind,
     rules::{D10, Ruleset, turn_seed},
-    store::{Store, WorldView},
+    store::{Store, TurnKind, WorldView},
     turn::{
         Engine, MAX_INTENT_CHARS, REFUSAL_STEP, TurnControl, TurnError, create_campaign,
         stored_action,
@@ -2598,4 +2598,28 @@ fn play_turn_with_reads_no_flag_yet() {
     );
     assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
     assert_eq!(gm.calls()[1].max_tokens, None, "no cap anywhere yet");
+}
+
+/// `TurnKind::tells` and `has_intent` replace the matches that meant "has a
+/// Narration" and "carries an Intent" (mature content module, Task 5).
+#[test]
+fn kind_helpers_match_the_old_rules() {
+    let table = [
+        (TurnKind::Setup, false, false),
+        (TurnKind::Play, true, true),
+        (TurnKind::Correction, true, true),
+        (TurnKind::Ooc, false, false),
+        (TurnKind::Opening, true, false),
+    ];
+    for (kind, tells, has_intent) in table {
+        assert_eq!(kind.tells(), tells, "{kind:?} tells");
+        assert_eq!(kind.has_intent(), has_intent, "{kind:?} has an Intent");
+        let old_story = matches!(
+            kind,
+            TurnKind::Opening | TurnKind::Play | TurnKind::Correction
+        );
+        let old_act = matches!(kind, TurnKind::Play | TurnKind::Correction);
+        assert_eq!(kind.tells(), old_story, "{kind:?}");
+        assert_eq!(kind.has_intent(), old_act, "{kind:?}");
+    }
 }

@@ -177,10 +177,7 @@ impl PcSight {
 }
 
 fn is_story(kind: TurnKind) -> bool {
-    matches!(
-        kind,
-        TurnKind::Opening | TurnKind::Play | TurnKind::Correction
-    )
+    kind.tells()
 }
 
 /// The PC's sight of `view`. `turns` are the campaign's Turn rows (Setup
@@ -437,9 +434,7 @@ pub fn pc_sight(
         open_items,
         story,
         replaced_by,
-        needs_begin: !ordered
-            .iter()
-            .any(|t| matches!(t.record.kind, TurnKind::Opening | TurnKind::Play)),
+        needs_begin: !ordered.iter().any(|t| t.record.kind.tells()),
         can_correct: ordered
             .last()
             .is_some_and(|t| t.record.kind == TurnKind::Play && !reverted.contains(&t.id)),
@@ -735,7 +730,7 @@ fn present_at(
 /// whose stake changed nothing (QA's arm-wrestles all carried the badge in
 /// bug pass 3).
 fn decision(turn: &StoredTurn, view: &WorldView, open_items: &[OpenItem]) -> bool {
-    if !matches!(turn.record.kind, TurnKind::Play | TurnKind::Correction) {
+    if !turn.record.kind.has_intent() {
         return false;
     }
     let settled = stored_settles(&turn.record.proposal_json)

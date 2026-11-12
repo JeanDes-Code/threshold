@@ -414,7 +414,7 @@ impl Engine {
             .store
             .turns(self.campaign)?
             .iter()
-            .any(|t| matches!(t.record.kind, TurnKind::Play | TurnKind::Correction))
+            .any(|t| t.record.kind.has_intent())
         {
             return Err(TurnError::PlayStarted);
         }

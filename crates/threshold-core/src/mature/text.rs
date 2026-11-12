@@ -7,7 +7,7 @@
 //! the OOC sheet reads of a Turn, and its neutral line.
 
 use super::gate::Cleared;
-use crate::store::{StoredTurn, TurnId, TurnKind, WorldView};
+use crate::store::{StoredTurn, TurnId, WorldView};
 
 /// The Neutral Line of a Turn committed with `intimate` (glossary). The
 /// core fills `{minutes}` with the minutes between the Turn's
@@ -52,7 +52,7 @@ pub fn turn_text<'a>(
 /// committed with `intimate` (`INTIMATE_TEMPLATE`), `None` for any other
 /// Turn. Made from the Turn row only; no model call.
 pub fn neutral_line(turn: &StoredTurn) -> Option<String> {
-    let told = matches!(turn.record.kind, TurnKind::Play | TurnKind::Correction);
+    let told = turn.record.kind.has_intent();
     if !(told && stored_intimate(&turn.record.proposal_json)) {
         return None;
     }

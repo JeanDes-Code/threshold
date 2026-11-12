@@ -970,10 +970,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         let kind: TurnKind = enum_parse(kind)?;
         // An Opening Turn counts: the first play Turn's prompts must read
         // what the opening Narration already described.
-        let story = matches!(
-            kind,
-            TurnKind::Play | TurnKind::Correction | TurnKind::Opening
-        );
+        let story = kind.tells();
         if story && let Some(text) = &narration {
             narrations.push(text.clone());
         }

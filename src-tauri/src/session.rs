@@ -388,9 +388,7 @@ impl Session {
         let view = self.view()?;
         let seed = view.adventure_seed.as_ref();
         let stored = open.engine.store().turns(open.campaign).map_err(failed)?;
-        let needs_begin = !stored
-            .iter()
-            .any(|t| matches!(t.record.kind, TurnKind::Opening | TurnKind::Play));
+        let needs_begin = !stored.iter().any(|t| t.record.kind.tells());
         Ok(CampaignSummary {
             db_path: open.db_path.display().to_string(),
             pc_name: seed.map(|s| s.pc.name.clone()).unwrap_or_default(),
