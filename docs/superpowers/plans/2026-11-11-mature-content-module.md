@@ -680,6 +680,20 @@ Every row of shape section 5 (gates) and section 6 (paths), plus the guards this
 | Review: one list of final kinds | `CheckKind::is_final` read by `final_refusal` | 1 | `every_final_kind_ends_the_turn_after_one_call` |
 | Review: only the confirmed entries are marked | `ConfirmedAges::holds` | 2 | `the_seed_marks_only_the_confirmed_entries` |
 | Review: OOC answers hold the stable neutral line | `OOC_RULES` ends with `INTIMATE_RULE` | 2 | `the_ooc_rules_hold_the_intimate_rule` |
+| Review 2 B1: a narration told again reads the gate now as well as after its Turn | `mature::narration_clearance` (G1 on both states, `open_scene` now) | 4, 7 | `a_scene_narration_told_again_reads_the_gate_now` |
+| Review 2 B2: a Narration cut inside a speech mark shows no hidden name | `speech::without_cut_mark`, `turn::stored_cut`, the held line of `narrate_through` | 3 | `a_cut_narration_never_shows_a_name_the_full_text_hides`; `a_length_stop_stores_the_last_full_sentence` |
+| Review 2 M1: a pack cannot forge a core line or carry control characters | `pack` rules 9 and 10, `context::CORE_HEADINGS`, `context::PACK_RULE` | 7 | `pack_rules_refuse_the_whole_pack`; `every_core_heading_refuses_a_fragment_line`; `the_heading_list_holds_every_heading_the_core_writes`; `the_pack_rule_is_one_stable_line_of_both_rules` |
+| Review 2 M1: scene fragments only from a capable pack, which carries its own explicit narration fragment | `pack` rules 8 and 13 | 7 | `pack_rules_refuse_the_whole_pack` (`scene-not-capable`, `capable-without-explicit`) |
+| Review 2 M2: an earlier scene's Narration is in no prompt of the next scene | `turn_text` (`since <= turn.id`) | 4 | `an_earlier_scene_is_in_no_prompt_of_the_next_scene` |
+| Review 2 M2: a flag left up fades no later Turn | each Turn command marks itself running (`FadeGate::start`) | 6 | `a_flag_left_up_fades_no_later_turn` |
+| Review 2 M2: the Opening is never faded and never reads the flag | `TurnKind::fades`, `narrate_opening` | 6 | `a_fade_of_the_opening_fades_nothing_and_calls_no_model`; `the_opening_never_reads_the_fade_flag` |
+| Review 2 M2: a pinned act of a faded Turn is its Neutral Line | `view::act_words` | 6 | `a_faded_turn_shows_its_line_and_no_text` |
+| Review 2 M3: every reader of past Turn text for a prompt goes through `turn_text` | `context::Retrieval::new` | 4, 6 | `a_past_turn_names_nobody_through_text_a_prompt_may_not_read` |
+| Review 2: a late fade acts on the latest fadeable Turn and calls no model | `Engine::fade`, `Store::set_faded` | 6 | `a_fade_of_an_older_turn_with_no_narration_does_nothing`; `set_faded_refuses_a_turn_that_cannot_be_faded`; `a_fade_that_names_the_turn_that_just_ended_fades_it` |
+| Review 2: Fade to black tells a running Turn from any lock holder | `session::FadeGate`, `fade_to_black` | 6 | `a_fade_while_another_command_holds_the_lock_runs_the_idle_fade`; `a_late_fade_of_a_renarration_fades_its_turn`; `a fade a renarration missed is sent again with its op_id once it ends`; `the Narration of Begin and of a renarrated Opening cannot be faded` |
+| Review 2: a Closing Turn moves nobody | `checks::settle_closing`, `closing_schema_for` | 5 | `a_closing_turn_moves_nobody` |
+| Review 2: one token cap rule | `Engine::narrate` | 4, 5 | `a_scene_narration_is_capped` |
+| Review 2: the loader shows no pack-chosen name, counts a fragment after trimming, refuses a hard link and an invisible name | `pack::shown_folder`, `fragment_text`, `refuse_code`, rule 4 | 7 | `a_pack_problem_never_quotes_the_pack`; `a_padded_fragment_counts_its_chars_after_trimming`; `a_hard_link_in_a_pack_refuses_it`; `pack_rules_refuse_the_whole_pack` (`invisible-name`, `same-name-but-invisible`) |
 
 ---
 
@@ -705,6 +719,7 @@ A reviewer reads the diff at these points before the next task starts. The revie
   - The miss rate is measured on the live model, with a minor arm that must have zero misses (Tasks 9 and 10, owner's decision 6).
   - If it fails, the next step is a word list in the owner's private pack that makes the gate run more often, never less. The repository gets no word list.
   - What stays open: the default model can write explicit prose from an explicit Intent alone, with no tag. This plan does not close that.
+- **The Journal and a pinned act show the Intent of an intimate Turn that was not faded** (data shape 3.6). It is the Player's own words, on a Player screen that no prompt reads; only a faded Turn's act is its Neutral Line there (`view::act_words`). This is decided, not missed: the next reviewer need not flag it again (noted after the second review, 2026-11-12).
 - **A stranger may comply** (owner's decision 4). The "NPC will" metric counts it; there is no pass line.
 - **An `Implied` Narration can be explicit anyway**, and a Closing Narration can give the PC an act. Prompt only. The token caps and the agency metric are the limits.
 - **Fact values** of a scene Turn are 40 characters of model text that stay in the world. The cap is the only limit.

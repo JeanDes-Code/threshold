@@ -283,6 +283,9 @@ pub struct TurnControl<'a> { pub on_chunk: &'a mut dyn FnMut(&str), pub faded: &
 | A Narration streams (a Play, Correction or Closing Turn, or a `renarrate`) | stops the stream, `set_faded` on that Turn; if a scene is open, a Closing Turn that is born faded |
 | No Turn runs, a scene is open | a Closing Turn that is born faded: one proposal call, no narration call. The Turns already read keep their text |
 | No Turn runs, no scene | `TurnError::NothingToFade`. The UI does not show the button then |
+| The Narration streamed, and its Turn ended before it read the flag (a late fade) | the UI sends the fade again with that Turn's op_id (a renarration's op_id names the Turn it told). `Engine::fade` fades that Turn when it is the latest Turn and a Play, Correction or Closing Turn: `set_faded`, no text stored, and a scene it left open closes with a Closing Turn born faded. Any other Turn stays as stored, with no model call |
+
+**Changed after review (2026-11-12, second review).** The late fade (ADR 0011) fades a Turn whose Narration the Player already saw stream in full. It follows the owner's decision that a faded Turn stores no text: the Player asked to skip it, so the row loses its text and every screen and prompt reads its Neutral Line from then on. The Opening is never faded, by the button or by a late fade (section 10), and the UI disables the button while Begin or a renarration of the Opening streams. `fade_to_black` tells a running Turn from any other holder of the session lock (`session::FadeGate`): with no Turn running it takes the lock and runs the idle path, and it never leaves the flag up.
 
 **Correct last Turn.** A faded Play Turn that is the last Turn can be corrected. The Correction reverts it and commits a new Turn with a new Narration, read in full unless the Player fades again. The reverted Turn stays in the story as its neutral line. A faded Turn of a scene is followed by its Closing Turn, so it is no longer the last Turn and cannot be corrected. A Closing Turn has no Intent and cannot be corrected.
 
@@ -588,7 +591,7 @@ The view tests of the play-experience shape run again on the hidden-world fixtur
 - **The Closing Turn's model call fails.** The default closing commits.
 - **The token cap cuts a sentence.** The stored Narration ends at the last full sentence, without a last line that is a speech mark cut short (3.10). The stream showed a few more words of a long last line; it never showed a tag that the stored text leaves out.
 - **A World Event keeps a scene Turn refused.** The Player reads the fixed sentence each time. A plain Intent lets the event fire.
-- **`fade_to_black` arrives just after the Turn ended.** With a scene open it closes the scene, faded. With none it returns `NothingToFade` and the UI drops it.
+- **`fade_to_black` arrives just after the Turn ended.** The UI sends it with the op_id of the Turn that was streaming. When that Turn is the latest Turn and a Play, Correction or Closing Turn, the core fades it (no text stored; changed after review, 2026-11-12, to match ADR 0011), and closes a scene it left open, faded. A fade with no op_id of a Turn: with a scene open it closes the scene, faded; with none it returns `NothingToFade` and the UI drops it.
 
 ## 9. Red-flag pass on this design
 

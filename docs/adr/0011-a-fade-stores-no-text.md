@@ -33,3 +33,12 @@ date: 2026-11-12
 - The Player cannot un-fade. That is the intent of the button.
 - A fade with no Turn running and no op_id of a Turn fades nothing that was read: with a scene open it closes the scene, faded; with none it is `NothingToFade` and the UI drops it.
 - After a crash between `set_faded` and the Closing Turn, the Turn shows faded and the scene is still open; either button closes it.
+
+## Changed after review (2026-11-12, second review)
+
+- **A late fade acts on the latest fadeable Turn only, and calls no model.** `fade(op)` faded an older Turn whose Narration was missing (through `stored_outcome` and a hidden `renarrate`), and `fade("__begin__")` made a hidden narration call for an Opening whose Narration was missing. Now `Engine::fade` fades only the latest Turn, and only a Play, Correction or Closing Turn (`TurnKind::fades`); any other Turn is returned as stored, with no model call. `Store::set_faded` refuses every other kind. The review asked for Play and Closing only; Correction stays fadeable because the button can fade a Correction while it streams (data shape 3.6), and refusing `set_faded` there would fail that fade after its Commit.
+- **The Opening never reads the flag**, by the button, a `renarrate` or a late fade; the UI disables the button while Begin or a renarration of the Opening streams.
+- **The shell knows which Turn runs.** `fade_to_black` used `try_lock` and took any holder of the session lock for a running Turn, then left the flag up. `session::FadeGate` now holds the flag and the op_id of the running Turn command; each command marks itself as running, which clears the flag, and the mark and the flag go down together when it ends. With no Turn running, `fade_to_black` takes the lock as any command does and runs the idle path.
+- **A renarration gets the late fade too.** The UI sends the fade again with the renarration's op_id when it ends; the shell maps that op_id to the Turn it told.
+- **Every reader of a faded Turn reads its line.** A pinned act of a faded Turn showed its Intent. The Journal and a pin now share `view::act_words`. The Play story keeps showing the Player's own Intent above the Neutral Line (data shape 3.11).
+- **Data shape 3.6 and 8 now describe the late fade**: a Turn the Player saw stream in full is faded and stores no text, as the owner decided for every faded Turn.
