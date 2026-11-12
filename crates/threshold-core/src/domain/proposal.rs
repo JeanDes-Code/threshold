@@ -85,7 +85,7 @@ pub struct DecisionProposal {
 /// can hold it with `concat!`.
 macro_rules! intimacy_definition_text {
     () => {
-        "\"intimate\" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches; \"advance\" when it is a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, and no such content happens in this Turn, whatever the answer; else \"none\"."
+        "\"intimate\" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches, even in mild words such as going to bed together or making love; \"advance\" when it is only a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, with no such content in this Turn, whatever the answer; else \"none\". Judge THIS Turn's intent alone: a plain intent after an advance is \"none\"."
     };
 }
 pub(crate) use intimacy_definition_text;

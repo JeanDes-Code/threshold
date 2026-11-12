@@ -77,7 +77,7 @@ A Scene of sexual or erotic content between adults, from the first Turn tagged i
 _Avoid_: Sex scene, NSFW scene, adult scene
 
 **Intimacy Tag**:
-The value each Decision Proposal gives its Turn, in the field `intimacy`: "intimate" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches; "advance" when it is a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, and no such content happens in this Turn, whatever the answer; else "none". The core can raise it from the Intent's words (a Romance Word, or a term of a Content Pack's word list), never lower it. The age rule runs for "advance" and "intimate"; only "intimate" opens an Intimate Scene.
+The value each Decision Proposal gives its Turn, in the field `intimacy`: "intimate" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches, even in mild words such as going to bed together or making love; "advance" when it is only a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, with no such content in this Turn, whatever the answer; else "none". Judge THIS Turn's intent alone: a plain intent after an advance is "none". The core can raise it from the Intent's words (a Romance Word, or a term of a Content Pack's word list), never lower it. The age rule runs for "advance" and "intimate"; only "intimate" opens an Intimate Scene.
 _Avoid_: Flag, rating, NSFW tag
 
 **Advance**:
