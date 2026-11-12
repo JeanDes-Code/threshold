@@ -554,6 +554,7 @@ impl Ctx<'_> {
         };
         let outcome = result.map_err(|e| e.to_string());
         if let Some(path) = &self.raw_log {
+            let private = self.private;
             let rows: String = s
                 .engine
                 .store()
@@ -565,6 +566,10 @@ impl Ctx<'_> {
                         || row.step == "settle"
                         || row.step == "validate"
                         || row.step == "intimacy_floor"
+                        // The next proposal prompt reads each Narration, so
+                        // a miss the proposals do not explain can be traced.
+                        // A private run keeps its Narrations out.
+                        || (row.step == "narrate" && !private)
                 })
                 // One row per line: the model writes newlines inside its
                 // JSON, and a row cut over lines reads as a cut answer.

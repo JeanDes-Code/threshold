@@ -1533,6 +1533,9 @@ fn raw_log_goes_to_a_file_outside_the_repository_only() {
     let raw = std::fs::read_to_string(&outside).unwrap();
     std::fs::remove_dir_all(&dir).unwrap();
     assert!(raw.contains("basics-r1-t1 propose: "), "{raw}");
+    // Each Narration too: the next proposal prompt reads it, so a miss
+    // that the proposals do not explain can be traced (play_basics, run 4).
+    assert!(raw.contains("basics-r1-t1 narrate: Text."), "{raw}");
     // One row per line, so a row never reads as a cut answer.
     assert!(raw.lines().all(|l| l.starts_with("basics-r1-t")), "{raw}");
     assert!(!report.contains("\"verdict\""), "{report}");
