@@ -37,8 +37,8 @@ pub use gate::{
 };
 pub use scene::{
     CLOSING_NARRATION_MAX_TOKENS, SCENE_CLOSE_DEFAULT_MIN, SCENE_CLOSE_MAX_MIN,
-    SCENE_NARRATION_MAX_TOKENS, SCENE_PLAIN_MAX_MIN, default_close, narration_clearance,
-    open_scene, scene_gate, scene_op,
+    SCENE_NARRATION_MAX_TOKENS, SCENE_PLAIN_MAX_MIN, SCENE_PLAIN_TURNS_MAX, default_close,
+    narration_clearance, open_scene, plain_run, scene_gate, scene_op,
 };
 pub use text::{
     CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, effective, neutral_line,

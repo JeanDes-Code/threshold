@@ -47,7 +47,7 @@ ADR 0001 gives a Turn 15 s. The replay of bug pass 5 (`evals/reports/2026-11-tur
 
 ## Consequences
 
-- A file that another program changed can hold an open scene whose place is not cleared. The next Turn is planned as a plain one, and its Commit closes the scene.
+- A file that another program changed can hold an open scene whose place is not cleared. The next Turn is planned as a plain one, and its Commit closes the scene. (Round 2 of the polish pass: this code can write such a file too; see the dated section.)
 - `checks::validate` reads `WorldView::scene_open`, not the result of G1, for the plan limit (plan deviation 16). In such a file the schema of that one Turn says 90 characters while the validator accepts 1 to 200, so an empty plan there costs a retry.
 - After a scene ends, the GM model and the narrator know its committed facts, not its wording.
 - The model can still end a scene by mistake with `intimate: false`. The next intimate Turn opens a new one; no state is lost.
@@ -88,3 +88,20 @@ The Closing Turn, Fade to Black, `Excluded` and the gates G1 to G4 keep their ru
 
 What stays open, and was open before this change: the proposal call of a plain Turn inside a cleared scene reads the scene in full, and its reaction plans (up to `SCENE_PLAN_MAX_CHARS`) go to the plain narrator. A plan, or a Narration, that tells intimate content on a Turn tagged `none` is the wrong-tag risk of ADR 0008: code cannot see it. Before this change the same path existed for the one plain Turn that closed a scene; now it exists for every short plain Turn of the scene.
 
+## Changed in the polish pass, round 2 (2026-11-12): the open scene is bounded
+
+An independent review (Major 2, Minor 3) found that since the section above a scene stayed open through any number of short plain Turns. Each of them is planned with G1's clearance: its proposal prompt holds the scene line and, at an effective `explicit` level, the explicit-only pack fragments. The free text of that cleared proposal call is `finds`, facts and reaction plans. It is stored as a plain Turn's, and later prompts, the Journal and the OOC sheet read it with no `Cleared` value. After 12 plain Turns the scene was still open. The lead decided a bound.
+
+| Scene before | The Turn | Op |
+|---|---|---|
+| open | not `intimate`, `minutes` over `SCENE_PLAIN_MAX_MIN` (30) | close, `NotIntimate` (unchanged) |
+| open | not `intimate`, and `SCENE_PLAIN_TURNS_MAX` (2, a first value) Turns that are not `intimate` already stand right before it in the scene | close, `NotIntimate` |
+| open | not `intimate`, none of the above | none |
+
+The other rows (`Gate`, `Moved`, `Arrival`, `intimate`) do not change, and neither do the 30-minute rule, the Closing Turn and `Excluded`.
+
+- **The count.** `turn::resolve` gives `scene_op` the count `mature::plain_run(view)`. It reads the standing story Turns of the view (`WorldView::recent_turns`) from the latest back, with the stored tag reader of `turn_text` (`stored_intimate`), and stops at the first `intimate` Turn, at the Turn that opened the scene, and at a Turn with no Intent. An OOC Turn is not a story Turn: it neither counts nor ends the run. A reverted Turn is not standing: only its Correction counts, and a Correction counts from the state before the Turn it corrects. A Closing Turn never stands inside an open scene: it closes it. Tests: `a_scene_survives_a_bounded_run_of_plain_turns`, `the_plain_run_skips_ooc_and_reverted_turns`, `the_plain_run_stops_at_a_turn_with_no_intent`, and the oracle `scene_projection_matches_the_last_turn_rule`.
+- **No `finds` from a cleared proposal call.** `checks::settle` drops the `finds` of a Turn whose proposal call held the scene's `Cleared` value (`mature::open_scene` on the same view), as it drops them on a tagged Turn, with a log line that says why. Test: `a_plain_turn_inside_a_scene_keeps_no_finds` (the item is in no later prompt, Journal or OOC sheet).
+- **What stays open.** Facts and reaction plans of those Turns are still free text from a cleared prompt, stored as a plain Turn's. The bound limits them to at most `SCENE_PLAIN_TURNS_MAX` + 1 proposal calls in a row (the Turn that closes the scene is planned with the clearance too). That is the wrong-tag risk of ADR 0008: code cannot see it.
+- **G1 can fail on a file this code wrote.** The Consequences above said a scene whose place is not cleared comes from another program. Since a plain Turn keeps the scene open and runs no G2 or G3, a character who is not cleared can reach the place in normal play: an unconfirmed minor placed there unseen by a proposal fact with `seen: gm`. The paths behave as the gates say: no screen shows the scene, a `renarrate` of a scene Turn is told `Implied` with no fragment, the next `intimate` Turn is planned with no scene text and refused `AdultsOnly`, and the next Turn that commits closes the scene with `Gate`. Test: `a_minor_who_arrives_unseen_in_a_plain_turn_ends_the_scene_by_g1`.
+- **Other paths of a plain Turn inside a scene, pinned.** A Fade to Black of it (`a_fade_of_a_plain_turn_inside_a_scene_closes_the_scene`), a `renarrate` of it (`renarrate_of_a_plain_turn_inside_a_scene_reads_no_scene_text`), a Correction of it (`a_correction_of_a_plain_turn_inside_a_scene_is_told_plain`): no scene text in the narration prompt. A new NPC made in it closes the scene with `Arrival` (`a_new_npc_in_a_plain_turn_closes_the_scene`).

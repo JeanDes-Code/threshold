@@ -327,6 +327,44 @@ fn a_fade_in_a_scene_closes_it_with_a_faded_closing_turn() {
     );
 }
 
+/// Review round 2 (polish pass, 2026-11-12): a plain Turn inside an open
+/// scene, faded while it streams. Its narration prompt held no scene text
+/// (it is told plain), and the fade closes the scene it left open with a
+/// Closing Turn born faded (`FadeToBlack`).
+#[test]
+fn a_fade_of_a_plain_turn_inside_a_scene_closes_the_scene() {
+    const SCENE: &str = "MARKER-SCENE-FADE";
+    let mut rig = Rig::new("fade-plain-in-scene");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, &format!("{SCENE} Brann nods."));
+    rig.chunked();
+    let plain = rig.plain();
+    let closing = rig.closing();
+    rig.gm.push_proposal(serde_json::to_string(&plain).unwrap());
+    rig.gm
+        .push_proposal(serde_json::to_string(&closing).unwrap());
+    rig.gm.push_narration(TEN.into());
+    let out = run_fading(&mut rig, "t2", &Fader::at(2)).unwrap();
+    assert!(out.faded);
+    let narrate = rig.last_call(CallKind::Narrate);
+    let text = prompt_text(&narrate);
+    for line in [
+        threshold_core::context::IMPLIED_LINE,
+        threshold_core::context::EXPLICIT_LINE,
+        SCENE,
+    ] {
+        assert!(!text.contains(line), "{line}: {text}");
+    }
+    assert_eq!(narrate.max_tokens, None);
+    assert!(rig.turn(out.turn_id).faded);
+    assert_ne!(out.turn_id, t1);
+    let close = rig.store().turns(rig.campaign).unwrap().pop().unwrap();
+    assert_eq!(close.record.kind, TurnKind::Closing);
+    assert!(close.faded);
+    assert_eq!(rig.scene_ops(close.id), [(false, SceneWhy::FadeToBlack)]);
+    assert_eq!(rig.scene(), None);
+}
+
 #[test]
 fn fade_with_no_turn_and_no_scene_is_nothing_to_fade() {
     let mut rig = Rig::new("fade-nothing");

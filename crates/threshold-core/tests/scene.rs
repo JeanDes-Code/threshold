@@ -23,8 +23,8 @@ use threshold_core::{
     },
     mature::{
         CLOSING_NARRATION_MAX_TOKENS, INTIMATE_TEMPLATE, SCENE_CLOSE_DEFAULT_MIN,
-        SCENE_CLOSE_MAX_MIN, SCENE_NARRATION_MAX_TOKENS, SCENE_PLAIN_MAX_MIN, neutral_line,
-        stored_intimate,
+        SCENE_CLOSE_MAX_MIN, SCENE_NARRATION_MAX_TOKENS, SCENE_PLAIN_MAX_MIN,
+        SCENE_PLAIN_TURNS_MAX, neutral_line, plain_run, stored_intimate,
     },
     pack::load_all,
     store::{Store, StoredTurn, TurnId, TurnKind, WorldView},
@@ -365,8 +365,9 @@ fn the_scene_state_survives_a_restart() {
 /// changed in the polish pass, 2026-11-12): over the standing Play,
 /// Correction and Closing Turns, the scene starts at the first Turn
 /// committed with `intimate` after the last Turn that closed a scene, and
-/// stays open through the Turns after it. A short plain Turn closes
-/// nothing, so it does not end the run.
+/// stays open through the Turns after it. The rule reads the closing ops,
+/// so it holds for the round 2 bound too: up to `SCENE_PLAIN_TURNS_MAX`
+/// short plain Turns close nothing and do not end the scene.
 fn last_turn_rule(store: &Store, campaign: u64) -> Option<TurnId> {
     let reverted = store.reverted_turns(campaign).unwrap();
     let standing: Vec<StoredTurn> = store
@@ -417,8 +418,9 @@ fn correct(rig: &mut Rig, op: &str, p: &DecisionProposal) {
 
 /// Oracle: over a scripted run of Turns (plain, intimate, a short plain
 /// Turn inside the scene, a long plain Turn, a seen arrival, a hidden
-/// arrival, a move, two Corrections), the projection equals the rule over
-/// the standing Turns.
+/// arrival, a move, two Corrections, a run of short plain Turns past
+/// `SCENE_PLAIN_TURNS_MAX`), the projection equals the rule over the
+/// standing Turns.
 #[test]
 fn scene_projection_matches_the_last_turn_rule() {
     let mut rig = Rig::new("oracle");
@@ -474,9 +476,11 @@ fn scene_projection_matches_the_last_turn_rule() {
     check(&rig, "t10 opens at the yard");
     rig.played("t11", &plain, "Quiet.");
     check(&rig, "t11 keeps");
+    rig.played("t11b", &plain, "Quiet.");
+    check(&rig, "t11b, the second short plain Turn, keeps");
     assert_eq!(rig.scene(), Some(t10));
-    long_plain(&mut rig, "t12");
-    check(&rig, "t12 closes");
+    rig.played("t12", &plain, "Quiet.");
+    check(&rig, "t12, past SCENE_PLAIN_TURNS_MAX, closes");
     assert_eq!(rig.scene(), None);
 }
 
@@ -1661,4 +1665,325 @@ fn a_late_fade_skips_an_ooc_turn_after_the_streamed_turn() {
     assert!(outcome.faded);
     assert!(rig.turn(t1).faded);
     assert_eq!(rig.turn(t1).narration, None);
+}
+
+// --- Polish pass, round 2 (2026-11-12): the bound on plain Turns -------------
+
+/// A short plain proposal of the rig, as `n` plain Turns played in a row.
+fn plain_turns(rig: &mut Rig, ops: &[&str]) -> Vec<TurnId> {
+    let plain = rig.plain();
+    ops.iter()
+        .map(|op| rig.played(op, &plain, "Brann talks."))
+        .collect()
+}
+
+/// An open scene survives at most `SCENE_PLAIN_TURNS_MAX` Turns that are
+/// not `intimate` in a row: the next one closes it with `NotIntimate`. An
+/// `intimate` Turn starts the count again (review Major 2).
+#[test]
+fn a_scene_survives_a_bounded_run_of_plain_turns() {
+    assert_eq!(SCENE_PLAIN_TURNS_MAX, 2, "the tests below count to it");
+    let mut rig = Rig::new("plain-bound");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    assert_eq!(plain_run(&rig.view()), 0);
+    let kept = plain_turns(&mut rig, &["t2", "t3"]);
+    for t in &kept {
+        assert!(rig.scene_ops(*t).is_empty(), "turn {t}");
+    }
+    assert_eq!(rig.scene(), Some(t1));
+    assert_eq!(plain_run(&rig.view()), 2);
+    let t4 = plain_turns(&mut rig, &["t4"])[0];
+    assert_eq!(rig.scene_ops(t4), [(false, SceneWhy::NotIntimate)]);
+    assert_eq!(rig.scene(), None);
+    assert_eq!(plain_run(&rig.view()), 0, "no scene, no run");
+
+    // An intimate Turn in between starts the count again.
+    let mut rig = Rig::new("plain-bound-reset");
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    plain_turns(&mut rig, &["t2", "t3"]);
+    rig.played("t4", &p, "Brann stays.");
+    assert_eq!(plain_run(&rig.view()), 0);
+    plain_turns(&mut rig, &["t5", "t6"]);
+    assert_eq!(rig.scene(), Some(t1), "the same scene");
+    let t7 = plain_turns(&mut rig, &["t7"])[0];
+    assert_eq!(rig.scene_ops(t7), [(false, SceneWhy::NotIntimate)]);
+}
+
+/// The run counts standing Turns only. An OOC Turn tells nothing: it
+/// neither counts nor ends the run. A Turn a Correction reverted is not
+/// standing: only its Correction counts.
+#[test]
+fn the_plain_run_skips_ooc_and_reverted_turns() {
+    let mut rig = Rig::new("plain-ooc");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    plain_turns(&mut rig, &["t2"]);
+    rig.engine()
+        .set_detail_level("lvl".into(), DetailLevel::Explicit)
+        .unwrap();
+    assert_eq!(plain_run(&rig.view()), 1, "the OOC Turn does not count");
+    let t3 = plain_turns(&mut rig, &["t3"])[0];
+    assert!(rig.scene_ops(t3).is_empty());
+    assert_eq!(rig.scene(), Some(t1), "the OOC Turn did not end the run");
+    let t4 = plain_turns(&mut rig, &["t4"])[0];
+    assert_eq!(rig.scene_ops(t4), [(false, SceneWhy::NotIntimate)]);
+
+    let mut rig = Rig::new("plain-reverted");
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    plain_turns(&mut rig, &["t2"]);
+    let plain = rig.plain();
+    correct(&mut rig, "c2", &plain);
+    assert_eq!(plain_run(&rig.view()), 1, "t2 is reverted, c2 stands");
+    let t3 = plain_turns(&mut rig, &["t3"])[0];
+    assert!(
+        rig.scene_ops(t3).is_empty(),
+        "the reverted Turn is not counted"
+    );
+    assert_eq!(rig.scene(), Some(t1));
+}
+
+/// A Closing Turn closes its scene, so it never stands inside an open one.
+/// The run stops at any Turn with no Intent (a Closing or an Opening
+/// Turn), as it stops at the Turn that opened the scene.
+#[test]
+fn the_plain_run_stops_at_a_turn_with_no_intent() {
+    let turn = |id: TurnId, kind: TurnKind, tag: &str| StoredTurn {
+        id,
+        seq: id,
+        record: threshold_core::store::TurnRecord {
+            campaign_id: 1,
+            op_id: format!("op-{id}"),
+            kind,
+            intent: String::new(),
+            proposal_json: format!(r#"{{"proposal":{{"intimacy":"{tag}"}}}}"#),
+            clock_before: 0,
+            clock_after: 5,
+        },
+        narration: None,
+        faded: false,
+        told: None,
+    };
+    let mut view = WorldView {
+        scene_open: Some(1),
+        ..Default::default()
+    };
+    view.recent_turns = vec![
+        turn(1, TurnKind::Play, "intimate"),
+        turn(2, TurnKind::Play, "none"),
+        turn(3, TurnKind::Correction, "advance"),
+    ];
+    assert_eq!(plain_run(&view), 2);
+    view.recent_turns
+        .insert(2, turn(3, TurnKind::Closing, "none"));
+    view.recent_turns[3].id = 4;
+    assert_eq!(plain_run(&view), 1, "stops at the Closing Turn");
+    view.scene_open = Some(4);
+    assert_eq!(
+        plain_run(&view),
+        0,
+        "stops at the Turn that opened the scene"
+    );
+    view.scene_open = None;
+    assert_eq!(plain_run(&view), 0);
+}
+
+/// A plain Turn inside an open scene keeps no `finds`: its proposal call
+/// read the scene in full, and a found item is free text that later
+/// prompts, the Journal and the OOC sheet read with no clearance. The Turn
+/// commits; the item is in no later prompt and on no screen.
+#[test]
+fn a_plain_turn_inside_a_scene_keeps_no_finds() {
+    use threshold_core::{
+        domain::{Finds, FoundItem, SourceKind},
+        turn::stored_found,
+        view::ooc_sheet,
+    };
+    const ITEM: &str = "MARKER-FOUND-1";
+    let mut rig = Rig::new("plain-finds");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    let mut looking = rig.plain();
+    looking.action = ActionKind::Observe;
+    looking.finds = Finds {
+        from: SourceKind::NoticeOrSign,
+        source: "the notice board".into(),
+        items: vec![FoundItem {
+            title: ITEM.into(),
+            line: "A neutral line.".into(),
+        }],
+    };
+    let calls_before = rig.gm.calls().len();
+    let t2 = rig.played("t2", &looking, "You read the board.");
+    assert_eq!(rig.scene(), Some(t1));
+    assert_eq!(stored_found(&rig.turn(t2).record.proposal_json), None);
+    let settle = rig
+        .store()
+        .debug_log("t2")
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.step == "settle")
+        .map(|row| row.raw)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(settle.contains("removed finds"), "{settle}");
+    assert!(settle.contains("Intimate Scene"), "{settle}");
+    // Later prompts, in and after the scene.
+    rig.played("t3", &p, "Brann stays.");
+    long_plain(&mut rig, "t4");
+    plain_turns(&mut rig, &["t5"]);
+    let calls = rig.gm.calls();
+    // Every call from the proposal call of t2 on: the item was only in that
+    // call's answer.
+    for call in &calls[calls_before..] {
+        assert!(!prompt_text(call).contains(ITEM), "{:?}", call.kind);
+    }
+    let sight = rig.sight();
+    assert!(sight.story.iter().all(|t| t.found.is_none()));
+    let journal = journal_view(&sight, &Default::default());
+    assert!(journal.scenes.iter().all(|s| s.found.is_empty()));
+    assert!(!ooc_sheet(&sight).contains(ITEM));
+}
+
+// --- Review round 2: paths a plain Turn inside the scene made reachable ---------
+
+/// The explicit test pack, at `explicit`: the strongest telling a scene has.
+fn explicit_rig(name: &str) -> Rig {
+    let (packs, _) = load_all(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/packs"));
+    let pack = packs
+        .into_iter()
+        .find(|p| p.explicit())
+        .expect("the test pack gives explicit description");
+    Rig::with(name, DetailLevel::Explicit, vec![pack])
+}
+
+/// No scene text in a narration prompt: no implied or explicit line, no
+/// pack scene fragment, no scene Narration.
+fn assert_no_scene_text(call: &threshold_core::RecordedCall) {
+    let text = prompt_text(call);
+    for line in [EXPLICIT_LINE, IMPLIED_LINE, PACK_SCENE_HEAD, MARKER] {
+        assert!(!text.contains(line), "{line}: {text}");
+    }
+}
+
+/// `renarrate` of a plain Turn inside an open scene: told plain, with no
+/// scene text, and the scene stays open.
+#[test]
+fn renarrate_of_a_plain_turn_inside_a_scene_reads_no_scene_text() {
+    let mut rig = explicit_rig("plain-renarrate");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, &format!("{MARKER} Brann nods."));
+    let t2 = plain_turns(&mut rig, &["t2"])[0];
+    rig.gm.push_narration("Brann talks again.".into());
+    rig.engine().renarrate(t2, &mut |_| {}).unwrap();
+    let call = rig.last_call(CallKind::Narrate);
+    assert_no_scene_text(&call);
+    assert_eq!(call.max_tokens, None);
+    assert_eq!(rig.scene(), Some(t1));
+    assert_eq!(rig.turn(t2).told, None, "told plain");
+}
+
+/// A Correction of a plain Turn inside an open scene: its proposal call
+/// reads the scene (G1 on the state before the corrected Turn), its
+/// narration call reads no scene text, and the scene stays open.
+#[test]
+fn a_correction_of_a_plain_turn_inside_a_scene_is_told_plain() {
+    let mut rig = explicit_rig("plain-correction");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, &format!("{MARKER} Brann nods."));
+    plain_turns(&mut rig, &["t2"]);
+    let plain = rig.plain();
+    rig.gm.push_proposal(serde_json::to_string(&plain).unwrap());
+    rig.gm.push_narration("Brann talks.".into());
+    let c = rig
+        .engine()
+        .correct_last("c2".into(), "I talk with Brann.", "again", &mut |_| {})
+        .unwrap();
+    let propose = rig.last_call(CallKind::Propose);
+    assert!(propose.prompt.recent.starts_with(SCENE_LINE));
+    assert_no_scene_text(&rig.last_call(CallKind::Narrate));
+    assert!(rig.scene_ops(c.turn_id).is_empty());
+    assert_eq!(rig.scene(), Some(t1));
+}
+
+/// A new NPC made in a plain Turn inside an open scene is a character the
+/// PC now sees here: the Turn closes the scene with `Arrival`.
+#[test]
+fn a_new_npc_in_a_plain_turn_closes_the_scene() {
+    let mut rig = Rig::new("plain-new-npc");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let mut plain = rig.plain();
+    plain.new_npcs = vec![new_npc(1, "Kett", 34)];
+    let t2 = rig.played("t2", &plain, "Someone comes.");
+    assert_eq!(rig.scene_ops(t2), [(false, SceneWhy::Arrival)]);
+    assert_eq!(rig.scene(), None);
+}
+
+/// An unconfirmed minor comes to the place unseen during a plain Turn of an
+/// open scene: a proposal fact with `seen: gm` (data shape 3.4 said G1
+/// cannot fail on a file this code wrote; it can now). The ledger keeps the
+/// scene open, but no screen shows it; a `renarrate` of the scene Turn is
+/// told `Implied` with no pack fragment; the next intimate Turn is refused
+/// `AdultsOnly` with no scene text in its prompt; the next Commit closes
+/// the scene with `Gate`.
+#[test]
+fn a_minor_who_arrives_unseen_in_a_plain_turn_ends_the_scene_by_g1() {
+    let mut rig = explicit_rig("plain-minor");
+    let pip = rig.view().entity_by_name("Pip").unwrap().id;
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, &format!("{MARKER} Brann nods."));
+    assert_eq!(rig.turn(t1).told, Some(DetailLevel::Explicit));
+    let mut plain = rig.plain();
+    plain.facts = vec![fact(
+        slot(e(pip), "location", "gate square"),
+        Seen::Gm,
+        vec![],
+    )];
+    let t2 = rig.played("t2", &plain, "Dusk falls.");
+    let view = rig.view();
+    assert!(view.present().contains(&pip), "Pip is here");
+    assert!(!threshold_core::context::seen_present(&view).contains(&pip));
+    assert!(rig.scene_ops(t2).is_empty(), "an unseen arrival");
+    assert_eq!(rig.scene(), Some(t1), "the ledger keeps the scene");
+
+    // No screen shows it.
+    assert_eq!(rig.sight().scene, None);
+    assert_eq!(
+        play_view(&rig.sight(), &Default::default()).scene,
+        SceneState::Plain
+    );
+
+    // A `renarrate` of the scene Turn: implied, no fragment.
+    rig.gm.push_narration("Brann nods again.".into());
+    rig.engine().renarrate(t1, &mut |_| {}).unwrap();
+    let call = rig.last_call(CallKind::Narrate);
+    assert!(call.prompt.recent.starts_with(IMPLIED_LINE));
+    let text = prompt_text(&call);
+    assert!(!text.contains(EXPLICIT_LINE), "{text}");
+    assert!(!text.contains(PACK_SCENE_HEAD), "{text}");
+    assert_eq!(rig.turn(t1).told, Some(DetailLevel::Implied));
+
+    // The next intimate Turn: refused, and its prompt reads no scene text.
+    let err = rig.play("t3", &p, "-").expect_err("adults only");
+    assert!(
+        matches!(
+            err,
+            TurnError::Refused {
+                kind: threshold_core::mature::RefusalKind::AdultsOnly,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    let propose = rig.last_call(CallKind::Propose);
+    let text = prompt_text(&propose);
+    assert!(!text.contains(SCENE_LINE), "{text}");
+    assert!(!text.contains(MARKER), "{text}");
+    assert_eq!(rig.scene(), Some(t1), "nothing committed");
+
+    // The next Commit closes the scene by G1.
+    let t4 = plain_turns(&mut rig, &["t4"])[0];
+    assert_eq!(rig.scene_ops(t4), [(false, SceneWhy::Gate)]);
+    assert_eq!(rig.scene(), None);
 }

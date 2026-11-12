@@ -1534,12 +1534,13 @@ impl Engine {
             self.log(op_id, "gate_after", &Prompt::default(), "ok", step)?;
         }
         // A Closing Turn closes the scene for its own reason; any other
-        // Turn changes it as `mature::scene_op` says.
+        // Turn changes it as `mature::scene_op` says, with the run of plain
+        // Turns that stand before it in the scene (`mature::plain_run`).
         let scene_op = match ask {
             Ask::Closing { why } => Some(LedgerOp::SetScene { open: false, why }),
-            Ask::Play { .. } => presence
-                .as_ref()
-                .and_then(|presence| mature::scene_op(view, p, presence, gate_failed)),
+            Ask::Play { .. } => presence.as_ref().and_then(|presence| {
+                mature::scene_op(view, p, presence, gate_failed, mature::plain_run(view))
+            }),
         };
         if let Some(op) = scene_op {
             self.log(

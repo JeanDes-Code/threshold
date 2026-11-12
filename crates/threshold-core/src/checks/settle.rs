@@ -39,26 +39,40 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     }
     settle_closes(&mut p, view, &mut notes);
     settle_leaves(&mut p, view, &mut notes);
-    settle_finds(&mut p, &mut notes);
+    settle_finds(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
 }
 
 /// `finds` (ADR 0007, 2026-11-12). A Turn the age rule runs for keeps none:
 /// the gate reads handles, and a found item is free text that could name a
-/// character it never sees. The kind of a stored record (`other`) is no
+/// character it never sees. A Turn whose proposal call held the clearance
+/// of an open Intimate Scene keeps none either (polish pass, round 2,
+/// 2026-11-12, review Major 2): that prompt read the scene in full, and a
+/// found item is stored with the Turn and read with no clearance by later
+/// prompts, the Journal and the OOC sheet. `plan` gives the proposal call
+/// that clearance exactly when `mature::open_scene` holds on the same
+/// `view` (G1), so this rule reads it there. The kind of a stored record (`other`) is no
 /// model value: the result goes. An item over its limits, or with no title,
 /// goes; past `FIND_MAX_ITEMS` the rest go. A value that is still not
 /// sound (`Finds::problem`: `none` with content, a kind with no item or a
 /// bad source) becomes `none`. Each change only removes model output, and a
 /// note never quotes the text.
-fn settle_finds(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+fn settle_finds(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
     if p.finds == Finds::default() {
         return;
     }
     if p.intimacy.gated() {
         p.finds = Finds::default();
         notes.push("removed finds: a Turn the age rule runs for keeps no found content".into());
+        return;
+    }
+    if crate::mature::open_scene(view).is_some() {
+        p.finds = Finds::default();
+        notes.push(
+            "removed finds: the proposal call read the open Intimate Scene, so the Turn keeps no found content"
+                .into(),
+        );
         return;
     }
     if p.finds.from == SourceKind::Other {

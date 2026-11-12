@@ -5,7 +5,10 @@
 
 use std::collections::BTreeSet;
 
-use super::gate::{Blocked, Cleared, Presence, clearance};
+use super::{
+    gate::{Blocked, Cleared, Presence, clearance},
+    text::stored_intimate,
+};
 use crate::{
     context::seen_present,
     domain::{DecisionProposal, EntityId, EntityKind, LedgerOp, SceneWhy},
@@ -26,6 +29,17 @@ pub const SCENE_NARRATION_MAX_TOKENS: u32 = 280;
 /// value): a line of talk in the middle of a scene keeps it open, a long
 /// wait ends it (`scene_op`, `why: NotIntimate`).
 pub const SCENE_PLAIN_MAX_MIN: u32 = 30;
+
+/// The most Turns that are not `intimate` an open Intimate Scene survives
+/// in a row (polish pass, round 2, 2026-11-12, a first value). A Turn that
+/// is not `intimate` closes the scene (`scene_op`, `why: NotIntimate`) when
+/// this many such Turns already stand right before it in the scene
+/// (`plain_run`). Each of those Turns is planned with the scene's clearance
+/// (G1): its proposal prompt holds the scene line and, at an effective
+/// `explicit` level, the explicit-only pack fragments, and the free text of
+/// its proposal (facts, reaction plans) is stored as a plain Turn's. The
+/// bound keeps that to a few Turns (review Major 2).
+pub const SCENE_PLAIN_TURNS_MAX: u32 = 2;
 
 /// The minutes of the core's default closing (`default_close`), when the
 /// model gives no closing it can commit (data shape 3.7, a first value).
@@ -107,6 +121,7 @@ pub fn narration_clearance(view_after: &WorldView, now: &WorldView) -> Option<Cl
 /// | open | any tag, the PC's place changes | close, `Moved` |
 /// | open | any tag, a character the PC did not see here now sees here | close, `Arrival` |
 /// | open | not `intimate`, `minutes` over `SCENE_PLAIN_MAX_MIN` | close, `NotIntimate` |
+/// | open | not `intimate`, `plain_run` already `SCENE_PLAIN_TURNS_MAX` | close, `NotIntimate` |
 /// | open | not `intimate`, none of the above | none |
 /// | open | `intimate`, none of the above | none |
 ///
@@ -115,6 +130,11 @@ pub fn narration_clearance(view_after: &WorldView, now: &WorldView) -> Option<Cl
 /// the earlier Turns of the old scene reached later prompts as Neutral
 /// Lines only. A Turn that is not `intimate` is still told as a plain Turn
 /// (`told`), and its narration call holds no clearance (`Engine::narrate`).
+/// Round 2 (2026-11-12): the scene survives at most `SCENE_PLAIN_TURNS_MAX`
+/// such Turns in a row. `plain_run` is the count the caller reads from the
+/// standing Turns before this one (`plain_run(view)`): an OOC Turn neither
+/// counts nor ends the run, a reverted Turn is not standing, and a Closing
+/// Turn never stands inside an open scene (it closes it).
 ///
 /// `view` is the state before the Turn and `after` the presence once its
 /// ops are committed (`mature::after`). A Turn that closes a scene never
@@ -127,6 +147,7 @@ pub fn scene_op(
     p: &DecisionProposal,
     after: &Presence,
     gate_failed: bool,
+    plain_run: u32,
 ) -> Option<LedgerOp> {
     let close = |why| Some(LedgerOp::SetScene { open: false, why });
     if view.scene_open.is_none() {
@@ -162,8 +183,37 @@ pub fn scene_op(
     {
         return close(SceneWhy::Arrival);
     }
-    if !p.intimacy.intimate() && p.minutes > SCENE_PLAIN_MAX_MIN {
+    if !p.intimacy.intimate()
+        && (p.minutes > SCENE_PLAIN_MAX_MIN || plain_run >= SCENE_PLAIN_TURNS_MAX)
+    {
         return close(SceneWhy::NotIntimate);
     }
     None
+}
+
+/// The Turns that are not `intimate` standing right before the next Turn in
+/// the open scene of `view`, since the last `intimate` Turn of the scene
+/// (round 2 of the polish pass, 2026-11-12): `scene_op` reads it. It walks
+/// the standing story Turns of `view.recent_turns` from the latest back and
+/// stops at the first Turn committed with `intimate` (`stored_intimate`, the
+/// reader `turn_text` uses), at the Turn that opened the scene, and at any
+/// Turn with no Intent (a Closing or an Opening Turn: neither stands inside
+/// an open scene). An OOC Turn tells nothing, so it is not in
+/// `recent_turns`: it neither counts nor ends the run. A reverted Turn is
+/// not standing, so it is not there either. 0 when no scene is open.
+/// `recent_turns` holds the last six story Turns, more than
+/// `SCENE_PLAIN_TURNS_MAX` + 1, so the count is exact up to the bound.
+pub fn plain_run(view: &WorldView) -> u32 {
+    let Some(scene) = view.scene_open else {
+        return 0;
+    };
+    let run = view
+        .recent_turns
+        .iter()
+        .rev()
+        .take_while(|t| {
+            t.id > scene && t.record.kind.has_intent() && !stored_intimate(&t.record.proposal_json)
+        })
+        .count();
+    u32::try_from(run).unwrap_or(u32::MAX)
 }
