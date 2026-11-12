@@ -312,7 +312,7 @@ impl CloseOutcome {
 /// hold it with `concat!`.
 macro_rules! finds_definition_text {
     () => {
-        "what the PC now sees when the player's intent of THIS Turn looks for information or content (searches, reads, opens, checks, looks through, asks for a list or a price): what = \"found\", source = where it comes from in a few words (the browser tab, the letter, the top drawer), items = 1 to 5 entries, each a short title and one line of what it says or shows. Invent plausible content that fits this world and that this source would show: never a hidden fact, and never what the PC does, says or feels. Else what = \"nothing\", source empty, items empty."
+        "what the PC reads, opens or searches in THIS Turn's player intent. from = the kind of source: none = the intent reads, opens or searches nothing (talk, a question to a person, a person's answer or reaction, a greeting, a move, a view on the way, a glance or a look around; what a person says is told through reactions, never here); screen = a screen, a browser tab, a terminal; document = a letter, a book, a page, a file, a map; notice_or_sign = a notice, a poster, a sign, an inscription; container = a drawer, a box, a bag, a chest, a pocket opened; shelf_or_search = a shelf, a desk top, a pile or a place searched item by item on purpose; list_or_ledger = a list, a ledger, a register, a price list, a catalogue, also when a person hands it over. With from = none: source empty, items empty. Else source = that source in a few words (the browser tab, the letter, the top drawer), items = 1 to 5 entries, each a short title and one line of what it says or shows. Invent plausible content that fits this world and that this source would show: never a hidden fact, never what an earlier Turn found, and never what the PC does, says or feels."
     };
 }
 pub(crate) use finds_definition_text;
@@ -331,14 +331,19 @@ pub const FIND_LINE_MAX_CHARS: usize = 140;
 /// The most items one Turn finds.
 pub const FIND_MAX_ITEMS: usize = 5;
 
-/// What the PC finds in one Turn: a source and up to `FIND_MAX_ITEMS`
-/// items. One per Turn: two lookups in one Intent share it, and `source`
-/// names them together (ADR 0007, 2026-11-12).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// What the PC finds in one Turn: the kind of source, a source label and up
+/// to `FIND_MAX_ITEMS` items. One per Turn: two lookups in one Intent share
+/// it, and `source` names them together (ADR 0007, 2026-11-12).
+///
+/// A value stored before `from` (`{"what": "found" | "nothing", …}`) still
+/// reads: `found` becomes `SourceKind::Other`, `nothing` becomes `none`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct Finds {
-    pub what: FindKind,
-    /// Where the content comes from: "the browser tab", "the letter".
-    /// Empty when `what` is `nothing`.
+    /// The kind of source the Intent read, opened or searched; `none` when
+    /// it read nothing. It decides whether the Turn found anything.
+    pub from: SourceKind,
+    /// Where the content comes from, as the screens show it: "the browser
+    /// tab", "the letter". Empty when `from` is `none`.
     #[serde(default)]
     #[schemars(length(max = 40))]
     pub source: String,
@@ -347,26 +352,88 @@ pub struct Finds {
     pub items: Vec<FoundItem>,
 }
 
-/// Whether the Turn found anything. `nothing` comes first: ADR 0007's
-/// lesson is that this model follows a required enum with an explicit
-/// "nothing" value far better than an optional field or a prompt rule.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum FindKind {
-    #[default]
-    Nothing,
-    Found,
+impl<'de> Deserialize<'de> for Finds {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// The field before `from` (2026-11-12, b245f71).
+        #[derive(Deserialize, PartialEq)]
+        #[serde(rename_all = "snake_case")]
+        enum What {
+            Nothing,
+            Found,
+        }
+        #[derive(Deserialize)]
+        struct Raw {
+            #[serde(default)]
+            from: Option<SourceKind>,
+            #[serde(default)]
+            what: Option<What>,
+            #[serde(default)]
+            source: String,
+            #[serde(default)]
+            items: Vec<FoundItem>,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        let from = match (raw.from, raw.what) {
+            (Some(from), _) => from,
+            (None, Some(What::Found)) => SourceKind::Other,
+            (None, _) => SourceKind::None,
+        };
+        Ok(Self {
+            from,
+            source: raw.source,
+            items: raw.items,
+        })
+    }
 }
 
-impl FindKind {
-    /// Every value, `nothing` first: the order of the per-Turn schema's enum.
-    pub const ALL: [Self; 2] = [Self::Nothing, Self::Found];
+/// The kind of source a Turn's Intent read, opened or searched (ADR 0007,
+/// 2026-11-12). A closed enum with defined values, `none` first: this
+/// model follows such an enum far better than a free label or a prompt
+/// rule. A person's spoken answer, a reaction, a view on the way and a look
+/// around are `none`: speech is told through the reactions and the
+/// Narration. The list grows one value per surface the screens learn to
+/// render (a `screen` find is meant to become a browser panel).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceKind {
+    #[default]
+    None,
+    Screen,
+    Document,
+    NoticeOrSign,
+    Container,
+    ShelfOrSearch,
+    ListOrLedger,
+    /// A found result stored before `from`, whose kind nobody recorded.
+    /// Never in the per-Turn schema; `checks::validate` rejects it in a
+    /// proposal and `checks::settle` removes it.
+    Other,
+}
+
+impl SourceKind {
+    /// Every value the model may write, `none` first: the order of the
+    /// per-Turn schema's enum. `Other` is not among them.
+    pub const ALL: [Self; 7] = [
+        Self::None,
+        Self::Screen,
+        Self::Document,
+        Self::NoticeOrSign,
+        Self::Container,
+        Self::ShelfOrSearch,
+        Self::ListOrLedger,
+    ];
 
     /// The value as the schema and the prompt spell it.
     pub fn word(self) -> &'static str {
         match self {
-            Self::Nothing => "nothing",
-            Self::Found => "found",
+            Self::None => "none",
+            Self::Screen => "screen",
+            Self::Document => "document",
+            Self::NoticeOrSign => "notice_or_sign",
+            Self::Container => "container",
+            Self::ShelfOrSearch => "shelf_or_search",
+            Self::ListOrLedger => "list_or_ledger",
+            Self::Other => "other",
         }
     }
 }
@@ -384,26 +451,27 @@ pub struct FoundItem {
 }
 
 impl Finds {
-    /// True when the Turn found something to show: `found` with items.
+    /// True when the Turn found something to show: a source kind other than
+    /// `none`, with items.
     pub fn found(&self) -> bool {
-        self.what == FindKind::Found && !self.items.is_empty()
+        self.from != SourceKind::None && !self.items.is_empty()
     }
 
     /// Why this value breaks the field's shape, or `None` when it is
-    /// sound: `nothing` holds no source and no item; `found` holds a
+    /// sound: `none` holds no source and no item; any other kind holds a
     /// source of 1 to `FIND_SOURCE_MAX_CHARS` characters and 1 to
     /// `FIND_MAX_ITEMS` items, each with a title of 1 to
     /// `FIND_TITLE_MAX_CHARS` and a line of at most `FIND_LINE_MAX_CHARS`
     /// characters. `checks::validate` rejects such a value;
-    /// `checks::settle` removes it.
+    /// `checks::settle` removes it. A stored record may hold `Other`.
     pub fn problem(&self) -> Option<String> {
         let chars = |text: &str| text.trim().chars().count();
-        match self.what {
-            FindKind::Nothing if !self.source.trim().is_empty() || !self.items.is_empty() => {
-                Some("finds: what is nothing, so source and items stay empty".into())
+        match self.from {
+            SourceKind::None if !self.source.trim().is_empty() || !self.items.is_empty() => {
+                Some("finds: from is none, so source and items stay empty".into())
             }
-            FindKind::Nothing => None,
-            FindKind::Found => {
+            SourceKind::None => None,
+            _ => {
                 let source = chars(&self.source);
                 if source == 0 || source > FIND_SOURCE_MAX_CHARS {
                     return Some(format!(

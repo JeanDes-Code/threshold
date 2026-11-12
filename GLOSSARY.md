@@ -129,7 +129,7 @@ The GM's structured interpretation of an Intent: what kind of action it is, whet
 _Avoid_: Plan, tool call, response
 
 **Find**:
-What the PC finds in one Turn when the Intent looks for information or content: a search, a letter or a sign read, a drawer or a box opened, a shelf looked through, a list asked for. A source ("the letter") and one to five items, each a short title and one line. The GM states it in the Decision Proposal's `finds`; the core keeps it on the Turn when the act happens, and the story, the Journal and later prompts show it. It is world content, never a PC act, and it writes no fact.
+What the PC finds in one Turn when the Intent looks for information or content: a search, a letter or a sign read, a drawer or a box opened, a shelf looked through, a list asked for. A kind of source from a closed list (`screen`, `document`, `notice_or_sign`, `container`, `shelf_or_search`, `list_or_ledger`; `none` when the Intent reads nothing), a source label ("the letter") and one to five items, each a short title and one line. What a person says is never a Find: speech goes through the reactions and the Narration. The GM states it in the Decision Proposal's `finds`; the core keeps it on the Turn when the act happens, and the story, the Journal and later prompts show it. It is world content, never a PC act, and it writes no fact.
 _Avoid_: Search result, loot, clue, discovery (Discovery is the interview)
 
 **Commit**:

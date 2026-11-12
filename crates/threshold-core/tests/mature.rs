@@ -1307,10 +1307,10 @@ const PROPOSAL_FIELDS: &[(&str, bool)] = &[
     ("facts[].slot.subject", true),
     ("facts[].slot.value", false),
     // Free text: a tagged Turn keeps no finds (`checks::settle`).
+    ("finds.from", false),
     ("finds.items[].line", false),
     ("finds.items[].title", false),
     ("finds.source", false),
-    ("finds.what", false),
     ("intimacy", false),
     ("leaves[].npc", true),
     ("leaves[].to", false),

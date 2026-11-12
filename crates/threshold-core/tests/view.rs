@@ -1180,7 +1180,7 @@ fn play_view_json_matches_the_ui_types() {
     w.narrate(said, "Orsel: \"You are late.\"\n\nBrann laughs at Orsel.");
     // A Turn that found something (ADR 0007, 2026-11-12): the story shows
     // its card, so the UI fixture needs the shape.
-    let found = serde_json::json!({"what": "found", "source": "the toll board", "items": [
+    let found = serde_json::json!({"from": "notice_or_sign", "source": "the toll board", "items": [
         {"title": "Carts", "line": "Two copper at the gate."},
         {"title": "Walkers", "line": ""},
     ]});

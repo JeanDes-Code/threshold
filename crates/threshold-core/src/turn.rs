@@ -1702,7 +1702,7 @@ fn parse(raw: &str, needs_finds: bool) -> Result<DecisionProposal, Vec<Rejection
     }
     if needs_finds && value.as_ref().and_then(|v| v.get("finds")).is_none() {
         return Err(schema_error(
-            "finds is required: what nothing or found, source and items".to_owned(),
+            "finds is required: from (none or the kind of source), source and items".to_owned(),
         ));
     }
     Ok(p)

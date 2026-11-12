@@ -281,6 +281,11 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
             None,
             "finds: a Turn the age rule runs for keeps no found content".into(),
         );
+    } else if p.finds.from == crate::domain::SourceKind::Other {
+        err(
+            None,
+            "finds: from other is the kind of a stored record, not a value".into(),
+        );
     } else if let Some(why) = p.finds.problem() {
         err(None, why);
     }

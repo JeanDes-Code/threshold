@@ -115,7 +115,7 @@ pub struct DecisionProposal {
     pub verdict: Verdict,                   // allowed | impossible | check
     #[serde(default)] pub move_to: Option<Handle>,     // E* of a known place, or null; required in the schema (section 11)
     #[serde(default)] pub settles: Option<Settle>,     // none, or the one Open Item the Intent names and its outcome; required in the schema while an item is offered (section 11)
-    #[serde(default)] pub finds: Finds,                // what the PC finds: nothing, or a source and 1 to 5 items; required in the Play schema (section 16)
+    #[serde(default)] pub finds: Finds,                // what the PC finds: from none, or a kind of source, a source and 1 to 5 items; required in the Play schema (section 16)
     #[serde(default)] pub blockers: Vec<Handle>,       // F*, max 2: what stands in the PC's way
     pub check: Option<CheckDraft>,                      // present iff verdict == check
     #[serde(default)] pub reactions: Vec<Reaction>,    // max 2
@@ -424,14 +424,17 @@ ADR 0007 has the decision. The shape:
 
 ```rust
 pub struct DecisionProposal { /* … */ #[serde(default)] pub finds: Finds, /* … */ }   // required in the Play schema; parse refuses a Play proposal without it
-pub struct Finds     { pub what: FindKind, pub source: String, pub items: Vec<FoundItem> } // source 1..=40 chars with found, empty with nothing; items 1..=5 with found
-pub enum   FindKind  { Nothing, Found }                                                 // nothing first
-pub struct FoundItem { pub title: String, pub line: String }                            // title 1..=60 chars, line <= 140
+pub struct Finds      { pub from: SourceKind, pub source: String, pub items: Vec<FoundItem> } // source 1..=40 chars and items 1..=5 with a kind; both empty with none
+pub enum   SourceKind { None, Screen, Document, NoticeOrSign, Container, ShelfOrSearch, ListOrLedger, Other } // none first; Other is never in the schema
+pub struct FoundItem  { pub title: String, pub line: String }                              // title 1..=60 chars, line <= 140
 ```
 
-- **Settle and validate.** `checks::settle` drops an item with no title or over its limits, items past the fifth, then turns a value that `Finds::problem` still refuses into `nothing`; on a Turn whose tag is `advance` or `intimate` it drops `finds` whole (the gate reads handles only). `checks::validate` rejects the same shapes. `checks::settle_closing` drops `finds`.
-- **The record.** `checks::found(valid, roll, view)` gives the finds when the verdict lets the act happen (allowed, or a won Check), after `context::guard_found` (the guard of `guard_events`: an item that holds a secret value or names an entity the PC must not hear of goes; a source that does drops all). `turn::resolve` writes it under `found` in the Turn's `proposal_json`, next to `roll` and `wait_asked`. No ledger op, no fact, no projection column. `turn::stored_found(proposal_json)` is the one reader; an old record reads `None`.
-- **The narrator.** `context::found_lines` adds the outcome lines `- What the PC finds (<source>). Tell what it shows, briefly; add no other entry:` and `  - "<title>": <line>` to THIS TURN, after the engine's other outcome lines. `renarrate` reads the record.
+- **`from` (changed after the live run of b245f71).** The kind of source decides whether the Turn found anything: `Finds::found` is `from` not `none` with items. The schema's enum is `SourceKind::ALL`: `none`, `screen`, `document`, `notice_or_sign`, `container`, `shelf_or_search`, `list_or_ledger`. `FINDS_DEFINITION` defines each one; a person's spoken answer, a reaction, a view on the way and a look around are `none`. The keys of `finds` are written in the schema's sorted order, so `from` comes before `items` and `source`. The list grows one value per surface the screens learn to render.
+- **Old values.** A value stored with the first shape (`{"what": "found" | "nothing", …}`, b245f71) still reads: `found` becomes `SourceKind::Other`, `nothing` becomes `none` (a hand-written `Deserialize`). A value written now has `from` and no `what`. `Other` is a stored record's kind only: `checks::validate` rejects it in a proposal and `checks::settle` removes it.
+
+- **Settle and validate.** `checks::settle` drops an item with no title or over its limits, items past the fifth, then turns a value that `Finds::problem` still refuses into `none`; on a Turn whose tag is `advance` or `intimate` it drops `finds` whole (the gate reads handles only). `checks::validate` rejects the same shapes. `checks::settle_closing` drops `finds`.
+- **The record.** `checks::found(valid, roll, view)` gives the finds when the verdict lets the act happen (allowed, or a won Check), after `context::guard_found` (an item that names an entity the PC must not hear of, or holds a secret value of at least `FOUND_SECRET_MIN_WORDS` (2) content words, goes; a source that does drops all; the value rule of `guard_events` is wider). `turn::resolve` writes it under `found` in the Turn's `proposal_json`, next to `roll` and `wait_asked`. No ledger op, no fact, no projection column. `turn::stored_found(proposal_json)` is the one reader; an old record reads `None`.
+- **The narrator.** `context::found_lines` adds the outcome lines `- What the PC finds (<source>). Tell what it shows, briefly; add no other entry:` and `  - "<title>": <line>` to THIS TURN, after the engine's other outcome lines. `renarrate` reads the record. A `move` that the Commit did not make but that keeps found content gets `PC_PLACE_LINE`, not `NOT_MOVED_LINE`: the act happened inside the place.
 - **Later prompts.** `context::render_turn` adds `Found: <source>: "<title>": <line>; …` after a past Turn's Narration, only on the `Full` reading of `mature::turn_text`.
 - **`PcSight`.** `SightTurn::found` is the record of a story Turn that stands, is not faded and is read in full (`line` is `None`); `None` on any other Turn.
 - **Screens.** `StoryTurn::found: Option<FoundCard>` (`FoundCard { source, items: Vec<FoundRow { title, line }> }`): the Play story shows it under the Narration as a small card list, and a click on a row puts `I look closer at "<title>".` in the Intent field without sending it. `SceneEntry::found: Vec<FoundEntry { turn_id, source, items }>`: the Journal's Scene entry lists it under "Found". The OOC sheet's RECENT TURNS gives each Turn's `Found:` line, in the words of the prompts.

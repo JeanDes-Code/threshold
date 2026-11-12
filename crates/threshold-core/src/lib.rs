@@ -184,13 +184,14 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         require(&mut schema, "", "settles");
     }
     // What the PC finds (ADR 0007, 2026-11-12): a required object whose
-    // `what` has `nothing` first, so a plain Turn costs a few tokens.
-    let kinds: Vec<&str> = domain::FindKind::ALL.iter().map(|k| k.word()).collect();
+    // kind of source, `from`, comes first and has `none` first, so a plain
+    // Turn costs a few tokens. `other` (a stored record's kind) is no value.
+    let kinds: Vec<&str> = domain::SourceKind::ALL.iter().map(|k| k.word()).collect();
     schema["properties"]["finds"] = json!({
         "type": "object",
         "description": domain::FINDS_DEFINITION,
         "properties": {
-            "what": {"type": "string", "enum": kinds},
+            "from": {"type": "string", "enum": kinds},
             "source": {"type": "string", "maxLength": domain::FIND_SOURCE_MAX_CHARS},
             "items": {
                 "type": "array",
@@ -206,12 +207,12 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
                 },
             },
         },
-        "required": ["what", "source", "items"],
+        "required": ["from", "source", "items"],
         "additionalProperties": false,
     });
     require(&mut schema, "", "finds");
     if let Some(defs) = schema["$defs"].as_object_mut() {
-        for unused in ["Finds", "FindKind", "FoundItem"] {
+        for unused in ["Finds", "SourceKind", "FoundItem"] {
             defs.remove(unused);
         }
     }

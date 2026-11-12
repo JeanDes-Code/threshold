@@ -8,7 +8,7 @@ use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key
 use crate::{
     domain::{
         ActionKind, DecisionProposal, EntityKind, FIND_MAX_ITEMS, Finds, Handle, Intimacy, NO_ITEM,
-        SlotDraft, Verdict,
+        SlotDraft, SourceKind, Verdict,
     },
     mature::SCENE_CLOSE_MAX_MIN,
     normalize,
@@ -46,11 +46,12 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
 
 /// `finds` (ADR 0007, 2026-11-12). A Turn the age rule runs for keeps none:
 /// the gate reads handles, and a found item is free text that could name a
-/// character it never sees. An item over its limits, or with no title,
+/// character it never sees. The kind of a stored record (`other`) is no
+/// model value: the result goes. An item over its limits, or with no title,
 /// goes; past `FIND_MAX_ITEMS` the rest go. A value that is still not
-/// sound (`Finds::problem`: `nothing` with content, `found` with no item or
-/// a bad source) becomes `nothing`. Each change only removes model output,
-/// and a note never quotes the text.
+/// sound (`Finds::problem`: `none` with content, a kind with no item or a
+/// bad source) becomes `none`. Each change only removes model output, and a
+/// note never quotes the text.
 fn settle_finds(p: &mut DecisionProposal, notes: &mut Vec<String>) {
     if p.finds == Finds::default() {
         return;
@@ -58,6 +59,11 @@ fn settle_finds(p: &mut DecisionProposal, notes: &mut Vec<String>) {
     if p.intimacy.gated() {
         p.finds = Finds::default();
         notes.push("removed finds: a Turn the age rule runs for keeps no found content".into());
+        return;
+    }
+    if p.finds.from == SourceKind::Other {
+        p.finds = Finds::default();
+        notes.push("removed finds: from other is the kind of a stored record".into());
         return;
     }
     let mut at = 0;

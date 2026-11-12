@@ -21,8 +21,8 @@ use super::{
 };
 use crate::{
     domain::{
-        ActionKind, DetailLevel, EntityId, EntityKind, EntityRef, FindKind, Finds, FoundItem,
-        Handle, Knowing, LedgerOp, Reaction, Verdict, is_open_key, is_state_key, outcome_key,
+        ActionKind, DetailLevel, EntityId, EntityKind, EntityRef, Finds, FoundItem, Handle,
+        Knowing, LedgerOp, Reaction, Verdict, is_open_key, is_state_key, outcome_key,
     },
     mature::{Cleared, Told, effective},
     model::Prompt,
@@ -184,18 +184,23 @@ pub fn guard_events(view: &WorldView, events: &[String]) -> Vec<String> {
 }
 
 /// What the PC found in a Turn, as the Turn records it (ADR 0007,
-/// 2026-11-12). Each item is model text, like an event text, so it gets the
-/// guard of `guard_events`: an item whose title or line holds a secret
-/// value (`secret_values`) or names an entity the PC must not hear of
-/// (`names_unheard`) goes. A source that does either drops everything, and
-/// so does a result with no item left: `None`. The second value holds one
-/// note per item that went, with its place in the list and never its text.
-/// Only removes model output.
+/// 2026-11-12). Each item is model text, like an event text, so it gets a
+/// guard: an item whose title or line names an entity the PC must not hear
+/// of (`names_unheard`) or holds a secret value of at least
+/// `FOUND_SECRET_MIN_WORDS` content words (`found_secret_values`) goes. A
+/// source that does either drops everything, and so does a result with no
+/// item left: `None`. The second value holds one note per item that went,
+/// with its place in the list and never its text. Only removes model
+/// output.
+///
+/// The value rule is narrower than the one of `guard_events` (live run of
+/// b245f71): a found notice says "the magistrate" or "the clerk" without
+/// stating a secret, and a one-word value such as a role is a common word.
 pub fn guard_found(view: &WorldView, finds: &Finds) -> (Option<Finds>, Vec<String>) {
     if !finds.found() {
         return (None, Vec::new());
     }
-    let secrets = secret_values(view);
+    let secrets = found_secret_values(view);
     let unheard = unheard_names(view);
     let guarded = |text: &str| quotes(&secrets, text) || names_any(&unheard, text);
     if guarded(&finds.source) {
@@ -226,7 +231,7 @@ pub fn guard_found(view: &WorldView, finds: &Finds) -> (Option<Finds>, Vec<Strin
     }
     (
         Some(Finds {
-            what: FindKind::Found,
+            from: finds.from,
             source: finds.source.clone(),
             items,
         }),
@@ -322,6 +327,35 @@ fn unheard_names(view: &WorldView) -> Vec<Vec<String>> {
 fn names_any(parts: &[Vec<String>], text: &str) -> bool {
     let text = normalize::cased_words(text);
     parts.iter().any(|part| normalize::name_in(&text, part))
+}
+
+/// The fewest content words a secret value needs before a found item that
+/// states it is dropped (`guard_found`).
+pub const FOUND_SECRET_MIN_WORDS: usize = 2;
+
+/// Words that carry no content of their own: a value's content words are
+/// its other words.
+const FUNCTION_WORDS: &[&str] = &[
+    "a", "about", "after", "all", "an", "and", "any", "are", "as", "at", "be", "been", "before",
+    "but", "by", "for", "from", "her", "his", "in", "into", "is", "it", "its", "my", "no", "nor",
+    "not", "of", "off", "on", "onto", "or", "our", "out", "over", "so", "some", "than", "that",
+    "the", "their", "them", "then", "there", "these", "they", "this", "those", "to", "under", "up",
+    "upon", "very", "was", "were", "with", "yet", "your",
+];
+
+/// The secret values (`secret_values`) that have at least
+/// `FOUND_SECRET_MIN_WORDS` content words: what a found item must not
+/// state.
+fn found_secret_values(view: &WorldView) -> Vec<Vec<String>> {
+    secret_values(view)
+        .into_iter()
+        .filter(|term| {
+            term.iter()
+                .filter(|w| !FUNCTION_WORDS.contains(&w.as_str()))
+                .count()
+                >= FOUND_SECRET_MIN_WORDS
+        })
+        .collect()
 }
 
 /// The values of `secret_facts`: what an event text must not state.
@@ -729,11 +763,15 @@ fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Opt
 }
 
 /// Where the PC is after the Turn, from the Commit (`view_after`). A move
-/// whose Commit wrote no PC `location` did not happen.
+/// whose Commit wrote no PC `location` did not happen, unless the Turn keeps
+/// found content (`found`): then the act happened inside the place ("I walk
+/// over to the wall and read the notices"), and the line only says where
+/// the PC is (live run of b245f71).
 fn place_line(
     r: &Retrieval<'_>,
     perceived: &[LedgerOp],
     action: Option<ActionKind>,
+    found: bool,
 ) -> Option<String> {
     let pc = EntityRef::Id(r.pc?);
     let place = r
@@ -747,7 +785,7 @@ fn place_line(
         };
         slot.subject == pc && normalize::key(&slot.key) == "location"
     });
-    let line = if action == Some(ActionKind::Move) && !moved {
+    let line = if action == Some(ActionKind::Move) && !moved && !found {
         NOT_MOVED_LINE
     } else {
         PC_PLACE_LINE
@@ -785,7 +823,8 @@ fn recent(
         .chain(events.iter().map(|text| format!("- {}\n", one_line(text))))
         .chain(extra.iter().cloned())
         .collect();
-    if let Some(line) = place_line(r, perceived, turn.map(|(action, _)| action)) {
+    let found = extra.iter().any(|line| line.starts_with(FOUND_LINE));
+    if let Some(line) = place_line(r, perceived, turn.map(|(action, _)| action), found) {
         outcome.push(line);
     }
     outcome.push(here_line(r));

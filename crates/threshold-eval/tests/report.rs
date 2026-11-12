@@ -19,7 +19,7 @@ impl Judge for FirstChoice {
 }
 
 /// An allowed talk proposal: valid in any campaign, writes nothing.
-const PROPOSAL: &str = r#"{"action":"talk","verdict":"allowed","intimacy":"none","finds":{"what":"nothing","source":"","items":[]},"check":null,"schedule":null,"minutes":5}"#;
+const PROPOSAL: &str = r#"{"action":"talk","verdict":"allowed","intimacy":"none","finds":{"from":"none","source":"","items":[]},"check":null,"schedule":null,"minutes":5}"#;
 
 #[test]
 fn report_has_every_metric() {
@@ -425,11 +425,11 @@ fn offscreen_measures_the_seeded_event() {
     let walk = |place: &str, minutes: u32| {
         let place = id(&view, place);
         format!(
-            r#"{{"action":"move","verdict":"allowed","intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"move_to":"E{place}","check":null,"schedule":null,"minutes":{minutes}}}"#
+            r#"{{"action":"move","verdict":"allowed","intimacy":"none","finds":{{"from":"none","source":"","items":[]}},"move_to":"E{place}","check":null,"schedule":null,"minutes":{minutes}}}"#
         )
     };
     let tell = format!(
-        r#"{{"action":"talk","verdict":"allowed","intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"check":null,"schedule":null,"minutes":5,"facts":[{{"slot":{{"subject":"E{pc}","key":"reputation","value":"under_suspicion"}},"seen":"present","said_by":"E{hessa}","because":[]}}]}}"#
+        r#"{{"action":"talk","verdict":"allowed","intimacy":"none","finds":{{"from":"none","source":"","items":[]}},"check":null,"schedule":null,"minutes":5,"facts":[{{"slot":{{"subject":"E{pc}","key":"reputation","value":"under_suspicion"}},"seen":"present","said_by":"E{hessa}","because":[]}}]}}"#
     );
     let gm = RecordedGm::new(
         vec![
@@ -1398,26 +1398,26 @@ fn play_basics_counts_each_step() {
     let (wren, doul, hall) = (id("Wren"), id("Doul"), id("Varn town hall"));
     let mill = id("Varn mill");
     let contest = format!(
-        r#"{{"action":"act","verdict":"check","intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"check":{{"against":"E{doul}","win":{{"subject":"E{doul}","key":"mood","value":"beaten"}},"lose":{{"subject":"E{wren}","key":"fatigue","value":"sore_arm"}},"factors":[]}},"schedule":null,"minutes":5}}"#
+        r#"{{"action":"act","verdict":"check","intimacy":"none","finds":{{"from":"none","source":"","items":[]}},"check":{{"against":"E{doul}","win":{{"subject":"E{doul}","key":"mood","value":"beaten"}},"lose":{{"subject":"E{wren}","key":"fatigue","value":"sore_arm"}},"factors":[]}},"schedule":null,"minutes":5}}"#
     );
     let impossible =
-        r#"{"action":"act","verdict":"impossible","intimacy":"none","finds":{"what":"nothing","source":"","items":[]},"check":null,"schedule":null,"minutes":1}"#
+        r#"{"action":"act","verdict":"impossible","intimacy":"none","finds":{"from":"none","source":"","items":[]},"check":null,"schedule":null,"minutes":1}"#
             .to_owned();
     let close = |minutes: u32| {
         format!(
-            r#"{{"action":"talk","verdict":"allowed","intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"settles":{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}},"check":null,"schedule":null,"minutes":{minutes}}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimacy":"none","finds":{{"from":"none","source":"","items":[]}},"settles":{{"item":"E{wren} pending_copy_tithe_roll","outcome":"accepted"}},"check":null,"schedule":null,"minutes":{minutes}}}"#
         )
     };
     // No `minutes`: the core's default for a talk.
     let talk =
-        r#"{"action":"talk","verdict":"allowed","intimacy":"none","finds":{"what":"nothing","source":"","items":[]},"check":null,"schedule":null}"#
+        r#"{"action":"talk","verdict":"allowed","intimacy":"none","finds":{"from":"none","source":"","items":[]},"check":null,"schedule":null}"#
             .to_owned();
     let go = |place: u64| {
         format!(
-            r#"{{"action":"move","verdict":"allowed","intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"move_to":"E{place}","check":null,"schedule":null,"minutes":15}}"#
+            r#"{{"action":"move","verdict":"allowed","intimacy":"none","finds":{{"from":"none","source":"","items":[]}},"move_to":"E{place}","check":null,"schedule":null,"minutes":15}}"#
         )
     };
-    let nowhere = r#"{"action":"move","verdict":"allowed","intimacy":"none","finds":{"what":"nothing","source":"","items":[]},"move_to":null,"check":null,"schedule":null,"minutes":10}"#
+    let nowhere = r#"{"action":"move","verdict":"allowed","intimacy":"none","finds":{"from":"none","source":"","items":[]},"move_to":null,"check":null,"schedule":null,"minutes":10}"#
         .to_owned();
     let report_of = |proposals: Vec<String>| {
         let gm = RecordedGm::new(proposals, vec!["It happens.".to_owned(); 8]);
@@ -1658,10 +1658,10 @@ fn open_items_counts_right_and_wrong_closes() {
     let id = |name: &str| view.entity_by_name(name).unwrap().id;
     let (orsel, tobin) = (id("Orsel"), id("Tobin"));
     let wren = id("Wren");
-    let talk = r#"{"action":"talk","verdict":"allowed","intimacy":"none","finds":{"what":"nothing","source":"","items":[]},"minutes":2}"#.to_owned();
+    let talk = r#"{"action":"talk","verdict":"allowed","intimacy":"none","finds":{"from":"none","source":"","items":[]},"minutes":2}"#.to_owned();
     let settle = |item: String| {
         format!(
-            r#"{{"action":"talk","verdict":"allowed","intimacy":"none","finds":{{"what":"nothing","source":"","items":[]}},"settles":{{"item":"{item}","outcome":"accepted"}},"minutes":2}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimacy":"none","finds":{{"from":"none","source":"","items":[]}},"settles":{{"item":"{item}","outcome":"accepted"}},"minutes":2}}"#
         )
     };
     let gm = RecordedGm::new(
@@ -1723,7 +1723,7 @@ fn finds_counts_lookups_false_positives_and_told() {
             .map(|t| format!(r#"{{"title":"{t}","line":"A plain line."}}"#))
             .collect();
         format!(
-            r#"{{"action":"observe","verdict":"allowed","intimacy":"none","finds":{{"what":"found","source":"{source}","items":[{}]}},"minutes":5}}"#,
+            r#"{{"action":"observe","verdict":"allowed","intimacy":"none","finds":{{"from":"notice_or_sign","source":"{source}","items":[{}]}},"minutes":5}}"#,
             items.join(",")
         )
     };
@@ -1785,7 +1785,7 @@ mod mature {
 
     /// A tagged proposal with no reaction: the age rule refuses it when a
     /// character here is not cleared, and the stance rule otherwise.
-    const TAGGED: &str = r#"{"action":"talk","verdict":"allowed","intimacy":"intimate","finds":{"what":"nothing","source":"","items":[]},"check":null,"schedule":null,"minutes":5}"#;
+    const TAGGED: &str = r#"{"action":"talk","verdict":"allowed","intimacy":"intimate","finds":{"from":"none","source":"","items":[]},"check":null,"schedule":null,"minutes":5}"#;
 
     fn step(labelled: bool, ended: Ended) -> Step {
         Step {
@@ -1834,7 +1834,7 @@ mod mature {
         );
         // An advance commits where every character here is confirmed (the
         // plain arm of intimate_tag), and is refused where a minor stands.
-        let advance = PROPOSAL.replace("\"none\"", "\"advance\"");
+        let advance = PROPOSAL.replace("\"intimacy\":\"none\"", "\"intimacy\":\"advance\"");
         let gm = RecordedGm::new(vec![advance; 100], vec!["Text.".to_owned(); 100]);
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
         let report = run(
@@ -2003,7 +2003,7 @@ mod mature {
             .unwrap();
         let maren = super::id(&s.0.store().snapshot(s.1).unwrap(), "Maren");
         let tagged = format!(
-            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","finds":{{"what":"nothing","source":"","items":[]}},"check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null,"willing":"yes"}}]}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","finds":{{"from":"none","source":"","items":[]}},"check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null,"willing":"yes"}}]}}"#
         );
         let gm = RecordedGm::new(vec![tagged; 100], vec!["Text.".to_owned(); 100]);
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
@@ -2381,7 +2381,7 @@ mod mature {
             .unwrap();
         let maren = super::id(&s.0.store().snapshot(s.1).unwrap(), "Maren");
         let tagged = format!(
-            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","finds":{{"what":"nothing","source":"","items":[]}},"check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null,"willing":"yes"}}]}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","finds":{{"from":"none","source":"","items":[]}},"check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null,"willing":"yes"}}]}}"#
         );
         let gm = RecordedGm::new(vec![tagged; 50], vec!["Text.".to_owned(); 50]);
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;

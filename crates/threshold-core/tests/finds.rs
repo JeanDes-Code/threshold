@@ -1,7 +1,8 @@
 //! `finds` (ADR 0007, 2026-11-12): what the PC finds in a Turn whose Intent
-//! looks for information or content. A required field with `nothing` first;
-//! the core keeps it on the Turn record when the act happens, guards its
-//! text, and tells it to the narrator and to later prompts.
+//! looks for information or content. A required field whose kind of source,
+//! `from`, has `none` first; the core keeps it on the Turn record when the
+//! act happens, guards its text, and tells it to the narrator and to later
+//! prompts.
 
 mod support;
 
@@ -12,8 +13,8 @@ use threshold_core::{
     closing_schema_for,
     context::{FINDS_FIELD_LINE, PROPOSAL_RULES, guard_found},
     domain::{
-        DecisionProposal, EntityKind, FINDS_DEFINITION, FindKind, Finds, FoundItem, Handle,
-        Intimacy, SeedEntity, Verdict,
+        DecisionProposal, EntityKind, FINDS_DEFINITION, Finds, FoundItem, Handle, Intimacy,
+        SeedEntity, SourceKind, Verdict,
     },
     proposal_schema_for,
     rules::D10,
@@ -34,7 +35,7 @@ fn item(title: &str, line: &str) -> FoundItem {
 
 fn notices() -> Finds {
     Finds {
-        what: FindKind::Found,
+        from: SourceKind::NoticeOrSign,
         source: "the notice board".into(),
         items: vec![
             item(
@@ -110,7 +111,7 @@ fn hidden_world() -> World {
 // --- The field ---------------------------------------------------------------
 
 #[test]
-fn the_schema_requires_finds_with_nothing_first() {
+fn the_schema_requires_finds_with_none_first() {
     let w = World::new();
     let ctx = HandleContext {
         entities: vec![Handle::Entity(w.ada), Handle::Entity(w.orsel)],
@@ -121,14 +122,31 @@ fn the_schema_requires_finds_with_nothing_first() {
     assert!(required.iter().any(|k| k == "finds"), "{required:?}");
     let finds = &schema["properties"]["finds"];
     assert_eq!(finds["description"], FINDS_DEFINITION);
+    // The kind of source is a closed enum, `none` first, and it comes
+    // before the label and the items (live run of b245f71: a free label
+    // let a greeting find "the clerk's reaction").
     assert_eq!(
-        finds["properties"]["what"]["enum"],
-        serde_json::json!(["nothing", "found"])
+        finds["properties"]["from"]["enum"],
+        serde_json::json!([
+            "none",
+            "screen",
+            "document",
+            "notice_or_sign",
+            "container",
+            "shelf_or_search",
+            "list_or_ledger"
+        ])
     );
+    assert!(finds["properties"].get("what").is_none());
     assert_eq!(
         finds["required"],
-        serde_json::json!(["what", "source", "items"])
+        serde_json::json!(["from", "source", "items"])
     );
+    // The schema's keys are sorted, and the model writes them in that
+    // order: the kind comes first, before any item. (The raw log of b245f71
+    // shows `items`, `source`, then `what`: the decision came last.)
+    let order: Vec<&String> = finds["properties"].as_object().unwrap().keys().collect();
+    assert_eq!(order, ["from", "items", "source"]);
     assert_eq!(finds["additionalProperties"], false);
     assert_eq!(finds["properties"]["source"]["maxLength"], 40);
     assert_eq!(finds["properties"]["items"]["maxItems"], 5);
@@ -161,7 +179,10 @@ fn the_schema_takes_a_sound_finds_and_refuses_a_long_one() {
     assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));
     p["finds"] = serde_json::to_value(Finds::default()).unwrap();
     assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));
-    p["finds"]["what"] = "maybe".into();
+    p["finds"]["from"] = "maybe".into();
+    assert!(!validator.is_valid(&p));
+    // The kind of a stored record from before `from` is no model value.
+    p["finds"]["from"] = "other".into();
     assert!(!validator.is_valid(&p));
     p["finds"] = serde_json::to_value(notices()).unwrap();
     p["finds"]["items"][0]["title"] = "x".repeat(61).into();
@@ -173,6 +194,16 @@ fn the_schema_takes_a_sound_finds_and_refuses_a_long_one() {
 #[test]
 fn the_finds_definition_is_one_text() {
     assert_eq!(FINDS_FIELD_LINE, format!("- finds: {FINDS_DEFINITION}"));
+    // Each kind the model may write is defined in it, and speech is `none`.
+    for kind in SourceKind::ALL {
+        assert!(
+            FINDS_DEFINITION.contains(&format!("{} = ", kind.word())),
+            "{}",
+            kind.word()
+        );
+    }
+    assert!(!SourceKind::ALL.contains(&SourceKind::Other));
+    assert!(FINDS_DEFINITION.contains("what a person says is told through reactions, never here"));
     assert!(
         PROPOSAL_RULES.contains(FINDS_FIELD_LINE),
         "{PROPOSAL_RULES}"
@@ -213,10 +244,31 @@ fn an_old_stored_proposal_reads_nothing_found() {
     let old = r#"{"action":"talk","verdict":"allowed","minutes":5}"#;
     let p: DecisionProposal = serde_json::from_str(old).unwrap();
     assert_eq!(p.finds, Finds::default());
-    assert_eq!(p.finds.what, FindKind::Nothing);
+    assert_eq!(p.finds.from, SourceKind::None);
     let record = format!(r#"{{"proposal":{old},"reactions":[],"events":[],"roll":null}}"#);
     assert_eq!(stored_found(&record), None);
     assert_eq!(stored_found("{}"), None);
+}
+
+/// A Turn stored with the first shape of the field (b245f71, `what`) still
+/// reads: `found` is a result of an unknown kind, `nothing` is `none`.
+#[test]
+fn a_record_stored_with_what_still_reads() {
+    let record = r#"{"proposal":{"action":"act","verdict":"allowed","finds":{"what":"found","source":"the drawer","items":[{"title":"A key","line":"Small and rusty."}]}},"found":{"what":"found","source":"the drawer","items":[{"title":"A key","line":"Small and rusty."}]}}"#;
+    let found = stored_found(record).expect("an old found record reads");
+    assert_eq!(found.from, SourceKind::Other);
+    assert_eq!(found.source, "the drawer");
+    assert_eq!(found.items, [item("A key", "Small and rusty.")]);
+    let p: serde_json::Value = serde_json::from_str(record).unwrap();
+    let p: DecisionProposal = serde_json::from_value(p["proposal"].clone()).unwrap();
+    assert_eq!(p.finds.from, SourceKind::Other);
+    let nothing: Finds =
+        serde_json::from_str(r#"{"what":"nothing","source":"","items":[]}"#).unwrap();
+    assert_eq!(nothing, Finds::default());
+    // A value written now has `from`, and no `what`.
+    let written = serde_json::to_value(notices()).unwrap();
+    assert_eq!(written["from"], "notice_or_sign");
+    assert!(written.get("what").is_none());
 }
 
 // --- settle and validate ----------------------------------------------------
@@ -227,20 +279,28 @@ fn settle_drops_a_malformed_or_over_long_finds() {
     let long = |n: usize| "x".repeat(n);
     let cases: Vec<(&str, Finds, Finds)> = vec![
         (
-            "nothing with content",
+            "none with content",
             Finds {
-                what: FindKind::Nothing,
+                from: SourceKind::None,
                 source: "the drawer".into(),
                 items: vec![item("A key", "")],
             },
             Finds::default(),
         ),
         (
-            "found with no item",
+            "a kind with no item",
             Finds {
-                what: FindKind::Found,
+                from: SourceKind::Container,
                 source: "the drawer".into(),
                 items: vec![],
+            },
+            Finds::default(),
+        ),
+        (
+            "the kind of a stored record",
+            Finds {
+                from: SourceKind::Other,
+                ..notices()
             },
             Finds::default(),
         ),
@@ -316,9 +376,13 @@ fn validate_rejects_a_malformed_finds() {
     let w = World::new();
     for bad in [
         Finds {
-            what: FindKind::Nothing,
+            from: SourceKind::None,
             source: "the drawer".into(),
             items: vec![],
+        },
+        Finds {
+            from: SourceKind::Other,
+            ..notices()
         },
         Finds {
             items: vec![],
@@ -403,6 +467,55 @@ fn the_turn_records_what_the_pc_found_when_the_act_happens() {
     for part in [&told.system, &told.stable, &told.scene] {
         assert!(!part.contains("grey mule"), "{part}");
     }
+}
+
+/// The live run of b245f71: "I walk over to the wall and read the notices"
+/// came back as a `move` with `move_to: null`. The narrator got "The move
+/// does not happen" after the found lines, and told the PC stopping short
+/// of the wall in 5 of the 11 lookups that found something. A Turn that
+/// keeps found content happened, so the narrator gets where the PC is,
+/// not a move that failed.
+#[test]
+fn a_move_inside_the_place_that_finds_something_is_told_as_happening() {
+    let mut p = looking(notices());
+    p.action = threshold_core::domain::ActionKind::Move;
+    let (mut engine, _, gm) = setup(World::new(), vec![json(&p)], vec!["You read the board."]);
+    engine
+        .play_turn(
+            "t1".into(),
+            "I walk over to the board and read the notices.",
+            &mut |_| {},
+        )
+        .unwrap();
+    let told = &prompts(&gm, CallKind::Narrate)[0];
+    let outcome_block = &told.recent[told.recent.find("THIS TURN").unwrap()..];
+    assert!(
+        outcome_block.contains("- What the PC finds (the notice board)"),
+        "{outcome_block}"
+    );
+    assert!(
+        !outcome_block.contains(threshold_core::context::NOT_MOVED_LINE),
+        "{outcome_block}"
+    );
+    assert!(
+        outcome_block.contains(threshold_core::context::PC_PLACE_LINE),
+        "{outcome_block}"
+    );
+
+    // The same move that finds nothing is still a move that did not happen.
+    let mut p = looking(Finds::default());
+    p.action = threshold_core::domain::ActionKind::Move;
+    let (mut engine, _, gm) = setup(World::new(), vec![json(&p)], vec!["You stay."]);
+    engine
+        .play_turn("t1".into(), "I walk to the far hills.", &mut |_| {})
+        .unwrap();
+    let told = &prompts(&gm, CallKind::Narrate)[0];
+    assert!(
+        told.recent
+            .contains(threshold_core::context::NOT_MOVED_LINE),
+        "{}",
+        told.recent
+    );
 }
 
 #[test]
@@ -490,6 +603,71 @@ fn an_item_that_names_a_hidden_entity_or_a_secret_is_dropped() {
         ..notices()
     };
     assert_eq!(guard_found(&w.view, &only_secret).0, None);
+}
+
+/// The town campaign as the eval plays it: the Adventure Seed, then the
+/// world.
+fn town() -> threshold_core::store::WorldView {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/town");
+    let seed = threshold_core::fixture::load_adventure_seed(&dir.join("adventure-seed.toml"))
+        .expect("the town seed");
+    let mut store = Store::open_in_memory().unwrap();
+    let campaign = threshold_core::turn::create_campaign(&mut store, &seed, 11, None).unwrap();
+    threshold_core::fixture::load_world(&mut store, campaign, &dir.join("world.toml"))
+        .expect("the town world");
+    store.snapshot(campaign).unwrap()
+}
+
+/// The live run of b245f71 (`evals/reports/2026-11-finds.md`): the guard
+/// dropped notices that said "the magistrate" and a source that said "the
+/// clerk", because Orsel's role and Hessa's role are facts the PC holds no
+/// Belief about. A one-word value is a common word; a found item states
+/// it without stating the secret. The guard of found content keeps what
+/// protects hidden content: the names of hidden and un-nameable entities,
+/// and GM-only values of at least two content words.
+#[test]
+fn the_found_guard_keeps_common_words_and_drops_hidden_content() {
+    let view = town();
+    let finds = Finds {
+        source: "the clerk's notice board".into(),
+        items: vec![
+            item(
+                "Trade Decree",
+                "A decree from the magistrate's office on trade standards.",
+            ),
+            item("Grain Notice", "The grain tithe goes up next season."),
+            item(
+                "Archive hours",
+                "The Tithe archive opens at the third bell.",
+            ),
+        ],
+        ..notices()
+    };
+    let (kept, notes) = guard_found(&view, &finds);
+    let kept = kept.expect("the common words keep the result");
+    assert_eq!(kept.source, "the clerk's notice board");
+    let titles: Vec<&str> = kept.items.iter().map(|i| i.title.as_str()).collect();
+    // "the grain tithe" is the value of a GM-only fact (two content words).
+    assert!(titles.contains(&"Trade Decree"), "{titles:?} {notes:?}");
+    assert!(!titles.contains(&"Grain Notice"), "{titles:?}");
+    assert_eq!(notes.len(), titles.len().abs_diff(3), "{notes:?}");
+
+    // The names of hidden and un-nameable entities still go.
+    let w = hidden_world();
+    let finds = Finds {
+        items: vec![
+            item("A note from Maren", "Meet me after dark."),
+            item("Cellar rent", "Paid to the Smugglers Cellar each month."),
+            item("Keys", "Ada still holds the gate key."),
+            item("Tolls", "Carts pay two copper at the gate."),
+        ],
+        ..notices()
+    };
+    let (kept, _) = guard_found(&w.view, &finds);
+    assert_eq!(
+        kept.map(|f| f.items),
+        Some(vec![item("Tolls", "Carts pay two copper at the gate.")])
+    );
 }
 
 #[test]
@@ -592,7 +770,7 @@ fn a_correction_keeps_its_own_finds() {
     let other = Finds {
         source: "the toll house door".into(),
         items: vec![item("Tolls", "Carts pay two copper at the gate.")],
-        what: FindKind::Found,
+        from: SourceKind::NoticeOrSign,
     };
     let (mut engine, _, gm) = setup(
         World::new(),
@@ -651,7 +829,7 @@ mod screens {
     use crate::support::hidden::*;
     use serde_json::json;
     use threshold_core::{
-        domain::{ActionKind, FindKind, Finds, Intimacy, Verdict},
+        domain::{ActionKind, Finds, Intimacy, SourceKind, Verdict},
         player::Marks,
         store::TurnId,
         view::{FoundCard, FoundRow, journal_view, ooc_sheet, play_view},
@@ -775,7 +953,7 @@ mod screens {
     fn a_record_that_breaks_the_limits_shows_nothing() {
         let mut w = HiddenWorld::new();
         let broken = Finds {
-            what: FindKind::Found,
+            from: SourceKind::NoticeOrSign,
             source: "the notice board".into(),
             items: (1..=6).map(|i| item(&format!("Entry {i}"), "")).collect(),
         };
