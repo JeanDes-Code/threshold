@@ -98,8 +98,8 @@ fn report_has_every_metric() {
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
     // agency_leaks 12, offscreen 4, speech 10, play_basics 8, open_items 9,
-    // departures 5, finds 5 = 120 Turns. The OOC scenario plays no Turn.
-    assert!(report.contains("- Turns played: 240 (0 failed"), "{report}");
+    // departures 5, finds 7 = 122 Turns. The OOC scenario plays no Turn.
+    assert!(report.contains("- Turns played: 244 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1713,8 +1713,9 @@ fn open_items_counts_right_and_wrong_closes() {
 
 /// ADR 0007 (2026-11-12): the finds counts, on recorded answers. The first
 /// lookup finds two items, the drawer finds nothing, the fee list finds one;
-/// the plain talk finds one (a false positive) and the move nothing. The
-/// judge says yes to every Narration it reads.
+/// the plain talk finds one (a false positive); the look around, the long
+/// answer and the move find nothing. The judge says yes to every Narration
+/// it reads; the first Narration names one title.
 #[test]
 fn finds_counts_lookups_false_positives_and_told() {
     let found = |source: &str, titles: &[&str]| {
@@ -1732,10 +1733,14 @@ fn finds_counts_lookups_false_positives_and_told() {
             found("the court notices", &["Market day court", "Lost mule"]),
             found("Hessa's answer", &["Her week"]),
             PROPOSAL.to_owned(),
+            PROPOSAL.to_owned(),
+            PROPOSAL.to_owned(),
             found("the fee list", &["Copying, per page"]),
             PROPOSAL.to_owned(),
         ],
-        vec!["It happens.".to_owned(); 5],
+        std::iter::once("The court sits on market day.".to_owned())
+            .chain(std::iter::repeat_n("It happens.".to_owned(), 6))
+            .collect(),
     );
     let config = Config {
         root: root(),
@@ -1757,12 +1762,28 @@ fn finds_counts_lookups_false_positives_and_told() {
     for line in [
         "- Lookups that found something: 2 / 3 (67%)",
         "- Items per lookup that found something: 1.5",
-        "- Negatives with a found result (false positives): 1 / 2 (50%)",
+        "- Negatives with a found result (false positives): 1 / 4 (25%)",
         "- Lookup Narrations that tell a found item (judge): 2 / 3 (67%) (0 judge errors)",
-        "- Turns failed: 0 / 5 (0%)",
+        "- Lookup Narrations that name an item title (every content word; no pass line): 1 / 3 (33%)",
+        "- Item titles the Narration names: 1 / 3 (33%)",
+        "- Turns failed: 0 / 7 (0%)",
     ] {
         assert!(report.contains(line), "missing {line}:\n{report}");
     }
+}
+
+/// A title is named when each of its content words is in the Narration, in
+/// any order, with a plural `s` cut.
+#[test]
+fn a_narration_names_a_title_by_its_content_words() {
+    use threshold_eval::finds::names_title;
+    let told = "You lean in and find a \"Fee Schedule\" beside receipts for grain shipments.";
+    assert!(names_title(told, "Fee Schedule"));
+    assert!(names_title(told, "Grain Receipts"));
+    assert!(names_title(told, "The receipt"));
+    assert!(!names_title(told, "Lost Item"));
+    assert!(!names_title(told, "Fee List"));
+    assert!(!names_title(told, "The"));
 }
 
 /// The mature content module (plan Task 9): the four metrics, the outside

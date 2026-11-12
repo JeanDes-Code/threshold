@@ -3,17 +3,21 @@
 # finds: the proposal's required `finds`, kept on the Turn record when the
 # act happens, told by the narrator and shown under the Narration. One
 # campaign per run on the town fixture plays the steps in order: three
-# lookups and two negatives (a plain talk, then a move, last, so that every
-# lookup happens in the town hall).
+# lookups and four negatives (a plain talk, a look around, a question that
+# an NPC answers at length, then a move, last, so that every lookup happens
+# in the town hall). The fee list is a question to an NPC that is still a
+# lookup: the PC reads the list.
 #
-# Measures: lookups whose Turn records at least one item (`what` is not
-# `nothing`, the act happened, the guard kept an item); negatives that record
+# Measures: lookups whose Turn records at least one item (`from` is not
+# `none`, the act happened, the guard kept an item); negatives that record
 # one (false positives); lookup Narrations that tell at least one found item
-# (the judge reads the Narration and the items); Turn time.
+# (the judge reads the Narration and the items); lookup Narrations that name
+# at least one item title (every content word of the title is in the
+# Narration: a deterministic cross-check, no pass line); Turn time.
 #
-# Pass lines, at --runs 4 (12 lookups, 8 negatives):
+# Pass lines, at --runs 4 (12 lookups, 16 negatives):
 # - Lookups that found something: at least 10 of 12.
-# - Negatives with a found result (false positives): at most 1 of 8.
+# - Negatives with a found result (false positives): at most 2 of 16.
 # - Lookup Narrations that tell a found item (judge): at least 10 of 12.
 # - Turn time p90 (committed Turns): under 15 s.
 #
@@ -32,6 +36,14 @@ intent = "I tell Hessa good morning and ask how her week has been."
 [[steps]]
 kind = "lookup"
 intent = "I open the drawer of the spare desk by the window and look through what is inside."
+
+[[steps]]
+kind = "negative"
+intent = "I look around the room."
+
+[[steps]]
+kind = "negative"
+intent = "I ask Hessa to tell me about the people who work in the town hall, and I listen to her answer."
 
 [[steps]]
 kind = "lookup"

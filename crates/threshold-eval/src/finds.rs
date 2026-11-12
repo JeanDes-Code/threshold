@@ -1,10 +1,12 @@
 //! The finds scenario (ADR 0007, 2026-11-12): Intents that read, open,
 //! look through or ask for a list, and negative Intents (a plain talk, a
-//! move). It counts, from each Turn's record (`turn::stored_found`, what the
-//! screens show), the lookups that found something and the negatives that
-//! did; the judge reads each lookup's Narration with its found items and
-//! says whether the Narration tells at least one of them. The pass lines
-//! are in the scenario file's header.
+//! look around, an NPC's long answer, a move). It counts, from each Turn's
+//! record (`turn::stored_found`, what the screens show), the lookups that
+//! found something and the negatives that did; the judge reads each
+//! lookup's Narration with its found items and says whether the Narration
+//! tells at least one of them. A deterministic count stands next to the
+//! judge: the item titles whose content words all appear in the Narration
+//! (`names_title`). The pass lines are in the scenario file's header.
 
 use std::fmt::Write as _;
 
@@ -24,8 +26,45 @@ struct Stats {
     items: usize,
     told: usize,
     judge_errors: usize,
+    /// Lookup Narrations that name at least one item title (`names_title`).
+    named: usize,
+    /// Item titles on the lookup Turns that found something, and those the
+    /// Narration names.
+    titles: usize,
+    titles_named: usize,
     negatives: usize,
     false_found: usize,
+}
+
+/// Words that carry no content: a title's content words are its others.
+const FUNCTION_WORDS: &[&str] = &[
+    "a", "an", "and", "at", "by", "for", "from", "in", "into", "of", "on", "or", "the", "to",
+    "with",
+];
+
+/// The words of `text`, lower case, split on what is not a letter or a
+/// digit, with a plural `s` cut from words of more than three letters.
+fn word_set(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| match w.strip_suffix('s') {
+            Some(stem) if w.chars().count() > 3 && !w.ends_with("ss") => stem.to_owned(),
+            _ => w.to_owned(),
+        })
+        .collect()
+}
+
+/// True when every content word of `title` appears in `narration`
+/// (`word_set`): the Narration names the item, in any order. A title with
+/// no content word is never named.
+pub fn names_title(narration: &str, title: &str) -> bool {
+    let told = word_set(narration);
+    let content: Vec<String> = word_set(title)
+        .into_iter()
+        .filter(|w| !FUNCTION_WORDS.contains(&w.as_str()))
+        .collect();
+    !content.is_empty() && content.iter().all(|w| told.contains(w))
 }
 
 /// The judge's task: does the Narration tell at least one found item.
@@ -70,10 +109,15 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                 .ok_or("the committed Turn is missing")?;
             let found = stored_found(&stored.record.proposal_json);
             (ctx.log)(&format!(
-                "{} {:?}: {} items found",
+                "{} {:?}: {} items found{}",
                 played.op_id,
                 step.kind,
-                found.as_ref().map_or(0, |f| f.items.len())
+                found.as_ref().map_or(0, |f| f.items.len()),
+                found.as_ref().map_or_else(String::new, |f| format!(
+                    " (from {}, source {:?})",
+                    f.from.word(),
+                    f.source
+                ))
             ));
             match (step.kind, found) {
                 (FindKind::Negative, found) => {
@@ -91,6 +135,16 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                         .iter()
                         .map(|i| (i.title.clone(), i.line.clone()))
                         .collect();
+                    let named = found
+                        .items
+                        .iter()
+                        .filter(|i| names_title(&outcome.narration, &i.title))
+                        .count();
+                    st.titles += found.items.len();
+                    st.titles_named += named;
+                    if named > 0 {
+                        st.named += 1;
+                    }
                     let task = told_task(&outcome.narration, &found.source, &items);
                     match ctx.ask(&task, &["yes", "no"]).as_deref() {
                         Some("yes") => st.told += 1,
@@ -137,6 +191,20 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         st.lookups,
         pct(st.told, st.lookups),
         st.judge_errors
+    );
+    let _ = writeln!(
+        out,
+        "- Lookup Narrations that name an item title (every content word; no pass line): {} / {} ({})",
+        st.named,
+        st.lookups,
+        pct(st.named, st.lookups)
+    );
+    let _ = writeln!(
+        out,
+        "- Item titles the Narration names: {} / {} ({})",
+        st.titles_named,
+        st.titles,
+        pct(st.titles_named, st.titles)
     );
     let _ = writeln!(
         out,

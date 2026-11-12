@@ -8,7 +8,7 @@
 //! gives counts, never a pass/fail, except the latency pass line.
 
 mod departures;
-mod finds;
+pub mod finds;
 mod judge;
 pub mod mature;
 mod ooc;
