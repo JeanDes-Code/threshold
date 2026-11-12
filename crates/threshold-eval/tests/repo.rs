@@ -126,15 +126,48 @@ fn scan(pack: Option<&Path>) -> (i32, String) {
     (out.status.code().unwrap_or(-1), text)
 }
 
+/// The scan needs `sh` and a git checkout of the repository: without them
+/// a scan test says why it skips, and passes.
+fn scan_can_run() -> bool {
+    if !Path::new("/bin/sh").exists() && !has("sh") {
+        eprintln!("skipped: sh is missing");
+        return false;
+    }
+    let checkout = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root())
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !checkout {
+        eprintln!("skipped: no git checkout of the repository (or no git)");
+    }
+    checkout
+}
+
+/// A fresh folder outside the repository for one scan test.
+fn scratch(case: &str) -> PathBuf {
+    let base = std::env::temp_dir().join(format!("private-scan-{case}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    base.canonicalize().unwrap()
+}
+
+/// A line of 40 characters or more of a tracked file, read at run time, so
+/// no source here holds it.
+fn tracked_line(file: &str) -> String {
+    std::fs::read_to_string(root().join(file))
+        .unwrap()
+        .lines()
+        .find(|l| l.trim().chars().count() >= 40)
+        .unwrap()
+        .trim()
+        .to_owned()
+}
+
 #[test]
 fn the_scan_finds_a_fragment_line_and_prints_no_text() {
-    // `sh` runs the script (the plan's skip rule); `git` lists the files
-    // the scan searches.
-    for tool in ["sh", "git"] {
-        if !(tool == "sh" && Path::new("/bin/sh").exists() || has(tool)) {
-            eprintln!("skipped: {tool} is missing");
-            return;
-        }
+    if !scan_can_run() {
+        return;
     }
     let base =
         Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("private-scan-{}", std::process::id()));
@@ -173,7 +206,158 @@ fn the_scan_finds_a_fragment_line_and_prints_no_text() {
 
     let (code, out) = scan(None);
     assert_eq!(code, 0, "{out}");
-    assert!(out.trim().is_empty(), "{out}");
+    assert_eq!(
+        out.trim(),
+        "private_text_scan: THRESHOLD_PRIVATE_PACK is not set; skipped"
+    );
 
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+/// Review M1 (2026-11-12): the scan reads the pack's text files only. A
+/// `.git` folder, a binary file and `pack.toml` that hold a tracked line
+/// are left out, and do not stop the scan; a fragment that holds it is a
+/// hit. A relative folder, and a folder whose path holds a colon, work.
+#[test]
+fn the_scan_reads_text_files_only_and_skips_git_and_binary() {
+    if !scan_can_run() {
+        return;
+    }
+    let line = tracked_line("docs/adr/0006-speaker-mark.md");
+    let base = scratch("text");
+    let pack = base.join("pack:one");
+    std::fs::create_dir_all(pack.join(".git/objects")).unwrap();
+    std::fs::write(pack.join(".git/objects/blob"), format!("{line}\n")).unwrap();
+    std::fs::write(pack.join(".git/HEAD"), format!("{line}\n")).unwrap();
+    let mut binary = b"\x00\x01binary\n".to_vec();
+    binary.extend_from_slice(line.as_bytes());
+    binary.extend_from_slice(b"\n\x00");
+    std::fs::write(pack.join("image.bin"), binary).unwrap();
+    std::fs::write(pack.join("pack.toml"), format!("# {line}\n")).unwrap();
+    let (code, out) = scan(Some(&pack));
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains(&line), "{out}");
+
+    std::fs::write(pack.join("words.txt"), format!("{line}\n")).unwrap();
+    let (code, out) = scan(Some(&pack));
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("docs/adr/0006-speaker-mark.md:"), "{out}");
+    assert!(!out.contains(&line), "{out}");
+
+    // The same folder, named relative to the repository root.
+    let up = "../".repeat(root().components().count() - 1);
+    let relative = PathBuf::from(up).join(pack.strip_prefix("/").unwrap());
+    let (code, out) = scan(Some(&relative));
+    assert_eq!(code, 1, "relative: {out}");
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
+/// Review M1: a tool error stops the scan with a plain message that holds
+/// no pack text and no pack file name; it is never a silent pass.
+#[cfg(unix)]
+#[test]
+fn a_tool_error_fails_the_scan_and_prints_no_pack_text() {
+    use std::os::unix::fs::PermissionsExt;
+    if !scan_can_run() {
+        return;
+    }
+    let base = scratch("error");
+    let secret = base.join("secret-fragment-name.md");
+    std::fs::write(&secret, "SECRETPACKTEXT and more words of it\n").unwrap();
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&secret).is_ok() {
+        eprintln!("skipped: this user reads a file of mode 000");
+        std::fs::remove_dir_all(&base).unwrap();
+        return;
+    }
+    let (code, out) = scan(Some(&base));
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::remove_dir_all(&base).unwrap();
+    assert_eq!(code, 2, "{out}");
+    assert!(out.starts_with("private_text_scan: "), "{out}");
+    for text in ["SECRETPACKTEXT", "secret-fragment-name"] {
+        assert!(!out.contains(text), "{out}");
+    }
+}
+
+/// Review M1: a hit in a file whose path holds a colon prints the whole
+/// path and the line number. The scan runs in a small git repository of
+/// its own, with no sample pack.
+#[test]
+fn the_scan_names_a_file_whose_path_holds_a_colon() {
+    if !scan_can_run() {
+        return;
+    }
+    let base = scratch("colon");
+    let repo = base.join("repo");
+    std::fs::create_dir_all(repo.join("dir:x")).unwrap();
+    let line = "a plain line of the private pack, for the colon test";
+    std::fs::write(repo.join("dir:x/a:b.md"), format!("intro\n{line}\n")).unwrap();
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .unwrap()
+    };
+    git(&["init", "-q"]);
+    git(&["add", "dir:x/a:b.md"]);
+    let pack = base.join("pack");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(pack.join("fragment.md"), format!("{line}\n")).unwrap();
+    let out = Command::new("sh")
+        .arg(root().join("scripts/qa/private_text_scan.sh"))
+        .env("THRESHOLD_PRIVATE_PACK", &pack)
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    std::fs::remove_dir_all(&base).unwrap();
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(text.contains("staged: dir:x/a:b.md:2"), "{text}");
+    assert!(text.contains("work tree: dir:x/a:b.md:2"), "{text}");
+    assert!(!text.contains(line), "{text}");
+}
+
+/// Review M2 (2026-11-12): a pack built exactly from the example of
+/// `docs/content-pack-format.md` (its `pack.toml` block and the files it
+/// names) loads, and the scan lets every commit through: `pack.toml` is not
+/// scanned, so the lines it shares with the format page are no hit.
+#[test]
+fn a_pack_from_the_format_page_example_loads_and_passes_the_scan() {
+    let page = std::fs::read_to_string(root().join("docs/content-pack-format.md")).unwrap();
+    let start = page.find("## `pack.toml`").unwrap();
+    let block = &page[start..];
+    let toml = &block[block.find("```toml\n").unwrap() + 8..];
+    let toml = &toml[..toml.find("```").unwrap()];
+    let base = scratch("example");
+    let pack = base.join("my-pack");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(pack.join("pack.toml"), toml).unwrap();
+    // The files the example names, with lines made at run time.
+    let made: String = format!("{}-{}", std::process::id(), "y".repeat(24));
+    for line in toml.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key == "file" || key == "intimate_words" {
+            let name = value.split('"').nth(1).unwrap();
+            let text = if key == "file" {
+                format!("Keep each moment short and plain, {made}.\n")
+            } else {
+                "glimmerwick\n".to_owned()
+            };
+            std::fs::write(pack.join(name), text).unwrap();
+        }
+    }
+    let (packs, problems) = threshold_core::pack::load_all(&base);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(packs.len(), 1);
+    assert_eq!(packs[0].intimate_words.len(), 1);
+    if scan_can_run() {
+        let (code, out) = scan(Some(&pack));
+        assert_eq!(code, 0, "{out}");
+    }
     std::fs::remove_dir_all(&base).unwrap();
 }
