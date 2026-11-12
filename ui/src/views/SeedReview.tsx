@@ -40,6 +40,8 @@ import {
   gapsAt,
   isCharacter,
   nameChange,
+  otherButton,
+  pairMarks,
   removeAt,
   removeEntry,
   renamed,
@@ -113,6 +115,9 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const [leaving, setLeaving] = useState(false);
   const [editing, setEditing] = useState<ReadonlySet<number>>(() => new Set());
   const [adding, setAdding] = useState<"character" | "place" | null>(null);
+  // The gap "To fix" shows, and the pair gap a "Show" button last showed.
+  const [gapIndex, setGapIndex] = useState(0);
+  const [shown, setShown] = useState<Gap | null>(null);
   // Set and read in event handlers only: a rename on Enter must not run
   // again on the blur that follows, before React renders the busy state.
   const [guard] = useState(createGuard);
@@ -274,14 +279,24 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
     }
   };
 
-  const show = (at: string) => {
+  /** Scrolls to the field at `at` and focuses it. `gap`: the gap whose button the Player pressed. */
+  const show = (at: string, gap?: Gap) => {
+    if (gap) setShown(gap);
     const target = focusTarget(at);
     const el = document.getElementById(fieldId(target));
     el?.scrollIntoView({ block: "center" });
     el?.focus();
   };
 
-  const toFix = (path: string) => <FieldGaps gaps={gapsAt(gaps, path)} form={form} />;
+  const current = gaps[Math.min(gapIndex, gaps.length - 1)];
+  // Both rows of a pair gap, while it is the current one or was last shown.
+  const marks = pairMarks(gaps, [current, shown], form);
+  const pairMark = (row: string) => {
+    const label = marks[row];
+    return label === undefined ? null : <span className="review-tag review-tag--pair review-pair">{label}</span>;
+  };
+
+  const toFix = (path: string) => <FieldGaps gaps={gapsAt(gaps, path)} form={form} onShow={show} />;
   const cutsOf = (id: SectionId) => cut.filter((c) => cutSections(c, form).includes(id));
   const countIn = (id: SectionId) => gaps.filter((g) => sectionOf(g.at, form) === id).length;
 
@@ -379,7 +394,10 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
         return next;
       });
     return (
-      <li key={i} className={`review-fact${open ? " review-fact--open" : ""}`}>
+      <li
+        key={i}
+        className={`review-fact${open ? " review-fact--open" : ""}${marks[`knowledge[${i}]`] ? " review-fact--paired" : ""}`}
+      >
         <div className="review-fact__line">
           <span className={`review-fact__mark${k.open ? " review-fact__mark--open" : ""}`} aria-hidden="true" />
           <p className="review-fact__text">{k.text.trim() || <span className="review-hint">No sentence yet.</span>}</p>
@@ -401,6 +419,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
             Delete
           </button>
         </div>
+        {pairMark(`knowledge[${i}]`)}
         {toFix(`knowledge[${i}]`)}
         {open ? (
           <div className="review-fact__edit">
@@ -510,7 +529,8 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
       </>
     ),
     you: (
-      <div className="review-entry review-entry--pc">
+      <div className={`review-entry review-entry--pc${marks.pc ? " review-entry--paired" : ""}`}>
+        {pairMark("pc")}
         {name("pc", "Name")}
         {toFix("pc.name")}
         {age("pc", seed.pc.age, (n) => n !== null && setPc({ age: n }))}
@@ -530,7 +550,8 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
         {people.length === 0 && <p className="review-empty">No other person in the draft.</p>}
         <ul className="review-entries">
           {people.map(({ e, i }) => (
-            <li key={i} className="review-entry">
+            <li key={i} className={`review-entry${marks[`entities[${i}]`] ? " review-entry--paired" : ""}`}>
+              {pairMark(`entities[${i}]`)}
               <div className="review-entry__head">
                 {name(i, "Name")}
                 {kindSelect(e, i, KINDS)}
@@ -564,7 +585,8 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
         {places.length === 0 && <p className="review-empty">No place or group in the draft.</p>}
         <ul className="review-entries">
           {places.map(({ e, i }) => (
-            <li key={i} className="review-entry">
+            <li key={i} className={`review-entry${marks[`entities[${i}]`] ? " review-entry--paired" : ""}`}>
+              {pairMark(`entities[${i}]`)}
               <div className="review-entry__head">
                 {name(i, "Name")}
                 {kindSelect(e, i, PLACE_KINDS)}
@@ -753,7 +775,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
             <p className="review-notice">A campaign was already built from this draft. Change something to build a new one.</p>
           )}
           <Progress ages={ages} others={others} />
-          <NextGap gaps={gaps} form={form} onShow={show} />
+          <NextGap gaps={gaps} form={form} index={gapIndex} onIndex={setGapIndex} onShow={show} />
           {cut.length > 0 && (
             <ul className="review-cuts">
               {cut.map((c) => (
@@ -850,12 +872,30 @@ function Progress({ ages, others }: { ages: AgeLine[]; others: number }) {
   );
 }
 
-/** The next gap in plain words, with a button that shows its field. */
-function NextGap({ gaps, form, onShow }: { gaps: Gap[]; form: ReviewForm; onShow: (at: string) => void }) {
-  const [index, setIndex] = useState(0);
+type Show = (at: string, gap?: Gap) => void;
+
+/**
+ * The next gap in plain words, with a button that shows its field. A pair
+ * gap has a second button for the other entry. Its place is kept, empty,
+ * for every other gap, so Previous and Next never move.
+ */
+function NextGap({
+  gaps,
+  form,
+  index,
+  onIndex,
+  onShow,
+}: {
+  gaps: Gap[];
+  form: ReviewForm;
+  index: number;
+  onIndex: (i: number) => void;
+  onShow: Show;
+}) {
   const i = Math.min(index, gaps.length - 1);
   const gap = gaps[i];
   if (!gap) return <p className="review-ready">Nothing is left to fix.</p>;
+  const other = otherButton(gap, form);
   return (
     <div className="review-next" role="status">
       <p className="play-label">
@@ -863,13 +903,22 @@ function NextGap({ gaps, form, onShow }: { gaps: Gap[]; form: ReviewForm; onShow
       </p>
       <p className="review-next__text">{gapSentence(gap, form)}</p>
       <div className="review-next__tools">
-        <button type="button" className="play-btn play-btn--outline" onClick={() => onShow(gap.at)}>
+        <button type="button" className="play-btn play-btn--outline" onClick={() => onShow(gap.at, gap)}>
           Show me
         </button>
-        <button type="button" className="play-btn play-btn--text" disabled={i === 0} onClick={() => setIndex(i - 1)}>
+        {other ? (
+          <button type="button" className="play-btn play-btn--outline" onClick={() => onShow(other.at, gap)}>
+            {other.label}
+          </button>
+        ) : (
+          <span className="play-btn play-btn--outline review-next__spare" aria-hidden="true">
+            Show the other fact
+          </span>
+        )}
+        <button type="button" className="play-btn play-btn--text" disabled={i === 0} onClick={() => onIndex(i - 1)}>
           Previous
         </button>
-        <button type="button" className="play-btn play-btn--text" disabled={i === gaps.length - 1} onClick={() => setIndex(i + 1)}>
+        <button type="button" className="play-btn play-btn--text" disabled={i === gaps.length - 1} onClick={() => onIndex(i + 1)}>
           Next
         </button>
       </div>
@@ -877,16 +926,27 @@ function NextGap({ gaps, form, onShow }: { gaps: Gap[]; form: ReviewForm; onShow
   );
 }
 
-/** Each gap of one field, next to it: what is wrong, then what to do. */
-function FieldGaps({ gaps, form }: { gaps: Gap[]; form: ReviewForm }) {
+/** Each gap of one field, next to it: what is wrong, then what to do. A pair gap can show its other entry. */
+function FieldGaps({ gaps, form, onShow }: { gaps: Gap[]; form: ReviewForm; onShow: Show }) {
   if (gaps.length === 0) return null;
   return (
     <>
-      {gaps.map((g) => (
-        <p key={`${g.kind}-${g.at}`} className="review-gap">
-          {gapSentence(g, form)}
-        </p>
-      ))}
+      {gaps.map((g) => {
+        const other = otherButton(g, form);
+        return (
+          <p key={`${g.kind}-${g.at}`} className="review-gap">
+            {gapSentence(g, form)}
+            {other && (
+              <>
+                {" "}
+                <button type="button" className="play-btn play-btn--text review-gap__show" onClick={() => onShow(other.at, g)}>
+                  {other.label}
+                </button>
+              </>
+            )}
+          </p>
+        );
+      })}
     </>
   );
 }

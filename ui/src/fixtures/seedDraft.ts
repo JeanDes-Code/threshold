@@ -69,7 +69,7 @@ export const confirmedAges: Record<string, number> = { "Agathe Morrow": 67, "Pim
 /** The gaps that are not about ages; the preview derives the age gaps. */
 export const otherGaps: Gap[] = [
   { kind: "unknown_name", at: "start.present[2]" },
-  { kind: "slot_conflict", at: "knowledge[3]" },
+  { kind: "slot_conflict", at: "knowledge[3]", with: "knowledge[1]" },
 ];
 
 export const seedDraftView: DraftView = {

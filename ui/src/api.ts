@@ -401,10 +401,15 @@ export type GapKind =
   | "seed_block_too_long"
   | "slot_conflict";
 
-/** One thing to fix before approval. `at` locates the field (see `Gap` in Rust). */
+/**
+ * One thing to fix before approval. `at` locates the field (see `Gap` in
+ * Rust). `with`: the other entry of a pair, in the same path form, on a
+ * `duplicate_name` or a `slot_conflict` gap only; absent on older data.
+ */
 export interface Gap {
   kind: GapKind;
   at: string;
+  with?: string;
 }
 
 export type DraftState = "draft" | "approved" | "built";
@@ -720,7 +725,9 @@ export function gapsFromError(e: unknown): Gap[] | null {
     if (!isRecord(item) || typeof item.kind !== "string" || typeof item.at !== "string") {
       return null;
     }
-    gaps.push({ kind: item.kind as GapKind, at: item.at });
+    const gap: Gap = { kind: item.kind as GapKind, at: item.at };
+    if (typeof item.with === "string") gap.with = item.with;
+    gaps.push(gap);
   }
   return gaps;
 }

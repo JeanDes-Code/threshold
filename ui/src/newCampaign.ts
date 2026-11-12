@@ -158,6 +158,7 @@ function factName(form: ReviewForm, i: number): string {
 }
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /** The field at `at`, in plain words, starting with a capital letter. No internal field name. */
 export function fieldLabel(at: string, form: ReviewForm): string {
@@ -260,6 +261,8 @@ function wrongKind(at: string, field: string, form: ReviewForm): string {
 /** One sentence for a gap: what is wrong, then what to do. */
 export function gapSentence(gap: Gap, form: ReviewForm): string {
   const field = fieldLabel(gap.at, form);
+  const other = otherOf(gap, form);
+  const otherField = other === null ? "" : lower(fieldLabel(other, form));
   const min = form.seed.min_age;
   const sentences: Record<GapKind, () => string> = {
     missing: () => `${field} is empty. Write it in.`,
@@ -268,17 +271,94 @@ export function gapSentence(gap: Gap, form: ReviewForm): string {
     age_below_min: () =>
       `${field} is below the minimum age${min === null ? "" : ` of ${min}`}. Raise the age, or change the minimum age under “How you want to play”.`,
     unknown_name: () => unknownName(gap.at, field, form),
-    duplicate_name: () => `${field} is used twice. Give one of them another name.`,
+    duplicate_name: () =>
+      other === null
+        ? `${field} is used twice. Give one of them another name.`
+        : `${field} is the same as ${otherField}. Give one of them another name.`,
     pc_in_roster: () => `${field} is a name of your character. Delete this entry, or give it another name.`,
     wrong_kind: () => wrongKind(gap.at, field, form),
     seed_block_too_long: () =>
       "The story setup is too long for the GM to read. Shorten the premise, the GM agreement or the content limits.",
     slot_conflict: () =>
-      `${field} says something about the same thing as another fact. Delete one of them, or merge them.`,
+      other === null
+        ? `${field} says something about the same thing as another fact. Delete one of them, or merge them.`
+        : `${field} and ${otherField} say something about the same thing. Delete one of them, or merge them.`,
   };
   return Object.hasOwn(sentences, gap.kind)
     ? sentences[gap.kind]()
     : `${field} needs a fix. Check it.`;
+}
+
+/**
+ * The other entry of a pair gap (`duplicate_name`, `slot_conflict`), while
+ * the review shows it: a known fact, a main name or an other name. Null for
+ * any other kind, for older data with no `with`, for a seed fact the review
+ * does not show, and for a row that is gone.
+ */
+export function otherOf(gap: Gap, form: ReviewForm): string | null {
+  if ((gap.kind !== "duplicate_name" && gap.kind !== "slot_conflict") || gap.with === undefined) {
+    return null;
+  }
+  const p = parseAt(gap.with);
+  const [a, b, c, d] = p;
+  const has = (list: unknown[] | undefined, i: unknown) => typeof i === "number" && list?.[i] !== undefined;
+  const shown =
+    (a === "knowledge" && p.length === 2 && has(form.knowledge, b)) ||
+    (a === "pc" && p.length === 2 && b === "name") ||
+    (a === "pc" && p.length === 3 && b === "other_names" && has(form.seed.pc.other_names, c)) ||
+    (a === "entities" && p.length === 3 && c === "name" && has(form.seed.entities, b)) ||
+    (a === "entities" &&
+      p.length === 4 &&
+      c === "other_names" &&
+      has(form.seed.entities[typeof b === "number" ? b : -1]?.other_names, d));
+  return shown ? gap.with : null;
+}
+
+/** The second button of a pair gap, next to "Show me": it shows the other entry. */
+export function otherButton(gap: Gap, form: ReviewForm): { label: string; at: string } | null {
+  const at = otherOf(gap, form);
+  if (at === null) return null;
+  return { label: at.startsWith("knowledge[") ? "Show the other fact" : "Show the other name", at };
+}
+
+/** The review row that holds the field at `at`: `pc`, `entities[2]` or `knowledge[4]`; null for any other field. */
+export function rowOf(at: string): string | null {
+  if (at === "pc" || at.startsWith("pc.")) return "pc";
+  return /^(entities|knowledge)\[\d+\]/.exec(at)?.[0] ?? null;
+}
+
+const sameGap = (a: Gap, b: Gap) => a.kind === b.kind && a.at === b.at && a.with === b.with;
+
+/**
+ * The rows to mark, by `rowOf`, each with its short label: both rows of
+ * each `active` pair gap (the current one in "To fix", the one last shown)
+ * that the store still reports. A fixed gap marks nothing.
+ */
+export function pairMarks(
+  gaps: Gap[],
+  active: (Gap | null | undefined)[],
+  form: ReviewForm,
+): Record<string, string> {
+  const marks: Record<string, string> = {};
+  for (const gap of active) {
+    if (!gap || !gaps.some((g) => sameGap(g, gap))) continue;
+    const other = otherOf(gap, form);
+    const here = rowOf(gap.at);
+    const there = other === null ? null : rowOf(other);
+    if (here === null || there === null) continue;
+    for (const row of [here, there]) {
+      if (Object.hasOwn(marks, row)) continue;
+      marks[row] =
+        gap.kind === "duplicate_name"
+          ? here === there
+            ? "Same name twice"
+            : "Same name as another entry"
+          : row.startsWith("knowledge[")
+            ? "Same thing as another fact"
+            : "Same thing as a fact";
+    }
+  }
+  return marks;
 }
 
 /** The parts of the review, in order: a guided path through the draft. */

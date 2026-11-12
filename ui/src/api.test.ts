@@ -258,6 +258,15 @@ describe("gapsFromError", () => {
     ]);
   });
 
+  it("keeps the other entry of a pair gap", () => {
+    const gap = { kind: "slot_conflict", at: "knowledge[2]", with: "knowledge[0]" };
+    expect(gapsFromError([gap])).toEqual([gap]);
+    // A `with` that is not text is dropped; the gap stays.
+    expect(gapsFromError([{ kind: "missing", at: "premise", with: 3 }])).toEqual([
+      { kind: "missing", at: "premise" },
+    ]);
+  });
+
   it("is null for a text error or a malformed list", () => {
     expect(gapsFromError("the draft is not approved")).toBeNull();
     expect(gapsFromError(new Error("boom"))).toBeNull();

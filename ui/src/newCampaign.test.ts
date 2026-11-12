@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AdventureSeed, AgeLine, DraftView, EntryRef, GapKind } from "./api";
+import type { AdventureSeed, AgeLine, DraftView, EntryRef, Gap, GapKind } from "./api";
 import {
   CANCEL_NOTE,
   DETAIL_LEVELS,
@@ -28,6 +28,10 @@ import {
   focusTarget,
   gapSentence,
   gapsAt,
+  otherButton,
+  otherOf,
+  pairMarks,
+  rowOf,
   formOfView,
   nameChange,
   parseAt,
@@ -260,6 +264,141 @@ describe("gapSentence", () => {
   it("keeps an unknown locator as it is", () => {
     expect(sentence("missing", "decided[0].subject")).toBe("Decided fact 1 is empty. Write it in.");
     expect(sentence("missing", "weird.path")).toBe("weird.path is empty. Write it in.");
+  });
+});
+
+describe("pair gaps", () => {
+  /** `form()` with two more facts: fact 3 says the same thing as fact 1. */
+  function paired(): ReviewForm {
+    const f = form();
+    return {
+      ...f,
+      knowledge: [
+        ...f.knowledge,
+        { subject: "Agathe Morrow", key: "trade", value: "brewer", text: "Agathe brews the beer.", open: false },
+      ],
+    };
+  }
+  const conflict: Gap = { kind: "slot_conflict", at: "knowledge[2]", with: "knowledge[0]" };
+  const duplicate: Gap = { kind: "duplicate_name", at: "entities[1].name", with: "entities[0].name" };
+
+  it("names both facts of a conflict", () => {
+    expect(gapSentence(conflict, paired())).toBe(
+      "The fact “Agathe brews the beer.” and the fact “Agathe runs the inn.” say something about the same thing. Delete one of them, or merge them.",
+    );
+    // A fact with no sentence goes by its number.
+    const blank = paired();
+    blank.knowledge = replaceAt(blank.knowledge, 0, { text: " " });
+    expect(gapSentence(conflict, blank)).toBe(
+      "The fact “Agathe brews the beer.” and fact 1 say something about the same thing. Delete one of them, or merge them.",
+    );
+    // A fact on the slot of an other name names that name.
+    expect(gapSentence({ ...conflict, with: "pc.other_names[0]" }, paired())).toBe(
+      "The fact “Agathe brews the beer.” and the other name “Wick” of your character say something about the same thing. Delete one of them, or merge them.",
+    );
+  });
+
+  it("keeps the old sentence when the other entry is unknown", () => {
+    const old = "The fact “Agathe brews the beer.” says something about the same thing as another fact. Delete one of them, or merge them.";
+    // Older data: no `with`.
+    expect(gapSentence({ kind: "slot_conflict", at: "knowledge[2]" }, paired())).toBe(old);
+    // A seed fact the review does not show, or a row that is gone.
+    expect(gapSentence({ ...conflict, with: "decided[0]" }, paired())).toBe(old);
+    expect(gapSentence({ ...conflict, with: "knowledge[9]" }, paired())).toBe(old);
+  });
+
+  it("names both entries of a duplicate name", () => {
+    expect(gapSentence(duplicate, form())).toBe(
+      "The name of Sefa Lind is the same as the name of Agathe Morrow. Give one of them another name.",
+    );
+    expect(gapSentence({ kind: "duplicate_name", at: "entities[0].name", with: "pc.other_names[0]" }, form())).toBe(
+      "The name of Agathe Morrow is the same as the other name “Wick” of your character. Give one of them another name.",
+    );
+    expect(gapSentence({ kind: "duplicate_name", at: "pc.other_names[0]", with: "pc.name" }, form())).toBe(
+      "The other name “Wick” of your character is the same as your character's name. Give one of them another name.",
+    );
+    // No other entry: the old sentence.
+    expect(gapSentence({ kind: "duplicate_name", at: "entities[1].name" }, form())).toBe(
+      "The name of Sefa Lind is used twice. Give one of them another name.",
+    );
+  });
+
+  it("finds the other entry only for a pair the review shows", () => {
+    const f = paired();
+    expect(otherOf(conflict, f)).toBe("knowledge[0]");
+    expect(otherOf(duplicate, f)).toBe("entities[0].name");
+    expect(otherOf({ ...duplicate, with: "pc.name" }, f)).toBe("pc.name");
+    expect(otherOf({ ...duplicate, with: "pc.other_names[0]" }, f)).toBe("pc.other_names[0]");
+    expect(otherOf({ ...conflict, with: undefined }, f)).toBeNull();
+    expect(otherOf({ ...conflict, with: "decided[0]" }, f)).toBeNull();
+    expect(otherOf({ ...conflict, with: "knowledge[3]" }, f)).toBeNull();
+    expect(otherOf({ ...duplicate, with: "entities[7].name" }, f)).toBeNull();
+    expect(otherOf({ ...duplicate, with: "pc.other_names[4]" }, f)).toBeNull();
+    // Only the two pair kinds carry another entry.
+    expect(otherOf({ kind: "missing", at: "knowledge[2].text", with: "knowledge[0]" }, f)).toBeNull();
+  });
+
+  it("gives a pair gap a second button", () => {
+    const f = paired();
+    expect(otherButton(conflict, f)).toEqual({ label: "Show the other fact", at: "knowledge[0]" });
+    expect(otherButton(duplicate, f)).toEqual({ label: "Show the other name", at: "entities[0].name" });
+    expect(otherButton({ ...conflict, with: "pc.other_names[0]" }, f)).toEqual({
+      label: "Show the other name",
+      at: "pc.other_names[0]",
+    });
+    expect(otherButton({ kind: "slot_conflict", at: "knowledge[2]" }, f)).toBeNull();
+    expect(otherButton({ kind: "missing", at: "premise" }, f)).toBeNull();
+    // The second button reaches the field like "Show me" does.
+    expect(fieldId(focusTarget("knowledge[0]"))).toBe("f-knowledge-0-");
+    expect(fieldId(focusTarget("entities[0].name"))).toBe("f-entities-0--name");
+  });
+
+  it("names the review row of a field", () => {
+    expect(rowOf("knowledge[3]")).toBe("knowledge[3]");
+    expect(rowOf("knowledge[3].subject")).toBe("knowledge[3]");
+    expect(rowOf("entities[2].other_names[0]")).toBe("entities[2]");
+    expect(rowOf("entities[2].name")).toBe("entities[2]");
+    expect(rowOf("pc.other_names[1]")).toBe("pc");
+    expect(rowOf("pc.name")).toBe("pc");
+    expect(rowOf("premise")).toBeNull();
+  });
+
+  it("marks both rows of an open pair, with a label", () => {
+    const f = paired();
+    const gaps: Gap[] = [{ kind: "missing", at: "premise" }, conflict, duplicate];
+    expect(pairMarks(gaps, [conflict], f)).toEqual({
+      "knowledge[2]": "Same thing as another fact",
+      "knowledge[0]": "Same thing as another fact",
+    });
+    expect(pairMarks(gaps, [duplicate], f)).toEqual({
+      "entities[1]": "Same name as another entry",
+      "entities[0]": "Same name as another entry",
+    });
+    // The current gap and the gap last shown both mark.
+    expect(Object.keys(pairMarks(gaps, [conflict, duplicate], f))).toHaveLength(4);
+    // A fact on the slot of an other name: the name's row says "a fact".
+    const alias: Gap = { ...conflict, with: "pc.other_names[0]" };
+    expect(pairMarks([alias], [alias], f)).toEqual({
+      "knowledge[2]": "Same thing as another fact",
+      pc: "Same thing as a fact",
+    });
+    // Two other names of one entry: one row.
+    const twice: Gap = { kind: "duplicate_name", at: "pc.other_names[1]", with: "pc.other_names[0]" };
+    expect(pairMarks([twice], [twice], f)).toEqual({ pc: "Same name twice" });
+  });
+
+  it("drops the mark once the gap is fixed, and marks nothing else", () => {
+    const f = paired();
+    // Fixed: the store no longer reports the gap.
+    expect(pairMarks([{ kind: "missing", at: "premise" }], [conflict], f)).toEqual({});
+    // Another pair now: the old one marks nothing.
+    expect(pairMarks([{ ...conflict, with: "knowledge[1]" }], [conflict], f)).toEqual({});
+    // No active gap, a gap of another kind, older data with no `with`.
+    expect(pairMarks([conflict], [null, undefined], f)).toEqual({});
+    const missing: Gap = { kind: "missing", at: "premise" };
+    expect(pairMarks([missing], [missing], f)).toEqual({});
+    const old: Gap = { kind: "slot_conflict", at: "knowledge[2]" };
+    expect(pairMarks([old], [old], f)).toEqual({});
   });
 });
 
