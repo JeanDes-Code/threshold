@@ -23,6 +23,8 @@ export interface PlayScreenProps {
   answer: string | null;
   /** Why the last Turn failed; nothing was committed. */
   failure: string | null;
+  /** The sentence of the last Refusal: not a failure, no retry. */
+  refusal: string | null;
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
   canRetry: boolean;
@@ -140,6 +142,7 @@ export default function PlayScreen(props: PlayScreenProps) {
         needsBegin={view.needs_begin}
         answer={answer}
         failure={props.failure}
+        refusal={props.refusal}
         notice={props.notice}
         canRetry={props.canRetry}
         canCorrect={view.can_correct}

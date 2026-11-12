@@ -7,7 +7,15 @@
 // The Turn state lives above the tabs: App holds one store per app, and a tab
 // switch does not touch it. Only another Campaign resets it.
 
-import { errorText, turnNotice, type Api, type Attempt, type NarrationChunk, type PlayView } from "../api";
+import {
+  errorText,
+  refusalFromError,
+  turnNotice,
+  type Api,
+  type Attempt,
+  type NarrationChunk,
+  type PlayView,
+} from "../api";
 
 export interface PlaySession {
   opened(): Promise<PlayView>;
@@ -32,6 +40,12 @@ export interface TurnState {
   pendingIntent: string | null;
   /** Why the last Turn failed. It stays until the Player retries or dismisses it. */
   failure: string | null;
+  /**
+   * The sentence of the last Refusal: the core did not play the Turn, and
+   * it did not fail. No retry; the Intent goes back to the field. The next
+   * call clears it.
+   */
+  refusal: string | null;
   /** The failed Turn can be sent again under its op_id. */
   canRetry: boolean;
   /** A Turn that committed with a problem, or a command that failed. */
@@ -52,6 +66,7 @@ export const IDLE_TURN: TurnState = {
   stream: null,
   pendingIntent: null,
   failure: null,
+  refusal: null,
   canRetry: false,
   notice: null,
   answer: null,
@@ -132,6 +147,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         stream: "",
         pendingIntent: intent,
         failure: null,
+        refusal: null,
         canRetry: false,
         notice: null,
         startedMs: now(),
@@ -139,11 +155,13 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
       let committed = false;
       let notice: string | null = null;
       let failure: string | null = null;
+      let refusal: string | null = null;
       try {
         notice = turnNotice(await made.result);
         committed = true;
       } catch (e) {
-        failure = errorText(e);
+        refusal = refusalFromError(e);
+        if (refusal === null) failure = errorText(e);
       }
       if (mine !== generation) return committed;
       set({ opId: null });
@@ -155,6 +173,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         stream: null,
         pendingIntent: null,
         failure,
+        refusal,
         canRetry: failure !== null && deps.canRetry(),
         notice: reloadNotice ?? notice,
         startedMs: null,
@@ -165,7 +184,16 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
     renarrate: async (opId, call) => {
       if (state.busy) return;
       const mine = generation;
-      set({ busy: true, opId, stream: "", failure: null, canRetry: false, notice: null, startedMs: now() });
+      set({
+        busy: true,
+        opId,
+        stream: "",
+        failure: null,
+        refusal: null,
+        canRetry: false,
+        notice: null,
+        startedMs: now(),
+      });
       let notice: string | null = null;
       try {
         await call();

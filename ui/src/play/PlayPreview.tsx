@@ -102,6 +102,7 @@ export default function PlayPreview() {
         pendingIntent={pendingIntent}
         answer={answer}
         failure={null}
+        refusal={null}
         notice={null}
         canRetry={false}
         loadCard={fixtureCard}

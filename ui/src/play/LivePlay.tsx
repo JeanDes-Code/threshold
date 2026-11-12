@@ -78,6 +78,7 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
       pendingIntent={turn.pendingIntent}
       answer={turn.answer}
       failure={turn.failure}
+      refusal={turn.refusal}
       notice={turn.notice}
       canRetry={turn.canRetry}
       loadCard={api.getEntityCard}

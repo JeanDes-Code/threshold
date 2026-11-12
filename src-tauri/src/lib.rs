@@ -61,6 +61,13 @@ struct TurnFailed {
     reason: String,
 }
 
+/// A Refusal: not a failed Turn (review M3).
+#[derive(Clone, Serialize)]
+struct TurnRefused {
+    op_id: String,
+    text: String,
+}
+
 #[derive(Serialize)]
 struct Defaults {
     seed_path: String,
@@ -123,6 +130,13 @@ fn report(app: &AppHandle, op_id: &str, result: &Result<TurnSummary, AppError>) 
             TurnCommitted {
                 turn_id: turn.turn_id,
                 roll: turn.roll,
+            },
+        ),
+        Err(AppError::Refused(text)) => app.emit(
+            "turn_refused",
+            TurnRefused {
+                op_id: op_id.to_owned(),
+                text: text.clone(),
             },
         ),
         Err(e) => app.emit(

@@ -477,6 +477,12 @@ export interface TurnFailed {
   reason: string;
 }
 
+/** The `turn_refused` event: a Refusal, not a failed Turn. */
+export interface TurnRefused {
+  op_id: string;
+  text: string;
+}
+
 /** One attempt at a Turn: its op_id, known before the result arrives. */
 export interface Attempt {
   opId: string;
@@ -515,10 +521,17 @@ export function createTurnClient(
 
   const send = (turn: PendingTurn): Attempt => {
     pending = turn;
-    const result = invoke<TurnSummary>(turn.cmd, turn.args).then((summary) => {
-      if (pending === turn) pending = null;
-      return summary;
-    });
+    const result = invoke<TurnSummary>(turn.cmd, turn.args).then(
+      (summary) => {
+        if (pending === turn) pending = null;
+        return summary;
+      },
+      (e: unknown) => {
+        // A Refusal is not a failed Turn: nothing to send again.
+        if (refusalFromError(e) !== null && pending === turn) pending = null;
+        throw e;
+      },
+    );
     return { opId: turn.opId, result };
   };
 
@@ -602,6 +615,15 @@ export function createApi(invoke: Invoke) {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null;
 
+/**
+ * The sentence of a Refusal, or null for any other error. The shell sends a
+ * Refusal as `{refusal: <sentence>}`: the core did not play the Turn, and
+ * it did not fail (review M3).
+ */
+export function refusalFromError(e: unknown): string | null {
+  return isRecord(e) && typeof e.refusal === "string" ? e.refusal : null;
+}
+
 /** The gaps of an `approve_draft` error, or null for any other error. */
 export function gapsFromError(e: unknown): Gap[] | null {
   if (!Array.isArray(e)) return null;
@@ -649,6 +671,8 @@ export function turnNotice(turn: TurnSummary): string | null {
 /** The text of a command error: Tauri rejects with the serialized AppError. */
 export function errorText(e: unknown): string {
   if (typeof e === "string") return e;
+  const refusal = refusalFromError(e);
+  if (refusal !== null) return refusal;
   if (e instanceof Error) return e.message;
   return String(e);
 }

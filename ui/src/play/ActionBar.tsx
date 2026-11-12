@@ -24,6 +24,11 @@ interface Props {
   answer: string | null;
   /** Why the last Turn failed; nothing was committed. */
   failure: string | null;
+  /**
+   * The sentence of the last Refusal. Not a failed Turn: a quiet line, no
+   * heading, no Retry. The Intent is back in the field to change it.
+   */
+  refusal: string | null;
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
   /** The failed Turn can be sent again under its op_id. */
@@ -55,7 +60,7 @@ interface Props {
 
 /** The Intent field, "Act", quiet buttons, and an empty slot on the right for later modules. */
 export default function ActionBar(props: Props) {
-  const { scene, phase, pcName, needsBegin, answer, failure, notice, onAct, onAsk } = props;
+  const { scene, phase, pcName, needsBegin, answer, failure, refusal, notice, onAct, onAsk } = props;
   const { canRetry, canCorrect, fixing, onFixing, onCorrect, onRetry, onBegin, onDismissAnswer } = props;
   const { onDismissFailure } = props;
   const [intent, setIntent] = useState("");
@@ -134,6 +139,11 @@ export default function ActionBar(props: Props) {
             Dismiss
           </button>
         </section>
+      )}
+      {refusal !== null && (
+        <p className="play-refusal" role="status">
+          {refusal}
+        </p>
       )}
       {notice !== null && (
         <section className="play-alert" role="status">

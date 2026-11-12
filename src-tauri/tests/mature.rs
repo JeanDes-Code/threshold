@@ -45,7 +45,7 @@ fn names(s: &Session) -> Vec<String> {
 
 fn refusal(s: &mut Session, op: &str) -> String {
     match s.submit_intent(op.into(), "I lean closer.", &mut |_| {}) {
-        Err(AppError::Failed(text)) => text,
+        Err(AppError::Refused(text)) => text,
         other => panic!("expected a refusal, got {other:?}"),
     }
 }
@@ -83,4 +83,28 @@ fn a_refusal_shows_one_fixed_sentence() {
         assert!(!text.chars().any(|c| c.is_ascii_digit()), "{text}");
         assert_eq!(gm.calls().len(), 1, "no retry after a refusal");
     }
+}
+
+/// Review M3: a Refusal is not a failed Turn. It reaches the UI as its own
+/// kind, `{"refusal": <sentence>}`, not as a failure text, and the same
+/// op_id sent again gets the same Refusal with no model call.
+#[test]
+fn a_refusal_is_its_own_result_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(vec![intimate(), intimate()], vec![]);
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    let err = s
+        .submit_intent("op-1".into(), "I lean closer.", &mut |_| {})
+        .expect_err("refused");
+    assert_eq!(
+        serde_json::to_value(&err).unwrap(),
+        serde_json::json!({ "refusal": REFUSAL_EXCLUDED })
+    );
+    assert_eq!(err.to_string(), REFUSAL_EXCLUDED);
+
+    assert_eq!(refusal(&mut s, "op-1"), REFUSAL_EXCLUDED);
+    assert_eq!(gm.calls().len(), 1, "the same op runs no model call");
+    assert_eq!(refusal(&mut s, "op-2"), REFUSAL_EXCLUDED);
+    assert_eq!(gm.calls().len(), 2, "a new op is judged afresh");
 }

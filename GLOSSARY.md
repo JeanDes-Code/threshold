@@ -105,7 +105,7 @@ An OOC request to fix a continuity error or a misread Intent. It changes the rec
 _Avoid_: Undo, retcon, edit
 
 **Refusal**:
-A Turn that the core stops for a Content Boundary, with no retry and no Commit. The Player reads one fixed sentence.
+A Turn that the core stops for a Content Boundary, with no retry and no Commit. The Player reads one fixed sentence. A Refusal is not a failed Turn: the Play screen shows the sentence as a quiet line with no Retry, and the Intent goes back to the field. The same operation sent again gets the same Refusal with no model call; a new Intent is judged afresh.
 _Avoid_: Block, censorship, rejection (a rejection gets a retry)
 
 **Decision Proposal**:

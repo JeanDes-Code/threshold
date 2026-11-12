@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   createApi,
   createTurnClient,
+  errorText,
   gapsFromError,
+  refusalFromError,
   parseBuildProgress,
   renarrateOpId,
   turnNotice,
@@ -17,12 +19,13 @@ interface Call {
 }
 
 /** An `invoke` that records calls and answers from a queue of outcomes. */
-function fakeInvoke(outcomes: ("ok" | "fail")[]) {
+function fakeInvoke(outcomes: ("ok" | "fail" | "refuse")[]) {
   const calls: Call[] = [];
   const invoke: Invoke = <T,>(cmd: string, args?: Record<string, unknown>) => {
     calls.push({ cmd, args });
     const outcome = outcomes.shift() ?? "ok";
     if (outcome === "fail") return Promise.reject(new Error("the game model is unreachable"));
+    if (outcome === "refuse") return Promise.reject({ refusal: REFUSAL });
     return Promise.resolve({
       turn_id: calls.length,
       roll: null,
@@ -33,6 +36,9 @@ function fakeInvoke(outcomes: ("ok" | "fail")[]) {
   };
   return { calls, invoke };
 }
+
+/** A Refusal sentence, as the shell sends it. */
+const REFUSAL = "An Intimate Scene cannot happen here.";
 
 function counter() {
   let n = 0;
@@ -90,6 +96,15 @@ describe("createTurnClient", () => {
     await client.submit("two").result;
     expect(calls[1]?.args).toEqual({ op_id: "op-2", text: "two" });
     expect(client.pending()).toBeNull();
+  });
+
+  it("a Refusal leaves no Turn to send again", async () => {
+    const { calls, invoke } = fakeInvoke(["refuse"]);
+    const client = createTurnClient(invoke, counter());
+    await expect(client.submit("I lean closer.").result).rejects.toEqual({ refusal: REFUSAL });
+    expect(client.pending()).toBeNull();
+    expect(client.retry()).toBeNull();
+    expect(calls).toHaveLength(1);
   });
 
   it("reset() clears the pending Turn so retry() returns null", async () => {
@@ -246,6 +261,20 @@ describe("gapsFromError", () => {
     expect(gapsFromError(new Error("boom"))).toBeNull();
     expect(gapsFromError([{ kind: "missing" }])).toBeNull();
     expect(gapsFromError([{ kind: 3, at: "premise" }])).toBeNull();
+  });
+});
+
+describe("refusalFromError", () => {
+  it("reads the sentence of a Refusal", () => {
+    expect(refusalFromError({ refusal: REFUSAL })).toBe(REFUSAL);
+    expect(errorText({ refusal: REFUSAL })).toBe(REFUSAL);
+  });
+
+  it("is null for any other error", () => {
+    expect(refusalFromError("the game model is unreachable")).toBeNull();
+    expect(refusalFromError(new Error("x"))).toBeNull();
+    expect(refusalFromError([{ kind: "age_unconfirmed", at: "pc.age" }])).toBeNull();
+    expect(refusalFromError({ refusal: 3 })).toBeNull();
   });
 });
 

@@ -10,7 +10,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::{Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeMap};
 use threshold_core::{
     Gm,
     build::Gap,
@@ -42,6 +42,9 @@ pub enum AppError {
     DebugOff,
     /// `approve_draft` on a draft that still has gaps: every gap.
     Gaps(Vec<Gap>),
+    /// A Refusal (glossary): the Turn was not played, and it did not fail.
+    /// The one fixed sentence of its kind (`view::refusal_text`).
+    Refused(String),
     Failed(String),
 }
 
@@ -55,7 +58,7 @@ impl fmt::Display for AppError {
                 "the draft cannot be approved: {} gap(s) to fix",
                 gaps.len()
             ),
-            Self::Failed(why) => f.write_str(why),
+            Self::Refused(text) | Self::Failed(text) => f.write_str(text),
         }
     }
 }
@@ -66,11 +69,18 @@ pub(crate) fn failed(e: impl fmt::Display) -> AppError {
 
 impl std::error::Error for AppError {}
 
-/// An error reaches the UI as its text, except `Gaps`: the list of gaps.
+/// An error reaches the UI as its text, except `Gaps`, the list of gaps,
+/// and `Refused`, `{"refusal": <sentence>}`: a Refusal is its own result
+/// kind, not a failed Turn (review M3).
 impl Serialize for AppError {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::Gaps(gaps) => gaps.serialize(s),
+            Self::Refused(text) => {
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry("refusal", text)?;
+                map.end()
+            }
             _ => s.collect_str(self),
         }
     }
@@ -688,8 +698,11 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
             "a storage error stopped the Turn (details in the debug view)".into()
         }
         // A Refusal shows its one fixed sentence, in debug mode too: no
-        // name, no id, no age (mature content module, Task 1).
-        TurnError::Refused { kind, .. } => view::refusal_text(*kind).to_owned(),
+        // name, no id, no age (mature content module, Task 1). It is its
+        // own result kind, not a failure (review M3).
+        TurnError::Refused { kind, .. } => {
+            return AppError::Refused(view::refusal_text(*kind).to_owned());
+        }
     };
     AppError::Failed(text)
 }

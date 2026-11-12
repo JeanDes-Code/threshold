@@ -135,6 +135,27 @@ describe("createTurnStore", () => {
     expect(log.forgets).toBe(1);
   });
 
+  it("a Refusal is a quiet line, not a failure, and offers no retry", async () => {
+    const { store, log } = harness(true);
+    const turn = attempt("op-1");
+    const done = store.run(turn.make, "I lean closer.");
+    turn.result.reject({ refusal: "An Intimate Scene cannot happen here." });
+    expect(await done).toBe(false);
+    expect(store.get().refusal).toBe("An Intimate Scene cannot happen here.");
+    expect(store.get().failure).toBeNull();
+    expect(store.get().canRetry).toBe(false);
+    expect(store.get().busy).toBe(false);
+    expect(log.reloads).toBe(1);
+
+    // The next Turn clears it.
+    const next = attempt("op-2");
+    const sent = store.run(next.make, "I wave.");
+    expect(store.get().refusal).toBeNull();
+    next.result.resolve(committed);
+    await sent;
+    expect(store.get().refusal).toBeNull();
+  });
+
   it("a failure with nothing to send again offers no retry", async () => {
     const { store } = harness(false);
     const turn = attempt("op-1");

@@ -332,6 +332,11 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 .play-alert--error { border-color: var(--danger); color: var(--text); }
 .play-alert__detail { color: var(--muted); white-space: pre-wrap; }
 .play-alert .play-btn { height: 32px; }
+/* A Refusal: one quiet line, not a failure. */
+.play-refusal {
+  margin: var(--space-2) 0;
+  font-size: var(--text-sm); color: var(--muted);
+}
 
 /* Narrow window: the panel folds under the "Panel" button. 760px is --narrow in tokens.css. */
 @media (max-width: 760px) {
