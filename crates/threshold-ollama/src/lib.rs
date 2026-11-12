@@ -16,7 +16,7 @@ const CANCEL_POLL: Duration = Duration::from_millis(100);
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use threshold_core::{CallStats, Gm, GmError, Prompt};
+use threshold_core::{CallStats, Gm, GmError, Prompt, Stream};
 use ureq::{Agent, Response};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,7 +238,12 @@ impl Gm for OllamaGm {
         Ok(parsed.message.content)
     }
 
-    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        _max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
         self.clear_metrics();
         let body = self.chat_body(prompt, true, None);
         let response = self.post("/api/chat", &body)?;
@@ -251,7 +256,7 @@ impl Gm for OllamaGm {
             }
             let chunk = parse_chat(&line, status)?;
             self.record_metrics(&chunk);
-            on_chunk(&chunk.message.content);
+            let _ = on_chunk(&chunk.message.content);
             narration.push_str(&chunk.message.content);
         }
         Ok(narration)

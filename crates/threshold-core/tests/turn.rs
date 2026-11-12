@@ -4,7 +4,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use support::*;
 use threshold_core::{
-    CallKind, Gm, GmError, Prompt, RecordedGm,
+    CallKind, Gm, GmError, Prompt, RecordedGm, Stream,
     checks::CheckKind,
     domain::{
         ActionKind, DecisionProposal, EntityRef, FactSource, Knowing, LedgerOp, Reaction,
@@ -343,7 +343,12 @@ impl Gm for DownGm {
     fn propose(&self, _: &Prompt, _: &serde_json::Value) -> Result<String, GmError> {
         Err(GmError::Unreachable("connection refused".into()))
     }
-    fn narrate(&self, _: &Prompt, _: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+    fn narrate(
+        &self,
+        _: &Prompt,
+        _: Option<u32>,
+        _: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
         Err(GmError::Unreachable("connection refused".into()))
     }
 }
@@ -850,9 +855,14 @@ impl Gm for TokenGm {
         *self.last.lock().unwrap() = Some(100);
         self.inner.propose(prompt, schema)
     }
-    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
         *self.last.lock().unwrap() = Some(40);
-        self.inner.narrate(prompt, on_chunk)
+        self.inner.narrate(prompt, max_tokens, on_chunk)
     }
     fn last_prompt_tokens(&self) -> Option<u64> {
         *self.last.lock().unwrap()
@@ -1577,9 +1587,10 @@ fn a_cut_proposal_logs_why_the_model_stopped() {
         fn narrate(
             &self,
             prompt: &Prompt,
-            on_chunk: &mut dyn FnMut(&str),
+            max_tokens: Option<u32>,
+            on_chunk: &mut dyn FnMut(&str) -> Stream,
         ) -> Result<String, GmError> {
-            self.0.narrate(prompt, on_chunk)
+            self.0.narrate(prompt, max_tokens, on_chunk)
         }
         fn last_done_reason(&self) -> Option<String> {
             Some("length".into())
@@ -1840,8 +1851,13 @@ impl Gm for StatsGm {
     fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
         self.0.propose(prompt, schema)
     }
-    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
-        self.0.narrate(prompt, on_chunk)
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
+        self.0.narrate(prompt, max_tokens, on_chunk)
     }
     fn last_call_stats(&self) -> Option<threshold_core::CallStats> {
         Some(STATS)

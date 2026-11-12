@@ -441,8 +441,13 @@ impl Gm for Hooked {
         out
     }
 
-    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
-        self.inner.narrate(prompt, on_chunk)
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> threshold_core::Stream,
+    ) -> Result<String, GmError> {
+        self.inner.narrate(prompt, max_tokens, on_chunk)
     }
 }
 

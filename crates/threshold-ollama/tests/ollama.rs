@@ -7,7 +7,7 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use threshold_core::{Gm, GmError, Prompt, proposal_schema};
+use threshold_core::{Gm, GmError, Prompt, Stream, proposal_schema};
 use threshold_ollama::{OllamaConfig, OllamaGm};
 
 fn prompt() -> Prompt {
@@ -189,7 +189,10 @@ fn narrate_streams_ndjson_and_returns_full_text() {
     let mut chunks = Vec::new();
 
     let narration = gm
-        .narrate(&prompt(), &mut |chunk| chunks.push(chunk.to_owned()))
+        .narrate(&prompt(), None, &mut |chunk| {
+            chunks.push(chunk.to_owned());
+            Stream::More
+        })
         .unwrap();
     server.join().unwrap();
     assert_eq!(narration, "The door opens.");
@@ -222,7 +225,7 @@ fn narrate_maps_a_mid_stream_error_line() {
         base_url,
         ..OllamaConfig::default()
     });
-    let result = gm.narrate(&prompt(), &mut |_| {});
+    let result = gm.narrate(&prompt(), None, &mut |_| Stream::More);
     server.join().unwrap();
     assert_eq!(
         result,
@@ -261,7 +264,7 @@ fn silent_server_times_out() {
         ..OllamaConfig::default()
     });
     let started = Instant::now();
-    let result = gm.narrate(&prompt(), &mut |_| {});
+    let result = gm.narrate(&prompt(), None, &mut |_| Stream::More);
     assert_eq!(result, Err(GmError::Timeout));
     assert!(started.elapsed() < Duration::from_secs(3));
     server.join().unwrap();

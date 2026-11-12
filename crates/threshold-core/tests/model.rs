@@ -1,4 +1,4 @@
-use threshold_core::{Gm, Prompt, RecordedGm};
+use threshold_core::{Gm, Prompt, RecordedGm, Stream};
 
 #[test]
 fn recorded_gm_returns_responses_in_order() {
@@ -19,10 +19,16 @@ fn recorded_gm_returns_responses_in_order() {
 
     let mut chunks = Vec::new();
     assert_eq!(
-        gm.narrate(&prompt, &mut |chunk| chunks.push(chunk.to_owned()))
-            .unwrap(),
+        gm.narrate(&prompt, None, &mut |chunk| {
+            chunks.push(chunk.to_owned());
+            Stream::More
+        })
+        .unwrap(),
         "narration one"
     );
     assert_eq!(chunks, ["narration one"]);
-    assert_eq!(gm.narrate(&prompt, &mut |_| {}).unwrap(), "narration two");
+    assert_eq!(
+        gm.narrate(&prompt, None, &mut |_| Stream::More).unwrap(),
+        "narration two"
+    );
 }

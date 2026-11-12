@@ -28,7 +28,7 @@ use crate::{
         EntityRef, FactSource, Handle, LedgerOp, Reaction, Verdict,
     },
     mature::{self, RefusalKind},
-    model::{Gm, GmError, Prompt},
+    model::{Gm, GmError, Prompt, Stream},
     pack::ContentPack,
     proposal_schema_for,
     rules::{RollResult, Ruleset, turn_seed},
@@ -416,7 +416,7 @@ impl Engine {
         let sight = crate::world::pc_sight(&view, &turns, &reverted);
         let prompt = ooc_prompt(&view, sight.as_ref(), question);
         let start = Instant::now();
-        let answer = self.gm.narrate(&prompt, &mut |_| {});
+        let answer = self.gm.narrate(&prompt, None, &mut |_| Stream::More);
         self.log(&op_id, "ooc", &prompt, answer_text(&answer), start)?;
         self.log_stats(&op_id, "ooc")?;
         Ok(answer?)
@@ -1198,11 +1198,12 @@ fn narrate_through(
     on_chunk: &mut dyn FnMut(&str),
 ) -> Result<String, GmError> {
     let mut filter = TagFilter::new(hidden);
-    let answer = gm.narrate(prompt, &mut |chunk| {
+    let answer = gm.narrate(prompt, None, &mut |chunk| {
         let shown = filter.push(chunk);
         if !shown.is_empty() {
             on_chunk(&shown);
         }
+        Stream::More
     });
     let rest = filter.finish();
     if !rest.is_empty() {

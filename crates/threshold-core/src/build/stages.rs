@@ -705,7 +705,12 @@ mod tests {
                 .unwrap_or(Err(GmError::Unreachable("script is empty".into())))
         }
 
-        fn narrate(&self, _: &Prompt, _: &mut dyn FnMut(&str)) -> Result<String, GmError> {
+        fn narrate(
+            &self,
+            _: &Prompt,
+            _: Option<u32>,
+            _: &mut dyn FnMut(&str) -> crate::model::Stream,
+        ) -> Result<String, GmError> {
             unreachable!("a stage never narrates")
         }
     }

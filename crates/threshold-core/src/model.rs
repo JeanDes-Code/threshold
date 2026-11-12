@@ -85,9 +85,27 @@ impl CallStats {
     }
 }
 
+/// What the reader of a narration stream wants after a chunk (data shape
+/// 3.6): the next chunk, or no more text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stream {
+    More,
+    /// The adapter stops reading, drops the response and returns the text
+    /// received so far.
+    Stop,
+}
+
 pub trait Gm {
     fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError>;
-    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError>;
+    /// One streamed narration call. `max_tokens` caps the generated tokens
+    /// when set. After each chunk, `on_chunk` says whether to read on; on
+    /// `Stream::Stop` the call returns the text received so far.
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError>;
     /// The prompt tokens the model reported for the last call, if the adapter
     /// knows them.
     fn last_prompt_tokens(&self) -> Option<u64> {
@@ -120,6 +138,8 @@ pub struct RecordedCall {
     pub prompt: Prompt,
     /// The JSON schema of a `propose` call; `Null` for `narrate`.
     pub schema: serde_json::Value,
+    /// The token cap of a `narrate` call; `None` for `propose`.
+    pub max_tokens: Option<u32>,
 }
 
 /// A `Gm` that replays recorded responses in order and records every call.
@@ -166,7 +186,13 @@ impl RecordedGm {
             .clone()
     }
 
-    fn record(&self, kind: CallKind, prompt: &Prompt, schema: &serde_json::Value) {
+    fn record(
+        &self,
+        kind: CallKind,
+        prompt: &Prompt,
+        schema: &serde_json::Value,
+        max_tokens: Option<u32>,
+    ) {
         self.calls
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -174,13 +200,14 @@ impl RecordedGm {
                 kind,
                 prompt: prompt.clone(),
                 schema: schema.clone(),
+                max_tokens,
             });
     }
 }
 
 impl Gm for RecordedGm {
     fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
-        self.record(CallKind::Propose, prompt, schema);
+        self.record(CallKind::Propose, prompt, schema, None);
         self.proposals
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -188,15 +215,25 @@ impl Gm for RecordedGm {
             .ok_or_else(|| GmError::Unreachable("no recorded proposal remains".into()))
     }
 
-    fn narrate(&self, prompt: &Prompt, on_chunk: &mut dyn FnMut(&str)) -> Result<String, GmError> {
-        self.record(CallKind::Narrate, prompt, &serde_json::Value::Null);
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
+        self.record(
+            CallKind::Narrate,
+            prompt,
+            &serde_json::Value::Null,
+            max_tokens,
+        );
         let narration = self
             .narrations
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .pop_front()
             .ok_or_else(|| GmError::Unreachable("no recorded narration remains".into()))?;
-        on_chunk(&narration);
+        let _ = on_chunk(&narration);
         Ok(narration)
     }
 }
