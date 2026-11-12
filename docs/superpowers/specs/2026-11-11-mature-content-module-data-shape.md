@@ -311,7 +311,7 @@ A Closing Turn has an empty Intent and the kind `closing`. `end_scene` fails wit
 
 1. `context::closing_prompt(view)`: the proposal rules, the stable and scene blocks, and one core line in place of the Intent: the Player ends the scene; propose how each NPC present takes it and how many minutes it took. No pack fragment.
 2. `closing_schema_for(handles)` pins what the code does not want: `action` is `wait`, `verdict` is `allowed`, `contested` and `intimate` are `false`, `move_to` and `check` are `null`, and `settles`, `new_npcs`, `schedule` and `cancel` are absent. Free fields: `minutes`, `reactions` (max 2), `facts` (max 1).
-3. `checks::settle` forces the same pins on the parsed proposal and logs each change. It removes model output and adds no PC act. `minutes` is clamped to 1 to `SCENE_CLOSE_MAX_MIN`.
+3. `checks::settle` forces the same pins on the parsed proposal and logs each change. It removes model output and adds no PC act. `minutes` is clamped to 1 to `SCENE_CLOSE_MAX_MIN`. A Closing Turn moves nobody (changed after review, 2026-11-12): `checks::settle_closing` also drops every fact on the key `location`, on any subject, and the closing schema says so on `facts`.
 4. `validate` runs as on any Turn. The Agency check keeps a fact on the PC to `PC_INVOLUNTARY_KEYS`, so fatigue is allowed and a PC choice is not.
 5. `to_ops`, the World Clock and the due World Events run as on any Turn. `SetScene { open: false }` is added. One Commit.
 6. The narration is told at `Plain`, with `context::CLOSING_LINE` and `CLOSING_NARRATION_MAX_TOKENS`. The narrator gets no Intent line. A faded Closing Turn gets no narration call.

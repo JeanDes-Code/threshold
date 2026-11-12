@@ -265,7 +265,8 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
 /// `contested` and `intimate` are `false`, `move_to` and `check` are
 /// `null`; `settles`, `new_npcs`, `schedule`, `cancel`, `leaves` and
 /// `blockers` are absent. Free: `minutes` (1 to
-/// `mature::SCENE_CLOSE_MAX_MIN`), at most two `reactions` and one fact.
+/// `mature::SCENE_CLOSE_MAX_MIN`), at most two `reactions` and one fact,
+/// which is never a `location` fact: a Closing Turn moves nobody.
 /// `checks::settle_closing` forces the same pins on the parsed proposal,
 /// because the validator does not trust the grammar.
 pub fn closing_schema_for(ctx: &HandleContext) -> serde_json::Value {
@@ -296,6 +297,11 @@ pub fn closing_schema_for(ctx: &HandleContext) -> serde_json::Value {
         if let Some(list) = schema["properties"].get_mut(key) {
             list["maxItems"] = json!(max);
         }
+    }
+    // A Closing Turn moves nobody (review minor, 2026-11-12):
+    // `settle_closing` drops a `location` fact all the same.
+    if let Some(facts) = schema["properties"].get_mut("facts") {
+        facts["description"] = json!("never a location fact: a Closing Turn moves nobody");
     }
     if let Some(required) = schema["required"].as_array_mut() {
         required.retain(|k| !gone.iter().any(|g| k == g));

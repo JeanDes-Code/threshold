@@ -933,6 +933,44 @@ fn settle_forces_the_closing_pins() {
     assert_eq!(notes.len(), 5, "{notes:?}");
 }
 
+/// Review minor (2026-11-12): a Closing Turn moves nobody. `settle_closing`
+/// drops every `location` fact, on any subject and in any case of the key,
+/// with one note each; the closing schema says so; and "End scene" with
+/// such a proposal leaves Brann where he stands.
+#[test]
+fn a_closing_turn_moves_nobody() {
+    let mut rig = Rig::new("closing-moves");
+    let mut p = rig.closing();
+    p.facts = vec![fact(
+        slot(e(rig.brann), "Location", "far road"),
+        Seen::Present,
+        vec![],
+    )];
+    let (settled, notes) = settle_closing(p.clone(), &rig.view());
+    assert!(settled.facts.is_empty(), "{:?}", settled.facts);
+    assert_eq!(
+        notes.iter().filter(|n| n.contains("location")).count(),
+        1,
+        "{notes:?}"
+    );
+    let schema = closing_schema_for(&HandleContext {
+        entities: vec![Handle::Entity(rig.brann)],
+        new_slots: 1,
+        ..HandleContext::default()
+    });
+    let facts = schema["properties"]["facts"]["description"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(facts.contains("location"), "{schema}");
+
+    let intimate = rig.intimate();
+    rig.played("t1", &intimate, "Brann nods.");
+    rig.end_scene("close-1", &p, "The scene ends.").unwrap();
+    let view = rig.view();
+    let place = view.live_fact(rig.brann, "location").unwrap();
+    assert_eq!(place.slot.value, "gate square");
+}
+
 /// A Closing Turn sets no voluntary act of the PC: a fact on the PC's
 /// `mood` is an agency rejection, `fatigue` passes (data shape 3.7 step 4).
 #[test]

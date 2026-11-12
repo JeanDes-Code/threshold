@@ -44,7 +44,9 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
 /// step 3): the pins of `closing_schema_for` first, then `settle`. Each pin
 /// only takes model output away or fixes a value the core owns, so it adds
 /// no PC act. `minutes` is clamped to 1 to `mature::SCENE_CLOSE_MAX_MIN`.
-/// One note per change.
+/// A Closing Turn moves nobody (review minor, 2026-11-12): `move_to`,
+/// `leaves`, the scheduled event and new NPCs go, and so does every fact on
+/// the key `location`, on any subject. One note per change.
 pub fn settle_closing(
     mut p: DecisionProposal,
     view: &WorldView,
@@ -97,6 +99,13 @@ pub fn settle_closing(
             note(&format!("kept the first {max} of {len} {field}"));
         }
     }
+    p.facts.retain(|f| {
+        let moves = super::same_key(&f.slot.key, "location");
+        if moves {
+            note(&format!("removed the location fact on {}", f.slot.subject));
+        }
+        !moves
+    });
     p.reactions.truncate(CLOSING_MAX_REACTIONS);
     p.facts.truncate(CLOSING_MAX_FACTS);
     let minutes = p.minutes.clamp(1, SCENE_CLOSE_MAX_MIN);
