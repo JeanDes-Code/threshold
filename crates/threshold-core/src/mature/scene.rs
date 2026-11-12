@@ -13,8 +13,9 @@ use crate::{
     store::{TurnId, WorldView},
 };
 
-/// The token cap of a Narration told by implication inside an Intimate
-/// Scene (data shape 4, a first value): about the size of an ordinary
+/// The token cap of a Narration told as intimate, at any level, the Turn
+/// that ends its scene and a `renarrate` included (data shape 4, a first
+/// value; one rule since review, 2026-11-12): about the size of an ordinary
 /// Narration (ADR 0001), now held by the model's token limit. The Player's
 /// 15 s Turn budget reads it: at about 43 tokens per second, 280 tokens are
 /// about 6.5 s of generation (ADR 0010).

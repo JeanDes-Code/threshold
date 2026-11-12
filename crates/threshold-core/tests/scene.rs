@@ -563,6 +563,23 @@ fn a_scene_narration_is_capped() {
     assert_eq!(rig.last_call(CallKind::Narrate).max_tokens, Some(280));
     rig.played("t3", &plain, "Dusk.");
     assert_eq!(rig.last_call(CallKind::Narrate).max_tokens, None);
+
+    // Review minor (2026-11-12): one rule. A Turn told as intimate gets the
+    // scene cap, the Turn that ends its scene by a move or an arrival
+    // included, as a `renarrate` of an ended scene does.
+    let yard = rig.place("Mill Yard");
+    rig.played("t4", &p, "Brann nods.");
+    rig.played("t5", &rig.intimate_move(yard), "The yard is quiet.");
+    assert_eq!(rig.scene(), None, "the move closed the scene");
+    assert_eq!(rig.last_call(CallKind::Narrate).max_tokens, Some(280));
+    let mut rig = Rig::new("cap-arrival");
+    let kett = rig.add_npc("Kett", 34, true, "far road");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    rig.arrival(kett);
+    rig.played("t2", &p, "Someone comes.");
+    assert_eq!(rig.scene(), None, "the arrival closed the scene");
+    assert_eq!(rig.last_call(CallKind::Narrate).max_tokens, Some(280));
 }
 
 /// G4 of a `renarrate`: a scene Turn narrated again after the scene ended

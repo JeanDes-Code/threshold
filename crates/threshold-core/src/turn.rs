@@ -950,8 +950,9 @@ impl Engine {
     /// clearance `told` holds (ADR 0009). Inside an open scene that is
     /// still open `now`, the earlier Turns of the scene reach the prompt in
     /// full only through the clearance of the state after the Turn
-    /// (`mature::narration_clearance`), and a scene Narration carries
-    /// `mature::SCENE_NARRATION_MAX_TOKENS`.
+    /// (`mature::narration_clearance`). A Narration told as intimate carries
+    /// `mature::SCENE_NARRATION_MAX_TOKENS`, a Closing Turn's
+    /// `mature::CLOSING_NARRATION_MAX_TOKENS`.
     fn narrate(
         &mut self,
         op_id: &str,
@@ -992,11 +993,13 @@ impl Engine {
         }
         let told = mature::told(view_after, now, committed.intimate, &self.packs);
         let cleared = mature::narration_clearance(view_after, now);
+        // One rule (review minor, 2026-11-12): a Turn told as intimate, at
+        // any level, gets the scene cap, the Turn that ends its scene and a
+        // `renarrate` included; a Closing Turn gets the closing cap.
         let max_tokens = if committed.closing {
             Some(mature::CLOSING_NARRATION_MAX_TOKENS)
         } else {
-            (matches!(told, Told::Implied | Told::Explicit(_)) && view_after.scene_open.is_some())
-                .then_some(mature::SCENE_NARRATION_MAX_TOKENS)
+            (!matches!(told, Told::Plain)).then_some(mature::SCENE_NARRATION_MAX_TOKENS)
         };
         let prompt = narration_prompt_with(
             view_after,

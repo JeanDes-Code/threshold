@@ -422,7 +422,7 @@ turn      + faded INTEGER NOT NULL DEFAULT 0      -- not a projection (3.6)
 | Proposal, open scene, G1 passed | the core's scene line; pack `proposal` scene fragments; the explicit-only ones only at `explicit` | `Full` | `plan` up to 200 chars |
 | Proposal of a Closing Turn | the closing line, no pack fragment | `Full` when G1 passed | pinned schema |
 | Narration, `Plain` | none | `Line` | as today |
-| Narration, `Implied` | the core's implied line | `Full` only with a `Cleared` value | `SCENE_NARRATION_MAX_TOKENS` in a scene |
+| Narration, `Implied` | the core's implied line | `Full` only with a `Cleared` value | `SCENE_NARRATION_MAX_TOKENS` (changed after review, 2026-11-12: every Turn told as intimate, the Turn that ends its scene and a `renarrate` included; a Closing Turn gets `CLOSING_NARRATION_MAX_TOKENS`) |
 | Narration, `Explicit(Cleared)` | pack `narration` scene fragments, explicit-only ones included; no implied line | `Full` | `SCENE_NARRATION_MAX_TOKENS` |
 | Opening, OOC, every draft and World Build call | none, at any level | `Line` | as today |
 
