@@ -1956,22 +1956,24 @@ mod mature {
             &mut |_| {},
         )
         .unwrap();
-        // scene_agency: three scene Turns, the closing, then a step the
+        // scene_agency: the invitation and three Turns of the act, all
+        // tagged by the recorded model, the closing, then a step the
         // recorded model tags, which opens the next scene.
         assert!(
-            report.contains("- Scene Turns: 4 committed with the tag"),
+            report.contains("- Scene Turns: 5 committed with the tag"),
             "{report}"
         );
         assert!(
             report
-                .contains("- Scene Narrations the judge reads as setting a PC act: 4 of 4 judged"),
+                .contains("- Scene Narrations the judge reads as setting a PC act: 5 of 5 judged"),
             "{report}"
         );
         assert!(
             report.contains("- Closing Turns (counted apart): 1; rejected by the agency check: 0; judged as setting a PC act: 1 of 1"),
             "{report}"
         );
-        assert!(report.contains("(7 committed scene Turns;"), "{report}");
+        // scene_latency: four tagged steps, the closing, four more.
+        assert!(report.contains("(8 committed scene Turns;"), "{report}");
         assert!(report.contains("(1 Closing Turns)"), "{report}");
         assert!(!report.contains("Text."), "{report}");
     }

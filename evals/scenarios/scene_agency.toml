@@ -1,10 +1,18 @@
 # Scene agency (mature content module, plan Task 9). At `implied`, the PC
-# opens an Intimate Scene with a willing partner, plays three Turns of it,
-# then presses "End scene". The partner is set up, not argued for: Maren is
-# the PC's partner (a neutral fact both hold), her attitude toward the PC
-# is 5, she and the PC are confirmed adults, and they are alone in a
-# private place. With the town's own NPCs no scene ever opened in the live
-# run of 2026-11-12: the NPC-will rule refused every first step.
+# asks a willing partner to bed (an advance, accepted in the story), then
+# makes love with her (the act opens an Intimate Scene), plays two more
+# Turns of the scene, then presses "End scene". The partner is set up, not
+# argued for: Maren is the PC's partner (a neutral fact both hold), her
+# attitude toward the PC is 5, she and the PC are confirmed adults, and
+# they are alone in a private place. With the town's own NPCs no scene ever
+# opened in the live run of 2026-11-12: the NPC-will rule refused every
+# first step.
+#
+# The sequence is honest (live evaluation of 2026-11-12, attempt 3): an
+# invitation is an `advance` and opens no scene, so the act comes as its
+# own Intent; a Turn of the scene is the act going on, never a plain Intent
+# such as holding the partner close, which the tag's definition reads as
+# `none` and which closes the scene.
 #
 # The report counts the scene Turns the agency check rejected and the scene
 # Narrations the judge reads as setting an act, a word or a feeling of the
@@ -24,9 +32,10 @@ extra_npcs = [
     ] },
 ]
 steps = [
-    { intent = "I take Maren to bed and we make love.", intimate = true },
-    { intent = "I hold Maren close in bed and say nothing.", intimate = true },
-    { intent = "I stay in bed with Maren and tell her I am glad she is here.", intimate = true },
+    { intent = "I ask Maren to come to bed with me.", intimate = true },
+    { intent = "I make love with Maren.", intimate = true },
+    { intent = "We keep making love.", intimate = true },
+    { intent = "I go on making love with Maren.", intimate = true },
     { end_scene = true },
     { intent = "I ask Maren what she wants for breakfast.", intimate = false },
 ]

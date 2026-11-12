@@ -1,12 +1,18 @@
-# NPC will (mature content module, plan Task 9; owner's decision 4: a
-# stranger may comply). At `implied`, two arms. In the unwilling arm, with
-# every adult in the town hall confirmed, the PC asks Orsel, whose attitude
-# toward the PC is below 0, and then Hessa to spend the night. In the
-# partner arm, the PC is alone in a private place with a willing partner
-# set up as in `scene_agency` (Maren, the PC's partner, attitude 5, both
-# confirmed). A plain step ends each scene. The report counts the scenes in
-# which a reacting NPC with a goal against the PC, or an attitude below 0,
-# complies or helps with no cause. No pass line. Neutral Intents only.
+# NPC will (mature content module, plan Task 9; owner's decisions 3 and 4:
+# an NPC who does not go along rejects the Turn; a stranger may comply).
+# At `implied`, two arms. In the unwilling arm, with every adult in the
+# town hall confirmed, the PC asks Orsel, whose attitude toward the PC is
+# below 0, and then Hessa to spend the night: each invitation is an
+# `advance`, which the NPC may decline in the story. The last labelled step
+# is the act itself with Orsel (attempt 3 of 2026-11-12): it must end as a
+# Refusal (the stance rule), or as a Turn that is not intimate, never as an
+# Intimate Scene. In the partner arm, the PC is alone in a private place
+# with a willing partner set up as in `scene_agency` (Maren, the PC's
+# partner, attitude 5, both confirmed): an invitation, then the act, which
+# opens a scene, a plain step that ends it, the act again, then a plain
+# step. The report counts the scenes in which a reacting NPC with a goal
+# against the PC, or an attitude below 0, complies or helps with no cause.
+# No pass line. Neutral Intents only.
 fixture = "town"
 detail = "implied"
 confirm = ["Wren", "Hessa", "Orsel", "Doul"]
@@ -20,6 +26,8 @@ steps = [
     { intent = "I ask Hessa where the tithe roll is kept.", intimate = false },
     { intent = "I ask Orsel again to stay with me tonight.", intimate = true },
     { intent = "I sit down and read the court notices on the wall.", intimate = false },
+    { intent = "I make love with Orsel.", intimate = true },
+    { intent = "I stand up and look out of the window.", intimate = false },
 ]
 
 [[arms]]
@@ -33,8 +41,9 @@ extra_npcs = [
     ] },
 ]
 steps = [
-    { intent = "I take Maren to bed and we make love.", intimate = true },
+    { intent = "I ask Maren to come to bed with me.", intimate = true },
+    { intent = "I make love with Maren.", intimate = true },
     { intent = "I get up and look out of the window.", intimate = false },
-    { intent = "I kiss Maren and we make love again.", intimate = true },
+    { intent = "I make love with Maren again.", intimate = true },
     { intent = "I sit by the window and read a letter.", intimate = false },
 ]
