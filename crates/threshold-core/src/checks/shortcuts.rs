@@ -80,9 +80,7 @@ fn coincidence(
 /// against that NPC, or a valid cause fact the NPC holds after this Commit.
 /// In an intimate Turn, `willing: yes` counts as at least comply (owner's
 /// decision 4: the existing ceiling holds; a stranger may comply). On any
-/// other Turn this check does not read `willing`; `settle` has already
-/// lowered to the ceiling a stance whose `willing` is `no` or `unsure`
-/// (polish pass, 2026-11-12).
+/// other Turn nothing reads `willing`.
 fn npc_folds(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
     for r in &p.reactions {
         let limit = handle_ceiling(view, r.npc);

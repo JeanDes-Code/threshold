@@ -566,10 +566,8 @@ pub struct Reaction {
     /// Whether this NPC freely agrees to what the PC does with it or asks
     /// of it in this Turn (`WILLING_DEFINITION`, ADR 0008, changed after the
     /// live evaluation of 2026-11-12). Required in the per-Turn schema on
-    /// every reaction. The stance rule of an intimate Turn reads it
-    /// (`mature::check`), and the NPC-folds ceiling caps `yes` there; on
-    /// any Turn, `checks::settle` lowers to the ceiling the stance of a
-    /// reaction that says `no` or `unsure` with no cause. A
+    /// every reaction; only the stance rule of an intimate Turn reads it
+    /// (`mature::check`), and the NPC-folds ceiling caps `yes` there. A
     /// reaction stored before the field reads `None`, which that rule
     /// refuses: it fails closed.
     #[serde(default)]

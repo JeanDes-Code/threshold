@@ -22,9 +22,8 @@ use threshold_core::{
     checks::{CheckKind, Rejection, ceiling, settle, to_ops, validate},
     context::{SCENE_LINE, narration_prompt, seen_present},
     domain::{
-        ActionKind, Canon, Cause, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef,
-        FactDraft, FactSource, Handle, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict,
-        Willing,
+        ActionKind, Canon, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef, FactDraft,
+        FactSource, Handle, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict, Willing,
     },
     mature::{
         Blocked, RefusalKind, Told, after, check_after, checked_here, clearance, stored_intimate,
@@ -434,52 +433,71 @@ fn willing_above_the_ceiling_needs_a_cause() {
     }
 }
 
-/// Polish pass (2026-11-12): in the live tag scenario at f11978c, 27 of the
-/// 30 reactions that the NPC-folds check rejected paired the stance `help`,
-/// above the NPC's ceiling, with `willing: no` or `unsure`: the model's own
-/// field says the NPC does not agree, so it does not give in. `settle`
-/// lowers such a stance to the NPC's ceiling, on any Turn, with a note; the
-/// proposal then passes. `yes`, a missing value and a stance with a cause
-/// keep the check as before.
+/// Polish pass, round 2 (2026-11-12, review Major 1): `checks::settle`
+/// no longer lowers a stance. It committed a declined reaction as `comply`,
+/// and the narrator reads the stance only. So an intimate proposal whose
+/// reaction says `willing: no`, with a stance above the NPC's ceiling and no
+/// cause, fails two checks: the stance rule and the NPC-folds check. When
+/// the retry does the same, the Turn is not an `Unwilling` Refusal: it
+/// fails as a rejected Turn, and nothing commits. At or below the ceiling,
+/// `no` stays an `Unwilling` Refusal.
 #[test]
-fn a_stance_above_the_ceiling_with_willing_no_is_lowered_to_the_ceiling() {
+fn an_unwilling_npc_above_its_ceiling_fails_two_checks() {
     let w = confirmed_gate();
-    let limit = ceiling(&w.view, w.orsel);
-    assert!(limit < Stance::Help);
-    for intimacy in [Intimacy::None, Intimacy::Advance] {
-        for value in [Willing::No, Willing::Unsure] {
-            let mut p = proposal(Verdict::Allowed);
-            p.intimacy = intimacy;
-            p.reactions = vec![reaction(e(w.orsel), Stance::Help, None)];
-            let p = with_willing(p, Some(value));
-            assert!(validate(&p, &w.view).is_err(), "the check alone rejects");
-            let (p, notes) = settle(p, &w.view);
-            assert_eq!(p.reactions[0].stance, limit, "{intimacy:?} {value:?}");
-            assert!(notes.iter().any(|n| n.contains("stance")), "{notes:?}");
-            assert!(validate(&p, &w.view).is_ok(), "{intimacy:?} {value:?}");
-        }
-    }
-    // `yes`, no value, or a cause: the stance stays, and the check rules.
-    for (value, cause) in [
-        (Some(Willing::Yes), None),
-        (None, None),
-        (Some(Willing::No), Some(Cause::Check)),
-    ] {
-        let mut p = proposal(Verdict::Allowed);
-        p.reactions = vec![reaction(e(w.orsel), Stance::Help, cause)];
-        let p = with_willing(p, value);
-        let (p, _) = settle(p, &w.view);
-        assert_eq!(p.reactions[0].stance, Stance::Help, "{value:?}");
-        let errs = validate(&p, &w.view).expect_err("folds");
-        assert!(kinds(&errs).contains(&CheckKind::NpcFolds), "{errs:?}");
-    }
-    // In an intimate Turn the stance rule still refuses `no`.
+    assert!(ceiling(&w.view, w.orsel) < Stance::Help);
     let mut p = proposal(Verdict::Allowed);
     p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.orsel), Stance::Help, None)];
-    let (p, _) = settle(with_willing(p, Some(Willing::No)), &w.view);
-    let errs = validate(&p, &w.view).expect_err("unwilling");
-    assert_eq!(kinds(&errs), [CheckKind::Unwilling], "{errs:?}");
+    let p = with_willing(p, Some(Willing::No));
+    let (settled, notes) = settle(p.clone(), &w.view);
+    assert_eq!(settled.reactions[0].stance, Stance::Help, "{notes:?}");
+    let errs = validate(&settled, &w.view).expect_err("two checks");
+    let got = kinds(&errs);
+    assert!(got.contains(&CheckKind::Unwilling), "{errs:?}");
+    assert!(got.contains(&CheckKind::NpcFolds), "{errs:?}");
+
+    let mut rig = Rig::new("unwilling-above-ceiling");
+    let orsel = rig.view().entity_by_name("Orsel").unwrap().id;
+    let mut p = p;
+    p.reactions[0].npc = e(orsel);
+    let turns = rig.store().turns(rig.campaign).unwrap().len();
+    for _ in 0..2 {
+        rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    }
+    let err = rig
+        .engine()
+        .play_turn("t1".into(), "I stay with Orsel.", &mut |_| {})
+        .expect_err("rejected");
+    match err {
+        TurnError::Rejected(errs) => {
+            let got = kinds(&errs);
+            assert!(got.contains(&CheckKind::NpcFolds), "{errs:?}");
+            assert!(got.contains(&CheckKind::Unwilling), "{errs:?}");
+        }
+        other => panic!("expected a rejected Turn, got {other:?}"),
+    }
+    assert_eq!(rig.store().turns(rig.campaign).unwrap().len(), turns);
+    assert_eq!(rig.scene(), None);
+
+    // At or below the ceiling, `no` is an `Unwilling` Refusal.
+    p.reactions[0].stance = Stance::Neutral;
+    for _ in 0..2 {
+        rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    }
+    let err = rig
+        .engine()
+        .play_turn("t2".into(), "I stay with Orsel.", &mut |_| {})
+        .expect_err("refused");
+    assert!(
+        matches!(
+            err,
+            TurnError::Refused {
+                kind: RefusalKind::Unwilling,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
 }
 
 /// A reaction stored before `willing` existed still loads, with no value.

@@ -85,7 +85,7 @@ A Turn whose Intimacy Tag is "advance": a romantic or sexual invitation, without
 _Avoid_: Flirt mode, pre-scene
 
 **Willing**:
-The value each reaction of a Decision Proposal gives its NPC, in the field `willing`: whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: "yes" agrees and takes part; "unsure" hesitates or has not agreed yet; "no" declines or objects. The stance rule of an intimate Turn reads it: every reacting NPC must say "yes", or the Turn is refused after the one retry. A missing value refuses. The NPC's attitude toward the PC and its goals cap "yes" as they cap a stance: above that cap it needs a cause. On any Turn, a reaction that says "no" or "unsure" and gives no cause has its stance lowered to that cap: an NPC that does not agree does not give in.
+The value each reaction of a Decision Proposal gives its NPC, in the field `willing`: whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: "yes" agrees and takes part; "unsure" hesitates or has not agreed yet; "no" declines or objects. Only the stance rule of an intimate Turn reads it: every reacting NPC must say "yes", or the Turn is refused after the one retry. A missing value refuses. The NPC's attitude toward the PC and its goals cap "yes" as they cap a stance: above that cap it needs a cause.
 _Avoid_: Consent flag, mood, stance (the stance rule does not read the stance)
 
 **Romance Word**:
