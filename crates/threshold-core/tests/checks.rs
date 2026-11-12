@@ -1,6 +1,7 @@
 mod support;
 
 use support::*;
+use threshold_core::domain::Intimacy;
 use threshold_core::{
     HandleContext,
     checks::{
@@ -486,7 +487,7 @@ fn intimate_with_minor_rejected() {
     let ids = [w.ada, w.orsel, w.brann];
     w.confirm(&ids);
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.pip), Stance::Comply, None)];
     let errs = rejected(validate(&p, &w.view), CheckKind::AdultsOnly);
     assert!(errs.iter().any(|r| r.handle == Some(e(w.pip))), "{errs:?}");
@@ -498,7 +499,7 @@ fn intimate_with_minor_rejected() {
     );
 
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
     p.new_npcs = vec![new_npc(1, "Kett", 17)];
     let errs = rejected(validate(&p, &w.view), CheckKind::AdultsOnly);
@@ -523,7 +524,7 @@ fn intimate_with_minor_rejected() {
         },
     }]);
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
     let errs = rejected(validate(&p, &w.view), CheckKind::AdultsOnly);
     assert_eq!(errs.len(), 1, "{errs:?}");
@@ -547,7 +548,7 @@ fn intimate_with_adults_ok() {
     let ids = [w.ada, w.orsel, w.brann];
     w.confirm(&ids);
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
     ok(validate(&p, &w.view));
 }
@@ -735,7 +736,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "action": "talk",
         "verdict": "allowed",
         "contested": false,
-        "intimate": false,
+        "intimacy": "none",
         "move_to": null,
         "leaves": [],
         "settles": {"item": "none", "outcome": "open"},
@@ -1688,7 +1689,7 @@ fn item_status_is_a_closed_list() {
     });
     let validator = jsonschema::validator_for(&schema).unwrap();
     let mut p = serde_json::json!({
-        "action": "talk", "verdict": "allowed", "contested": false, "intimate": false, "move_to": null,
+        "action": "talk", "verdict": "allowed", "contested": false, "intimacy": "none", "move_to": null,
         "settles": {"item": "E1 pending_trip", "outcome": "refused"}
     });
     assert!(validator.is_valid(&p), "{:?}", validator.validate(&p));

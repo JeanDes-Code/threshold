@@ -41,7 +41,7 @@ pub use scene::{
 };
 pub use text::{
     CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, effective, neutral_line,
-    stored_intimate, told, turn_text,
+    stored_intimacy, stored_intimate, told, turn_text,
 };
 
 use crate::{

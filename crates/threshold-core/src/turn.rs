@@ -27,7 +27,8 @@ use crate::{
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, DetailLevel,
-        EntityId, EntityKind, EntityRef, FactSource, Handle, LedgerOp, Reaction, SceneWhy, Verdict,
+        EntityId, EntityKind, EntityRef, FactSource, Handle, Intimacy, LedgerOp, Reaction,
+        SceneWhy, Verdict,
     },
     mature::{self, RefusalKind, Told},
     model::{Gm, GmError, Prompt, Stream},
@@ -293,8 +294,9 @@ struct Planned {
     verdict: Verdict,
     /// The minutes a wait Intent stated (`world::intent_minutes`), if any.
     wait_asked: Option<u32>,
-    /// The proposal's `intimate`, after the tag of the first attempt stuck.
-    intimate: bool,
+    /// The proposal's intimacy tag, after the strongest tag of the raw
+    /// answers stuck.
+    intimacy: Intimacy,
 }
 
 impl Planned {
@@ -306,7 +308,7 @@ impl Planned {
         Self {
             ops: mature::default_close(why),
             proposal_json: json!({
-                "proposal": {"action": "wait", "verdict": "allowed", "minutes": minutes, "intimate": false},
+                "proposal": {"action": "wait", "verdict": "allowed", "minutes": minutes, "intimacy": "none"},
                 "reactions": [],
                 "events": [],
                 "roll": null,
@@ -321,7 +323,7 @@ impl Planned {
             action: ActionKind::Wait,
             verdict: Verdict::Allowed,
             wait_asked: None,
-            intimate: false,
+            intimacy: Intimacy::None,
         }
     }
 }
@@ -1036,7 +1038,7 @@ impl Engine {
                 .and_then(|asked| wait_cut_line(planned.minutes, asked))
                 .into_iter()
                 .collect(),
-            intimate: planned.intimate,
+            intimate: planned.intimacy.intimate(),
             closing,
         };
         let narrated = self
@@ -1268,7 +1270,7 @@ impl Engine {
         };
         let mut prompt = ctx.prompt;
         let mut wait_asked = None;
-        let mut tagged = false;
+        let mut tagged = Intimacy::None;
         for attempt in ["propose", "propose_retry"] {
             let step = Instant::now();
             let raw = self.gm.propose(&prompt, &schema);
@@ -1284,10 +1286,10 @@ impl Engine {
 
             let step = Instant::now();
             let retry = attempt == "propose_retry";
-            // The tag sticks once any attempt's raw text says it, valid
+            // The strongest tag any attempt's raw text says sticks, valid
             // JSON or not: cut, fenced, with trailing text, or with the key
-            // twice (review M2). The retry is then checked as intimate.
-            tagged |= states_intimate(&raw);
+            // twice (review M2). The retry is then checked with it.
+            tagged = tagged.max(stated_intimacy(&raw));
             let parsed = match parse(&raw) {
                 Ok(p) if matches!(ask, Ask::Closing { .. }) => {
                     let (p, notes) = checks::settle_closing(p, view);
@@ -1297,7 +1299,7 @@ impl Engine {
                     Ok(p)
                 }
                 Ok(mut p) => {
-                    p.intimate |= tagged;
+                    p.intimacy = p.intimacy.max(tagged);
                     // The items the Intent names: the only ones `settles`
                     // may close (review M1).
                     p.offered.clone_from(&ctx.handles.open_items);
@@ -1428,8 +1430,9 @@ impl Engine {
 
         // Who is at the PC's place once the ops are committed: G3 and the
         // scene's state read it. With no scene and no tag, neither does.
-        let presence = (p.intimate || view.scene_open.is_some()).then(|| mature::after(view, &ops));
-        if let (true, Some(presence)) = (p.intimate, &presence) {
+        let presence =
+            (p.intimacy.gated() || view.scene_open.is_some()).then(|| mature::after(view, &ops));
+        if let (true, Some(presence)) = (p.intimacy.gated(), &presence) {
             let step = Instant::now();
             if let Err(blocked) = mature::check_after(p, view, presence) {
                 let raw = format!("adults only after the ops: {:?}", blocked.who);
@@ -1478,7 +1481,7 @@ impl Engine {
             action: p.action,
             verdict: p.verdict,
             wait_asked,
-            intimate: p.intimate,
+            intimacy: p.intimacy,
         })
     }
 
@@ -1591,9 +1594,10 @@ fn schema_error(reason: String) -> Vec<Rejection> {
 /// (`checks::validate`), after the core's repairs: on the retry, a missing
 /// Check is one the core can build (`checks::default_check`).
 ///
-/// A raw proposal without the `intimate` key is a schema error: the field
-/// keeps `serde(default)` for stored proposals, so without this rule a
-/// missing tag would read as `false` and skip the age rule (plan
+/// A raw proposal without the `intimacy` key, or with a value that is not
+/// one of the three, is a schema error: the field keeps `serde(default)`
+/// and reads the old boolean for stored proposals, so without this rule a
+/// missing tag would read as `none` and skip the age rule (plan
 /// deviation 5).
 fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
     let raw = raw.trim();
@@ -1601,32 +1605,51 @@ fn parse(raw: &str) -> Result<DecisionProposal, Vec<Rejection>> {
         serde_json::from_str(raw).map_err(|e| schema_error(format!("invalid JSON: {e}")))?;
     let tagged = serde_json::from_str::<serde_json::Value>(raw)
         .ok()
-        .is_some_and(|v| v.get("intimate").is_some_and(serde_json::Value::is_boolean));
+        .and_then(|v| v.get("intimacy").cloned())
+        .is_some_and(|v| serde_json::from_value::<Intimacy>(v).is_ok());
     if !tagged {
         return Err(schema_error(
-            "intimate is required: true or false".to_owned(),
+            "intimacy is required: none, advance or intimate".to_owned(),
         ));
     }
     Ok(p)
 }
 
-/// True when the raw model text says `intimate` is true anywhere, read
-/// without parsing (review M2): the word `intimate`, then any quotes,
-/// spaces, `:` or `=`, then `true`, in any case. A text that holds the key
-/// twice with two values says it. The tag then sticks: a wrong tag only
-/// refuses a Turn, a lost tag skips the age rule.
-fn states_intimate(raw: &str) -> bool {
+/// The strongest intimacy tag the raw model text states anywhere, read
+/// without parsing (review M2): the key `intimacy`, then any quotes,
+/// spaces, `:` or `=`, then `intimate` or `advance`; or the old key
+/// `intimate`, then `true`; in any case. A text that holds the key twice
+/// with two values states the stronger one. The tag then sticks: a wrong
+/// tag only refuses a Turn, a lost tag skips the age rule.
+fn stated_intimacy(raw: &str) -> Intimacy {
     let text = raw.to_lowercase();
-    let mut rest = text.as_str();
-    while let Some(at) = rest.find("intimate") {
-        rest = &rest[at + "intimate".len()..];
-        let value = rest
-            .trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ':' | '='));
-        if value.starts_with("true") {
-            return true;
+    let value_after = |rest: &str| -> String {
+        rest.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ':' | '='))
+            .to_owned()
+    };
+    let mut strongest = Intimacy::None;
+    for (key, values) in [
+        (
+            "intimacy",
+            &[
+                ("intimate", Intimacy::Intimate),
+                ("advance", Intimacy::Advance),
+            ][..],
+        ),
+        ("intimate", &[("true", Intimacy::Intimate)][..]),
+    ] {
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find(key) {
+            rest = &rest[at + key.len()..];
+            let value = value_after(rest);
+            for (word, tag) in values {
+                if value.starts_with(word) {
+                    strongest = strongest.max(*tag);
+                }
+            }
         }
     }
-    false
+    strongest
 }
 
 /// The engine owns the time of a Turn, so the model cannot freeze the World

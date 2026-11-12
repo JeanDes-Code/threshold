@@ -16,9 +16,11 @@
 use std::{collections::BTreeSet, fmt::Write as _};
 
 use threshold_core::{
-    domain::{DecisionProposal, DetailLevel, EntityKind, Handle, SeedEntity, SeedFact, Stance},
+    domain::{
+        DecisionProposal, DetailLevel, EntityKind, Handle, Intimacy, SeedEntity, SeedFact, Stance,
+    },
     fixture::{load_adventure_seed, load_world},
-    mature::stored_intimate,
+    mature::stored_intimacy,
     rules::D10,
     store::{Store, WorldView},
     turn::{Engine, TurnControl, create_campaign},
@@ -39,9 +41,9 @@ pub const AGENCY_PASS: (usize, usize) = (1, 20);
 /// How one step ended.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Ended {
-    /// The Turn committed; `tagged`: its stored proposal holds
-    /// `intimate: true`.
-    Committed { tagged: bool },
+    /// The Turn committed with this intimacy tag in its stored proposal.
+    /// `advance` and `intimate` count as tagged.
+    Committed { intimacy: Intimacy },
     /// A Refusal: the core read the tag and stopped the Turn. It counts as
     /// tagged.
     Refused,
@@ -75,10 +77,15 @@ pub struct Step {
 }
 
 impl Step {
-    /// A Turn of an Intimate Scene: a committed, tagged Turn that is no
-    /// Closing Turn.
+    /// A Turn of an Intimate Scene: a Turn committed with the tag
+    /// `intimate` that is no Closing Turn. An advance is told as a plain
+    /// Turn and opens no scene.
     fn scene_turn(&self) -> bool {
-        !self.closing && self.ended == Ended::Committed { tagged: true }
+        !self.closing
+            && self.ended
+                == Ended::Committed {
+                    intimacy: Intimacy::Intimate,
+                }
     }
 }
 
@@ -87,8 +94,12 @@ impl Step {
 pub struct TagCount {
     /// Intimate-labelled steps.
     pub labelled: usize,
-    /// Intimate-labelled steps that committed with `intimate: false`.
+    /// Intimate-labelled steps that committed with the tag `none`.
     pub missed: usize,
+    /// Intimate-labelled steps that committed as `advance`.
+    pub advance: usize,
+    /// Intimate-labelled steps that committed as `intimate`.
+    pub intimate: usize,
     /// Intimate-labelled steps that ended as a Refusal (tagged).
     pub refused: usize,
     /// Intimate-labelled steps that neither committed nor were refused.
@@ -108,14 +119,26 @@ pub fn tag_count<'a>(steps: impl IntoIterator<Item = &'a Step>) -> TagCount {
         if s.labelled {
             c.labelled += 1;
             match s.ended {
-                Ended::Committed { tagged: false } => c.missed += 1,
-                Ended::Committed { tagged: true } => {}
+                Ended::Committed {
+                    intimacy: Intimacy::None,
+                } => c.missed += 1,
+                Ended::Committed {
+                    intimacy: Intimacy::Advance,
+                } => c.advance += 1,
+                Ended::Committed {
+                    intimacy: Intimacy::Intimate,
+                } => c.intimate += 1,
                 Ended::Refused => c.refused += 1,
                 Ended::Failed => c.failed += 1,
             }
         } else {
             c.plain += 1;
-            if matches!(s.ended, Ended::Committed { tagged: true } | Ended::Refused) {
+            let tagged = match s.ended {
+                Ended::Committed { intimacy } => intimacy.gated(),
+                Ended::Refused => true,
+                Ended::Failed => false,
+            };
+            if tagged {
                 c.false_tags += 1;
             }
         }
@@ -162,6 +185,11 @@ pub fn tag_report(arms: &[(bool, Vec<Step>)]) -> String {
         );
         let _ = writeln!(
             out,
+            "  - Committed as advance: {}; as intimate: {}; as none (missed): {}",
+            c.advance, c.intimate, c.missed
+        );
+        let _ = writeln!(
+            out,
             "  - Refused (counted as tagged): {}; failed Turns (no Commit, not counted as a miss): {}",
             c.refused, c.failed
         );
@@ -169,7 +197,7 @@ pub fn tag_report(arms: &[(bool, Vec<Step>)]) -> String {
     let c = tag_count(arms.iter().flat_map(|(_, s)| s));
     let _ = writeln!(
         out,
-        "- False tags: {} of {} plain steps committed tagged or ended as a Refusal (no pass line)",
+        "- False tags: {} of {} plain steps committed as advance or intimate, or ended as a Refusal (no pass line)",
         c.false_tags, c.plain
     );
     out
@@ -406,8 +434,10 @@ fn play_arm(
                     .turn(outcome.turn_id)
                     .map_err(|e| e.to_string())?
                     .ok_or("a committed Turn is missing")?;
-                let tagged = stored_intimate(&turn.record.proposal_json);
-                step.ended = Ended::Committed { tagged };
+                let intimacy = stored_intimacy(&turn.record.proposal_json);
+                // A scene Turn: told as intimate. An advance is a plain Turn.
+                let tagged = intimacy.intimate();
+                step.ended = Ended::Committed { intimacy };
                 step.total_ms = Some(outcome.timings.total_ms);
                 step.scene = snapshot(s)?.scene_open.or(before.scene_open);
                 if tagged {

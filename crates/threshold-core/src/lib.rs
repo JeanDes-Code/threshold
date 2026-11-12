@@ -240,9 +240,16 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
     require(&mut schema, "", "contested");
     // The adults-only gate needs the signal on every Turn and at every
     // Detail Level, `excluded` included: an optional tag was never set
-    // (design 4, 0 of 15). `parse` refuses a raw proposal without it.
-    schema["properties"]["intimate"] = json!({"type": "boolean"});
-    require(&mut schema, "", "intimate");
+    // (design 4, 0 of 15), and a required boolean missed mild invitations
+    // (live evaluation of 2026-11-12). A required enum with a middle value
+    // (ADR 0007's lesson, ADR 0008). `parse` refuses a raw proposal
+    // without it.
+    schema["properties"]["intimacy"] = json!({
+        "type": "string",
+        "enum": ["none", "advance", "intimate"],
+        "description": domain::INTIMACY_DEFINITION,
+    });
+    require(&mut schema, "", "intimacy");
     for stake in ["win", "lose"] {
         schema["$defs"]["CheckDraft"]["properties"][stake] = json!({"$ref": "#/$defs/SlotDraft"});
         require(&mut schema, "/$defs/CheckDraft", stake);
@@ -262,7 +269,7 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
 /// The schema of a Closing Turn's proposal (mature content data shape 3.7):
 /// the per-Turn schema of `ctx`, with what the code does not want the model
 /// to choose pinned or left out. `action` is `wait`, `verdict` `allowed`,
-/// `contested` and `intimate` are `false`, `move_to` and `check` are
+/// `contested` is `false`, `intimacy` is `none`, `move_to` and `check` are
 /// `null`; `settles`, `new_npcs`, `schedule`, `cancel`, `leaves` and
 /// `blockers` are absent. Free: `minutes` (1 to
 /// `mature::SCENE_CLOSE_MAX_MIN`), at most two `reactions` and one fact,
@@ -277,7 +284,7 @@ pub fn closing_schema_for(ctx: &HandleContext) -> serde_json::Value {
     props["action"] = json!({"type": "string", "enum": ["wait"]});
     props["verdict"] = json!({"type": "string", "enum": ["allowed"]});
     props["contested"] = json!({"type": "boolean", "enum": [false]});
-    props["intimate"] = json!({"type": "boolean", "enum": [false]});
+    props["intimacy"] = json!({"type": "string", "enum": ["none"]});
     props["move_to"] = json!({"type": "null"});
     props["check"] = json!({"type": "null"});
     props["minutes"] = json!({

@@ -6,6 +6,7 @@
 mod support;
 
 use std::{fs, path::Path};
+use threshold_core::domain::Intimacy;
 
 use support::{rig::*, *};
 use threshold_core::{
@@ -866,7 +867,7 @@ fn the_closing_schema_pins_what_code_does_not_want() {
     assert_eq!(props["action"]["enum"], serde_json::json!(["wait"]));
     assert_eq!(props["verdict"]["enum"], serde_json::json!(["allowed"]));
     assert_eq!(props["contested"]["enum"], serde_json::json!([false]));
-    assert_eq!(props["intimate"]["enum"], serde_json::json!([false]));
+    assert_eq!(props["intimacy"]["enum"], serde_json::json!(["none"]));
     assert_eq!(props["move_to"], serde_json::json!({"type": "null"}));
     assert_eq!(props["check"], serde_json::json!({"type": "null"}));
     for key in [
@@ -885,7 +886,7 @@ fn the_closing_schema_pins_what_code_does_not_want() {
     assert_eq!(props["facts"]["maxItems"], 1);
     assert_eq!(props["minutes"]["minimum"], 1);
     assert_eq!(props["minutes"]["maximum"], SCENE_CLOSE_MAX_MIN);
-    for key in ["intimate", "contested", "move_to", "minutes"] {
+    for key in ["intimacy", "contested", "move_to", "minutes"] {
         assert!(
             schema["required"]
                 .as_array()
@@ -908,12 +909,12 @@ fn settle_forces_the_closing_pins() {
     let rig = Rig::new("settle-pins");
     let mut p = rig.closing();
     p.action = ActionKind::Act;
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.new_npcs = vec![new_npc(1, "Kett", 30)];
     p.minutes = 999;
     let (p, notes) = settle_closing(p, &rig.view());
     assert_eq!(p.action, ActionKind::Wait);
-    assert!(!p.intimate);
+    assert_eq!(p.intimacy, Intimacy::None);
     assert!(p.new_npcs.is_empty());
     assert_eq!(p.minutes, SCENE_CLOSE_MAX_MIN);
     assert_eq!(SCENE_CLOSE_MAX_MIN, 240);
@@ -1299,5 +1300,78 @@ fn excluded_closes_the_open_scene() {
             }
         ),
         "{err:?}"
+    );
+}
+
+// --- Live evaluation of 2026-11-12: the advance -------------------------------
+
+/// An advance is told as a plain Turn: no implied line, no scene cap, and
+/// it opens no Intimate Scene. Its record keeps the tag.
+#[test]
+fn an_advance_is_told_plain_and_opens_no_scene() {
+    let mut rig = Rig::new("advance-plain");
+    let mut p = rig.intimate();
+    p.intimacy = Intimacy::Advance;
+    let t1 = rig.played("t1", &p, "Brann smiles and shakes his head.");
+    assert_eq!(rig.scene(), None);
+    assert!(rig.scene_ops(t1).is_empty());
+    let narrate = rig.last_call(CallKind::Narrate);
+    assert!(!narrate.prompt.recent.contains(IMPLIED_LINE));
+    assert_eq!(narrate.max_tokens, None);
+    let record: serde_json::Value =
+        serde_json::from_str(&rig.turn(t1).record.proposal_json).unwrap();
+    assert_eq!(record["proposal"]["intimacy"], "advance");
+    // A plain Turn has no Neutral Line: the next prompts read it in full.
+    assert_eq!(neutral_line(&rig.turn(t1)), None);
+}
+
+/// Only `intimate` continues a scene: an advance inside an open scene
+/// closes it, as a plain Turn does.
+#[test]
+fn an_advance_in_an_open_scene_closes_it() {
+    let mut rig = Rig::new("advance-closes");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let mut p = rig.intimate();
+    p.intimacy = Intimacy::Advance;
+    let t2 = rig.played("t2", &p, "Dusk falls.");
+    assert_eq!(rig.scene(), None);
+    assert_eq!(rig.scene_ops(t2), [(false, SceneWhy::NotIntimate)]);
+}
+
+/// The sticky tag keeps the strongest value of the raw answers: a first
+/// answer that says `advance`, then a retry that says `none`, commits as
+/// an advance, and a minor here refuses it.
+#[test]
+fn the_sticky_tag_keeps_the_strongest_value() {
+    let mut rig = Rig::new("sticky-strongest");
+    let mut first = rig.intimate();
+    first.intimacy = Intimacy::Advance;
+    // A plan over the limit makes the first answer fail another check.
+    first.reactions[0].plan = "x".repeat(120);
+    let retry = rig.plain();
+    let play = |rig: &mut Rig, op: &str| {
+        rig.gm.push_proposal(serde_json::to_string(&first).unwrap());
+        rig.gm.push_proposal(serde_json::to_string(&retry).unwrap());
+        rig.gm.push_narration("Brann shrugs.".into());
+        rig.engine()
+            .play_turn(op.into(), "I stay with Brann.", &mut |_| {})
+    };
+    let outcome = play(&mut rig, "t1").unwrap();
+    let record: serde_json::Value =
+        serde_json::from_str(&rig.turn(outcome.turn_id).record.proposal_json).unwrap();
+    assert_eq!(record["proposal"]["intimacy"], "advance");
+
+    rig.add_npc("Kit", 15, true, "gate square");
+    let refused = play(&mut rig, "t2").expect_err("a minor is here");
+    assert!(
+        matches!(
+            refused,
+            TurnError::Refused {
+                kind: threshold_core::mature::RefusalKind::AdultsOnly,
+                ..
+            }
+        ),
+        "{refused:?}"
     );
 }

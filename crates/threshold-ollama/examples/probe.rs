@@ -54,7 +54,7 @@ impl FieldPresence {
         self.cancel += usize::from(!proposal.cancel.is_empty());
         self.schedule += usize::from(proposal.schedule.is_some());
         self.minutes += usize::from(proposal.minutes > 0);
-        self.intimate += usize::from(proposal.intimate);
+        self.intimate += usize::from(proposal.intimacy.intimate());
     }
 }
 

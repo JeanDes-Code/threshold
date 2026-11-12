@@ -6,7 +6,9 @@
 
 use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
-    domain::{ActionKind, DecisionProposal, EntityKind, Handle, NO_ITEM, SlotDraft, Verdict},
+    domain::{
+        ActionKind, DecisionProposal, EntityKind, Handle, Intimacy, NO_ITEM, SlotDraft, Verdict,
+    },
     mature::SCENE_CLOSE_MAX_MIN,
     normalize,
     store::WorldView,
@@ -65,9 +67,9 @@ pub fn settle_closing(
         note("contested set to false");
         p.contested = false;
     }
-    if p.intimate {
-        note("intimate set to false");
-        p.intimate = false;
+    if p.intimacy != Intimacy::None {
+        note(&format!("intimacy {:?} set to none", p.intimacy));
+        p.intimacy = Intimacy::None;
     }
     if let Some(place) = p.move_to.take() {
         note(&format!("removed move_to {place}"));

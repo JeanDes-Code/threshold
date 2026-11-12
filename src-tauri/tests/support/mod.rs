@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use threshold_core::domain::Intimacy;
 
 use threshold_app::session::Session;
 use threshold_core::{
@@ -35,7 +36,7 @@ pub fn base() -> DecisionProposal {
         cancel: vec![],
         schedule: None,
         minutes: 0,
-        intimate: false,
+        intimacy: Intimacy::None,
         facts_on_win: false,
         offered: vec![],
     }
@@ -161,7 +162,7 @@ pub fn confirm_all(s: &Session) {
 pub fn intimate_with_hessa(db: &str) -> String {
     use threshold_core::domain::{Reaction, Stance};
     let mut p = base();
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.minutes = 5;
     p.reactions = vec![Reaction {
         npc: Handle::Entity(entity(db, "Hessa")),

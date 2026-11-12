@@ -9,10 +9,11 @@ pub use adventure_seed::{
     SeedEntity, SeedFact, StartSeed,
 };
 pub use handle::{Handle, HandleError};
+pub(crate) use proposal::intimacy_definition_text;
 pub use proposal::{
     AWAY, ActionKind, Cancel, Cause, CheckDraft, CloseOutcome, DecisionProposal, EventDraft,
-    Factor, ItemStatus, Leave, NO_ITEM, NewFact, NewNpc, PLAN_MAX_CHARS, Reaction,
-    SCENE_PLAN_MAX_CHARS, Seen, Settle, SlotDraft, Verdict,
+    Factor, INTIMACY_DEFINITION, Intimacy, ItemStatus, Leave, NO_ITEM, NewFact, NewNpc,
+    PLAN_MAX_CHARS, Reaction, SCENE_PLAN_MAX_CHARS, Seen, Settle, SlotDraft, Verdict,
 };
 pub use types::{
     ALIAS_KEY_PREFIX, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,

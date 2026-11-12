@@ -5,6 +5,7 @@
 pub mod hidden;
 pub mod rig;
 
+use threshold_core::domain::Intimacy;
 use threshold_core::{
     domain::{
         ActionKind, AdventureSeed, Canon, CheckDraft, DecisionProposal, DetailLevel, EntityKind,
@@ -304,7 +305,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         cancel: vec![],
         schedule: None,
         minutes: 0,
-        intimate: false,
+        intimacy: Intimacy::None,
         facts_on_win: false,
         offered: vec![],
     }

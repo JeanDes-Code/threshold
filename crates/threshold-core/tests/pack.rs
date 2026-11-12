@@ -10,6 +10,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+use threshold_core::domain::Intimacy;
 
 use support::{rig::*, *};
 use threshold_core::{
@@ -481,12 +482,12 @@ fn a_pack_changes_no_check() {
     let ids = [w.ada, w.orsel, w.brann];
     w.confirm(&ids);
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.pip), Stance::Comply, None)];
     let errs = validate(&p, &w.view).expect_err("still rejected");
     assert!(errs.iter().any(|r| r.check == CheckKind::AdultsOnly));
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
     p.new_npcs = vec![new_npc(1, "Kett", 30)];
     let errs = validate(&p, &w.view).expect_err("still rejected");

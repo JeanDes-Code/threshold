@@ -254,7 +254,8 @@ pub fn after(view: &WorldView, ops: &[LedgerOp]) -> Presence {
     }
 }
 
-/// G3: for an intimate proposal, `clearance` over every character the gate
+/// G3: for a proposal tagged `advance` or `intimate`, `clearance` over
+/// every character the gate
 /// checks at the PC's place once the Turn's ops are committed
 /// (`after.checked`: world truth, so an arrival the PC does not see counts,
 /// and everyone the PC then believes is here, so a Claim of this Turn
@@ -270,7 +271,7 @@ pub fn check_after(
     view: &WorldView,
     after: &Presence,
 ) -> Result<(), Blocked> {
-    if !p.intimate {
+    if !p.intimacy.gated() {
         return Ok(());
     }
     let here: Vec<EntityId> = after
@@ -566,11 +567,12 @@ impl Replay {
     }
 }
 
-/// G2: the rules of an intimate proposal, in order (data shape 3.3). A
-/// proposal without `intimate` passes untouched.
+/// G2: the rules of a proposal tagged `advance` or `intimate`, in order
+/// (data shape 3.3; the middle value since the live evaluation of
+/// 2026-11-12, ADR 0008). A proposal tagged `none` passes untouched.
 ///
-/// 1. At Detail Level `excluded`: one `DetailExcluded` rejection, and
-///    nothing else is checked.
+/// 1. At Detail Level `excluded`, for `intimate` only: one `DetailExcluded`
+///    rejection, and nothing else is checked.
 /// 2. Every handle the proposal names, anywhere (`named`): a character it
 ///    reaches, directly or through a fact, a World Event or a goal, must be
 ///    cleared, here or not. A new NPC (an `N` handle) has no Age
@@ -580,13 +582,14 @@ impl Replay {
 /// 3. `clearance` over the place (`checked_here`) and the characters of
 ///    rule 2: one `AdultsOnly` rejection per blocked character, with its
 ///    handle.
-/// 4. No reaction, or a reacting NPC below comply: `Unwilling`. Not final:
-///    it keeps the one retry.
+/// 4. For `intimate` only: no reaction, or a reacting NPC below comply:
+///    `Unwilling`. Not final: it keeps the one retry. An NPC may accept or
+///    decline an advance in the story freely.
 pub fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
-    if !p.intimate {
+    if !p.intimacy.gated() {
         return;
     }
-    if view.detail == DetailLevel::Excluded {
+    if p.intimacy.intimate() && view.detail == DetailLevel::Excluded {
         errs.push(Rejection::new(
             CheckKind::DetailExcluded,
             None,
@@ -603,7 +606,9 @@ pub fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) 
                 also.extend(ids);
                 continue;
             }
-            Reach::NewNpc => "a new NPC cannot be part of an intimate Turn".to_owned(),
+            Reach::NewNpc => {
+                "a new NPC cannot be part of a Turn tagged advance or intimate".to_owned()
+            }
             Reach::Nothing => {
                 format!("{field} names nothing the world holds, so nobody can be cleared")
             }
@@ -618,9 +623,14 @@ pub fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) 
             errs.push(Rejection::new(
                 CheckKind::AdultsOnly,
                 Some(Handle::Entity(id)),
-                "an intimate Turn needs every character here, and every character it names, to be a confirmed adult",
+                "a Turn tagged advance or intimate needs every character here, and every character it names, to be a confirmed adult",
             ));
         }
+    }
+    // An NPC may decline an advance in the story: the stance rule is for
+    // an intimate Turn only.
+    if !p.intimacy.intimate() {
+        return;
     }
     if p.reactions.is_empty() {
         errs.push(Rejection::new(
@@ -675,7 +685,7 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         cancel,
         schedule,
         minutes: _,
-        intimate: _,
+        intimacy: _,
         facts_on_win: _,
         offered: _,
     } = p;

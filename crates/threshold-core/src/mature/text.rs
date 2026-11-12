@@ -10,7 +10,7 @@
 
 use super::{gate::Cleared, scene::narration_clearance};
 use crate::{
-    domain::DetailLevel,
+    domain::{DetailLevel, Intimacy},
     pack::ContentPack,
     store::{StoredTurn, TurnId, TurnKind, WorldView},
 };
@@ -175,11 +175,24 @@ fn lower(a: DetailLevel, b: DetailLevel) -> DetailLevel {
 }
 
 /// True when a Turn's stored `proposal_json` holds a proposal committed with
-/// `intimate: true`. A record without the key, or that does not parse,
-/// reads as false: such a Turn was committed before the tag existed, or is
-/// not a Play or Correction Turn.
+/// the tag `intimate` (`stored_intimacy`).
 pub fn stored_intimate(proposal_json: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(proposal_json).is_ok_and(|record| {
-        record.pointer("/proposal/intimate") == Some(&serde_json::Value::Bool(true))
-    })
+    stored_intimacy(proposal_json).intimate()
+}
+
+/// The intimacy tag of a Turn's stored `proposal_json`: `proposal.intimacy`,
+/// or the old boolean `proposal.intimate` (`true` is `intimate`). A record
+/// with neither key, or that does not parse, reads `none`: such a Turn was
+/// committed before the tag existed, or is not a Play or Correction Turn.
+pub fn stored_intimacy(proposal_json: &str) -> Intimacy {
+    let Ok(record) = serde_json::from_str::<serde_json::Value>(proposal_json) else {
+        return Intimacy::None;
+    };
+    if let Some(value) = record.pointer("/proposal/intimacy") {
+        return serde_json::from_value(value.clone()).unwrap_or_default();
+    }
+    match record.pointer("/proposal/intimate") {
+        Some(serde_json::Value::Bool(true)) => Intimacy::Intimate,
+        _ => Intimacy::None,
+    }
 }

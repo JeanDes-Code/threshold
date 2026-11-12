@@ -10,6 +10,7 @@ use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
 };
+use threshold_core::domain::Intimacy;
 
 use support::{
     hidden::{HiddenWorld, claim as hidden_claim, id_of, record, set},
@@ -55,7 +56,7 @@ fn confirmed_gate() -> World {
 /// An intimate proposal: Brann reacts with `stance`.
 fn intimate(w: &World, stance: Stance) -> DecisionProposal {
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.brann), stance, None)];
     p
 }
@@ -146,7 +147,7 @@ fn an_intimate_proposal_is_refused_at_excluded() {
     assert!(errs[0].check.is_final());
     // A plain proposal at the same level passes.
     let mut p = intimate(&w, Stance::Comply);
-    p.intimate = false;
+    p.intimacy = Intimacy::None;
     assert!(validate(&p, &w.view).is_ok());
 }
 
@@ -632,7 +633,11 @@ fn an_intimate_turn_is_told_by_implication_only() {
 
     let record = |intimate: bool| {
         let mut p = proposal(Verdict::Allowed);
-        p.intimate = intimate;
+        p.intimacy = if intimate {
+            Intimacy::Intimate
+        } else {
+            Intimacy::None
+        };
         serde_json::json!({ "proposal": p, "reactions": [], "events": [] }).to_string()
     };
     assert!(stored_intimate(&record(true)));
@@ -831,7 +836,7 @@ fn the_gate_checks_who_the_pc_believes_is_here() {
         0,
     )];
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     assert_eq!(
         check_after(&p, &view, &after(&view, &ops)).unwrap_err(),
         Blocked { who: vec![w.pip] }
@@ -1083,7 +1088,7 @@ fn a_tagged_proposal_checks_every_character_it_names() {
     }
     // The same proposals, untagged, are not refused for Pip.
     for (label, mut p) in proposals_naming_pip(&w) {
-        p.intimate = false;
+        p.intimacy = Intimacy::None;
         if let Err(errs) = validate(&p, &w.view) {
             assert!(adults_only(&errs).is_empty(), "{label}: {errs:?}");
         }
@@ -1227,7 +1232,7 @@ const PROPOSAL_FIELDS: &[(&str, bool)] = &[
     ("facts[].slot.key", false),
     ("facts[].slot.subject", true),
     ("facts[].slot.value", false),
-    ("intimate", false),
+    ("intimacy", false),
     ("leaves[].npc", true),
     ("leaves[].to", false),
     ("minutes", false),
@@ -1278,7 +1283,7 @@ fn every_proposal_field_is_sorted_for_the_gate() {
 /// an untagged proposal with Brann complying.
 fn play_with_first(mut w: World, first: String) -> Result<(), TurnError> {
     let mut retry = intimate(&w, Stance::Comply);
-    retry.intimate = false;
+    retry.intimacy = Intimacy::None;
     let gm = RecordedGm::new(
         vec![first, serde_json::to_string(&retry).unwrap()],
         vec!["Brann nods.".into()],
@@ -1304,20 +1309,24 @@ fn a_malformed_first_answer_keeps_the_tag() {
     };
     let tagged = serde_json::to_string(&intimate(&gate(), Stance::Comply)).unwrap();
     let mut untagged = intimate(&gate(), Stance::Comply);
-    untagged.intimate = false;
+    untagged.intimacy = Intimacy::None;
     let untagged = serde_json::to_string(&untagged).unwrap();
-    let cut = tagged[..tagged.find("\"intimate\":true").unwrap() + 15].to_owned();
+    let cut = tagged[..tagged.find("\"intimacy\":\"intimate\"").unwrap() + 21].to_owned();
     let shapes = [
         ("cut", cut),
         ("fenced", format!("```json\n{tagged}\n```")),
         ("trailing text", format!("{tagged} That is the answer.")),
         (
             "duplicate key",
-            untagged.replacen('{', "{\"intimate\":true,", 1),
+            untagged.replacen('{', "{\"intimacy\":\"intimate\",", 1),
         ),
         (
             "spaces and quotes",
-            "{ \"intimate\" : \"true\", \"action\": ".to_owned(),
+            "{ \"intimacy\" : \"INTIMATE\", \"action\": ".to_owned(),
+        ),
+        (
+            "the old key",
+            "{ \"intimate\" : true, \"action\": ".to_owned(),
         ),
     ];
     for (shape, first) in shapes {
@@ -1831,7 +1840,7 @@ fn the_confirm_list_is_the_same_whatever_hides_behind_a_refusal() {
             .collect();
         play_ops(&mut w, ops);
         let mut p = proposal(Verdict::Allowed);
-        p.intimate = true;
+        p.intimacy = Intimacy::Intimate;
         p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
         let gm = RecordedGm::new(vec![serde_json::to_string(&p).unwrap()], vec![]);
         let (mut engine, _) = w.engine(&gm);
@@ -1872,4 +1881,118 @@ fn the_confirm_list_is_the_same_whatever_hides_behind_a_refusal() {
         }
         assert!(!json.contains("age"), "{json}");
     }
+}
+
+// --- Live evaluation of 2026-11-12: the tag has three values -----------------
+
+/// A proposal stored before the tag had three values still reads: the old
+/// boolean `true` is `intimate`, `false` is `none`, and a record with
+/// neither key is `none`. A new proposal writes `intimacy`.
+#[test]
+fn a_stored_proposal_with_the_old_flag_still_reads() {
+    use threshold_core::mature::stored_intimacy;
+    let base = serde_json::json!({"action": "talk", "verdict": "allowed"});
+    let with = |key: &str, value: serde_json::Value| {
+        let mut p = base.clone();
+        p[key] = value;
+        p
+    };
+    for (proposal, tag) in [
+        (with("intimate", true.into()), Intimacy::Intimate),
+        (with("intimate", false.into()), Intimacy::None),
+        (base.clone(), Intimacy::None),
+        (with("intimacy", "advance".into()), Intimacy::Advance),
+        (with("intimacy", "intimate".into()), Intimacy::Intimate),
+    ] {
+        let parsed: DecisionProposal = serde_json::from_value(proposal.clone()).unwrap();
+        assert_eq!(parsed.intimacy, tag, "{proposal}");
+        let record = serde_json::json!({ "proposal": proposal }).to_string();
+        assert_eq!(stored_intimacy(&record), tag, "{record}");
+        assert_eq!(stored_intimate(&record), tag == Intimacy::Intimate);
+    }
+    let written = serde_json::to_value(&parsed_advance()).unwrap();
+    assert_eq!(written["intimacy"], "advance");
+    assert!(written.get("intimate").is_none());
+}
+
+fn parsed_advance() -> DecisionProposal {
+    serde_json::from_value(serde_json::json!({
+        "action": "talk", "verdict": "allowed", "intimacy": "advance"
+    }))
+    .unwrap()
+}
+
+/// An advance: Brann reacts with `stance`.
+fn an_advance(w: &World, stance: Stance) -> DecisionProposal {
+    let mut p = intimate(w, stance);
+    p.intimacy = Intimacy::Advance;
+    p
+}
+
+/// The age rule (G2) runs for an advance as for an intimate Turn: a minor
+/// here refuses it, finally, with the same kind.
+#[test]
+fn an_advance_runs_the_age_rule() {
+    let mut w = confirmed_gate();
+    let pip = w.pip;
+    bring(&mut w, pip, "Gate Square");
+    let errs = validate(&an_advance(&w, Stance::Comply), &w.view).expect_err("Pip");
+    assert_eq!(adults_only(&errs), [Some(e(w.pip))]);
+    assert!(errs.iter().all(|r| r.check.is_final()), "{errs:?}");
+
+    // Every character it names, here or not, and a new NPC.
+    let w = confirmed_gate();
+    let mut p = an_advance(&w, Stance::Comply);
+    p.facts = vec![fact(slot(e(w.pip), "mood", "curious"), Seen::Gm, vec![])];
+    let errs = validate(&p, &w.view).expect_err("Pip is named");
+    assert_eq!(adults_only(&errs), [Some(e(w.pip))]);
+    let mut p = an_advance(&w, Stance::Comply);
+    p.new_npcs = vec![new_npc(1, "Lark", 30)];
+    assert_eq!(
+        kinds(&validate(&p, &w.view).expect_err("a new NPC")),
+        [CheckKind::AdultsOnly]
+    );
+}
+
+/// At `excluded` an advance is not refused for the level, and it takes no
+/// stance rule: an NPC may decline an advance in the story. An unconfirmed
+/// character here still refuses it.
+#[test]
+fn an_advance_takes_neither_the_level_nor_the_stance_rule() {
+    let mut w = World::new();
+    assert_eq!(w.view.detail, DetailLevel::Excluded);
+    let errs = validate(&an_advance(&w, Stance::Resist), &w.view).expect_err("unconfirmed");
+    assert!(
+        kinds(&errs).iter().all(|k| *k == CheckKind::AdultsOnly),
+        "{errs:?}"
+    );
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    assert!(validate(&an_advance(&w, Stance::Resist), &w.view).is_ok());
+    let mut p = an_advance(&w, Stance::Comply);
+    p.reactions.clear();
+    assert!(validate(&p, &w.view).is_ok(), "no reaction is fine too");
+    // The same proposal tagged intimate is refused for the level.
+    assert_eq!(
+        kinds(&validate(&intimate(&w, Stance::Comply), &w.view).expect_err("excluded")),
+        [CheckKind::DetailExcluded]
+    );
+}
+
+/// G3 runs for an advance: a minor who stands at the PC's place after the
+/// Turn's ops refuses it.
+#[test]
+fn g3_runs_for_an_advance() {
+    let w = confirmed_gate();
+    let p = an_advance(&w, Stance::Comply);
+    let mut after = after(&w.view, &[]);
+    assert!(check_after(&p, &w.view, &after).is_ok());
+    after.checked.insert(w.pip);
+    assert_eq!(
+        check_after(&p, &w.view, &after).unwrap_err(),
+        Blocked { who: vec![w.pip] }
+    );
+    let mut plain = p.clone();
+    plain.intimacy = Intimacy::None;
+    assert!(check_after(&plain, &w.view, &after).is_ok());
 }

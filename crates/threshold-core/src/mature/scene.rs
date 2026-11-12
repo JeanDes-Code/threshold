@@ -116,7 +116,7 @@ pub fn scene_op(
 ) -> Option<LedgerOp> {
     let close = |why| Some(LedgerOp::SetScene { open: false, why });
     if view.scene_open.is_none() {
-        return p.intimate.then_some(LedgerOp::SetScene {
+        return p.intimacy.intimate().then_some(LedgerOp::SetScene {
             open: true,
             why: SceneWhy::Opened,
         });
@@ -124,7 +124,7 @@ pub fn scene_op(
     if gate_failed {
         return close(SceneWhy::Gate);
     }
-    if !p.intimate {
+    if !p.intimacy.intimate() {
         return close(SceneWhy::NotIntimate);
     }
     let place_before = view

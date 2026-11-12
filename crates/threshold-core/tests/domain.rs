@@ -458,9 +458,10 @@ fn a_seed_without_detail_excludes() {
     }
 }
 
-/// `intimate` is required on every Turn, with or without entities.
+/// `intimacy` is required on every Turn, with or without entities: an
+/// enum of three values with the one definition as its description.
 #[test]
-fn a_proposal_without_intimate_fails_the_schema() {
+fn a_proposal_without_intimacy_fails_the_schema() {
     use threshold_core::{HandleContext, proposal_schema_for};
     let empty = proposal_schema_for(&HandleContext::default());
     let full = proposal_schema_for(&HandleContext {
@@ -471,10 +472,15 @@ fn a_proposal_without_intimate_fails_the_schema() {
     });
     for schema in [empty, full] {
         let required = schema["required"].as_array().unwrap();
-        assert!(required.iter().any(|k| k == "intimate"), "{required:?}");
+        assert!(required.iter().any(|k| k == "intimacy"), "{required:?}");
         assert_eq!(
-            schema["properties"]["intimate"],
-            serde_json::json!({"type": "boolean"})
+            schema["properties"]["intimacy"],
+            serde_json::json!({
+                "type": "string",
+                "enum": ["none", "advance", "intimate"],
+                "description": threshold_core::domain::INTIMACY_DEFINITION,
+            })
         );
+        assert!(schema["properties"].get("intimate").is_none());
     }
 }

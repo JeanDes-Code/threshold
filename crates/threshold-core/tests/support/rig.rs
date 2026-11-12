@@ -5,6 +5,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+use threshold_core::domain::Intimacy;
 
 use super::*;
 use threshold_core::{
@@ -344,7 +345,7 @@ impl Rig {
     /// An intimate proposal: Brann complies.
     pub fn intimate(&self) -> DecisionProposal {
         let mut p = proposal(Verdict::Allowed);
-        p.intimate = true;
+        p.intimacy = Intimacy::Intimate;
         p.minutes = 5;
         p.reactions = vec![reaction(e(self.brann), Stance::Comply, None)];
         p

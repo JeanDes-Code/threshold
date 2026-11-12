@@ -53,13 +53,19 @@ pub struct DecisionProposal {
     pub schedule: Option<EventDraft>,
     #[serde(default)]
     pub minutes: u32,
-    /// True when this Turn's intent or its outcome involves sexual or
-    /// erotic content between any characters, whether the PC takes part or
-    /// only watches. Required in the per-Turn schema, and `turn::parse` refuses a raw
-    /// proposal without it; `default` stays so that a stored proposal
-    /// still reads. `mature::check` gates a proposal that sets it.
-    #[serde(default)]
-    pub intimate: bool,
+    /// The intimacy tag (`INTIMACY_DEFINITION`, ADR 0008): `intimate` when
+    /// THIS Turn's intent or its outcome involves sexual or erotic content
+    /// between any characters, whether the PC takes part or only watches;
+    /// `advance` when it is a romantic or sexual advance or invitation
+    /// between characters without that content happening in this Turn,
+    /// whatever the answer; else `none`. Required in the per-Turn schema,
+    /// and `turn::parse` refuses a raw proposal without the `intimacy` key.
+    /// A stored proposal still reads: one with the old boolean `intimate`
+    /// reads `true` as `intimate` and `false` as `none`, and one with
+    /// neither key reads `none`. `mature::check` gates a proposal whose tag
+    /// is `advance` or `intimate`.
+    #[serde(default, alias = "intimate", deserialize_with = "intimacy_or_old_flag")]
+    pub intimacy: Intimacy,
     /// Set by the core only, never by the model: the core built this
     /// proposal's Check (`checks::default_check`), so its `facts`, written
     /// for an act that simply happens, apply on a won Roll only (ADR 0007,
@@ -73,6 +79,77 @@ pub struct DecisionProposal {
     /// schema and not parsed.
     #[serde(skip)]
     pub offered: Vec<String>,
+}
+
+/// The text of `INTIMACY_DEFINITION`, as a literal, so the proposal rules
+/// can hold it with `concat!`.
+macro_rules! intimacy_definition_text {
+    () => {
+        "\"intimate\" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches; \"advance\" when it is a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, and no such content happens in this Turn, whatever the answer; else \"none\"."
+    };
+}
+pub(crate) use intimacy_definition_text;
+
+/// The one definition of the intimacy tag (ADR 0008, changed after the
+/// live evaluation of 2026-11-12), in neutral words. The proposal rules
+/// (`context::INTIMACY_FIELD_LINE`), the schema's description of
+/// `intimacy`, the glossary and ADR 0008 hold this text; a test pins them
+/// together. The owner reads it before the merge.
+pub const INTIMACY_DEFINITION: &str = intimacy_definition_text!();
+
+/// The intimacy tag of a Turn, from the weakest to the strongest (ADR
+/// 0008). `Advance` is the middle value: an invitation that is not yet an
+/// act. ADR 0007's lesson: this model follows a required enum with an
+/// explicit middle value far better than a boolean. The order matters:
+/// the core keeps the strongest value it sees and never lowers one.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Intimacy {
+    /// Nothing romantic or sexual.
+    #[default]
+    None,
+    /// A romantic or sexual advance or invitation, without the act. The age
+    /// rule runs; the Turn is told as a plain Turn and opens no Intimate
+    /// Scene.
+    Advance,
+    /// Sexual or erotic content between any characters: the whole mature
+    /// module applies (Detail Level, age rule, stance rule, scene, telling,
+    /// caps).
+    Intimate,
+}
+
+impl Intimacy {
+    /// True for `Advance` and `Intimate`: the age rule runs (G2 and G3).
+    pub fn gated(self) -> bool {
+        self != Self::None
+    }
+
+    /// True for `Intimate` only.
+    pub fn intimate(self) -> bool {
+        self == Self::Intimate
+    }
+}
+
+/// Reads the intimacy tag of a proposal: the value of `intimacy`, or the
+/// boolean of a proposal stored before the tag had three values (`true` is
+/// `intimate`, `false` is `none`).
+fn intimacy_or_old_flag<'de, D>(d: D) -> Result<Intimacy, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Flag(bool),
+        Value(Intimacy),
+    }
+    Ok(match Stored::deserialize(d)? {
+        Stored::Flag(true) => Intimacy::Intimate,
+        Stored::Flag(false) => Intimacy::None,
+        Stored::Value(value) => value,
+    })
 }
 
 /// The `to` of a `Leave`, or the `moves_actor_to` of an event, that names

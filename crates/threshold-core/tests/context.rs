@@ -5,7 +5,7 @@ use threshold_core::{
     Prompt, RecordedGm,
     checks::{to_ops, validate},
     context::{
-        IMPLIED_LINE, INTIMATE_FIELD_LINE, INTIMATE_RULE, NARRATION_RULES, PACK_RULE,
+        IMPLIED_LINE, INTIMACY_FIELD_LINE, INTIMATE_RULE, NARRATION_RULES, PACK_RULE,
         PACK_SCENE_HEAD, PROPOSAL_RULES, guard_plans, handle_context, narration_prompt,
         opening_prompt, perceived_by_pc, proposal_prompt,
     },
@@ -340,13 +340,13 @@ fn voice_cards_of_present_npcs_only() {
     }
 }
 
-/// The `intimate` field has one neutral definition line in the proposal
-/// rules (mature content module, Task 1).
+/// The `intimacy` field has one neutral definition line in the proposal
+/// rules (mature content module, Task 1; three values since 2026-11-12).
 #[test]
-fn the_proposal_rules_define_intimate_in_one_line() {
-    assert!(PROPOSAL_RULES.contains(INTIMATE_FIELD_LINE));
-    assert!(!INTIMATE_FIELD_LINE.contains('\n'));
-    assert!(INTIMATE_FIELD_LINE.contains("intimate"));
+fn the_proposal_rules_define_intimacy_in_one_line() {
+    assert!(PROPOSAL_RULES.contains(INTIMACY_FIELD_LINE));
+    assert!(!INTIMACY_FIELD_LINE.contains('\n'));
+    assert!(INTIMACY_FIELD_LINE.contains("intimate"));
     let lines = PROPOSAL_RULES
         .lines()
         .filter(|l| l.contains("intimate"))
@@ -381,9 +381,37 @@ fn the_pack_rule_is_one_stable_line_of_both_rules() {
 /// between the PC and another character.
 #[test]
 fn the_intimate_line_covers_any_characters() {
-    assert!(!INTIMATE_FIELD_LINE.contains("between the PC and another character"));
+    assert!(!INTIMACY_FIELD_LINE.contains("between the PC and another character"));
     for words in ["intent or its outcome", "any characters", "watches"] {
-        assert!(INTIMATE_FIELD_LINE.contains(words), "{words}");
+        assert!(INTIMACY_FIELD_LINE.contains(words), "{words}");
+    }
+}
+
+/// The intimacy tag has one definition (live evaluation of 2026-11-12):
+/// the proposal rule line, the schema's description, the glossary and ADR
+/// 0008 hold the same text, `domain::INTIMACY_DEFINITION`.
+#[test]
+fn the_intimacy_definition_is_one_text() {
+    use threshold_core::{HandleContext, domain::INTIMACY_DEFINITION, proposal_schema_for};
+    assert_eq!(
+        INTIMACY_FIELD_LINE,
+        format!("- intimacy: {INTIMACY_DEFINITION}")
+    );
+    let schema = proposal_schema_for(&HandleContext::default());
+    assert_eq!(
+        schema["properties"]["intimacy"]["description"],
+        INTIMACY_DEFINITION
+    );
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for doc in [
+        "GLOSSARY.md",
+        "docs/adr/0008-confirmed-ages-and-final-refusal.md",
+    ] {
+        let text = std::fs::read_to_string(root.join(doc)).unwrap();
+        assert!(text.contains(INTIMACY_DEFINITION), "{doc}");
+    }
+    for value in ["\"none\"", "\"advance\"", "\"intimate\""] {
+        assert!(INTIMACY_DEFINITION.contains(value), "{value}");
     }
 }
 

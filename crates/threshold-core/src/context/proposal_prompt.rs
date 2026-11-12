@@ -15,18 +15,18 @@ use crate::{
     world::{items_named_by, known_places, open_item_ref, pc_item_text},
 };
 
-/// The text of `INTIMATE_FIELD_LINE`, as a literal, so `PROPOSAL_RULES` can
+/// The text of `INTIMACY_FIELD_LINE`, as a literal, so `PROPOSAL_RULES` can
 /// hold it with `concat!`.
-macro_rules! intimate_field_text {
+macro_rules! intimacy_field_text {
     () => {
-        "- intimate: true when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches; else false."
+        concat!("- intimacy: ", crate::domain::intimacy_definition_text!())
     };
 }
 
-/// The one line that defines the required `intimate` field, in neutral
-/// words (mature content module, Task 1). Part of `PROPOSAL_RULES`. The
-/// owner reads it before the merge.
-pub const INTIMATE_FIELD_LINE: &str = intimate_field_text!();
+/// The one line that defines the required `intimacy` field, in neutral
+/// words: `domain::INTIMACY_DEFINITION` after the field's name (ADR 0008).
+/// Part of `PROPOSAL_RULES`. The owner reads it before the merge.
+pub const INTIMACY_FIELD_LINE: &str = intimacy_field_text!();
 
 /// The head of the proposal prompt's `recent` block inside a cleared
 /// Intimate Scene (data shape 3.10): one line, in neutral words. It reaches
@@ -45,7 +45,7 @@ pub const CLOSING_ASK: &str = "SCENE ENDS: the player ends the intimate scene he
 /// measured by the live probe (`threshold-ollama/examples/probe.rs`); the
 /// VERDICT and LATER ACTIONS parts answer two failures that probe found: a
 /// Check on every proposal, and no scheduled event for a delayed action.
-/// The `move_to`, `settles`, `contested` and `intimate` lines describe
+/// The `move_to`, `settles`, `contested` and `intimacy` lines describe
 /// required fields (ADR 0007, ADR 0008), one line each. `context::PACK_RULE`
 /// says that a Content Pack line is a style note only (review M1).
 pub const PROPOSAL_RULES: &str = concat!(
@@ -66,7 +66,7 @@ VERDICT
 - check: only when BOTH are true: the outcome is truly uncertain, AND failure has real stakes (danger, an NPC who actively opposes the PC, an open obstacle). Then include check with win and lose stakes as slot writes, and factors that cite existing facts.
 - contested: true when an NPC actively opposes this act and the result is uncertain (arm-wrestling, a race, a staring match); then verdict is check, with against = that NPC. Else false.
 ",
-    intimate_field_text!(),
+    intimacy_field_text!(),
     "
 - If either part is missing, do not use check: choose allowed or impossible. Include check only when verdict is check. Never set a numeric difficulty.
 LATER ACTIONS

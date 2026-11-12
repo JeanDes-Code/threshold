@@ -1,6 +1,7 @@
 mod support;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use threshold_core::domain::Intimacy;
 
 use support::*;
 use threshold_core::{
@@ -2110,7 +2111,7 @@ fn gate_at_implied(minor_here: bool) -> World {
 
 fn intimate_with_brann(w: &World, stance: Stance) -> DecisionProposal {
     let mut p = proposal(Verdict::Allowed);
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.brann), stance, None)];
     p
 }
@@ -2125,9 +2126,9 @@ fn refused(
 }
 
 #[test]
-fn a_raw_proposal_without_the_intimate_key_is_a_schema_error() {
+fn a_raw_proposal_without_the_intimacy_key_is_a_schema_error() {
     let mut raw: serde_json::Value = serde_json::to_value(proposal(Verdict::Allowed)).unwrap();
-    raw.as_object_mut().unwrap().remove("intimate");
+    raw.as_object_mut().unwrap().remove("intimacy");
     let (mut engine, _w, gm) = setup(
         vec![raw.to_string(), json(&proposal(Verdict::Allowed))],
         vec!["You look around."],
@@ -2145,7 +2146,7 @@ fn a_raw_proposal_without_the_intimate_key_is_a_schema_error() {
         .map(|(_, raw)| raw)
         .collect();
     assert!(validate[0].starts_with("schema"), "{validate:?}");
-    assert!(validate[0].contains("intimate"), "{validate:?}");
+    assert!(validate[0].contains("intimacy"), "{validate:?}");
     assert_eq!(validate[1], "ok");
 }
 
@@ -2209,7 +2210,7 @@ fn a_retry_keeps_the_tag_of_the_first_attempt() {
     let mut first = intimate_with_brann(&w0, Stance::Comply);
     first.reactions.clear();
     let mut second = intimate_with_brann(&w0, Stance::Comply);
-    second.intimate = false;
+    second.intimacy = Intimacy::None;
     let (mut engine, w, gm) =
         engine_for(w0, vec![json(&first), json(&second)], vec!["Brann nods."]);
     let outcome = engine
@@ -2223,7 +2224,7 @@ fn a_retry_keeps_the_tag_of_the_first_attempt() {
     assert!(retry.recent.contains("unwilling"), "{}", retry.recent);
     let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
     let record: serde_json::Value = serde_json::from_str(&stored.record.proposal_json).unwrap();
-    assert_eq!(record["proposal"]["intimate"], true);
+    assert_eq!(record["proposal"]["intimacy"], "intimate");
     let _ = w;
 }
 
@@ -2643,4 +2644,30 @@ fn kind_helpers_match_the_old_rules() {
         assert_eq!(kind.tells(), old_story, "{kind:?}");
         assert_eq!(kind.has_intent(), old_act, "{kind:?}");
     }
+}
+
+/// A new raw proposal must carry `intimacy`: the old boolean key alone is a
+/// schema error, as no key is (the stored record still reads it).
+#[test]
+fn a_raw_proposal_with_only_the_old_flag_is_a_schema_error() {
+    let mut raw: serde_json::Value = serde_json::to_value(proposal(Verdict::Allowed)).unwrap();
+    raw.as_object_mut().unwrap().remove("intimacy");
+    raw["intimate"] = serde_json::Value::Bool(false);
+    let (mut engine, _w, gm) = setup(
+        vec![raw.to_string(), json(&proposal(Verdict::Allowed))],
+        vec!["You look around."],
+    );
+    engine
+        .play_turn("t1".into(), "I look around.", &mut no_chunks())
+        .unwrap();
+    assert_eq!(
+        kinds(&gm),
+        [CallKind::Propose, CallKind::Propose, CallKind::Narrate]
+    );
+    let validate: Vec<String> = steps(&engine, "t1")
+        .into_iter()
+        .filter(|(step, _)| step == "validate")
+        .map(|(_, raw)| raw)
+        .collect();
+    assert!(validate[0].contains("intimacy"), "{validate:?}");
 }

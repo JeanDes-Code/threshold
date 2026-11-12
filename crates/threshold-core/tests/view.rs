@@ -2074,7 +2074,7 @@ fn in_a_scene() -> (HiddenWorld, TurnId) {
         .collect();
     w.commit(TurnKind::Setup, "", "{}", 0, confirm);
     let mut record: Value = serde_json::from_str(&observe()).unwrap();
-    record["proposal"]["intimate"] = Value::Bool(true);
+    record["proposal"]["intimacy"] = Value::from("intimate");
     let turn = w.play(
         "I stay close to Brann.",
         &record.to_string(),

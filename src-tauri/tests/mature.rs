@@ -8,6 +8,7 @@ use std::{
     sync::{Arc, Mutex, mpsc},
     thread,
 };
+use threshold_core::domain::Intimacy;
 
 use support::{base, session, town, town_at_implied, town_in_a_scene};
 use threshold_app::session::{AppError, FadeResult, PACKS_OP_ID, Session, fade_to_black};
@@ -25,7 +26,7 @@ use threshold_core::{
 /// stance rule matters.
 fn intimate() -> String {
     let mut p = base();
-    p.intimate = true;
+    p.intimacy = Intimacy::Intimate;
     serde_json::to_string(&p).unwrap()
 }
 
