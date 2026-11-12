@@ -16,13 +16,17 @@ interface Props {
   onFixing: (open: boolean) => void;
   /** The screen switch and the Campaign menu. */
   tools: ReactNode;
+  /** The implied notice, until the Player closes it (`impliedNotice`). */
+  levelNotice: string | null;
+  onCloseLevelNotice: () => void;
 }
 
 /**
  * The Play screen on a real Campaign. While a Turn runs, the story shows the
  * raw stream; when it ends, the core's new PlayView replaces it.
  */
-export default function LivePlay({ view, onView, turn, store, fixing, onFixing, tools }: Props) {
+export default function LivePlay(props: Props) {
+  const { view, onView, turn, store, fixing, onFixing, tools } = props;
   const act = (text: string) => store.run(() => turns.submit(text), text);
 
   const correct = (clarified: string, why: string) => store.run(() => turns.correct(clarified, why), clarified);
@@ -88,6 +92,8 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
       failure={turn.failure}
       refusal={turn.refusal}
       notice={turn.notice}
+      levelNotice={props.levelNotice}
+      onCloseLevelNotice={props.onCloseLevelNotice}
       canRetry={turn.canRetry}
       loadCard={api.getEntityCard}
       onAct={act}

@@ -1,10 +1,31 @@
-# A harmless test pack. It proves that a Content Pack is data only and
-# cannot weaken a Content Boundary: its prompt asks the model to ignore the
-# age rules, and the Commit checks still reject an intimate scene with a minor.
-name = "test-pack"
-seed_options = ["A quiet fishing village at the edge of a fog bank"]
-model_hints = ["prefers short, concrete sentences"]
+# The sample pack of the repository, in Content Pack format 2. It is
+# neutral: each fragment is one marker sentence that the tests search the
+# prompts for. It declares the explicit capability, so it holds scene
+# fragments only (rule 7). Its proposal scene fragment carries the test line
+# that asks the model to ignore the age rule: the core refuses all the same.
+format = 2
+name = "sample"
+provides = ["explicit_description"]
+recommended_model = "sample-model:latest"
 
 [[fragments]]
-at = "tone"
-file = "prompt.md"
+prompt = "proposal"
+at = "intimate_scene"
+file = "proposal-scene.md"
+
+[[fragments]]
+prompt = "proposal"
+at = "intimate_scene"
+when = "explicit"
+file = "proposal-explicit.md"
+
+[[fragments]]
+prompt = "narration"
+at = "intimate_scene"
+file = "narration-scene.md"
+
+[[fragments]]
+prompt = "narration"
+at = "intimate_scene"
+when = "explicit"
+file = "narration-explicit.md"

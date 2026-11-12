@@ -3,14 +3,14 @@
 
 use super::{
     GM_FACTS_MAX_CHARS, NamesAudience, Retrieval, adventure_block, fact_text, names_block,
-    one_line, render_voice, turns_window, with_fragments,
+    one_line, pack_block, render_voice, turns_window, with_fragments,
 };
 use crate::{
     HandleContext,
-    domain::{Canon, EntityId, EntityKind, Handle, Trigger, is_open_key},
-    mature::Cleared,
+    domain::{Canon, DetailLevel, EntityId, EntityKind, Handle, Trigger, is_open_key},
+    mature::{Cleared, effective},
     model::Prompt,
-    pack::ContentPack,
+    pack::{ContentPack, Target, scene_fragments},
     store::{Entity, Fact},
     world::{items_named_by, known_places, open_item_ref, pc_item_text},
 };
@@ -109,8 +109,10 @@ pub fn handle_context(view: &crate::store::WorldView, intent: &str) -> HandleCon
 
 /// The proposal prompt and its handles. `cleared` is G1's value
 /// (`mature::scene_gate`): with `Some`, the `recent` block opens with
-/// `SCENE_LINE` and the Turns of the open scene are shown in full
-/// (`mature::turn_text`), and the schema takes the longer plan. With
+/// `SCENE_LINE`, then the proposal scene fragments of the Content Packs
+/// (the explicit-only ones too when `mature::effective` of the stored level
+/// is `explicit`, ADR 0009), and the Turns of the open scene are shown in
+/// full (`mature::turn_text`), and the schema takes the longer plan. With
 /// `None`, the prompt holds no scene text at all. The system, stable and
 /// scene blocks do not depend on it, so the cached prefix stays the same
 /// when a scene opens or ends (ADR 0001).
@@ -129,7 +131,7 @@ pub fn proposal_context(
             names_block(r.view, NamesAudience::Gm)
         ),
         scene: scene(&r),
-        recent: recent(&r, intent, cleared),
+        recent: recent(&r, intent, cleared, packs),
     };
     ProposalContext {
         prompt,
@@ -156,7 +158,7 @@ pub fn closing_context(
             names_block(r.view, NamesAudience::Gm)
         ),
         scene: scene(&r),
-        recent: recent_with(&r, "", CLOSING_ASK, cleared),
+        recent: recent_with(&r, "", CLOSING_ASK, cleared, &[]),
     };
     ProposalContext {
         prompt,
@@ -245,7 +247,7 @@ fn offered(r: &Retrieval<'_>, intent: &str) -> Vec<(EntityId, String, String)> {
 }
 
 fn system(packs: &[ContentPack]) -> String {
-    with_fragments(PROPOSAL_RULES, packs)
+    with_fragments(PROPOSAL_RULES, packs, Target::Proposal)
 }
 
 /// One entity line. It takes the `Entity` itself, so an unknown id can never
@@ -443,14 +445,26 @@ fn scene(r: &Retrieval<'_>) -> String {
     out
 }
 
-fn recent(r: &Retrieval<'_>, intent: &str, cleared: Option<&Cleared>) -> String {
+fn recent(
+    r: &Retrieval<'_>,
+    intent: &str,
+    cleared: Option<&Cleared>,
+    packs: &[ContentPack],
+) -> String {
     let ask = format!("INTENT\n{}\n", intent.trim());
-    recent_with(r, intent, &ask, cleared)
+    recent_with(r, intent, &ask, cleared, packs)
 }
 
 /// The `recent` block: past Turns, the clock, the offered items, then `ask`
-/// (the Intent of a Play Turn, or `CLOSING_ASK`).
-fn recent_with(r: &Retrieval<'_>, intent: &str, ask: &str, cleared: Option<&Cleared>) -> String {
+/// (the Intent of a Play Turn, or `CLOSING_ASK`). Inside a cleared scene,
+/// the scene line and the pack scene fragments of `packs` come first.
+fn recent_with(
+    r: &Retrieval<'_>,
+    intent: &str,
+    ask: &str,
+    cleared: Option<&Cleared>,
+    packs: &[ContentPack],
+) -> String {
     let mut head = format!("NOW\nMinute {}\n", r.view.clock_min);
     if !r.mentioned.is_empty() {
         head.push_str("MENTIONED ENTITIES (not present)\n");
@@ -477,10 +491,15 @@ fn recent_with(r: &Retrieval<'_>, intent: &str, ask: &str, cleared: Option<&Clea
     tail.push_str(ask);
     // The past Turns first, then the clock and the Intent: the next Turn's
     // prompt differs from this one only after the newest Turn (bug pass 5,
-    // M4). Inside a cleared scene the scene line comes before them.
-    let scene_line = if cleared.is_some() { SCENE_LINE } else { "" };
+    // M4). Inside a cleared scene the scene line comes before them, then
+    // the pack scene fragments (data shape 3.8).
+    let scene_head = cleared.map_or_else(String::new, |cleared| {
+        let explicit = effective(r.view.detail, packs) == DetailLevel::Explicit;
+        let fragments = scene_fragments(packs, Target::Proposal, cleared, explicit);
+        format!("{SCENE_LINE}{}", pack_block(&fragments))
+    });
     format!(
-        "{scene_line}{}{head}{tail}",
+        "{scene_head}{}{head}{tail}",
         turns_window(r.view, r.view.turn_seq + 1, cleared)
     )
 }

@@ -16,10 +16,11 @@ use threshold_core::{
     build::Gap,
     fixture::{load_adventure_seed, load_world_setup},
     model::GmError,
+    pack::{self, ContentPack, PackProblem},
     player::{Marks, Note, PlayerStore, Target},
     rules::{D10, RollResult},
     setup::{create_campaign_file, remove_part},
-    store::{self, CampaignId, Store, StoreError, StoredTurn, TurnKind, WorldView},
+    store::{self, CampaignId, DebugEntry, Store, StoreError, StoredTurn, TurnKind, WorldView},
     turn::{Engine, TurnControl, TurnError, TurnOutcome, stored_roll},
     view::{self, CharacterView, EntityCard, JournalView, PlayView},
     world::{PcSight, pc_sight},
@@ -28,6 +29,53 @@ use threshold_ollama::OllamaConfig;
 
 /// The config file the app reads from its data dir.
 pub const CONFIG_FILE: &str = "threshold.toml";
+
+/// The folder of the data dir that holds the Content Packs, one folder each
+/// (data shape 3.8).
+pub const PACKS_DIR: &str = "packs";
+
+/// The `op_id` of the debug row that names the loaded and refused packs
+/// when a Campaign opens. It holds folder names, pack names and rules,
+/// never a line of a pack.
+pub const PACKS_OP_ID: &str = "packs";
+
+/// One line of the home menu's pack list (data shape 3.11): a loaded pack by
+/// its name, or a refused one by its folder and its problem. It holds no
+/// fragment text: a Player may paste the list into a public issue.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PackLine {
+    pub folder: String,
+    pub name: Option<String>,
+    /// The pack declares that it gives explicit description.
+    pub explicit: bool,
+    /// Shown, never applied.
+    pub recommended_model: Option<String>,
+    /// The fixed sentence of the rule that refused the pack, and where.
+    pub problem: Option<String>,
+}
+
+/// The pack list of `packs` and `problems`, in folder order.
+fn pack_lines(packs: &[ContentPack], problems: &[PackProblem]) -> Vec<PackLine> {
+    let mut lines: Vec<PackLine> = packs
+        .iter()
+        .map(|p| PackLine {
+            folder: p.folder.clone(),
+            name: Some(p.name.clone()),
+            explicit: p.explicit(),
+            recommended_model: p.recommended_model.clone(),
+            problem: None,
+        })
+        .chain(problems.iter().map(|p| PackLine {
+            folder: p.folder.clone(),
+            name: None,
+            explicit: false,
+            recommended_model: None,
+            problem: Some(p.text()),
+        }))
+        .collect();
+    lines.sort_by(|a, b| a.folder.cmp(&b.folder));
+    lines
+}
 
 /// The one refusal of `get_entity_card`, for a hidden entity and for an id
 /// that does not exist alike.
@@ -262,20 +310,76 @@ pub struct Session {
     /// lock; each Turn command clears it when it starts and reads it
     /// through `TurnControl`.
     fade: Arc<AtomicBool>,
+    /// The Content Packs of `<data_dir>/packs`, loaded once at start and
+    /// given to every Engine (data shape 3.8).
+    packs: Vec<ContentPack>,
+    /// The packs the loader refused, by folder and rule.
+    pack_problems: Vec<PackProblem>,
 }
 
 impl Session {
     /// A session on `data_dir`. It first deletes the `.part` files a crash
-    /// left in `campaigns/`.
+    /// left in `campaigns/`, then loads the Content Packs of
+    /// `<data_dir>/packs`. A refused pack loads nothing and the app starts:
+    /// the pack list shows its folder and rule, and one line on the
+    /// standard error names them for the owner, never a line of the pack.
     pub fn new(data_dir: PathBuf, make_gm: MakeGm) -> Self {
         remove_part_files(&data_dir.join("campaigns"));
+        let (packs, pack_problems) = pack::load_all(&data_dir.join(PACKS_DIR));
+        for problem in &pack_problems {
+            eprintln!(
+                "threshold: Content Pack folder \"{}\" refused: {}",
+                problem.folder,
+                problem.text()
+            );
+        }
         Self {
             data_dir,
             make_gm,
             open: None,
             debug: Arc::new(AtomicBool::new(false)),
             fade: Arc::new(AtomicBool::new(false)),
+            packs,
+            pack_problems,
         }
+    }
+
+    /// The home menu's pack list: every folder of `<data_dir>/packs`, in
+    /// name order. No lock is needed by the shell: the list never changes
+    /// after start.
+    pub fn list_packs(&self) -> Vec<PackLine> {
+        pack_lines(&self.packs, &self.pack_problems)
+    }
+
+    /// The debug row of the packs, written when a Campaign opens: one line
+    /// per loaded pack and per refused folder, with names and rules only.
+    /// Nothing when the packs folder held nothing.
+    fn log_packs(&self, store: &Store) -> Result<(), AppError> {
+        let lines: Vec<String> = self
+            .list_packs()
+            .into_iter()
+            .map(|line| match (&line.name, &line.problem) {
+                (_, Some(problem)) => format!("refused: folder {}: {problem}", line.folder),
+                (name, None) => format!(
+                    "loaded: {} (folder {}), explicit description: {}",
+                    name.as_deref().unwrap_or_default(),
+                    line.folder,
+                    if line.explicit { "yes" } else { "no" }
+                ),
+            })
+            .collect();
+        if lines.is_empty() {
+            return Ok(());
+        }
+        store
+            .log_debug(DebugEntry {
+                op_id: PACKS_OP_ID.into(),
+                step: "packs".into(),
+                prompt: String::new(),
+                raw: lines.join("\n"),
+                ms: 0,
+            })
+            .map_err(failed)
     }
 
     /// Where new campaign files go.
@@ -397,7 +501,14 @@ impl Session {
         db_path: PathBuf,
     ) -> Result<CampaignSummary, AppError> {
         let player = PlayerStore::open(&db_path).map_err(failed)?;
-        let engine = Engine::new(store, (self.make_gm)(), Box::new(D10), vec![], campaign);
+        self.log_packs(&store)?;
+        let engine = Engine::new(
+            store,
+            (self.make_gm)(),
+            Box::new(D10),
+            self.packs.clone(),
+            campaign,
+        );
         self.open = Some(Open {
             engine,
             campaign,
@@ -608,7 +719,11 @@ impl Session {
     /// The Play screen: the story and the side panel, from PC Knowledge
     /// only. The UI calls it after a Turn ends, never during one.
     pub fn get_play_view(&self) -> Result<PlayView, AppError> {
-        Ok(view::play_view(&self.sight()?, &self.marks()?))
+        Ok(view::play_view_with(
+            &self.sight()?,
+            &self.marks()?,
+            &self.packs,
+        ))
     }
 
     /// The card of one person, place or Faction the PC knows. Any other id

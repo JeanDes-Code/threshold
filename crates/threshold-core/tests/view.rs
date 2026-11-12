@@ -1060,6 +1060,7 @@ fn play_view_json_matches_the_ui_types() {
         [
             "can_correct",
             "clock_min",
+            "detail",
             "here",
             "known",
             "needs_begin",
@@ -1073,6 +1074,10 @@ fn play_view_json_matches_the_ui_types() {
         ]
     );
     assert_eq!(json["scene"]["kind"], "plain");
+    assert_eq!(
+        json["detail"],
+        serde_json::json!({"stored": "excluded", "effective": "excluded"})
+    );
     let story = json["story"].as_array().unwrap();
     let spoken = story.iter().find(|t| t["turn_id"] == said).unwrap();
     assert_eq!(spoken["kind"], "play");

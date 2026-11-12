@@ -7,10 +7,12 @@ use serde::Serialize;
 
 use crate::{
     domain::{
-        ClockMin, CloseOutcome, EntityId, EntityKind, STATE_KEYS, is_open_key, is_state_key,
-        outcome_key, slot_sentence, you_sentence,
+        ClockMin, CloseOutcome, DetailLevel, EntityId, EntityKind, STATE_KEYS, is_open_key,
+        is_state_key, outcome_key, slot_sentence, you_sentence,
     },
+    mature::effective,
     normalize,
+    pack::ContentPack,
     player::{Marks, Note, Target},
     rules::RollResult,
     store::{TurnId, TurnKind},
@@ -122,6 +124,8 @@ pub struct PlayView {
     pub needs_begin: bool,
     pub can_correct: bool,
     pub scene: SceneState,
+    /// The Detail Level the Campaign stores and the one it plays at.
+    pub detail: DetailView,
     pub story: Vec<StoryTurn>,
     /// The characters present now, the PC left out.
     pub here: Vec<NameRef>,
@@ -266,8 +270,26 @@ pub enum SceneState {
     },
 }
 
-/// The Play screen of `sight`. `marks` holds the Player's Notes and Pins.
+/// The Detail Level of the Campaign (data shape 3.11): the level it stores
+/// and the level it plays at with the loaded Content Packs
+/// (`mature::effective`). When `stored` is `explicit` and `effective` is
+/// `implied`, the Play screen says so once per session. No pack text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct DetailView {
+    pub stored: DetailLevel,
+    pub effective: DetailLevel,
+}
+
+/// The Play screen of `sight` with no Content Pack loaded: `play_view_with`
+/// and no pack.
 pub fn play_view(sight: &PcSight, marks: &Marks) -> PlayView {
+    play_view_with(sight, marks, &[])
+}
+
+/// The Play screen of `sight`. `marks` holds the Player's Notes and Pins;
+/// `packs` are the loaded Content Packs, read for the effective Detail
+/// Level only.
+pub fn play_view_with(sight: &PcSight, marks: &Marks, packs: &[ContentPack]) -> PlayView {
     let links = Links::new(sight);
     PlayView {
         pc_name: sight.pc_name.clone(),
@@ -285,6 +307,10 @@ pub fn play_view(sight: &PcSight, marks: &Marks) -> PlayView {
             .map_or(SceneState::Plain, |since_turn| SceneState::Intimate {
                 since_turn,
             }),
+        detail: DetailView {
+            stored: sight.detail,
+            effective: effective(sight.detail, packs),
+        },
         story: sight
             .story
             .iter()

@@ -24,6 +24,13 @@ use crate::{
 /// The proof that every character of a place is cleared. Only `clearance`
 /// makes one: the field is private to this file. It is neither `Clone` nor
 /// `Copy` and is never stored, so a later step must ask `clearance` again.
+///
+/// Code outside this crate cannot make one, so it cannot put scene text or
+/// explicit text in a prompt without the gate (ADR 0009):
+///
+/// ```compile_fail
+/// let forged = threshold_core::mature::Cleared(());
+/// ```
 #[derive(Debug)]
 pub struct Cleared(());
 

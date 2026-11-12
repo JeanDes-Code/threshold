@@ -13,6 +13,7 @@ use threshold_core::{
         ActionKind, Canon, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef,
         FactSource, LedgerOp, SceneWhy, Slot, Stance, Trigger, Verdict,
     },
+    pack::ContentPack,
     rules::D10,
     store::{Store, StoredTurn, TurnId, TurnKind, TurnRecord, WorldView},
     turn::{Engine, TurnControl, TurnError, TurnOutcome, create_campaign},
@@ -22,7 +23,8 @@ use threshold_core::{
 /// The gate world at `implied` in a Campaign file, played through an
 /// `Engine`. Ada, Orsel and Brann are confirmed, and so is Vale (40), an
 /// NPC the Adventure Seed hides, on the far road. `edit` commits raw ops as
-/// another program would, between two Turns.
+/// another program would, between two Turns. `packs` are the Content Packs
+/// every Engine of the rig gets.
 pub struct Rig {
     pub path: PathBuf,
     pub campaign: u64,
@@ -32,16 +34,22 @@ pub struct Rig {
     pub brann: u64,
     pub vale: u64,
     pub edits: u32,
+    pub packs: Vec<ContentPack>,
 }
 
 impl Rig {
     pub fn new(name: &str) -> Self {
+        Self::with(name, DetailLevel::Implied, Vec::new())
+    }
+
+    /// The rig at Detail Level `detail`, with `packs` loaded.
+    pub fn with(name: &str, detail: DetailLevel, packs: Vec<ContentPack>) -> Self {
         let path = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join(format!("scene-{name}-{}.sqlite", std::process::id()));
         let _ = fs::remove_file(&path);
         let mut store = Store::open(&path).unwrap();
         let mut seed = adventure_seed();
-        seed.detail = DetailLevel::Implied;
+        seed.detail = detail;
         let mut vale = npc("Vale", 40);
         vale.hidden = true;
         seed.entities.push(vale);
@@ -60,6 +68,7 @@ impl Rig {
             brann,
             vale,
             edits: 0,
+            packs,
         };
         rig.commit_raw(
             &mut store,
@@ -79,16 +88,29 @@ impl Rig {
             store,
             Box::new(self.gm.clone()),
             Box::new(D10),
-            vec![],
+            self.packs.clone(),
             self.campaign,
         )
+    }
+
+    /// The app restarted with `packs` in place of the loaded ones: a pack
+    /// added or removed between two Turns.
+    pub fn set_packs(&mut self, packs: Vec<ContentPack>) {
+        self.packs = packs;
+        self.restart();
     }
 
     /// The Engine on the same file with another model.
     pub fn with_gm(&mut self, gm: Box<dyn Gm + Send>) {
         drop(self.engine.take());
         let store = Store::open(&self.path).unwrap();
-        self.engine = Some(Engine::new(store, gm, Box::new(D10), vec![], self.campaign));
+        self.engine = Some(Engine::new(
+            store,
+            gm,
+            Box::new(D10),
+            self.packs.clone(),
+            self.campaign,
+        ));
     }
 
     /// "End scene" with `p` as the closing proposal and `narration` as the

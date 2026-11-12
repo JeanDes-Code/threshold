@@ -1,6 +1,6 @@
 // Pure rules of the Play screen. The components hold no logic of their own.
 
-import type { KnownLine, NameRef, PlayView, SceneState, StoryTurn } from "../api";
+import type { DetailView, KnownLine, NameRef, PlayView, SceneState, StoryTurn } from "../api";
 
 /**
  * "answering": the GM answers an out-of-character question; no Turn runs.
@@ -204,4 +204,21 @@ export function laterButtons(scene: SceneState, phase: TurnPhase): { end: LaterB
     end: { shown: intimate, enabled: intimate && phase === "idle" },
     fade: { shown: narrating || intimate, enabled: narrating || (intimate && phase === "idle") },
   };
+}
+
+/**
+ * The notice of data shape 3.11: the Campaign asks for explicit description
+ * and no loaded Content Pack gives it, so scenes are told by implication.
+ */
+export const IMPLIED_NOTICE = "No loaded Content Pack gives explicit description. Scenes are told by implication.";
+
+/**
+ * The implied notice, once per session: it shows on the Play screen while
+ * the stored level is `explicit` and the effective level is `implied`, until
+ * the Player closes it; once closed, no view of the session shows it again,
+ * in this Campaign or another.
+ */
+export function impliedNotice(detail: DetailView, closed: boolean): string | null {
+  const due = detail.stored === "explicit" && detail.effective === "implied";
+  return due && !closed ? IMPLIED_NOTICE : null;
 }

@@ -1,13 +1,19 @@
 //! What a Narration may tell of an intimate Turn (G4, data shape 3.5), and
 //! what a reader gets of a Turn committed with `intimate` (data shape 3.6).
-//! Task 2 of the plan has two telling modes: a plain Turn is told as any
-//! Turn, an intimate Turn by implication only, with the core's own line
-//! (`context::IMPLIED_LINE`). No pack and no model output choose the mode.
-//! Task 4 adds `turn_text`, the one function that says what a prompt or
-//! the OOC sheet reads of a Turn, and its neutral line.
+//! A plain Turn is told as any Turn; an intimate Turn by implication, with
+//! the core's own line (`context::IMPLIED_LINE`); and, inside a cleared
+//! open scene at an effective `explicit` level, with the explicit-only
+//! fragments of a capable Content Pack (`Told::Explicit`, ADR 0009). The
+//! switch is this code, never pack wording or model output. `turn_text` is
+//! the one function that says what a prompt or the OOC sheet reads of a
+//! Turn, and its neutral line.
 
-use super::gate::Cleared;
-use crate::store::{StoredTurn, TurnId, TurnKind, WorldView};
+use super::{gate::Cleared, scene::narration_clearance};
+use crate::{
+    domain::DetailLevel,
+    pack::ContentPack,
+    store::{StoredTurn, TurnId, TurnKind, WorldView},
+};
 
 /// The Neutral Line of a Turn committed with `intimate` (glossary). The
 /// core fills `{minutes}` with the minutes between the Turn's
@@ -90,7 +96,7 @@ pub fn neutral_line(turn: &StoredTurn) -> Option<String> {
 }
 
 /// How the narrator tells one Turn.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Told {
     /// Not an intimate Turn: told as any Turn, under the core's stable rule
     /// that a Narration describes no intimate content unless a line of the
@@ -99,13 +105,55 @@ pub enum Told {
     /// An intimate Turn: told by implication only. The narration prompt
     /// opens its `recent` block with `context::IMPLIED_LINE`.
     Implied,
+    /// An intimate Turn of a cleared open scene at an effective `explicit`
+    /// level: the narration prompt opens its `recent` block with
+    /// `context::EXPLICIT_LINE` and the narration scene fragments of the
+    /// capable packs, the explicit-only ones included. It holds the
+    /// clearance of the state after the Turn: only `clearance` makes one.
+    Explicit(Cleared),
 }
 
-/// The telling of a Turn committed with `intimate`: `Implied`. Any other
-/// Turn: `Plain`. The state right after the Turn and the state now are
-/// unread for now: explicit telling (Task 7 of the plan) reads both.
-pub fn told(_view_after: &WorldView, _now: &WorldView, intimate: bool) -> Told {
-    if intimate { Told::Implied } else { Told::Plain }
+/// The Detail Level a Campaign plays at (data shape 3.1): `explicit` only
+/// when the stored level is `explicit` and a loaded pack declares that it
+/// gives explicit description; `implied` for a stored `explicit` in any
+/// other case. Any other stored level is itself. The stored level never
+/// changes here.
+pub fn effective(stored: DetailLevel, packs: &[ContentPack]) -> DetailLevel {
+    match stored {
+        DetailLevel::Explicit if packs.iter().any(ContentPack::explicit) => DetailLevel::Explicit,
+        DetailLevel::Explicit => DetailLevel::Implied,
+        other => other,
+    }
+}
+
+/// G4 (data shape 3.5): how the narrator tells a Turn.
+///
+/// ```text
+/// not intimate                                          -> Plain
+/// intimate, and the scene is open after this Commit,
+///   and it is still the open scene now,
+///   and effective(now.detail, packs) is explicit,
+///   and clearance(view_after) passes                    -> Explicit(Cleared)
+/// intimate, any other case                              -> Implied
+/// ```
+///
+/// A Turn that ends a scene is never told at `Explicit`, and neither is a
+/// `renarrate` of a Turn of a scene that has ended. `now` and `packs` are
+/// read at each call: a pack removed or a level changed during a scene
+/// takes effect on the next Narration.
+pub fn told(
+    view_after: &WorldView,
+    now: &WorldView,
+    intimate: bool,
+    packs: &[ContentPack],
+) -> Told {
+    if !intimate {
+        return Told::Plain;
+    }
+    if effective(now.detail, packs) != DetailLevel::Explicit {
+        return Told::Implied;
+    }
+    narration_clearance(view_after, now).map_or(Told::Implied, Told::Explicit)
 }
 
 /// True when a Turn's stored `proposal_json` holds a proposal committed with

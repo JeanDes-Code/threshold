@@ -38,6 +38,7 @@ export const playView: PlayView = {
   needs_begin: false,
   can_correct: true,
   scene: { kind: "plain" },
+  detail: { stored: "excluded", effective: "excluded" },
   story: [
     {
       turn_id: 1,

@@ -19,7 +19,7 @@ use std::{
 use drafts::{DraftLine, DraftView, Drafts};
 use serde::Serialize;
 use session::{
-    AppError, CampaignCard, CampaignSummary, DebugLine, DebugView, FadeResult, Session,
+    AppError, CampaignCard, CampaignSummary, DebugLine, DebugView, FadeResult, PackLine, Session,
     TurnSummary, clock_nanos, load_config, lock, renarrate_op_id,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -46,6 +46,10 @@ struct FadeFlag(Arc<AtomicBool>);
 
 /// The model's warm-up state: "warming", "ready", or the error text.
 struct ModelStatus(Arc<Mutex<String>>);
+
+/// The pack list, made once at start: packs load once, so `list_packs`
+/// takes no session lock and never waits for a running Turn.
+struct PackList(Vec<PackLine>);
 
 #[derive(Clone, Serialize)]
 struct NarrationChunk {
@@ -172,6 +176,13 @@ fn defaults(app: AppHandle) -> Result<Defaults, AppError> {
 #[tauri::command(rename_all = "snake_case")]
 fn model_status(status: State<'_, ModelStatus>) -> String {
     lock(&status.0).clone()
+}
+
+/// The Content Packs of `<data_dir>/packs`: a loaded pack by its name, a
+/// refused one by its folder and rule. Never a line of a pack.
+#[tauri::command(rename_all = "snake_case")]
+fn list_packs(packs: State<'_, PackList>) -> Vec<PackLine> {
+    packs.0.clone()
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -478,6 +489,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     );
     app.manage(DebugFlag(session.debug_flag()));
     app.manage(FadeFlag(session.fade_flag()));
+    app.manage(PackList(session.list_packs()));
     let session = Arc::new(Mutex::new(session));
     // A Cancel stops the running draft or build call at once.
     let cancel = Arc::new(AtomicBool::new(false));
@@ -499,6 +511,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             defaults,
             model_status,
+            list_packs,
             list_campaigns,
             remove_campaign,
             new_campaign,

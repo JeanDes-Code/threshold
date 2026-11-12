@@ -23,6 +23,8 @@ import {
   emphasis,
   tabbableTurn,
   laterButtons,
+  impliedNotice,
+  IMPLIED_NOTICE,
   type TurnPhase,
 } from "./logic";
 
@@ -198,5 +200,18 @@ describe("Task 5 fixes", () => {
     }
     expect(laterButtons(plain, "idle").fade).toEqual({ shown: false, enabled: false });
     expect(PHASE_TEXT.fading).not.toBe("");
+  });
+
+  it("the implied notice shows once per session", () => {
+    const fallback = { stored: "explicit", effective: "implied" } as const;
+    // Every Play view that falls back shows it until the Player closes it.
+    expect(impliedNotice(fallback, false)).toBe(IMPLIED_NOTICE);
+    // Once closed, no later view of the session shows it, in any Campaign.
+    expect(impliedNotice(fallback, true)).toBeNull();
+    // No notice while explicit description is in use, or never asked for.
+    expect(impliedNotice({ stored: "explicit", effective: "explicit" }, false)).toBeNull();
+    expect(impliedNotice({ stored: "implied", effective: "implied" }, false)).toBeNull();
+    expect(impliedNotice({ stored: "excluded", effective: "excluded" }, false)).toBeNull();
+    expect(IMPLIED_NOTICE).not.toMatch(/\d/);
   });
 });

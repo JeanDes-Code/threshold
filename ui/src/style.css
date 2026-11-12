@@ -621,6 +621,10 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 .app-menu__box--on { background: var(--danger); border-color: var(--danger); box-shadow: inset 0 0 0 2px var(--card); }
 .app-menu__rule { height: 1px; margin: var(--space-2) 0; background: var(--rule); }
 .app-menu__status { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--muted); }
+/* The Content Pack list: a loaded pack by its name, a refused one by its folder. */
+.app-menu__pack-list { margin: 0; padding: 0; list-style: none; }
+.app-menu__pack { padding: var(--space-1) var(--space-3); font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.app-menu__sub--problem { color: var(--danger); }
 
 /* The Journal's top bar holds the tools too. */
 .journal-top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }

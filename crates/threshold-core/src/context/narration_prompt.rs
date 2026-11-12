@@ -16,7 +16,8 @@ use std::collections::HashSet;
 
 use super::{
     NamesAudience, PC_KNOWS_MAX_CHARS, PC_KNOWS_STEP, Retrieval, adventure_block, bounded,
-    fact_text, names_block, one_line, render_voice, seen_present, turns_window, with_fragments,
+    fact_text, names_block, one_line, pack_block, render_voice, seen_present, turns_window,
+    with_fragments,
 };
 use crate::{
     domain::{
@@ -26,7 +27,7 @@ use crate::{
     mature::{Cleared, Told},
     model::Prompt,
     normalize,
-    pack::ContentPack,
+    pack::{ContentPack, Target, scene_fragments},
     store::WorldView,
     world::{hidden, name_parts, openly_here, pc_can_name, pc_knowledge},
 };
@@ -70,6 +71,15 @@ pub const INTIMATE_RULE: &str = intimate_rule_text!();
 /// intimate moment without describing it. One line, in neutral words. The
 /// owner reads it before the merge.
 pub const IMPLIED_LINE: &str = "INTIMATE TURN (implied): tell only that the moment happens and how the characters are with each other, then pass over it without describing it. Add no act, word or feeling of the PC beyond the player intent.\n";
+
+/// The head of the narration's `recent` block when the Turn is told at an
+/// effective `explicit` level (`mature::Told::Explicit`, ADR 0009), in place
+/// of `IMPLIED_LINE`: the narrator tells the moment as far as the Content
+/// Pack lines that follow allow, and no further. It is headed INTIMATE TURN,
+/// so `INTIMATE_RULE` reads it as the line that allows. One line, in
+/// neutral words; it holds no description itself. The owner reads it
+/// before the merge.
+pub const EXPLICIT_LINE: &str = "INTIMATE TURN (explicit): tell this moment only as far as the Content Pack lines below allow, and no further. Add no act, word or feeling of the PC beyond the player intent.\n";
 
 /// The head of the narration's `recent` block for a Closing Turn (data
 /// shape 3.7 step 6): the Player ended the scene; the narrator tells briefly
@@ -334,11 +344,15 @@ pub fn narration_prompt(
 /// `closing` tells a Closing Turn: `CLOSING_LINE` opens `recent`, and an
 /// empty `intent` gives no `Player intent` line.
 /// `told` is the telling `mature::told` chose (G4): `Implied` opens the
-/// `recent` block with `IMPLIED_LINE`. `cleared` is the clearance of the
-/// open scene (`mature::narration_clearance`): with `Some`, the earlier
-/// Turns of that scene are shown in full; with `None`, each Turn committed
-/// with `intimate` is its Neutral Line (`mature::turn_text`). The rules,
-/// stable and scene blocks depend on neither.
+/// `recent` block with `IMPLIED_LINE`, then, inside a cleared scene, the
+/// always-on narration scene fragments of `packs`; `Explicit` opens it with
+/// `EXPLICIT_LINE` and every narration scene fragment of `packs`, the
+/// explicit-only ones included, and no `IMPLIED_LINE` (data shape 3.10).
+/// `cleared` is the clearance of the open scene
+/// (`mature::narration_clearance`): with `Some`, the earlier Turns of that
+/// scene are shown in full; with `None`, each Turn committed with
+/// `intimate` is its Neutral Line (`mature::turn_text`). The rules, stable
+/// and scene blocks depend on neither.
 #[allow(clippy::too_many_arguments)]
 pub fn narration_prompt_with(
     view_after: &WorldView,
@@ -355,12 +369,21 @@ pub fn narration_prompt_with(
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
     let head = match told {
-        Told::Plain if closing => CLOSING_LINE,
-        Told::Plain => "",
-        Told::Implied => IMPLIED_LINE,
+        Told::Plain if closing => CLOSING_LINE.to_owned(),
+        Told::Plain => String::new(),
+        Told::Implied => {
+            let fragments = cleared.map_or_else(Vec::new, |cleared| {
+                scene_fragments(packs, Target::Narration, cleared, false)
+            });
+            format!("{IMPLIED_LINE}{}", pack_block(&fragments))
+        }
+        Told::Explicit(cleared) => {
+            let fragments = scene_fragments(packs, Target::Narration, cleared, true);
+            format!("{EXPLICIT_LINE}{}", pack_block(&fragments))
+        }
     };
     Prompt {
-        system: with_fragments(NARRATION_RULES, packs),
+        system: with_fragments(NARRATION_RULES, packs, Target::Narration),
         stable: format!(
             "{}{}",
             adventure_block(view_after, None),
@@ -423,7 +446,11 @@ pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt {
         }
     }
     Prompt {
-        system: with_fragments(&format!("{NARRATION_RULES}{OPENING_RULES}"), packs),
+        system: with_fragments(
+            &format!("{NARRATION_RULES}{OPENING_RULES}"),
+            packs,
+            Target::Narration,
+        ),
         stable: format!(
             "{}{}",
             adventure_block(view, None),

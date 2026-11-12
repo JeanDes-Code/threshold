@@ -941,12 +941,15 @@ impl Engine {
     /// intents. A plan or a World Event text that names a secret is dropped
     /// (`guard_plans`, `guard_events`). `now` is the current state: the
     /// stream filter reads it (`narrate_through`). G4: `mature::told`
-    /// chooses how the Turn is told; an intimate Turn is told by
-    /// implication only, with the core's own line. Inside an open scene
-    /// that is still open `now`, the earlier Turns of the scene reach the
-    /// prompt in full only through the clearance of the state after the
-    /// Turn (`mature::narration_clearance`), and a Narration told by
-    /// implication carries `mature::SCENE_NARRATION_MAX_TOKENS`.
+    /// chooses how the Turn is told from the state after it, the state now
+    /// and the loaded packs: an intimate Turn is told by implication, with
+    /// the core's own line, or, in a cleared open scene at an effective
+    /// `explicit` level, with the packs' explicit fragments behind the
+    /// clearance `told` holds (ADR 0009). Inside an open scene that is
+    /// still open `now`, the earlier Turns of the scene reach the prompt in
+    /// full only through the clearance of the state after the Turn
+    /// (`mature::narration_clearance`), and a scene Narration carries
+    /// `mature::SCENE_NARRATION_MAX_TOKENS`.
     fn narrate(
         &mut self,
         op_id: &str,
@@ -985,12 +988,12 @@ impl Engine {
         if !committed.events.is_empty() && events.is_empty() && !event_fact {
             events.push(QUIET_EVENT_LINE.to_owned());
         }
-        let told = mature::told(view_after, now, committed.intimate);
+        let told = mature::told(view_after, now, committed.intimate, &self.packs);
         let cleared = mature::narration_clearance(view_after, now);
         let max_tokens = if committed.closing {
             Some(mature::CLOSING_NARRATION_MAX_TOKENS)
         } else {
-            (told == Told::Implied && view_after.scene_open.is_some())
+            (matches!(told, Told::Implied | Told::Explicit(_)) && view_after.scene_open.is_some())
                 .then_some(mature::SCENE_NARRATION_MAX_TOKENS)
         };
         let prompt = narration_prompt_with(

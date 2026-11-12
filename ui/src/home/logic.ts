@@ -1,7 +1,7 @@
 // Pure rules of the home screen and of the app's screens. The core reads
 // each Campaign file; these only word and order what it sends.
 
-import type { CampaignCard, DraftLine } from "../api";
+import type { CampaignCard, DraftLine, PackLine } from "../api";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -148,4 +148,16 @@ export function withoutDebug(screen: AppScreen): AppScreen {
   if (screen.kind === "debug") return { kind: "home" };
   if (screen.kind === "campaign" && screen.tab === "debug") return { kind: "campaign", tab: "play" };
   return screen;
+}
+
+/**
+ * One line of the menu's pack list: a loaded pack by its name, whether it
+ * gives explicit description, and its recommended model; a refused pack by
+ * its folder and the core's sentence. The core sends no pack text.
+ */
+export function packLineText(line: PackLine): { title: string; detail: string; refused: boolean } {
+  if (line.problem !== null) return { title: line.folder, detail: line.problem, refused: true };
+  const parts = [`explicit description: ${line.explicit ? "yes" : "no"}`];
+  if (line.recommended_model !== null) parts.push(`recommended model: ${line.recommended_model}`);
+  return { title: line.name ?? line.folder, detail: parts.join(" · "), refused: false };
 }

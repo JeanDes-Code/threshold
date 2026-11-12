@@ -1,0 +1,51 @@
+---
+status: accepted
+date: 2026-11-12
+---
+
+# Explicit text enters a prompt only with a clearance value
+
+## Context
+
+The repository is public and holds no adult text. Explicit description comes from one private Content Pack that the owner keeps in his data folder (design 6.7, 7). Packs are data, written by someone other than the core, and the app loads every pack it finds. The adults-only rule must hold whatever a pack says: a pack line that tells the model to ignore the age rule must change nothing (path 18), and a pack that carries explicit rules must not reach a prompt that the gate did not clear (path 19). The format of version 1 put every fragment in the system block of both prompts, on every Turn.
+
+## Decision
+
+- **A `Cleared` value is the key.** `mature::Cleared` has a private field; only `mature::clearance` makes one, from stored and confirmed ages (ADR 0008). It is neither `Clone` nor `Copy` and is never stored. A `compile_fail` example on the type shows that code outside the core cannot forge one.
+- **Every scene text needs one.** `pack::scene_fragments` takes `&Cleared`. The proposal prompt gets it from G1 (`mature::scene_gate`), only while a scene is open. The narration prompt gets it from `mature::narration_clearance`, and explicit telling holds its own: `Told::Explicit(Cleared)`. A caller that skipped the gate cannot ask for a scene fragment, and a Turn outside an open scene has no value to give.
+- **Explicit-only fragments need `explicit` in effect.** `mature::effective` gives `explicit` only when the stored level is `explicit` and a loaded pack declares `explicit_description`; else a stored `explicit` plays at `implied`. `mature::told` gives `Explicit` only for an intimate Turn whose scene is open after the Commit, is still the open scene now, is cleared after the Turn, at an effective `explicit`. It reads the level and the packs at each call (path 20).
+- **A fragment names one prompt.** `prompt = "proposal"` or `"narration"`; the loader refuses a fragment with no target. `tone` and `scenes` fragments go in the system block of that prompt only; `intimate_scene` fragments at the head of its `recent` block, after the core's scene line, under the heading `context::PACK_SCENE_HEAD`. The closing proposal, the OOC prompt, the draft stages and the World Build get no scene fragment.
+- **A capable pack holds scene fragments only (rule 7).** A pack that declares `explicit_description` may hold `intimate_scene` fragments and nothing else, so every line of a pack that can turn explicit description on is behind the gate.
+- **The core keeps the switch.** At `implied` the narration opens with `context::IMPLIED_LINE`; at `explicit` with `context::EXPLICIT_LINE` and no implied line. Both are headed INTIMATE TURN, which `context::INTIMATE_RULE` (a stable rule line) reads as the line that allows; the pack's lines follow them and never replace them. The switch is a `Told` value, never pack wording.
+- **A pack changes no rule.** No file of `checks/` and not `mature/gate.rs` names a pack (source test). A pack cannot change the age rule, the Detail Level a Campaign stores, the gates, the Refusal sentences, the Neutral Lines, any rule line of the core, or a prompt its format does not name. The ledger records no pack.
+- **Unknown keys are refused.** `pack.toml` and each fragment table deny unknown fields; `[interview]` is the one reserved key, read and ignored. Old format 1 packs are refused, not read.
+
+### Size caps
+
+The loader refuses a pack that would pass a cap, so a pack cannot blow the 15 s Turn budget of ADR 0001 or push the cached prompt prefix around. The rates are those of `evals/reports/2026-11-turn-time.md`: about 900 tokens per second to read a prompt, about 4 characters per token.
+
+| Cap | Value | Where the text sits | Why this value |
+|---|---|---|---|
+| `FRAGMENT_MAX_CHARS` | 1,200 chars (about 300 tokens) | one fragment file | A scene instruction is a short list of rules, not a story. One file cannot fill a whole prompt budget. |
+| `SCENE_FRAGMENTS_MAX_CHARS` | 1,600 chars per prompt, over all packs (about 400 tokens) | the head of `recent`, in scene Turns only | It is read in full when a scene opens and on any cache miss: about 0.45 s per call, 0.9 s for the two calls of a scene Turn. The scene Turn estimate of data shape 4 (about 12 s) then stays under 15 s. |
+| `TONE_FRAGMENTS_MAX_CHARS` | 2,400 chars per prompt, over all packs (about 600 tokens) | the system block, every Turn | The same budget as the Adventure block (`ADVENTURE_BLOCK_MAX_CHARS`). It sits in the cached prefix, read once per session and on a cache miss, about 0.7 s. |
+
+Packs load once, at start. The system block never changes during a session, and the scene fragments sit after the cached system, stable and scene blocks, so a scene that opens or ends changes only `recent` (ADR 0001). The scene fragments of one scene are the same on every Turn of it, so they stay in the cached part of `recent` until the scene ends.
+
+### Where pack text may appear
+
+In a prompt, and in the prompt rows of the debug log, like any prompt (only `get_debug` reads them, in debug mode). Never on a Player screen, in the Journal, on a card, on the OOC sheet, in an error message, in a test snapshot, in an evaluation report, or in the repository. A refused pack shows its folder and a fixed sentence per rule (`PackRule::sentence`), with a file name or a `pack.toml` line number: never a line of the pack. The pack list shows a pack's `name` and `recommended_model` (one token of at most 80 characters, no space), which the author writes to be shown.
+
+## Considered options
+
+- **Always-on fragments for a capable pack.** They would carry explicit rules into every prompt, with no gate. Rejected (rule 7).
+- **A boolean "explicit allowed" argument in place of a value.** Any caller could pass `true`. Rejected: the value makes the gate a condition of building the prompt, not a check a caller can forget.
+- **Scene fragments in the system block.** The prefix would change each time a scene opens or ends, and the fragments would reach every Turn. Rejected.
+- **Reading format 1 packs.** Their fragments name no prompt and would reach both. Rejected: one format, refused with a clear sentence.
+
+## Consequences
+
+- After a scene ends, the narrator and the GM know its committed facts and not its wording.
+- The owner writes his pack to the caps above; a pack over a cap is refused whole, and the pack list says which rule.
+- A Campaign at `explicit` with no capable pack plays at `implied`, and the Play screen says so once per session.
+- Explicit telling is as safe as the tag of the Turn: a Turn the model tags `intimate: false` gets no scene text at all (path 24, measured in Task 10).

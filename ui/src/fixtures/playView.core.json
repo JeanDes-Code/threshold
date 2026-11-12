@@ -1,6 +1,10 @@
 {
   "can_correct": true,
   "clock_min": 5,
+  "detail": {
+    "effective": "excluded",
+    "stored": "excluded"
+  },
   "here": [
     {
       "entity_id": 2,

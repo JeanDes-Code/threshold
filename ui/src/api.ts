@@ -19,6 +19,21 @@ export interface CampaignSummary {
   needs_begin: boolean;
 }
 
+/**
+ * One folder of `<data_dir>/packs` on the home menu: a loaded Content Pack by
+ * its name, or a refused one by its folder and the core's sentence for the
+ * rule it broke. It never holds a line of a pack.
+ */
+export interface PackLine {
+  folder: string;
+  name: string | null;
+  /** The pack declares that it gives explicit description. */
+  explicit: boolean;
+  /** Shown, never applied: the Player chooses the model. */
+  recommended_model: string | null;
+  problem: string | null;
+}
+
 /** One Campaign file on the home screen. A card with a `problem` cannot open. */
 export interface CampaignCard {
   /** The card's own id (its file name). "Remove from list" sends it, never a path. */
@@ -266,6 +281,15 @@ export interface EntityCard {
  * since a Turn (data shape 3.11). The action bar reads the tag. */
 export type SceneState = { kind: "plain" } | { kind: "intimate"; since_turn: number };
 
+/**
+ * The Detail Level the Campaign stores, and the one it plays at with the
+ * loaded Content Packs (data shape 3.11).
+ */
+export interface DetailView {
+  stored: DetailLevel;
+  effective: DetailLevel;
+}
+
 export interface PlayView {
   pc_name: string;
   place: PlaceLine | null;
@@ -273,6 +297,7 @@ export interface PlayView {
   needs_begin: boolean;
   can_correct: boolean;
   scene: SceneState;
+  detail: DetailView;
   story: StoryTurn[];
   here: NameRef[];
   you: YouCard;
@@ -576,6 +601,8 @@ export function createApi(invoke: Invoke) {
     /** The Play screen, from PC Knowledge only. Call it after a Turn ends, never during one. */
     getPlayView: () => invoke<PlayView>("get_play_view"),
     modelStatus: () => invoke<string>("model_status"),
+    /** The Content Packs the app loaded at start, and the folders it refused. */
+    listPacks: () => invoke<PackLine[]>("list_packs"),
     /** The home cards, the latest played first. */
     listCampaigns: () => invoke<CampaignCard[]>("list_campaigns"),
     /** "Remove from list": moves the card's file to the archive folder of the data dir. Nothing is deleted. */

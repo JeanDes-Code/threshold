@@ -27,6 +27,9 @@ export interface PlayScreenProps {
   refusal: string | null;
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
+  /** The implied notice, until the Player closes it (`impliedNotice`). */
+  levelNotice?: string | null;
+  onCloseLevelNotice?: () => void;
   canRetry: boolean;
   /** `get_entity_card`: what the PC knows about one entity. */
   loadCard: (entityId: number) => Promise<EntityCard>;
@@ -150,6 +153,8 @@ export default function PlayScreen(props: PlayScreenProps) {
         failure={props.failure}
         refusal={props.refusal}
         notice={props.notice}
+        levelNotice={props.levelNotice}
+        onCloseLevelNotice={props.onCloseLevelNotice}
         canRetry={props.canRetry}
         canCorrect={view.can_correct}
         fixing={props.fixing}

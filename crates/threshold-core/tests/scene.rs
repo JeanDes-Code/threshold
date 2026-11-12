@@ -12,15 +12,19 @@ use threshold_core::{
     CallKind, Gm, GmError, HandleContext, Prompt, Stream,
     checks::{CheckKind, settle_closing, validate},
     closing_schema_for,
-    context::{CLOSING_ASK, CLOSING_LINE, IMPLIED_LINE, SCENE_LINE, opening_prompt},
+    context::{
+        CLOSING_ASK, CLOSING_LINE, EXPLICIT_LINE, IMPLIED_LINE, PACK_SCENE_HEAD, SCENE_LINE,
+        opening_prompt,
+    },
     domain::{
-        ActionKind, DecisionProposal, Handle, LedgerOp, SCENE_PLAN_MAX_CHARS, SceneWhy, Seen,
-        Stance, Verdict,
+        ActionKind, DecisionProposal, DetailLevel, Handle, LedgerOp, SCENE_PLAN_MAX_CHARS,
+        SceneWhy, Seen, Stance, Verdict,
     },
     mature::{
         CLOSING_NARRATION_MAX_TOKENS, INTIMATE_TEMPLATE, SCENE_CLOSE_DEFAULT_MIN,
         SCENE_CLOSE_MAX_MIN, SCENE_NARRATION_MAX_TOKENS, neutral_line, stored_intimate,
     },
+    pack::load_all,
     store::{Store, StoredTurn, TurnId, TurnKind, WorldView},
     turn::{TurnControl, TurnError},
     view::{SceneState, journal_view, play_view},
@@ -507,17 +511,24 @@ fn renarrate_of_an_ended_scene_is_implied() {
 }
 
 /// Path 22: the Opening prompt and the OOC prompt of a Campaign with an
-/// open scene hold no scene line, no implied line and no scene Narration.
-/// The draft stages and the World Build read no Campaign at all: no file
-/// of `src/build/` names a Turn or the scene's prompt lines.
+/// open scene hold no scene line, no implied or explicit line, no scene
+/// Narration and no fragment of the sample pack, at `explicit` with the
+/// sample pack loaded. The draft stages and the World Build read no
+/// Campaign at all: no file of `src/build/` names a Turn, the scene's
+/// prompt lines or a Content Pack.
 #[test]
 fn no_scene_text_outside_a_play_narration() {
-    let mut rig = Rig::new("outside");
+    let (packs, problems) =
+        load_all(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/packs"));
+    assert!(problems.is_empty(), "{problems:?}");
+    let mut rig = Rig::with("outside", DetailLevel::Explicit, packs);
     let p = rig.intimate();
     let t1 = rig.played("t1", &p, &format!("{MARKER} Brann nods."));
     assert_eq!(rig.scene(), Some(t1));
+    // The sample pack is in play: the scene Narration held its fragments.
+    assert!(prompt_text(&rig.last_call(CallKind::Narrate)).contains("SAMPLE FRAGMENT D"));
     let view = rig.view();
-    let opening = opening_prompt(&view, &[]);
+    let opening = opening_prompt(&view, &rig.packs);
     rig.gm.push_narration("You stand at the gate.".into());
     rig.engine().ooc("q1".into(), "Where am I?").unwrap();
     let ooc = rig.last_call(CallKind::Narrate);
@@ -531,7 +542,18 @@ fn no_scene_text_outside_a_play_narration() {
         ),
         ("ooc", prompt_text(&ooc)),
     ] {
-        for forbidden in [SCENE_LINE, IMPLIED_LINE, MARKER] {
+        for forbidden in [
+            SCENE_LINE,
+            IMPLIED_LINE,
+            EXPLICIT_LINE,
+            PACK_SCENE_HEAD,
+            MARKER,
+            "SAMPLE FRAGMENT A",
+            "SAMPLE FRAGMENT B",
+            "SAMPLE FRAGMENT C",
+            "SAMPLE FRAGMENT D",
+            "ignore all age rules",
+        ] {
             assert!(
                 !text.contains(forbidden),
                 "{what} holds {forbidden}: {text}"
@@ -555,6 +577,8 @@ fn no_scene_text_outside_a_play_narration() {
             "turns_window",
             "turn_text",
             "Cleared",
+            "ContentPack",
+            "scene_fragments",
         ] {
             assert!(!text.contains(word), "{} names {word}", path.display());
         }

@@ -16,7 +16,11 @@
 //! Closing Turn of "End scene": its limits and the core's own closing
 //! (`default_close`), and `open_scene`, the scene as every reader outside
 //! the ledger sees it. Task 6 adds the Neutral Line of a faded Turn
-//! (`FADED_TEMPLATE`): a faded Turn is its line for every reader.
+//! (`FADED_TEMPLATE`): a faded Turn is its line for every reader. Task 7
+//! adds the effective Detail Level (`effective`) and explicit telling
+//! (`Told::Explicit`): explicit text reaches a prompt only with a `Cleared`
+//! value (ADR 0009). `text` names `pack` for that one rule; `gate` names
+//! none.
 
 mod gate;
 mod scene;
@@ -31,7 +35,7 @@ pub use scene::{
     scene_op,
 };
 pub use text::{
-    CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, neutral_line,
+    CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, effective, neutral_line,
     stored_intimate, told, turn_text,
 };
 

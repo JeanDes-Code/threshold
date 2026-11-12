@@ -10,10 +10,11 @@ use std::{
 };
 
 use support::{base, session, town, town_at_implied, town_in_a_scene};
-use threshold_app::session::{AppError, FadeResult, Session, fade_to_black};
+use threshold_app::session::{AppError, FadeResult, PACKS_OP_ID, Session, fade_to_black};
 use threshold_core::{
     CallKind, Gm, GmError, Prompt, RecordedGm, Stream,
-    domain::ActionKind,
+    domain::{ActionKind, DetailLevel},
+    pack::PackRule,
     store::{Store, TurnKind},
     view::{REFUSAL_ADULTS_ONLY, REFUSAL_EXCLUDED, SceneState, TurnBody},
 };
@@ -311,4 +312,121 @@ fn a_fade_that_reaches_the_shell_after_the_turn_ended_fades_it() {
             .unwrap()
             .contains("MARKER-FADE-3")
     );
+}
+
+// --- Content Packs from the data folder (Task 7) -------------------------------
+
+/// Copies the sample pack of the repository to `<data_dir>/packs/<folder>`.
+fn install_sample(data_dir: &Path, folder: &str) {
+    let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/packs/test-pack");
+    let to = data_dir.join("packs").join(folder);
+    std::fs::create_dir_all(&to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+    }
+}
+
+/// The town fixture with its seed at Detail Level `explicit`, every adult
+/// confirmed.
+fn town_at_explicit(s: &mut Session, dir: &Path) {
+    let seed = std::fs::read_to_string(support::town_dir().join("adventure-seed.toml")).unwrap();
+    let seed_path = dir.join("adventure-seed.toml");
+    std::fs::write(&seed_path, format!("detail = \"explicit\"\n{seed}")).unwrap();
+    s.new_campaign(&seed_path, &support::town_dir().join("world.toml"), 11)
+        .unwrap();
+    support::confirm_all(s);
+}
+
+/// The home menu's pack list: a refused pack shows by its folder and one
+/// fixed sentence for its rule, never its text; a loaded pack by its name,
+/// whether it gives explicit description, and its recommended model.
+#[test]
+fn list_packs_shows_a_refused_pack_by_folder_and_rule() {
+    let dir = tempfile::tempdir().unwrap();
+    install_sample(dir.path(), "b-sample");
+    // A pack of format 1, as the repository held before Task 7.
+    let old = dir.path().join("packs/a-old");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(
+        old.join("pack.toml"),
+        "name = \"old\"\n[[fragments]]\nat = \"tone\"\nfile = \"prompt.md\"\n",
+    )
+    .unwrap();
+    std::fs::write(old.join("prompt.md"), "UNIQUEOLDPACKTEXT stays private.").unwrap();
+    let gm = RecordedGm::new(vec![], vec![]);
+    let s = session(dir.path(), &gm);
+    let lines = s.list_packs();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[0].folder, "a-old");
+    assert_eq!(lines[0].name, None);
+    assert!(!lines[0].explicit);
+    let problem = lines[0].problem.as_deref().expect("a refused pack");
+    assert_eq!(problem, PackRule::Format.sentence());
+    assert_eq!(lines[1].folder, "b-sample");
+    assert_eq!(lines[1].name.as_deref(), Some("sample"));
+    assert!(lines[1].explicit);
+    assert_eq!(
+        lines[1].recommended_model.as_deref(),
+        Some("sample-model:latest")
+    );
+    assert_eq!(lines[1].problem, None);
+    let json = serde_json::to_string(&lines).unwrap();
+    for private in ["UNIQUEOLDPACKTEXT", "SAMPLE FRAGMENT"] {
+        assert!(!json.contains(private), "{json}");
+    }
+}
+
+/// The packs of `<data_dir>/packs` reach every Engine: a scene Narration at
+/// `explicit` holds the sample's explicit fragment, and the Play view says
+/// which level is in use. With no pack, the same Campaign plays at
+/// `implied`. The debug log names the packs and holds no fragment.
+#[test]
+fn the_data_folder_packs_reach_every_engine() {
+    for with_pack in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        if with_pack {
+            install_sample(dir.path(), "sample");
+        }
+        let gm = RecordedGm::new(vec![], vec![]);
+        let mut s = session(dir.path(), &gm);
+        town_at_explicit(&mut s, dir.path());
+        let db = s.summary().unwrap().db_path;
+        gm.push_proposal(support::intimate_with_hessa(&db));
+        gm.push_narration("Hessa smiles.".into());
+        s.submit_intent("scene-1".into(), "I sit with Hessa.", &mut |_| {})
+            .unwrap();
+        let narrate = gm
+            .calls()
+            .into_iter()
+            .rfind(|c| c.kind == CallKind::Narrate)
+            .unwrap();
+        assert_eq!(
+            narrate.prompt.recent.contains("SAMPLE FRAGMENT D"),
+            with_pack
+        );
+        let view = s.get_play_view().unwrap();
+        assert!(matches!(view.scene, SceneState::Intimate { .. }));
+        assert_eq!(view.detail.stored, DetailLevel::Explicit);
+        let effective = if with_pack {
+            DetailLevel::Explicit
+        } else {
+            DetailLevel::Implied
+        };
+        assert_eq!(view.detail.effective, effective);
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(!json.contains("SAMPLE FRAGMENT"), "{json}");
+
+        let store = Store::open(Path::new(&db)).unwrap();
+        let rows = store.debug_log(PACKS_OP_ID).unwrap();
+        if with_pack {
+            assert!(!rows.is_empty());
+            for row in &rows {
+                assert!(row.raw.contains("sample"), "{}", row.raw);
+                assert!(!row.raw.contains("SAMPLE FRAGMENT"), "{}", row.raw);
+            }
+        } else {
+            assert!(rows.is_empty(), "no packs folder: no row");
+        }
+    }
 }

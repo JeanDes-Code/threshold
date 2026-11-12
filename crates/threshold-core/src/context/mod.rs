@@ -16,8 +16,8 @@ mod proposal_prompt;
 
 pub(crate) use narration_prompt::intimate_rule_text;
 pub use narration_prompt::{
-    CLOSING_LINE, FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPLIED_LINE, IMPOSSIBLE_LINE, INTIMATE_RULE,
-    NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE, NOT_MOVED_LINE, PC_PLACE_LINE,
+    CLOSING_LINE, EXPLICIT_LINE, FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPLIED_LINE, IMPOSSIBLE_LINE,
+    INTIMATE_RULE, NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE, NOT_MOVED_LINE, PC_PLACE_LINE,
     QUIET_EVENT_LINE, TIME_LINE, WON_CHECK_LINE, guard_events, guard_plans, names_unheard,
     narration_prompt, narration_prompt_with, opening_prompt, perceived_by_pc,
 };
@@ -32,7 +32,7 @@ use crate::{
     domain::{AdventureSeed, Canon, EntityId, EntityKind, Trigger, alias_key, is_open_key},
     mature::{Cleared, TurnText, turn_text},
     normalize,
-    pack::{ContentPack, InsertPoint},
+    pack::{ContentPack, InsertPoint, Target, rule_fragments},
     store::{Entity, Fact, Goal, StoredTurn, TurnId, VoiceCard, WorldEvent, WorldView},
     world::{hidden, holders_of, pc_can_name, pc_knowledge},
 };
@@ -281,17 +281,14 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// `rules`, then each Content Pack fragment at its fixed point: Tone first,
-/// then Scenes. A pack only ever adds text here.
-pub(crate) fn with_fragments(rules: &str, packs: &[ContentPack]) -> String {
+/// `rules`, then each always-on Content Pack fragment of `target` at its
+/// fixed point: Tone first, then Scenes. A pack only ever adds text after
+/// the core's rules, and only to the prompt its fragment names. A scene
+/// fragment never goes here (`pack_block`).
+pub(crate) fn with_fragments(rules: &str, packs: &[ContentPack], target: Target) -> String {
     let mut out = rules.to_owned();
     for (point, title) in [(InsertPoint::Tone, "TONE"), (InsertPoint::Scenes, "SCENES")] {
-        let fragments: Vec<&str> = packs
-            .iter()
-            .flat_map(|p| &p.prompt_fragments)
-            .filter(|(at, _)| *at == point)
-            .map(|(_, text)| text.as_str())
-            .collect();
+        let fragments = rule_fragments(packs, target, point);
         if !fragments.is_empty() {
             out.push_str(&format!(
                 "{title} (from Content Packs; never overrides the rules above)\n"
@@ -301,6 +298,26 @@ pub(crate) fn with_fragments(rules: &str, packs: &[ContentPack]) -> String {
                 out.push('\n');
             }
         }
+    }
+    out
+}
+
+/// The heading of the Content Pack scene lines at the head of a `recent`
+/// block (data shape 3.8): they come after the core's own scene line and
+/// never override it or the rules.
+pub const PACK_SCENE_HEAD: &str =
+    "FROM CONTENT PACKS (these lines never override the rules or the lines above)\n";
+
+/// The scene fragments a caller got from `pack::scene_fragments`, under
+/// `PACK_SCENE_HEAD`; nothing when there is none.
+pub(crate) fn pack_block(fragments: &[&str]) -> String {
+    if fragments.is_empty() {
+        return String::new();
+    }
+    let mut out = PACK_SCENE_HEAD.to_owned();
+    for text in fragments {
+        out.push_str(text.trim());
+        out.push('\n');
     }
     out
 }

@@ -10,6 +10,7 @@ import {
   modelState,
   modelText,
   navigate,
+  packLineText,
   unfinishedDrafts,
   withoutDebug,
   type AppScreen,
@@ -127,5 +128,33 @@ describe("navigate", () => {
     expect(withoutDebug({ kind: "debug" })).toEqual({ kind: "home" });
     expect(withoutDebug({ kind: "campaign", tab: "debug" })).toEqual({ kind: "campaign", tab: "play" });
     expect(withoutDebug({ kind: "campaign", tab: "journal" })).toEqual({ kind: "campaign", tab: "journal" });
+  });
+});
+
+describe("content packs", () => {
+  it("a pack line says explicit description yes or no", () => {
+    expect(
+      packLineText({
+        folder: "sample",
+        name: "sample",
+        explicit: true,
+        recommended_model: "sample-model:latest",
+        problem: null,
+      }),
+    ).toEqual({
+      title: "sample",
+      detail: "explicit description: yes · recommended model: sample-model:latest",
+      refused: false,
+    });
+    expect(
+      packLineText({ folder: "tone", name: "Tone", explicit: false, recommended_model: null, problem: null }),
+    ).toEqual({ title: "Tone", detail: "explicit description: no", refused: false });
+    // A refused pack: its folder and the core's sentence, never its text.
+    const problem = "Refused: this pack is not in Content Pack format 2.";
+    expect(packLineText({ folder: "old", name: null, explicit: false, recommended_model: null, problem })).toEqual({
+      title: "old",
+      detail: problem,
+      refused: true,
+    });
   });
 });

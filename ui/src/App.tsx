@@ -5,6 +5,7 @@ import {
   type CampaignSummary,
   type DraftLine,
   type NarrationChunk,
+  type PackLine,
   type PlayView,
 } from "./api";
 import Home from "./home/Home";
@@ -12,7 +13,7 @@ import { navigate, withoutDebug, type AppScreen, type CampaignTab, type Go } fro
 import Menu from "./home/Menu";
 import LiveJournal from "./journal/LiveJournal";
 import LivePlay from "./play/LivePlay";
-import { canOpenCorrection } from "./play/logic";
+import { canOpenCorrection, impliedNotice } from "./play/logic";
 import { createTurnStore } from "./play/session";
 import { api, play, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
@@ -46,11 +47,18 @@ export default function App() {
   // The new-Campaign screen stays mounted while its draft or World Build runs.
   const [newScreen, setNewScreen] = useState<{ key: number; draft: string | null } | null>(null);
   const [job, setJob] = useState(false);
+  // The Content Packs the app loaded at start: they never change after.
+  const [packs, setPacks] = useState<PackLine[] | null>(null);
+  // The implied notice shows once per session: closed, it stays closed.
+  const [impliedClosed, setImpliedClosed] = useState(false);
 
   useEffect(() => {
     api.modelStatus().then(setModel, (e: unknown) => setModel(`unknown (${errorText(e)})`));
   }, []);
   useEvent<string>("model_status", setModel);
+  useEffect(() => {
+    api.listPacks().then(setPacks, (e: unknown) => setAppError(`Could not list the Content Packs: ${errorText(e)}`));
+  }, []);
 
   // The running Turn lives here, above the tabs: a tab switch keeps its
   // chunks, its result and its failure. Only another Campaign resets it.
@@ -159,6 +167,7 @@ export default function App() {
       onDebug={(on) => void toggleDebug(on)}
       onDebugView={() => go({ to: "debug" })}
       model={model}
+      packs={packs}
     />
   );
 
@@ -248,6 +257,8 @@ export default function App() {
             fixing={fixing}
             onFixing={setFixing}
             tools={tools}
+            levelNotice={impliedNotice(view.detail, impliedClosed)}
+            onCloseLevelNotice={() => setImpliedClosed(true)}
           />
         )}
         {campaign && tab === "journal" && (

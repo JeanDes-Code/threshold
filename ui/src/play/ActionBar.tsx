@@ -32,6 +32,12 @@ interface Props {
   refusal: string | null;
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
+  /**
+   * The implied notice (data shape 3.11): no loaded Content Pack gives the
+   * explicit description the Campaign asks for. Shown until closed.
+   */
+  levelNotice?: string | null;
+  onCloseLevelNotice?: () => void;
   /** The failed Turn can be sent again under its op_id. */
   canRetry: boolean;
   /** The latest Turn is a standing Play Turn. */
@@ -154,6 +160,16 @@ export default function ActionBar(props: Props) {
       {notice !== null && (
         <section className="play-alert" role="status">
           <p>{notice}</p>
+        </section>
+      )}
+      {props.levelNotice && (
+        <section className="play-alert" role="status">
+          <p>{props.levelNotice}</p>
+          {props.onCloseLevelNotice && (
+            <button type="button" className="play-btn play-btn--text" onClick={props.onCloseLevelNotice}>
+              Close
+            </button>
+          )}
         </section>
       )}
 

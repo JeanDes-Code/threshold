@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { modelState, modelText } from "./logic";
+import type { PackLine } from "../api";
+import { modelState, modelText, packLineText } from "./logic";
 
 interface Props {
   /** "Campaign" in a Campaign, "Menu" elsewhere. */
@@ -18,6 +19,8 @@ interface Props {
   onDebugView?: () => void;
   /** The model status the shell reports. */
   model: string;
+  /** The Content Packs of the data folder; null until the shell answers. */
+  packs?: PackLine[] | null;
   /** Opens the menu on the first render (dev preview only). */
   initiallyOpen?: boolean;
 }
@@ -125,6 +128,31 @@ export default function Menu(props: Props) {
             <button type="button" role="menuitem" className="app-menu__item" onClick={run(props.onDebugView)}>
               <span>Open the debug view</span>
             </button>
+          )}
+          {props.packs && (
+            <>
+              <div className="app-menu__rule" role="separator" />
+              <section className="app-menu__packs" aria-label="Content Packs">
+                <p className="app-menu__status">Content Packs</p>
+                {props.packs.length === 0 ? (
+                  <p className="app-menu__status">No Content Pack in the packs folder</p>
+                ) : (
+                  <ul className="app-menu__pack-list">
+                    {props.packs.map((line) => {
+                      const shown = packLineText(line);
+                      return (
+                        <li key={line.folder} className="app-menu__pack">
+                          {shown.title}
+                          <span className={shown.refused ? "app-menu__sub app-menu__sub--problem" : "app-menu__sub"}>
+                            {shown.detail}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            </>
           )}
           <div className="app-menu__rule" role="separator" />
           <p className="app-menu__status" role="status">
