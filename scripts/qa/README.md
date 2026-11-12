@@ -29,3 +29,7 @@ scripts/qa/headless.sh stop                  # stops only what start started
 ## Needs
 
 `Xvfb` (Arch package `xorg-server-xvfb`), `WebKitWebDriver` (Arch package `webkitgtk-6.0`), Python 3, and Ollama with the model of `threshold.toml`.
+
+## The private text scan
+
+`private_text_scan.sh` keeps the owner's private Content Pack out of the repository. It reads the pack folder from `THRESHOLD_PRIVATE_PACK`, takes each of its lines of 20 characters or more (a line that the neutral sample pack also holds is format and is left out), and searches the tracked files and the staged content for it, as a fixed string. A hit prints the file and the line number, never the text, and the scan exits 1. With the variable unset it does nothing, so the scan costs nothing on a machine without the pack. The pre-commit hook runs it. The repository holds no word list: the only list is the pack itself, outside the repository. The scan cannot catch model prose pasted without its pack lines.

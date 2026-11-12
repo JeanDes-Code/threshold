@@ -1,0 +1,20 @@
+# Scene agency (mature content module, plan Task 9). At `implied`, with
+# every adult in the town hall confirmed, the PC opens an Intimate Scene
+# with Hessa, plays three Turns of it, then presses "End scene". The report
+# counts the scene Turns the agency check rejected and the scene Narrations
+# the judge reads as setting an act, a word or a feeling of the PC that the
+# Intent did not state. Closing Turns are counted apart. Neutral Intents
+# only; the report prints counts only.
+fixture = "town"
+detail = "implied"
+confirm = ["Wren", "Hessa", "Orsel", "Doul"]
+
+[[arms]]
+name = "scene"
+steps = [
+    { intent = "I ask Hessa to spend the night with me.", intimate = true },
+    { intent = "I stay close to Hessa and say nothing.", intimate = true },
+    { intent = "I tell Hessa I am glad she stayed.", intimate = true },
+    { end_scene = true },
+    { intent = "I ask Hessa where the tithe roll is kept.", intimate = false },
+]

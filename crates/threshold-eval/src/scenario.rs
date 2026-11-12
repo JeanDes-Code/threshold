@@ -296,6 +296,97 @@ pub struct WorldBuild {
     pub expected: String,
 }
 
+/// A scenario of the mature content module (plan Task 9): the gates, the
+/// tag, the Refusals, the scene's lifecycle and its timing. The repository's
+/// files use neutral Intents and the level `implied` only; a folder outside
+/// the repository (`--scenarios-dir`) may hold other files, and the report
+/// then prints counts only.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mature {
+    #[serde(default = "default_fixture")]
+    pub fixture: String,
+    /// The Detail Level the Campaign starts at: `implied` in the
+    /// repository (`load_mature` refuses any other value there).
+    pub detail: String,
+    /// The characters the Player confirms in play (`Engine::confirm_age`)
+    /// before the first Intent, by main name.
+    #[serde(default)]
+    pub confirm: Vec<String>,
+    /// One Campaign each per run. `intimate_tag` has two: one with a minor
+    /// at the PC's place, one without; the report counts them apart.
+    pub arms: Vec<Arm>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Arm {
+    /// A name for the scenario file; the report never prints it.
+    pub name: String,
+    /// Characters added to the fixture's Adventure Seed before the Campaign
+    /// is made, each at a place.
+    #[serde(default)]
+    pub extra_npcs: Vec<ExtraNpc>,
+    pub steps: Vec<MatureStep>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtraNpc {
+    pub name: String,
+    pub age: u16,
+    /// The location value, as a seed fact writes it.
+    pub at: String,
+}
+
+/// One step: an Intent with the tag the scenario expects, or "End scene".
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MatureStep {
+    #[serde(default)]
+    pub intent: String,
+    /// The scenario expects the model to tag this Intent `intimate`.
+    #[serde(default)]
+    pub intimate: bool,
+    /// "End scene" (`Engine::end_scene`) in place of an Intent.
+    #[serde(default)]
+    pub end_scene: bool,
+}
+
+/// A mature scenario from `dir`. When `dir` lies inside the repository,
+/// only `detail = "implied"` is accepted: the repository holds no scenario
+/// at `explicit`, and none at `excluded`, which tests nothing.
+pub fn load_mature(dir: &Path, inside_repo: bool, name: &str) -> Result<Mature, String> {
+    let path = dir.join(format!("{name}.toml"));
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // A TOML error quotes the file: outside the repository, only where.
+    let sc: Mature = toml::from_str(&text).map_err(|e| {
+        if inside_repo {
+            format!("{}: {e}", path.display())
+        } else {
+            format!(
+                "{}: not a valid scenario file (at byte {})",
+                path.display(),
+                e.span().map_or(0, |span| span.start)
+            )
+        }
+    })?;
+    if inside_repo && sc.detail != "implied" {
+        return Err(format!(
+            "{}: a scenario inside the repository runs at detail = \"implied\" only",
+            path.display()
+        ));
+    }
+    if sc.arms.is_empty() || sc.arms.iter().any(|a| a.steps.is_empty()) {
+        return Err(format!("{}: every arm needs steps", path.display()));
+    }
+    let names: std::collections::BTreeSet<&str> = sc.arms.iter().map(|a| a.name.as_str()).collect();
+    if names.len() != sc.arms.len() {
+        return Err(format!("{}: two arms share a name", path.display()));
+    }
+    Ok(sc)
+}
+
 pub fn load<T: DeserializeOwned>(root: &Path, name: &str) -> Result<T, String> {
     let path = root.join("evals/scenarios").join(format!("{name}.toml"));
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;

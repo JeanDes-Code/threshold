@@ -4,8 +4,9 @@
 //! Options:
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
 //!   voices, shortcuts, agency_leaks, offscreen, world_build, speech,
-//!   play_basics, open_items, ooc, departures, replay. `all` leaves out replay, which
-//!   needs a Campaign file.
+//!   play_basics, open_items, ooc, departures, intimate_tag, scene_agency,
+//!   npc_will, scene_latency, replay. `all` leaves out replay, which needs a
+//!   Campaign file, and the four mature scenarios.
 //!   Repeat or comma-separate.
 //! - `--runs <n>` (default 3)
 //! - `--judge local` (default): the same local model, with a short rubric.
@@ -24,11 +25,25 @@
 //!   and check results to this file. They can hold GM-only facts, so a path
 //!   inside the repository is refused, and nothing of it reaches stderr or
 //!   the report.
+//! - `--packs <dir>`: the Content Packs every Engine of the run gets, from
+//!   a folder laid out as `<data_dir>/packs`.
+//! - `--scenarios-dir <dir>`: the folder the mature scenarios
+//!   (`intimate_tag`, `scene_agency`, `npc_will`, `scene_latency`) are read
+//!   from, in place of `evals/scenarios`. A file inside the repository must
+//!   be at `detail = "implied"`.
+//!
+//!   When `--packs` or `--scenarios-dir` names a folder outside the
+//!   repository, the run is private: `--out` is required and must lie
+//!   outside the repository too (as `--raw-log`), the progress lines print
+//!   no check reason and no error text, and the report prints counts only.
+//!   `all` leaves the mature scenarios out: name them.
 
 use std::{fs, path::PathBuf, process::ExitCode};
 
 use threshold_core::{Gm, build::BUILD_TIMEOUT_S};
-use threshold_eval::{Config, GmJudge, SCENARIOS, check_raw_log, find_root, run, today};
+use threshold_eval::{
+    Config, GmJudge, NOT_IN_ALL, SCENARIOS, check_private_out, check_raw_log, find_root, run, today,
+};
 use threshold_ollama::{OllamaConfig, OllamaGm};
 
 fn main() -> ExitCode {
@@ -51,6 +66,7 @@ fn real_main() -> Result<(), String> {
     let mut raw_log: Option<PathBuf> = None;
     let (mut source, mut expected): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     let (mut campaign, mut intents): (Option<PathBuf>, Option<PathBuf>) = (None, None);
+    let (mut packs_dir, mut scenarios_dir): (Option<PathBuf>, Option<PathBuf>) = (None, None);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value"));
@@ -72,9 +88,11 @@ fn real_main() -> Result<(), String> {
             "--expected" => expected = Some(PathBuf::from(value()?)),
             "--campaign" => campaign = Some(PathBuf::from(value()?)),
             "--intents" => intents = Some(PathBuf::from(value()?)),
+            "--packs" => packs_dir = Some(PathBuf::from(value()?)),
+            "--scenarios-dir" => scenarios_dir = Some(PathBuf::from(value()?)),
             "-h" | "--help" => {
                 println!(
-                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>] [--raw-log <path outside the repository>]"
+                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>] [--raw-log <path outside the repository>] [--packs <dir>] [--scenarios-dir <dir>]\n\n--packs <dir>          Content Packs for every Engine of the run\n--scenarios-dir <dir>  the folder of the mature scenario files (intimate_tag, scene_agency, npc_will, scene_latency)\nA --packs or --scenarios-dir folder outside the repository makes the run private: --out is then required, outside the repository, and the report prints counts only."
                 );
                 return Ok(());
             }
@@ -84,7 +102,7 @@ fn real_main() -> Result<(), String> {
     if scenarios.is_empty() || scenarios.iter().any(|s| s == "all") {
         scenarios = SCENARIOS
             .iter()
-            .filter(|s| **s != "replay")
+            .filter(|s| !NOT_IN_ALL.contains(s))
             .map(ToString::to_string)
             .collect();
     }
@@ -102,6 +120,15 @@ fn real_main() -> Result<(), String> {
     if let Some(path) = &raw_log {
         check_raw_log(&root, path)?;
     }
+    let packs_dir = packs_dir.map(|p| cwd.join(p));
+    let scenarios_dir = scenarios_dir.map(|p| cwd.join(p));
+    let out = out.map(|p| cwd.join(p));
+    check_private_out(
+        &root,
+        packs_dir.as_deref(),
+        scenarios_dir.as_deref(),
+        out.as_deref(),
+    )?;
 
     let warm = OllamaGm::new(ollama.clone());
     warm.warm_up().map_err(|e| format!("warm-up: {e}"))?;
@@ -119,6 +146,8 @@ fn real_main() -> Result<(), String> {
         raw_log,
         campaign: campaign.map(|p| cwd.join(p)),
         intents: intents.map(|p| cwd.join(p)),
+        packs_dir,
+        scenarios_dir,
     };
     let make = || Box::new(OllamaGm::new(ollama.clone())) as Box<dyn Gm + Send>;
     let mut slow = ollama.clone();

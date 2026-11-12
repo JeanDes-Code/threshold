@@ -3,3 +3,7 @@ target/
 node_modules/
 dist/
 src-tauri/gen/
+# Campaign files and debug dumps hold play text: they live in the data
+# folder, never here (mature content module, plan Task 9).
+*.sqlite*
+*.debug.jsonl

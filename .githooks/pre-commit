@@ -1,5 +1,8 @@
 #!/bin/sh
 set -e
 
+# The owner's private pack text never enters the repository (does nothing
+# when THRESHOLD_PRIVATE_PACK is unset).
+sh scripts/qa/private_text_scan.sh
 cargo fmt --check && cargo clippy --workspace -- -D warnings && cargo test --workspace
 npm --prefix ui run typecheck && npm --prefix ui run lint

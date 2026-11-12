@@ -9,6 +9,7 @@
 
 mod departures;
 mod judge;
+pub mod mature;
 mod ooc;
 mod open_items;
 mod play_basics;
@@ -31,17 +32,18 @@ use threshold_core::{
     checks::ceiling,
     domain::{Cause, Effect, EntityKind, EntityRef, Handle, LedgerOp, Reaction, Slot, Trigger},
     fixture::{load_adventure_seed, load_world},
+    mature::RefusalKind,
     normalize,
     rules::D10,
     store::{CampaignId, Store, TurnKind, TurnRecord, WorldView},
-    turn::{Engine, TurnOutcome, create_campaign},
+    turn::{Engine, TurnError, TurnOutcome, create_campaign},
     world::{beliefs, pc_knowledge},
 };
 
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 13] = [
+pub const SCENARIOS: [&str; 17] = [
     "latency",
     "memory",
     "voices",
@@ -54,7 +56,27 @@ pub const SCENARIOS: [&str; 13] = [
     "open_items",
     "ooc",
     "departures",
+    "intimate_tag",
+    "scene_agency",
+    "npc_will",
+    "scene_latency",
     "replay",
+];
+
+/// The scenarios of the mature content module (plan Task 9). They run when
+/// named: `all` leaves them out, as it leaves out `replay`.
+pub const MATURE_SCENARIOS: [&str; 4] =
+    ["intimate_tag", "scene_agency", "npc_will", "scene_latency"];
+
+/// The scenarios that `--scenario all` leaves out: `replay` needs a
+/// Campaign file, and the mature ones are measured on their own (plan
+/// Task 10).
+pub const NOT_IN_ALL: [&str; 5] = [
+    "replay",
+    "intimate_tag",
+    "scene_agency",
+    "npc_will",
+    "scene_latency",
 ];
 
 /// The latency pass line (design §10): p90 at or under 15 s, warm.
@@ -99,30 +121,76 @@ pub struct Config {
     /// line). Both must lie outside `root`.
     pub campaign: Option<PathBuf>,
     pub intents: Option<PathBuf>,
+    /// The Content Packs every Engine of the run gets (`pack::load_all`). A
+    /// folder outside `root` makes the run private (`check_private_out`).
+    pub packs_dir: Option<PathBuf>,
+    /// The folder the mature scenarios are read from, in place of
+    /// `evals/scenarios`. A folder outside `root` makes the run private.
+    pub scenarios_dir: Option<PathBuf>,
+}
+
+/// `path` as an absolute path with its folder resolved; the file itself
+/// may not exist yet.
+fn absolute(path: &Path) -> PathBuf {
+    let p = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir().map_or_else(|_| path.to_owned(), |cwd| cwd.join(path))
+    };
+    if p.is_dir() {
+        return p.canonicalize().unwrap_or(p);
+    }
+    let dir = p.parent().map(Path::to_owned).unwrap_or_default();
+    let dir = dir.canonicalize().unwrap_or(dir);
+    dir.join(p.file_name().unwrap_or_default())
+}
+
+/// True when `path` lies outside the repository `root`.
+pub fn is_outside(root: &Path, path: &Path) -> bool {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+    !absolute(path).starts_with(&root)
+}
+
+/// Refuses a path inside the repository `root` for `what`: a raw log, the
+/// report of a private run. The one copy of the outside-path rule.
+pub fn check_outside(root: &Path, path: &Path, what: &str) -> Result<(), String> {
+    if is_outside(root, path) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{what} {} is inside the repository; give a path outside it",
+            path.display()
+        ))
+    }
 }
 
 /// Refuses a raw log path inside the repository root (`Config::raw_log`).
 pub fn check_raw_log(root: &Path, path: &Path) -> Result<(), String> {
-    let absolute = |p: &Path| {
-        let p = if p.is_absolute() {
-            p.to_owned()
-        } else {
-            std::env::current_dir().map_or_else(|_| p.to_owned(), |cwd| cwd.join(p))
-        };
-        // The file may not exist yet: resolve its folder.
-        let dir = p.parent().map(Path::to_owned).unwrap_or_default();
-        let dir = dir.canonicalize().unwrap_or(dir);
-        dir.join(p.file_name().unwrap_or_default())
-    };
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
-    if absolute(path).starts_with(&root) {
-        Err(format!(
-            "the raw log {} is inside the repository; give a path outside it",
-            path.display()
-        ))
-    } else {
-        Ok(())
+    check_outside(root, path, "the raw log")
+}
+
+/// The outside-path rule of a private run (plan Task 9): when `--packs` or
+/// `--scenarios-dir` names a folder outside the repository, the run is
+/// private, `--out` is required and must lie outside the repository too.
+/// `Ok(true)` for a private run; its report prints counts only.
+pub fn check_private_out(
+    root: &Path,
+    packs: Option<&Path>,
+    scenarios_dir: Option<&Path>,
+    out: Option<&Path>,
+) -> Result<bool, String> {
+    let private = packs
+        .into_iter()
+        .chain(scenarios_dir)
+        .any(|dir| is_outside(root, dir));
+    if !private {
+        return Ok(false);
     }
+    let out = out.ok_or(
+        "--packs or --scenarios-dir names a folder outside the repository: give --out with a path outside it too",
+    )?;
+    check_outside(root, out, "the report of a private run")?;
+    Ok(true)
 }
 
 pub type GmFactory<'a> = &'a dyn Fn() -> Box<dyn Gm + Send>;
@@ -144,6 +212,26 @@ pub fn run(
     if let Some(path) = &config.raw_log {
         check_raw_log(&config.root, path)?;
     }
+    // Private: a pack folder or a scenario folder outside the repository.
+    // The progress lines then carry no check reason and no error text.
+    let private = config
+        .packs_dir
+        .iter()
+        .chain(&config.scenarios_dir)
+        .any(|dir| is_outside(&config.root, dir));
+    let (packs, refused_packs) = match &config.packs_dir {
+        Some(dir) => {
+            let (packs, problems) = threshold_core::pack::load_all(dir);
+            (packs, problems.len())
+        }
+        None => (Vec::new(), 0),
+    };
+    let packs_line = config.packs_dir.as_ref().map(|_| {
+        format!(
+            "- Content Packs (--packs): {} loaded, {refused_packs} refused; names withheld",
+            packs.len()
+        )
+    });
     let declared = if config
         .root
         .join("evals/scenarios/agency_leaks.toml")
@@ -162,6 +250,8 @@ pub fn run(
         log,
         declared,
         totals: Totals::default(),
+        packs,
+        private,
     };
     let mut sections = BTreeMap::new();
     // agency_leaks reads the totals of every other scenario, so it runs last.
@@ -186,6 +276,9 @@ pub fn run(
             "open_items" => open_items::scenario(&mut ctx)?,
             "ooc" => ooc::scenario(&mut ctx)?,
             "departures" => departures::scenario(&mut ctx)?,
+            "intimate_tag" | "scene_agency" | "npc_will" | "scene_latency" => {
+                mature::scenario(&mut ctx, name)?
+            }
             "replay" => replay::scenario(&mut ctx)?,
             _ => unreachable!("checked above"),
         };
@@ -224,6 +317,16 @@ pub fn run(
         "- Turns that needed the retry: {} of {}",
         t.retried, t.turns
     );
+    if t.refused > 0 {
+        let _ = writeln!(
+            out,
+            "- Turns refused (a Refusal: no Commit, not a failure): {} of {}",
+            t.refused, t.turns
+        );
+    }
+    if let Some(line) = packs_line {
+        let _ = writeln!(out, "{line}");
+    }
     for name in SCENARIOS {
         if let Some(section) = sections.get(name) {
             let _ = write!(out, "\n## {name}\n\n{section}");
@@ -252,6 +355,11 @@ struct Ctx<'a> {
     /// The scenario-declared secret stems; every Narration is scanned for them.
     declared: Vec<String>,
     totals: Totals,
+    /// The Content Packs of `--packs`, given to every Engine.
+    packs: Vec<threshold_core::pack::ContentPack>,
+    /// A private run (`check_private_out`): progress lines print no check
+    /// reason, no error text and no token.
+    private: bool,
 }
 
 #[derive(Default)]
@@ -261,6 +369,8 @@ struct Totals {
     /// Failed Turns whose model request timed out.
     timed_out: usize,
     retried: usize,
+    /// Turns that ended as a Refusal: no Commit, and not a failure.
+    refused: usize,
     total_ms: Vec<u64>,
     /// Turns with at least one proposal attempt the agency check rejected.
     agency_turns: usize,
@@ -275,6 +385,8 @@ struct Totals {
 struct Played {
     op_id: String,
     outcome: Result<TurnOutcome, String>,
+    /// The Turn ended as a Refusal of this kind.
+    refused: Option<RefusalKind>,
     /// The rejection lines of each proposal attempt; empty when it passed.
     attempts: Vec<Vec<String>>,
 }
@@ -328,7 +440,13 @@ impl Ctx<'_> {
             create_campaign(&mut store, &seed, rng_seed, None).map_err(|e| e.to_string())?;
         load_world(&mut store, campaign, &dir.join("world.toml")).map_err(|e| e.to_string())?;
         setup(&mut store, campaign)?;
-        let engine = Engine::new(store, (self.gm)(), Box::new(D10), vec![], campaign);
+        let engine = Engine::new(
+            store,
+            (self.gm)(),
+            Box::new(D10),
+            self.packs.clone(),
+            campaign,
+        );
         Ok(Session {
             engine,
             campaign,
@@ -339,13 +457,29 @@ impl Ctx<'_> {
     }
 
     fn play(&mut self, s: &mut Session, intent: &str) -> Played {
+        self.play_with(s, intent, |engine, op_id| {
+            engine.play_turn(op_id, intent, &mut |_: &str| {})
+        })
+    }
+
+    /// One Turn of `s` that `turn` plays under a fresh op_id: an Intent, or
+    /// "End scene" (`intent` empty). It records the raw log, the totals and
+    /// one progress line.
+    fn play_with(
+        &mut self,
+        s: &mut Session,
+        intent: &str,
+        turn: impl FnOnce(&mut Engine, String) -> Result<TurnOutcome, TurnError>,
+    ) -> Played {
         s.n += 1;
         let op_id = format!("{}-t{}", s.label, s.n);
         s.intents.push(intent.to_owned());
-        let outcome = s
-            .engine
-            .play_turn(op_id.clone(), intent, &mut |_: &str| {})
-            .map_err(|e| e.to_string());
+        let result = turn(&mut s.engine, op_id.clone());
+        let refused = match &result {
+            Err(TurnError::Refused { kind, .. }) => Some(*kind),
+            _ => None,
+        };
+        let outcome = result.map_err(|e| e.to_string());
         if let Some(path) = &self.config.raw_log {
             let rows: String = s
                 .engine
@@ -389,6 +523,7 @@ impl Ctx<'_> {
         let played = Played {
             op_id,
             outcome,
+            refused,
             attempts,
         };
 
@@ -431,10 +566,16 @@ impl Ctx<'_> {
                     o.timings.narrate_ms,
                     if found.is_empty() {
                         String::new()
+                    } else if self.private {
+                        format!(" LEAK ({} tokens)", found.len())
                     } else {
                         format!(" LEAK {found:?}")
                     }
                 )
+            }
+            Err(_) if played.refused.is_some() => {
+                t.refused += 1;
+                "REFUSED".to_owned()
             }
             Err(e) => {
                 t.failed += 1;
@@ -452,10 +593,15 @@ impl Ctx<'_> {
                         t.timed_out += 1;
                         "game model request timed out".to_owned()
                     }
+                    _ if self.private => "a Turn error (text withheld in a private run)".to_owned(),
                     _ => e.lines().next().unwrap_or("").chars().take(160).collect(),
                 };
                 *t.errors.entry(key).or_default() += 1;
-                format!("FAILED {}", e.replace('\n', " | "))
+                if self.private {
+                    "FAILED".to_owned()
+                } else {
+                    format!("FAILED {}", e.replace('\n', " | "))
+                }
             }
         };
         let rejected: Vec<String> = played
@@ -469,6 +615,14 @@ impl Ctx<'_> {
             played.op_id,
             if rejected.is_empty() {
                 String::new()
+            } else if self.private {
+                // A reason can quote model text: the check names only.
+                let kinds: Vec<String> = played
+                    .rejected_by()
+                    .iter()
+                    .map(|kinds| kinds.join(", "))
+                    .collect();
+                format!(" rejected by: {}", kinds.join(" || "))
             } else {
                 format!(" rejected: {}", rejected.join(" || "))
             }

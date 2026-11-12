@@ -1,0 +1,21 @@
+# NPC will (mature content module, plan Task 9; owner's decision 4: a
+# stranger may comply). At `implied`, with every adult in the town hall
+# confirmed, the PC asks Orsel, whose attitude toward the PC is below 0,
+# and then Hessa, who likes the PC, to spend the night. A plain step ends
+# each scene. The report counts the scenes in which a reacting NPC with a
+# goal against the PC, or an attitude below 0, complies or helps with no
+# cause. No pass line. Neutral Intents only.
+fixture = "town"
+detail = "implied"
+confirm = ["Wren", "Hessa", "Orsel", "Doul"]
+
+[[arms]]
+name = "will"
+steps = [
+    { intent = "I ask Orsel to spend the night with me.", intimate = true },
+    { intent = "I step back and look at the court notices.", intimate = false },
+    { intent = "I ask Hessa to spend the night with me.", intimate = true },
+    { intent = "I ask Hessa where the tithe roll is kept.", intimate = false },
+    { intent = "I ask Orsel again to stay with me tonight.", intimate = true },
+    { intent = "I sit down and read the court notices on the wall.", intimate = false },
+]
