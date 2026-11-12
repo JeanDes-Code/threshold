@@ -390,6 +390,81 @@ fn opening_a_scene_keeps_the_prompt_prefix() {
     assert!(during.prompt.recent.starts_with(SCENE_LINE));
 }
 
+/// Review M3 (2026-11-12): the names a prompt finds in past Turns
+/// (MENTIONED ENTITIES, and the handles of the schema) come through
+/// `mature::turn_text` too. Kett, away on the far road, is named only in a
+/// scene Narration and in the Intent of a faded Turn: once the scene has
+/// ended, no proposal prompt and no schema names Kett. Inside the cleared
+/// scene, the scene Narration is read in full, Kett included.
+#[test]
+fn a_past_turn_names_nobody_through_text_a_prompt_may_not_read() {
+    let mut rig = Rig::new("mentioned");
+    let kett = rig.add_npc("Kett", 34, true, "far road");
+    let handle = format!("\"E{kett}\"");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods. Kett is far away.");
+    rig.played("t2", &p, "Brann stays.");
+    let in_scene = rig.last_call(CallKind::Propose);
+    assert!(in_scene.prompt.recent.contains("Kett"), "read in full");
+    let plain = rig.plain();
+    rig.played("t3", &plain, "Dusk.");
+    rig.played("t4", &plain, "Night.");
+    let after = rig.last_call(CallKind::Propose);
+    assert!(
+        !prompt_text(&after).contains("Kett"),
+        "{}",
+        after.prompt.recent
+    );
+    assert!(!after.schema.to_string().contains(&handle));
+
+    // A faded Turn: its Intent names Kett.
+    rig.gm.push_proposal(serde_json::to_string(&plain).unwrap());
+    rig.gm.push_narration("Unused.".into());
+    let mut ctl = TurnControl {
+        on_chunk: &mut |_| {},
+        faded: &|| true,
+    };
+    let faded = rig
+        .engine()
+        .play_turn_with("t5".into(), "I ask where Kett is.", &mut ctl)
+        .unwrap();
+    assert!(faded.faded);
+    rig.played("t6", &plain, "Night again.");
+    let after = rig.last_call(CallKind::Propose);
+    assert!(
+        !prompt_text(&after).contains("Kett"),
+        "{}",
+        after.prompt.recent
+    );
+    assert!(!after.schema.to_string().contains(&handle));
+}
+
+/// Review M2 (2026-11-12): a cleared scene reads in full only its own
+/// Turns. The Narration of an earlier scene is its Neutral Line in every
+/// prompt of the next scene (`mature::turn_text`: the scene started at or
+/// before the Turn).
+#[test]
+fn an_earlier_scene_is_in_no_prompt_of_the_next_scene() {
+    const EARLIER: &str = "MARKER-SCENE-EARLIER";
+    let mut rig = Rig::new("two-scenes");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, &format!("{EARLIER} Brann nods."));
+    let plain = rig.plain();
+    rig.played("t2", &plain, "Dusk.");
+    assert_eq!(rig.scene(), None);
+    let t3 = rig.played("t3", &p, &format!("{MARKER} Brann returns."));
+    assert_eq!(rig.scene(), Some(t3), "a second scene");
+    rig.played("t4", &p, "Brann stays.");
+    let line = neutral_line(&rig.turn(t1)).unwrap();
+    for kind in [CallKind::Propose, CallKind::Narrate] {
+        let call = rig.last_call(kind);
+        let text = prompt_text(&call);
+        assert!(text.contains(MARKER), "{kind:?}: the open scene in full");
+        assert!(!text.contains(EARLIER), "{kind:?}: {text}");
+        assert!(call.prompt.recent.contains(&line), "{kind:?}: {text}");
+    }
+}
+
 /// After a plain Turn closes the scene, the next prompts hold each scene
 /// Turn's neutral line and none of its Narration.
 #[test]

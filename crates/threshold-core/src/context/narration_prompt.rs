@@ -369,7 +369,7 @@ pub fn narration_prompt_with(
     cleared: Option<&Cleared>,
     closing: bool,
 ) -> Prompt {
-    let r = Retrieval::new(view_after, "");
+    let r = Retrieval::new(view_after, "", cleared);
     let head = match told {
         Told::Plain if closing => CLOSING_LINE.to_owned(),
         Told::Plain => String::new(),
@@ -437,7 +437,7 @@ pub const TIME_LINE: &str = "Time this Turn takes: ";
 /// outcome: Begin commits nothing for the PC. An empty situation or time
 /// leaves its line out.
 pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt {
-    let r = Retrieval::new(view, "");
+    let r = Retrieval::new(view, "", None);
     let mut recent = String::from("OPENING\n");
     if let Some(start) = view.adventure_seed.as_ref().map(|seed| &seed.start) {
         for (label, text) in [("Situation", &start.situation), ("When", &start.when)] {

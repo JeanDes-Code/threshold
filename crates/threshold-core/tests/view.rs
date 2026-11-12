@@ -2112,4 +2112,16 @@ fn a_faded_turn_shows_its_line_and_no_text() {
     }
     let journal = serde_json::to_string(&journal).unwrap();
     assert!(!journal.contains("I look around the square."), "{journal}");
+
+    // Review M2 (2026-11-12): a pinned act of a faded Turn shows its
+    // Neutral Line, never its Intent.
+    let marks = Marks {
+        notes: vec![],
+        pins: vec![Target::Act { turn_id: turn }],
+    };
+    let view = play_view(&w.sight(), &marks);
+    assert_eq!(view.pinned.len(), 1, "{:?}", view.pinned);
+    assert_eq!(view.pinned[0].title, line);
+    let pinned = serde_json::to_string(&view.pinned).unwrap();
+    assert!(!pinned.contains("I look around the square."), "{pinned}");
 }

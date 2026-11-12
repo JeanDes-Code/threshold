@@ -108,7 +108,7 @@ pub fn proposal_prompt(
 /// The handles that `proposal_prompt(view, _, intent)` shows. Packs never
 /// change them.
 pub fn handle_context(view: &crate::store::WorldView, intent: &str) -> HandleContext {
-    handles(&Retrieval::new(view, intent), intent, false)
+    handles(&Retrieval::new(view, intent, None), intent, false)
 }
 
 /// The proposal prompt and its handles. `cleared` is G1's value
@@ -126,7 +126,7 @@ pub fn proposal_context(
     intent: &str,
     cleared: Option<&Cleared>,
 ) -> ProposalContext {
-    let r = Retrieval::new(view, intent);
+    let r = Retrieval::new(view, intent, cleared);
     let prompt = Prompt {
         system: system(packs),
         stable: format!(
@@ -153,7 +153,7 @@ pub fn closing_context(
     view: &crate::store::WorldView,
     cleared: Option<&Cleared>,
 ) -> ProposalContext {
-    let r = Retrieval::new(view, "");
+    let r = Retrieval::new(view, "", cleared);
     let prompt = Prompt {
         system: PROPOSAL_RULES.to_owned(),
         stable: format!(

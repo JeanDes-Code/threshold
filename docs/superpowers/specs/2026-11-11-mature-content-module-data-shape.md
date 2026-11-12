@@ -247,6 +247,16 @@ pub fn turn_text<'a>(turn: &'a StoredTurn, scene: Option<TurnId>, cleared: Optio
 
 So the Narration of a scene Turn never reaches a prompt that the gate did not clear. Facts that the scene committed stay in the world and reach every later prompt, as any fact does.
 
+**Changed after review (2026-11-12, second review, M3).** Every reader that scans past Turn text for a prompt goes through `turn_text`:
+
+| Reader | What it reads | Through |
+|---|---|---|
+| `context::turns_window` (the RECENT TURNS of the proposal, closing and narration prompts) | Intent and Narration | `turn_text` with the prompt's clearance (as before) |
+| `context::Retrieval::new` (MENTIONED ENTITIES, MENTIONED FACTS and the schema handles they add) | the names in the Intent and the Narration of the last 3 Turns | `turn_text` with the prompt's clearance (changed: it read every Narration and Intent raw) |
+| `view::ooc_sheet` (the OOC prompt) | Intent and Narration | `SightTurn.line`, which is `turn_text(turn, None, None)` (as before) |
+
+A faded Turn is its Neutral Line in each, its Intent included. The Journal and a pinned act are Player screens, not prompts: they read `view::act_words`, the one rule for both, so a faded Turn's act is its Neutral Line on both (a pinned act showed the Intent before). `WorldView::story_names` (what the PC can name, read by `world::pc_can_name`) keeps reading every standing Narration the Player read on screen, a scene Turn's included: it gives a prompt no text, only which names the PC may use, and the Player did read those names. A faded Turn has no stored Narration, so it names nobody there. A `RecordCorrection` op keeps the corrected Turn's Intent in its `what_wrong` text; no prompt and no screen reads it.
+
 **The stream.** `Gm::narrate` cannot be stopped today, and a running Turn holds the `Session` lock.
 
 ```rust

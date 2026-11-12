@@ -192,7 +192,11 @@ pub(crate) struct Retrieval<'a> {
 }
 
 impl<'a> Retrieval<'a> {
-    pub fn new(view: &'a WorldView, intent: &str) -> Self {
+    /// What a prompt retrieves for `intent`. `cleared` is the prompt's own
+    /// clearance (G1 or `mature::narration_clearance`): the names of the
+    /// past Turns are read through `mature::turn_text` with it, as the
+    /// `recent` block shows those Turns.
+    pub fn new(view: &'a WorldView, intent: &str, cleared: Option<&Cleared>) -> Self {
         let pc = view
             .entities
             .iter()
@@ -242,11 +246,21 @@ impl<'a> Retrieval<'a> {
         scene_entities.extend(events.iter().flat_map(|w| event_entities(w)));
         scene_entities.retain(|id| exists(id));
 
+        // Review M3 (2026-11-12): a past Turn's words come through
+        // `mature::turn_text`, as the prompt's `recent` block shows them: a
+        // faded Turn, and a Turn committed with `intimate` outside the
+        // prompt's cleared scene, are their Neutral Line, which names
+        // nobody.
         let mut named_text = vec![intent.to_owned()];
         let turns = &view.recent_turns;
         for turn in &turns[turns.len().saturating_sub(NAMED_TURNS)..] {
-            named_text.push(turn.record.intent.clone());
-            named_text.extend(turn.narration.clone());
+            match turn_text(turn, view.scene_open, cleared) {
+                TurnText::Full { intent, narration } => {
+                    named_text.push(intent.to_owned());
+                    named_text.extend(narration.map(str::to_owned));
+                }
+                TurnText::Line(line) => named_text.push(line),
+            }
         }
         let texts: Vec<Vec<String>> = named_text.iter().map(|t| words(t)).collect();
         let mentioned: Vec<EntityId> = view

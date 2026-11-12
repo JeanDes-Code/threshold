@@ -486,14 +486,10 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
             .filter(|m| m.kind.has_intent())
             .filter_map(|m| {
                 let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
-                let faded = turn.faded.then(|| turn.line.clone().unwrap_or_default());
+                let (intent, faded) = act_words(turn);
                 Some(Act {
                     turn_id: m.turn,
-                    intent: if faded.is_some() {
-                        String::new()
-                    } else {
-                        turn.intent.clone()
-                    },
+                    intent,
                     faded,
                     decision: m.decision,
                     closed: sight
@@ -838,6 +834,20 @@ fn notes_seen(sight: &PcSight, marks: &Marks) -> Vec<Note> {
         .collect()
 }
 
+/// The words of the Player's act in one Turn, as the Journal and a pinned
+/// act show them (review M3, 2026-11-12): the Intent, and `None`; or, for a
+/// faded Turn, an empty Intent and its Neutral Line. The one rule for both
+/// readers. A Turn committed with `intimate` and read in full keeps its
+/// Intent here: they are the Player's own words (data shape 3.6), and no
+/// prompt reads the Journal or a Pin.
+fn act_words(turn: &SightTurn) -> (String, Option<String>) {
+    if turn.faded {
+        (String::new(), Some(turn.line.clone().unwrap_or_default()))
+    } else {
+        (turn.intent.clone(), None)
+    }
+}
+
 /// The Pinned card: one line per Pin that still resolves.
 fn pin_lines(sight: &PcSight, marks: &Marks) -> Vec<PinLine> {
     pins_seen(sight, marks)
@@ -858,11 +868,8 @@ fn pin_words(sight: &PcSight, marks: &Marks, target: &Target) -> Option<(String,
     // A faded Turn's act is its Neutral Line, as in the Journal.
     let intent = |turn: TurnId| {
         sight.story.iter().find(|t| t.turn == turn).map(|t| {
-            if t.faded {
-                t.line.clone().unwrap_or_default()
-            } else {
-                t.intent.clone()
-            }
+            let (intent, faded) = act_words(t);
+            faded.unwrap_or(intent)
         })
     };
     let scene_place = |turn: TurnId| {
