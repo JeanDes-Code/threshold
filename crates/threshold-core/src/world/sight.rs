@@ -372,7 +372,14 @@ pub fn pc_sight(
                 speech::parse(text)
                     .into_iter()
                     .map(|line| match line {
-                        Line::Prose(text) => SightLine::Prose(text.to_owned()),
+                        // A tag the PC cannot use goes even when text
+                        // follows the quote, as in the stream (ADR 0006).
+                        Line::Prose(text) => match speech::leading_tag(text) {
+                            Some((name, said)) if hides_a_name(view, name, &named, &known) => {
+                                SightLine::Prose(said.to_owned())
+                            }
+                            _ => SightLine::Prose(text.to_owned()),
+                        },
                         Line::Tagged {
                             line,
                             name,
@@ -595,7 +602,8 @@ fn named(view: &WorldView, pc: EntityId, now: &[(Belief, &Knowledge)]) -> HashSe
 /// calls it once per snapshot with every standing Narration
 /// (`WorldView::story_names`). The name of a speech mark does not count:
 /// the mark names the speaker for the app, and a line whose mark cannot
-/// resolve must not make its own speaker resolve. Review B1: a hidden
+/// resolve must not make its own speaker resolve. Nor does the tag of a
+/// line with text after its quote (`speech::leading_tag`). Review B1: a hidden
 /// Faction "The Circle" was named by "A circle of lamplight"; a hidden
 /// entry needs a Belief.
 pub fn story_names<'a>(
@@ -605,7 +613,9 @@ pub fn story_names<'a>(
     let texts: Vec<Vec<String>> = narrations
         .flat_map(speech::parse)
         .map(|line| match line {
-            Line::Prose(text) => normalize::cased_words(text),
+            Line::Prose(text) => {
+                normalize::cased_words(speech::leading_tag(text).map_or(text, |(_, said)| said))
+            }
             Line::Tagged { words, .. } => normalize::cased_words(words),
         })
         .collect();

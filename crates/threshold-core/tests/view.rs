@@ -298,6 +298,80 @@ fn speech_line_without_a_certain_speaker_stays_prose() {
     }
 }
 
+/// A speech line with text after its closing quote is no mark (ADR 0006),
+/// but the stream filter drops its tag all the same. So the screens drop it
+/// too when the tag is a name the PC cannot use, whatever follows the
+/// quote: the stream and the stored text agree, and the name of a hidden
+/// or unnamed NPC never shows and never becomes nameable. A tag the PC can
+/// use, or a tag that names no entity, stays as the narrator wrote it.
+#[test]
+fn a_tag_with_text_after_the_quote_is_removed_when_it_hides_a_name() {
+    let mut w = HiddenWorld::new();
+    let said = w.play("I listen.", &observe(), 0, vec![]);
+    // (line, the prose the Player reads).
+    let lines = [
+        (
+            r#"Kestrel: "Nobody knows my name." He grins."#,
+            r#""Nobody knows my name." He grins."#,
+        ),
+        (
+            "Vey: (softly) \u{ab}Stay in the light.\u{bb} She turns away.",
+            "(softly) \u{ab}Stay in the light.\u{bb} She turns away.",
+        ),
+        (
+            r#"The Toll-Wolf: "Pay." The bell rings."#,
+            r#""Pay." The bell rings."#,
+        ),
+        (
+            r#"Orsel: "You are late." He sighs."#,
+            r#"Orsel: "You are late." He sighs."#,
+        ),
+        (
+            r#"Thunder: "Boom." It rolls."#,
+            r#"Thunder: "Boom." It rolls."#,
+        ),
+    ];
+    let written: Vec<&str> = lines.iter().map(|(line, _)| *line).collect();
+    w.narrate(said, &written.join("\n\n"));
+    let view = view_of(&w);
+    let got = blocks(&view, said);
+    assert_eq!(got.len(), written.len(), "{got:?}");
+    for (block, (line, shown)) in got.iter().zip(&lines) {
+        assert_eq!(prose(block), *shown, "{line}");
+    }
+
+    // The tag made nobody nameable: Kestrel is still a stranger.
+    assert_eq!(
+        view.here
+            .iter()
+            .find(|h| h.entity_id == w.kestrel)
+            .unwrap()
+            .name,
+        None
+    );
+    let sight = w.sight();
+    let marks = Marks::default();
+    for json in [
+        serde_json::to_string(&play_view(&sight, &marks)).unwrap(),
+        serde_json::to_string(&journal_view(&sight, &marks)).unwrap(),
+        threshold_core::view::ooc_sheet(&sight),
+    ] {
+        for hidden in HIDDEN.iter().filter(|h| **h != "Pip") {
+            assert!(!json.contains(hidden), "{hidden} leaks: {json}");
+        }
+    }
+
+    // The stream filter shows each of these lines as the screens do.
+    let set = unnameable_names(&w.view());
+    for (line, shown) in &lines {
+        assert_eq!(
+            threshold_core::speech::strip_tags(line, &set),
+            *shown,
+            "{line}"
+        );
+    }
+}
+
 /// A tag shared by a name the PC knows and a name it does not know is
 /// removed too: a bubble or a tag could tell the Player that both exist.
 #[test]

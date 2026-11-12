@@ -1187,12 +1187,14 @@ fn a_cut_narration_never_shows_a_name_the_full_text_hides() {
                 Brann: \"Stay a while.\"\n\
                 Vale: \"Go now. Go.\"\n\
                 Kett: (quietly) \"Not yet.\"\n\
+                Vale: \"Go.\" She turns.\n\
+                Kett: \"Wait.\" He frowns at the gate.\n\
                 The lamps go out.";
     let hidden = ["Vale", "Kett"];
 
     // The uncut Narration: the reference.
     let mut rig = Rig::new("cut-full");
-    rig.add_npc("Kett", 34, false, "gate square");
+    let kett = rig.add_npc("Kett", 34, false, "gate square");
     let p = rig.plain();
     let t = rig.played("t0", &p, full);
     let reference = shown_after(&rig, t);
@@ -1200,6 +1202,17 @@ fn a_cut_narration_never_shows_a_name_the_full_text_hides() {
     for name in hidden {
         assert!(!reference.contains(name), "the uncut text shows {name}");
     }
+    // A line with text after its closing quote keeps that text, without the
+    // tag (ADR 0006, 2026-11-12).
+    assert!(reference.contains("\"Go.\" She turns."), "{reference}");
+    assert!(reference.contains("He frowns at the gate."), "{reference}");
+    // No line made the PC able to name Kett.
+    assert!(
+        rig.sight()
+            .known
+            .iter()
+            .all(|k| k.id != kett || k.name.is_none())
+    );
 
     // Every cut point, one Turn each, with a model that says it was cut.
     let mut rig = Rig::new("cut-points");

@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use threshold_core::speech::{Line, RULE, TAG_HOLD_CHARS, TagFilter, parse, strip_tags};
+use threshold_core::speech::{
+    Line, RULE, TAG_HOLD_CHARS, TagFilter, leading_tag, parse, strip_tags,
+};
 
 fn tagged<'a>(name: &'a str, words: &'a str, line: &'a str) -> Line<'a> {
     let said = line.split_once(':').unwrap().1.trim();
@@ -231,5 +233,31 @@ fn parse_keeps_a_short_stage_note_before_the_quote() {
         "Orsel: (wiping the bar \"Late.\"",
     ] {
         assert_eq!(parse(text), [Line::Prose(text)], "{text}");
+    }
+}
+
+/// ADR 0006, 2026-11-12: a line with text after its closing quote is prose
+/// for `parse`, and `leading_tag` still finds its tag and the text after
+/// the colon, so a reader can drop a tag the stream filter drops.
+#[test]
+fn leading_tag_reads_a_tag_before_a_quote_whatever_follows() {
+    let line = r#"Vale: "Go." She turns."#;
+    assert_eq!(parse(line), [Line::Prose(line)]);
+    assert_eq!(leading_tag(line), Some(("Vale", r#""Go." She turns."#)));
+    assert_eq!(
+        leading_tag("Vale: (low) \u{ab}Go.\u{bb} She turns."),
+        Some(("Vale", "(low) \u{ab}Go.\u{bb} She turns."))
+    );
+    // A full mark reads the same.
+    assert_eq!(leading_tag(r#"Vale: "Go.""#), Some(("Vale", r#""Go.""#)));
+    // No quote right after the colon, or a quote that never closes: no tag.
+    for line in [
+        "Vale: she turns.",
+        r#"Vale: she says "Go.""#,
+        r#"Vale: "Go"#,
+        r#"A long line of five words: "Go.""#,
+        "Dusk falls.",
+    ] {
+        assert_eq!(leading_tag(line), None, "{line}");
     }
 }

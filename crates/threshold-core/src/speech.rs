@@ -115,6 +115,26 @@ fn holds_a_quote(text: &str) -> bool {
     })
 }
 
+/// The tag and the text after its colon of a prose line that starts like a
+/// speech mark: a tag (`tag`), an optional stage note, then a complete
+/// quoted span, whatever follows the closing quote (`Vale: "Go." She
+/// turns.`). Such a line is no mark (`parse` reads it as prose), but the
+/// stream filter drops its tag when the tag is a name the PC cannot use, so
+/// the readers of a stored Narration drop it too (ADR 0006, 2026-11-12):
+/// `world::pc_sight` shows the text after the colon, and
+/// `world::story_names` never counts the tag. `None` for any other line.
+pub fn leading_tag(line: &str) -> Option<(&str, &str)> {
+    let (name, said) = tag(line)?;
+    let said = said.trim();
+    let (_, quoted) = stage_note(said);
+    let (open, close) = QUOTES
+        .into_iter()
+        .find(|&(open, _)| quoted.starts_with(open))?;
+    quoted[open.len_utf8()..]
+        .contains(close)
+        .then_some((name, said))
+}
+
 fn mark(line: &str) -> Option<Line<'_>> {
     let (name, said) = tag(line)?;
     let said = said.trim();
