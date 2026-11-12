@@ -508,11 +508,14 @@ impl Engine {
     /// running Turn fades itself (`TurnControl::faded`).
     ///
     /// `op_id` may name the Turn that was streaming when the Player pressed
-    /// the button and that ended before it read the flag: when that Turn is
-    /// the latest Turn of the Campaign, not faded and not the Opening, it is
-    /// faded now (and a scene it left open closes, faded), with no model
-    /// call but the closing proposal. Any other stored Turn is returned as
-    /// it is, so a second call changes nothing.
+    /// the button and that ended before it read the flag (review minor,
+    /// 2026-11-12): when that Turn is the latest Turn of the Campaign, is
+    /// not faded, and is a Play, Correction or Closing Turn
+    /// (`TurnKind::fades`), it is faded now, and a scene it left open
+    /// closes, faded. Any other stored Turn (an older one, the Opening, one
+    /// already faded) is returned as it is stored, with no model call: its
+    /// Narration is not asked for again even when it is missing. So `fade`
+    /// never makes a model call but the proposal of a faded Closing Turn.
     pub fn fade(&mut self, op_id: OpId) -> Result<TurnOutcome, TurnError> {
         let mut sink = |_: &str| {};
         let mut ctl = TurnControl {
@@ -521,8 +524,7 @@ impl Engine {
         };
         if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
             let latest = self.store.turns(self.campaign)?.last().map(|t| t.id) == Some(stored.id);
-            let kind = stored.record.kind;
-            if latest && !stored.faded && kind.tells() && kind != TurnKind::Opening {
+            if latest && !stored.faded && stored.record.kind.fades() {
                 let narration = self.after_fade(stored.id, &op_id)?;
                 return Ok(TurnOutcome {
                     turn_id: stored.id,
@@ -532,7 +534,7 @@ impl Engine {
                     faded: true,
                 });
             }
-            return self.stored_outcome(stored, &mut ctl);
+            return Ok(as_stored(&stored));
         }
         if self.store.snapshot(self.campaign)?.scene_open.is_none() {
             return Err(TurnError::NothingToFade);
@@ -1401,6 +1403,24 @@ fn as_correction(op: &mut LedgerOp) {
     };
     if matches!(source, FactSource::Proposal | FactSource::Stake) {
         *source = FactSource::Correction;
+    }
+}
+
+/// The outcome of a stored Turn as it stands, with no model call: its
+/// Narration, its Neutral Line when it is faded, or nothing when its
+/// Narration is missing.
+fn as_stored(stored: &StoredTurn) -> TurnOutcome {
+    let narration = if stored.faded {
+        mature::neutral_line(stored).unwrap_or_default()
+    } else {
+        stored.narration.clone().unwrap_or_default()
+    };
+    TurnOutcome {
+        turn_id: stored.id,
+        roll: stored_roll(&stored.record.proposal_json),
+        narration,
+        timings: Timings::default(),
+        faded: stored.faded,
     }
 }
 

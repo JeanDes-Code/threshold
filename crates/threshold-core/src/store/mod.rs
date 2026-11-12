@@ -106,6 +106,13 @@ impl TurnKind {
     pub fn has_intent(self) -> bool {
         matches!(self, Self::Play | Self::Correction)
     }
+
+    /// True for a Turn whose Narration the Player can fade (Fade to Black,
+    /// review minor 2026-11-12): a Play, Correction or Closing Turn. Never
+    /// the Opening (data shape 10), a Setup or an OOC Turn.
+    pub fn fades(self) -> bool {
+        matches!(self, Self::Play | Self::Correction | Self::Closing)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -942,8 +949,20 @@ impl Store {
 
     /// Fades a Turn (Fade to Black, data shape 3.6): its Narration goes, for
     /// good, and the row says the Player skipped it. The ledger does not
-    /// change: the world keeps what the Turn committed.
+    /// change: the world keeps what the Turn committed. Only a Turn of a
+    /// kind that `TurnKind::fades` holds: any other is refused and keeps its
+    /// row (review minor, 2026-11-12).
     pub fn set_faded(&mut self, t: TurnId) -> Result<(), StoreError> {
+        let kind = self.turn(t)?.map(|turn| turn.record.kind);
+        match kind {
+            None => return Err(StoreError::Invalid("unknown turn".into())),
+            Some(kind) if !kind.fades() => {
+                return Err(StoreError::Invalid(
+                    "only a Play, Correction or Closing Turn can be faded".into(),
+                ));
+            }
+            Some(_) => {}
+        }
         if self
             .db
             .execute("UPDATE turn SET narration=NULL, faded=1 WHERE id=?1", [t])?

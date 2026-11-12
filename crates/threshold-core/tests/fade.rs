@@ -550,3 +550,119 @@ fn a_fade_that_names_the_turn_that_just_ended_fades_it() {
     assert!(rig.turn(t1).faded);
     assert_eq!(rig.scene(), None);
 }
+
+/// Review minor (2026-11-12): `fade(op)` acts only on the latest Turn, only
+/// when it is a Play, Correction or Closing Turn, and makes no model call
+/// but the closing proposal of a scene. An older Turn whose Narration is
+/// missing is not faded, and its Narration is not asked for again.
+#[test]
+fn a_fade_of_an_older_turn_with_no_narration_does_nothing() {
+    let mut rig = Rig::new("fade-old-missing");
+    let p = rig.plain();
+    // t1 commits; its Narration fails (none queued).
+    rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    let err = rig
+        .engine()
+        .play_turn("t1".into(), "I wait.", &mut |_| {})
+        .unwrap_err();
+    let TurnError::NarrationFailed { turn_id: t1, .. } = err else {
+        panic!("{err:?}");
+    };
+    rig.played("t2", &p, "Night.");
+    let calls = rig.gm.calls().len();
+    let out = rig.engine().fade("t1".into()).unwrap();
+    assert_eq!(out.turn_id, t1);
+    assert!(!out.faded);
+    let turn = rig.turn(t1);
+    assert!(!turn.faded, "an older Turn is never faded this way");
+    assert_eq!(turn.narration, None);
+    assert_eq!(rig.gm.calls().len(), calls, "no model call");
+}
+
+/// Review minor and M2 (2026-11-12): the Opening is never faded. A fade
+/// under the op of Begin fades nothing and makes no model call, even when
+/// the Opening's Narration is missing (it was a hidden narration call).
+#[test]
+fn a_fade_of_the_opening_fades_nothing_and_calls_no_model() {
+    use threshold_core::turn::BEGIN_OP_ID;
+    let mut rig = Rig::new("fade-opening");
+    rig.gm.push_narration("The square at dusk.".into());
+    let opening = rig.engine().begin(&mut |_| {}).unwrap().turn_id;
+    let calls = rig.gm.calls().len();
+    let out = rig.engine().fade(BEGIN_OP_ID.into()).unwrap();
+    assert_eq!(out.turn_id, opening);
+    assert!(!out.faded);
+    let turn = rig.turn(opening);
+    assert!(!turn.faded);
+    assert_eq!(turn.narration.as_deref(), Some("The square at dusk."));
+    assert_eq!(rig.gm.calls().len(), calls, "no model call");
+
+    // The Opening's Narration is missing: still no model call.
+    let mut rig = Rig::new("fade-opening-missing");
+    let err = rig.engine().begin(&mut |_| {}).unwrap_err();
+    let TurnError::NarrationFailed {
+        turn_id: opening, ..
+    } = err
+    else {
+        panic!("{err:?}");
+    };
+    let calls = rig.gm.calls().len();
+    let out = rig.engine().fade(BEGIN_OP_ID.into()).unwrap();
+    assert!(!out.faded);
+    assert!(!rig.turn(opening).faded);
+    assert_eq!(rig.gm.calls().len(), calls, "no hidden narration call");
+}
+
+/// Review M2 (2026-11-12): the Opening's Narration never reads the caller's
+/// fade flag. A `renarrate` of the Opening with the flag up makes its call
+/// and stores the Narration in full.
+#[test]
+fn the_opening_never_reads_the_fade_flag() {
+    let mut rig = Rig::new("fade-opening-flag");
+    rig.gm.push_narration("The square at dusk.".into());
+    let opening = rig.engine().begin(&mut |_| {}).unwrap().turn_id;
+    rig.gm.push_narration("The square at night.".into());
+    let before = rig.calls(CallKind::Narrate).len();
+    let mut shown = String::new();
+    let mut on_chunk = |c: &str| shown.push_str(c);
+    let mut ctl = TurnControl {
+        on_chunk: &mut on_chunk,
+        faded: &|| true,
+    };
+    let narration = rig.engine().renarrate_with(opening, &mut ctl).unwrap();
+    assert_eq!(narration, "The square at night.");
+    assert_eq!(rig.calls(CallKind::Narrate).len(), before + 1);
+    let turn = rig.turn(opening);
+    assert!(!turn.faded);
+    assert_eq!(turn.narration.as_deref(), Some("The square at night."));
+    assert_eq!(shown, "The square at night.");
+}
+
+/// Review minor (2026-11-12): `Store::set_faded` fades a Play, Correction or
+/// Closing Turn only. A Setup, Opening or OOC Turn is refused and keeps its
+/// row as it was.
+#[test]
+fn set_faded_refuses_a_turn_that_cannot_be_faded() {
+    let mut rig = Rig::new("set-faded-kinds");
+    rig.gm.push_narration("The square at dusk.".into());
+    let opening = rig.engine().begin(&mut |_| {}).unwrap().turn_id;
+    let path = rig.path.clone();
+    drop(rig.engine.take());
+    let mut store = Store::open(&path).unwrap();
+    let setup = store
+        .turns(rig.campaign)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.record.kind == TurnKind::Setup)
+        .unwrap()
+        .id;
+    for id in [setup, opening] {
+        assert!(store.set_faded(id).is_err(), "turn {id}");
+        assert!(!store.turn(id).unwrap().unwrap().faded);
+    }
+    assert_eq!(
+        store.turn(opening).unwrap().unwrap().narration.as_deref(),
+        Some("The square at dusk.")
+    );
+    rig.engine = Some(rig.make_engine(store));
+}
