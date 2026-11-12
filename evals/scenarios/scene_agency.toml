@@ -16,6 +16,8 @@
 # on (polish pass, 2026-11-12). Both steps are marked `same_scene`: the
 # scene open after each must be the scene open before it, since a short
 # Turn that is not `intimate` no longer ends the scene. Pass line: all.
+# A marked step that was refused or failed, or a talk step the model tagged
+# `intimate`, is counted apart: it does not test the rule (round 2).
 #
 # The report counts the scene Turns the agency check rejected and the scene
 # Narrations the judge reads as setting an act, a word or a feeling of the

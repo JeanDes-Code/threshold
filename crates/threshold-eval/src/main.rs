@@ -5,8 +5,8 @@
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
 //!   voices, shortcuts, agency_leaks, offscreen, world_build, speech,
 //!   play_basics, open_items, ooc, departures, finds, intimate_tag, scene_agency,
-//!   npc_will, scene_latency, replay. `all` leaves out replay, which needs a
-//!   Campaign file, and the four mature scenarios.
+//!   npc_will, scene_latency, scene_first_act, replay. `all` leaves out
+//!   replay, which needs a Campaign file, and the five mature scenarios.
 //!   Repeat or comma-separate.
 //! - `--runs <n>` (default 3)
 //! - `--judge local` (default): the same local model, with a short rubric.
@@ -28,7 +28,8 @@
 //! - `--packs <dir>`: the Content Packs every Engine of the run gets, from
 //!   a folder laid out as `<data_dir>/packs`.
 //! - `--scenarios-dir <dir>`: the folder the mature scenarios
-//!   (`intimate_tag`, `scene_agency`, `npc_will`, `scene_latency`) are read
+//!   (`intimate_tag`, `scene_agency`, `npc_will`, `scene_latency`,
+//!   `scene_first_act`) are read
 //!   from, in place of `evals/scenarios`. A file inside the repository must
 //!   be at `detail = "implied"`.
 //!
@@ -93,7 +94,7 @@ fn real_main() -> Result<(), String> {
             "--scenarios-dir" => scenarios_dir = Some(PathBuf::from(value()?)),
             "-h" | "--help" => {
                 println!(
-                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>] [--raw-log <path outside the repository>] [--packs <dir>] [--scenarios-dir <dir>]\n\n--packs <dir>          Content Packs for every Engine of the run\n--scenarios-dir <dir>  the folder of the mature scenario files (intimate_tag, scene_agency, npc_will, scene_latency)\nA --packs or --scenarios-dir folder outside the repository makes the run private: --out is then required, outside the repository, and the report prints counts only."
+                    "threshold-eval --scenario <name|all> --runs <n> [--judge local] [--model <tag>] [--memory-turns <n>] [--source <path> --expected <path>] [--out <path>] [--raw-log <path outside the repository>] [--packs <dir>] [--scenarios-dir <dir>]\n\n--packs <dir>          Content Packs for every Engine of the run\n--scenarios-dir <dir>  the folder of the mature scenario files (intimate_tag, scene_agency, npc_will, scene_latency, scene_first_act)\nA --packs or --scenarios-dir folder outside the repository makes the run private: --out is then required, outside the repository, and the report prints counts only."
                 );
                 return Ok(());
             }

@@ -110,17 +110,68 @@ impl Step {
     }
 }
 
-/// The `same_scene` counts (polish pass, 2026-11-12): `(kept, measured,
-/// marked)`. A marked step is measured when a scene was open before it; it
-/// is kept when the scene open after it is that same scene.
-pub fn same_scene_count(steps: &[Step]) -> (usize, usize, usize) {
-    let marked: Vec<&Step> = steps.iter().filter(|s| s.marked_same).collect();
-    let measured: Vec<&&Step> = marked.iter().filter(|s| s.scene_before.is_some()).collect();
-    let kept = measured
-        .iter()
-        .filter(|s| s.scene_after == s.scene_before)
-        .count();
-    (kept, measured.len(), marked.len())
+/// The counts of the steps marked `same_scene` (polish pass, 2026-11-12;
+/// round 2 after review). A marked step that the scenario labels plain is a
+/// talk step; one it labels intimate is an act step. A step is measured
+/// only when a scene was open before it and it committed as its kind asks:
+/// a talk step as a Turn that is not `intimate`, an act step with any tag.
+/// It is kept when the scene open after it is that same scene. A refused or
+/// failed step commits nothing, so the scene after it is the scene before
+/// it whatever the rule: it is counted apart, never as kept. So is a talk
+/// step the model tagged `intimate`: it does not test the rule for a Turn
+/// that is not `intimate`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SameScene {
+    pub talk: Marked,
+    pub act: Marked,
+    /// Marked steps with no scene open before them.
+    pub no_scene_before: usize,
+}
+
+/// One kind of marked step (`SameScene`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Marked {
+    /// Committed as the kind asks, with a scene open before.
+    pub measured: usize,
+    /// Of those, the same scene open after.
+    pub kept: usize,
+    /// Apart: a talk step committed as `intimate`.
+    pub intimate: usize,
+    /// Apart: ended as a Refusal, or with no Commit.
+    pub refused: usize,
+    pub failed: usize,
+}
+
+impl Marked {
+    /// The pass line (all): `None` when nothing was measured.
+    pub fn pass(&self) -> Option<bool> {
+        (self.measured > 0).then_some(self.kept == self.measured)
+    }
+}
+
+pub fn same_scene_count(steps: &[Step]) -> SameScene {
+    let mut c = SameScene::default();
+    for s in steps.iter().filter(|s| s.marked_same) {
+        if s.scene_before.is_none() {
+            c.no_scene_before += 1;
+            continue;
+        }
+        let m = if s.labelled { &mut c.act } else { &mut c.talk };
+        match s.ended {
+            Ended::Refused => m.refused += 1,
+            Ended::Failed => m.failed += 1,
+            Ended::Committed { intimacy } if !s.labelled && intimacy.intimate() => {
+                m.intimate += 1;
+            }
+            Ended::Committed { .. } => {
+                m.measured += 1;
+                if s.scene_after == s.scene_before {
+                    m.kept += 1;
+                }
+            }
+        }
+    }
+    c
 }
 
 /// The counts of the `opens` steps (polish pass, 2026-11-12): the act
@@ -770,17 +821,34 @@ pub(crate) fn scenario(ctx: &mut Ctx, name: &str) -> Result<String, String> {
             );
         }
     }
-    let (kept, measured, marked) = same_scene_count(&all);
-    if marked > 0 {
-        let verdict = match measured {
-            0 => "not measured",
-            _ if kept == measured => "PASS",
-            _ => "FAIL",
-        };
+    let same = same_scene_count(&all);
+    let verdict = |m: &Marked| match m.pass() {
+        None => "not measured",
+        Some(true) => "PASS",
+        Some(false) => "FAIL",
+    };
+    if same.talk != Marked::default() || same.act != Marked::default() || same.no_scene_before > 0 {
+        let t = &same.talk;
         let _ = writeln!(
             out,
-            "- Same scene after a step marked same_scene (plain talk inside a scene, then the act): {kept} of {measured} with a scene open before (pass line: all: {verdict}); {} marked steps had no scene open before",
-            marked - measured
+            "- Same scene after a talk step marked same_scene (plain talk inside a scene): {} of {} committed as not intimate (pass line: all: {}); apart: {} committed as intimate, {} refused, {} failed",
+            t.kept,
+            t.measured,
+            verdict(t),
+            t.intimate,
+            t.refused,
+            t.failed
+        );
+        let a = &same.act;
+        let _ = writeln!(
+            out,
+            "- Same scene after an act step marked same_scene (the act going on after the talk): {} of {} committed (pass line: all: {}); apart: {} refused, {} failed; marked steps with no scene open before: {}",
+            a.kept,
+            a.measured,
+            verdict(a),
+            a.refused,
+            a.failed,
+            same.no_scene_before
         );
     }
     let c = tag_count(&all);

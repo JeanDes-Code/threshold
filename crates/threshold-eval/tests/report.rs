@@ -1800,8 +1800,8 @@ mod mature {
     use threshold_eval::{
         Config, MATURE_SCENARIOS, check_private_out,
         mature::{
-            Ended, FirstAct, Step, agency_count, bends_will, first_act_count, npc_will_count,
-            same_scene_count, tag_count, tag_report,
+            Ended, FirstAct, Marked, Step, agency_count, bends_will, first_act_count,
+            npc_will_count, same_scene_count, tag_count, tag_report,
         },
         run,
     };
@@ -1819,24 +1819,72 @@ mod mature {
         }
     }
 
-    /// Polish pass (2026-11-12): a `same_scene` step counts only with a
-    /// scene open before it, and is kept when the scene after is the same.
+    /// Polish pass (2026-11-12; round 2 after review): a marked step is
+    /// measured only with a scene open before it and a Commit of its kind
+    /// (a talk step as not `intimate`, an act step with any tag), and kept
+    /// when the scene after is the same. A refused or failed step, and a
+    /// talk step committed as `intimate`, are counted apart: the scene
+    /// after them is the scene before whatever the rule.
     #[test]
     fn same_scene_counts_marked_steps_with_a_scene_before() {
-        let marked = |before, after| Step {
+        let plain = Ended::Committed {
+            intimacy: Intimacy::None,
+        };
+        let intimate = Ended::Committed {
+            intimacy: Intimacy::Intimate,
+        };
+        let marked = |labelled, ended, before, after| Step {
+            labelled,
+            ended,
             marked_same: true,
             scene_before: before,
             scene_after: after,
             ..Step::default()
         };
         let steps = [
-            marked(Some(3), Some(3)),
-            marked(Some(3), None),
-            marked(Some(3), Some(9)),
-            marked(None, Some(9)),
+            // Talk steps.
+            marked(false, plain, Some(3), Some(3)),
+            marked(false, plain, Some(3), None),
+            marked(false, plain, Some(3), Some(9)),
+            marked(false, intimate, Some(3), Some(3)),
+            marked(false, Ended::Refused, Some(3), Some(3)),
+            marked(false, Ended::Failed, Some(3), Some(3)),
+            marked(false, plain, None, Some(9)),
+            // Act steps.
+            marked(true, intimate, Some(3), Some(3)),
+            marked(true, plain, Some(3), None),
+            marked(true, Ended::Refused, Some(3), Some(3)),
             Step::default(),
         ];
-        assert_eq!(same_scene_count(&steps), (1, 3, 4));
+        let c = same_scene_count(&steps);
+        assert_eq!(
+            c.talk,
+            Marked {
+                measured: 3,
+                kept: 1,
+                intimate: 1,
+                refused: 1,
+                failed: 1,
+            }
+        );
+        assert_eq!(c.talk.pass(), Some(false));
+        assert_eq!(
+            c.act,
+            Marked {
+                measured: 2,
+                kept: 1,
+                intimate: 0,
+                refused: 1,
+                failed: 0,
+            }
+        );
+        assert_eq!(c.no_scene_before, 1);
+        // Refused, failed and tagged talk steps alone measure nothing.
+        let apart = [
+            marked(false, intimate, Some(3), Some(3)),
+            marked(false, Ended::Refused, Some(3), Some(3)),
+        ];
+        assert_eq!(same_scene_count(&apart).talk.pass(), None);
     }
 
     /// Polish pass (2026-11-12): the `opens` steps, by how they ended.
@@ -2023,7 +2071,12 @@ mod mature {
     fn the_scene_scenarios_give_the_pc_a_willing_partner() {
         use threshold_core::{context::seen_present, domain::EntityKind};
         let dir = root().join("evals/scenarios");
-        for name in ["scene_agency", "scene_latency", "npc_will"] {
+        for name in [
+            "scene_agency",
+            "scene_latency",
+            "npc_will",
+            "scene_first_act",
+        ] {
             let s = threshold_eval::mature::arm_session(&root(), &dir, name, "partner", 1)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             let view = s.0.store().snapshot(s.1).unwrap();
@@ -2091,7 +2144,14 @@ mod mature {
         let tagged = format!(
             r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","finds":{{"from":"none","source":"","items":[]}},"check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null,"willing":"yes"}}]}}"#
         );
-        let gm = RecordedGm::new(vec![tagged; 100], vec!["Text.".to_owned(); 100]);
+        // The talk step (the fourth) comes back plain, as a live model
+        // should tag it; every other step comes back tagged (review round
+        // 2: a tagged talk step counted as keeping the scene).
+        let plain = tagged.replace(r#""intimacy":"intimate""#, r#""intimacy":"none""#);
+        let mut proposals = vec![tagged.clone(); 3];
+        proposals.push(plain);
+        proposals.extend(vec![tagged; 96]);
+        let gm = RecordedGm::new(proposals, vec!["Text.".to_owned(); 100]);
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
         let report = run(
             &config(&["scene_agency", "scene_latency"], None),
@@ -2101,22 +2161,26 @@ mod mature {
             &mut |_| {},
         )
         .unwrap();
-        // scene_agency: the invitation, two Turns of the act, the talk
-        // step and one more Turn of the act, all tagged by the recorded
-        // model, the closing, then a step the recorded model tags, which
+        // scene_agency: the invitation and two Turns of the act, tagged by
+        // the recorded model; the talk step, plain; one more Turn of the
+        // act; the closing; then a step the recorded model tags, which
         // opens the next scene.
         assert!(
-            report.contains("- Scene Turns: 6 committed with the tag"),
+            report.contains("- Scene Turns: 5 committed with the tag"),
             "{report}"
         );
         assert!(
             report
-                .contains("- Scene Narrations the judge reads as setting a PC act: 6 of 6 judged"),
+                .contains("- Scene Narrations the judge reads as setting a PC act: 5 of 5 judged"),
             "{report}"
         );
         // The two steps marked `same_scene` (polish pass, 2026-11-12).
         assert!(
-            report.contains("- Same scene after a step marked same_scene (plain talk inside a scene, then the act): 2 of 2 with a scene open before (pass line: all: PASS); 0 marked steps had no scene open before"),
+            report.contains("- Same scene after a talk step marked same_scene (plain talk inside a scene): 1 of 1 committed as not intimate (pass line: all: PASS); apart: 0 committed as intimate, 0 refused, 0 failed"),
+            "{report}"
+        );
+        assert!(
+            report.contains("- Same scene after an act step marked same_scene (the act going on after the talk): 1 of 1 committed (pass line: all: PASS); apart: 0 refused, 0 failed; marked steps with no scene open before: 0"),
             "{report}"
         );
         assert!(
