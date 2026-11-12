@@ -28,6 +28,20 @@ macro_rules! intimacy_field_text {
 /// Part of `PROPOSAL_RULES`. The owner reads it before the merge.
 pub const INTIMACY_FIELD_LINE: &str = intimacy_field_text!();
 
+/// The text of `WILLING_FIELD_LINE`, as a literal, so `PROPOSAL_RULES` can
+/// hold it with `concat!`.
+macro_rules! willing_field_text {
+    () => {
+        concat!("- willing: ", crate::domain::willing_definition_text!())
+    };
+}
+
+/// The one line that defines a reaction's required `willing` field:
+/// `domain::WILLING_DEFINITION` after the field's name (ADR 0008, changed
+/// after the live evaluation of 2026-11-12). Part of `PROPOSAL_RULES`,
+/// under LATER ACTIONS. The owner reads it before the merge.
+pub const WILLING_FIELD_LINE: &str = willing_field_text!();
+
 /// The head of the proposal prompt's `recent` block inside a cleared
 /// Intimate Scene (data shape 3.10): one line, in neutral words. It reaches
 /// a prompt only with a `Cleared` value (`proposal_context`). It names the
@@ -71,6 +85,9 @@ VERDICT
 - If either part is missing, do not use check: choose allowed or impossible. Include check only when verdict is check. Never set a numeric difficulty.
 LATER ACTIONS
 - reactions: what each affected NPC intends right now, as a short plan, not prose.
+",
+    willing_field_text!(),
+    "
 - When an NPC decides to act later (revenge, a report, a visit, fetching someone), use schedule: actor = that NPC, in_minutes = minutes until it happens, text = what happens, effects = the slot writes it causes, seen_by = the NPCs who will witness it (never the PC; omit when nobody does), public = true when everyone at the place will see or hear what it changes (an announcement, a public act), false when only seen_by notice it, moves_actor_to = the place under ALL PLACES where the actor is when it happens, away for a place not listed, null when the actor stays where they are. Never record such a plan as a fact.
 - An NPC who is insulted, threatened or wronged, and who would hit back later rather than now, gets a schedule.
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.

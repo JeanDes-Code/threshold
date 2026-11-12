@@ -20,6 +20,7 @@ use threshold_core::{
     domain::{AttitudeEntry, FactEntry},
     domain::{
         DecisionProposal, DetailLevel, EntityKind, Handle, Intimacy, SeedEntity, SeedFact, Stance,
+        Willing,
     },
     fixture::load_adventure_seed,
     fixture::load_world_setup,
@@ -264,14 +265,17 @@ pub fn agency_count(steps: &[Step]) -> AgencyCount {
 
 /// True when a reaction of `p` bends an NPC's will (plan Task 9, owner's
 /// decision 4): an NPC with an active goal against the PC, or an attitude
-/// below 0 toward it, in `view`, complies or helps with no `cause`.
+/// below 0 toward it, in `view`, complies or helps, or says `willing: yes`
+/// (the field the stance rule reads since 2026-11-12), with no `cause`.
 pub fn bends_will(view: &WorldView, p: &DecisionProposal) -> bool {
     let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
         return false;
     };
     p.reactions
         .iter()
-        .filter(|r| r.stance >= Stance::Comply && r.cause.is_none())
+        .filter(|r| {
+            (r.stance >= Stance::Comply || r.willing == Some(Willing::Yes)) && r.cause.is_none()
+        })
         .filter_map(|r| match r.npc {
             Handle::Entity(id) => Some(id),
             _ => None,

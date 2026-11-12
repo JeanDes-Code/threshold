@@ -122,7 +122,7 @@ The confirmation in play shows no number. The Player reads "Confirm that <name> 
 
 ```rust
 pub struct DecisionProposal { /* as today */ pub intimate: bool }     // required in the per-Turn schema
-pub struct Reaction { npc, stance, plan /* 90 chars; SCENE_PLAN_MAX_CHARS inside a cleared scene */, cause }
+pub struct Reaction { npc, stance, plan /* 90 chars; SCENE_PLAN_MAX_CHARS inside a cleared scene */, cause, willing /* yes | unsure | no, since 2026-11-12 */ }
 pub const SCENE_PLAN_MAX_CHARS: usize = 200;                           // first value
 ```
 
@@ -138,7 +138,7 @@ pub const SCENE_PLAN_MAX_CHARS: usize = 200;                           // first 
 |---|---|---|---|
 | Setting | `view.detail` is not `excluded` | `DetailExcluded` | never |
 | Age | every character the proposal names, in any field, is cleared, and `clearance` passes for everyone in `mature::checked_here` (see below); a new NPC, or a handle that reaches nothing the world holds, refuses | `AdultsOnly` | never |
-| Stance | at least one NPC reacts, and each reacting NPC has stance comply or help | `Unwilling` (plan deviation 2) | the one normal retry |
+| Stance | at least one NPC reacts, and each reacting NPC has `willing: yes` (since 2026-11-12; it read the stance before, see below) | `Unwilling` (plan deviation 2) | the one normal retry |
 
 **Changed after review (2026-11-12).** The age rule reads more than the place and the reactions:
 
@@ -148,6 +148,8 @@ pub const SCENE_PLAN_MAX_CHARS: usize = 200;                           // first 
 - **The sticky tag.** When the raw text of the first attempt says `intimate` is true anywhere, read without parsing (cut, fenced, with trailing text, the key twice), the retry is checked as intimate.
 
 **Changed after the live evaluation (2026-11-12): the tag has three values.** `intimate: bool` is now `intimacy: Intimacy`, a required enum `none` < `advance` < `intimate` (ADR 0008, dated section; one definition, `domain::INTIMACY_DEFINITION`). The age rule above (every character here and every character the proposal names; G3 too) runs for `advance` and `intimate`, with the same final Refusal. The setting rule (`excluded`), the stance rule, the scene (3.4), the telling (3.5) and the caps are for `intimate` only; an `advance` is a plain Turn that an NPC may accept or decline. The sticky tag keeps the strongest value of the raw answers. A stored proposal with the old boolean reads `true` as `intimate`, `false` as `none`.
+
+**Changed after the live evaluation (2026-11-12): the stance rule reads `willing`.** `Reaction` gains `willing: Option<Willing>`, an enum `yes`, `unsure`, `no`, required on every reaction in the per-Turn schema (the schema is fixed before the model writes the tag). Its one definition is `domain::WILLING_DEFINITION` (ADR 0008, dated section). For an `intimate` proposal the stance rule reads it and never the stance: only `yes` passes; `unsure`, `no` and a missing value give `Unwilling`, with the one retry. In an intimate Turn the NPC-folds check counts `yes` as at least `comply`, so an NPC whose attitude or goal caps it lower needs a cause (owner's decision 4); on any other Turn nothing reads the field. A reaction stored before the field reads no value. Why: the model gave the willing partner `resist` in 12 of 16 reactions while each plan went along, and a defined stance then pushed plain cooperation above the ceiling in `play_basics` (4 and 5 of 8 runs lost a Turn). Rejected: a rule that reads the stance and `willing` both. Cost: a few tokens per reaction on every Turn, and, measured on the tag scenario, a stance that rises above the NPC-folds ceiling more often on plain Turns (failed Turns 2 to 9 of 240).
 
 `CheckKind` gains `DetailExcluded` and `AdultsOnly`, and `CheckKind::is_final()`. `turn::plan` stops at a final rejection: no retry prompt, no second proposal call, `TurnError::Refused`. `is_final` is the one list of final kinds (`mature::final_refusal` reads it).
 

@@ -740,7 +740,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         "move_to": null,
         "leaves": [],
         "settles": {"item": "none", "outcome": "open"},
-        "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}}],
+        "reactions": [{"npc": "E2", "stance": "neutral", "plan": "listens", "cause": {"fact": "F40"}, "willing": "unsure"}],
         "facts": [{"slot": {"subject": "N1", "key": "mood", "value": "calm"}, "seen": "pc", "because": ["F40"]}],
         "new_npcs": [{"id": "N1", "name": "Kett", "age": 34, "voice": "terse"}]
     });
@@ -748,6 +748,17 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
     let mut bad = good.clone();
     bad["reactions"][0]["npc"] = "E999".into();
     assert!(!validator.is_valid(&bad));
+    // `willing` is required on every reaction, from a closed list
+    // (2026-11-12).
+    let mut no_willing = good.clone();
+    no_willing["reactions"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("willing");
+    assert!(!validator.is_valid(&no_willing));
+    let mut other = good.clone();
+    other["reactions"][0]["willing"] = "maybe".into();
+    assert!(!validator.is_valid(&other));
     let mut ageless = good.clone();
     ageless["new_npcs"][0]
         .as_object_mut()

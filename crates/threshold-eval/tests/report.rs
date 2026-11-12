@@ -1944,7 +1944,7 @@ mod mature {
             .unwrap();
         let maren = super::id(&s.0.store().snapshot(s.1).unwrap(), "Maren");
         let tagged = format!(
-            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null}}]}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null,"willing":"yes"}}]}}"#
         );
         let gm = RecordedGm::new(vec![tagged; 100], vec!["Text.".to_owned(); 100]);
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
@@ -2166,6 +2166,7 @@ mod mature {
                 stance,
                 plan: "stays".into(),
                 cause,
+                willing: None,
             }],
             ..serde_json::from_str(PROPOSAL).unwrap()
         };
@@ -2178,6 +2179,26 @@ mod mature {
         ));
         assert!(!bends_will(&view, &with(orsel, Stance::Resist, None)));
         assert!(!bends_will(&view, &with(hessa, Stance::Comply, None)));
+        // The stance rule reads `willing` (2026-11-12): a `yes` from Orsel
+        // with no cause bends his will whatever the stance; `unsure` does
+        // not.
+        let willing = |npc: u64, value: threshold_core::domain::Willing| {
+            let mut p = with(npc, Stance::Resist, None);
+            p.reactions[0].willing = Some(value);
+            p
+        };
+        assert!(bends_will(
+            &view,
+            &willing(orsel, threshold_core::domain::Willing::Yes)
+        ));
+        assert!(!bends_will(
+            &view,
+            &willing(orsel, threshold_core::domain::Willing::Unsure)
+        ));
+        assert!(!bends_will(
+            &view,
+            &willing(hessa, threshold_core::domain::Willing::Yes)
+        ));
 
         let mut a = step(
             true,
@@ -2301,7 +2322,7 @@ mod mature {
             .unwrap();
         let maren = super::id(&s.0.store().snapshot(s.1).unwrap(), "Maren");
         let tagged = format!(
-            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null}}]}}"#
+            r#"{{"action":"talk","verdict":"allowed","intimacy":"intimate","check":null,"schedule":null,"minutes":5,"reactions":[{{"npc":"E{maren}","stance":"comply","plan":"stays","cause":null,"willing":"yes"}}]}}"#
         );
         let gm = RecordedGm::new(vec![tagged; 50], vec!["Text.".to_owned(); 50]);
         let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;

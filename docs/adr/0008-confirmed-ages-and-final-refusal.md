@@ -96,3 +96,23 @@ Data shape decision 6 named the next step if the live model failed the tag's pas
 - The neutral sample pack ships two made-up marker terms for the tests. The repository holds no real list.
 
 A pack can then make the gate run more often, and never less.
+
+## Changed after the live evaluation (2026-11-12): the stance rule reads `willing`
+
+The scene scenarios of attempt 2 committed 3 scene Turns. The raw answers showed why. On 33 scene steps that the scenarios label intimate, the model tagged 11 `intimate`, 12 `advance` and 10 `none` at the first attempt. In the proposals tagged `intimate`, the willing partner (attitude 5) had 16 reactions: 12 `resist`, 2 `neutral` and 2 `comply`, and each plan went along. The stance rule rejected 19 attempts and refused 8 Turns. The prompt and the schema did not define a stance.
+
+- **A defined stance was tried and removed.** A rule line and a schema description defined each stance value. The partner's stance then matched her plan in 14 of 14 reactions, and 14 scene Turns committed. But the model also gave the magistrate `comply` or `help` when the PC accepted his own request ("I tell Orsel yes"), above his ceiling `neutral`: in `play_basics` the NPC-folds check rejected that Turn twice in 4 of 8 runs. A second wording ("what the PC asks or wants of it") lost it in 5 of 8 runs. A named stance value pushes plain cooperation above the ceiling. The stance stays undefined in the prompt, as before.
+- **`willing`.** Each reaction has a required field `willing`, an enum of `yes`, `unsure` and `no`. Its one definition is `domain::WILLING_DEFINITION`; the proposal rule line (`context::WILLING_FIELD_LINE`), the schema's description and the glossary hold the same text, and a test pins them together:
+
+  whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: "yes" agrees and takes part; "unsure" hesitates or has not agreed yet; "no" declines or objects.
+
+- **The stance rule reads `willing`, never the stance.** For an `intimate` proposal: no reaction, or a reacting NPC whose `willing` is not `yes`, is `Unwilling`. `unsure`, `no` and a missing value refuse: the rule fails closed. It keeps the one retry and the fixed sentence (owner's decision 3).
+- **The ceiling holds (owner's decision 4).** In an intimate Turn, `willing: yes` counts as at least `comply` for the NPC-folds check. An NPC whose attitude or goal caps it below `comply` needs a cause: a Check against it, or a fact it holds. A stranger (attitude 0) may say `yes`. On any other Turn nothing reads `willing`, so plain play keeps its ceiling on the stance alone.
+- **Every reaction carries it.** The schema is built before the call and cannot depend on the tag the model is about to write. The cost is a few tokens per reaction.
+- **Stored proposals still read.** A reaction stored before the field reads no value. The gate never runs on a stored proposal; if it did, it would refuse.
+
+Considered: a rule that reads both the stance and `willing` (rejected: the stance went against the plan in 12 of 16 reactions, so the rule would still refuse a willing partner); a defined stance (measured above, rejected for its effect on the ceiling).
+
+The scene scenarios changed too. An invitation ("I ask Maren to come to bed with me.") is an `advance` and opens no scene, so the act now comes as its own Intent, then one or two Turns of the act going on, then "End scene". The unwilling arm of `npc_will` gained the act with an NPC who does not go along. The live numbers are in `evals/reports/2026-11-mature-content.md` (attempts 4 to 6).
+
+Measured cost (attempt 6): on plain Turns of the tag scenario, Hessa's stance rose to `help` above her ceiling far more often (55 Turns with an NPC-folds rejection, 7 before), often with `willing: no`. Retries rose from 19 to 47 of 240 and failed Turns from 2 to 9. `play_basics` and `speech` did not show it. What stays open: whether the field or its rule line moves the stance; and an act with an NPC who does not go along is tagged `advance` by the model (3 of 3), so it commits as a plain Turn in which the NPC declines, and the stance rule does not run.

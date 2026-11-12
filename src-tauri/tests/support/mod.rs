@@ -160,7 +160,7 @@ pub fn confirm_all(s: &Session) {
 /// An intimate proposal in which Hessa, who stands in the town hall with
 /// Wren, goes along.
 pub fn intimate_with_hessa(db: &str) -> String {
-    use threshold_core::domain::{Reaction, Stance};
+    use threshold_core::domain::{Reaction, Stance, Willing};
     let mut p = base();
     p.intimacy = Intimacy::Intimate;
     p.minutes = 5;
@@ -169,6 +169,7 @@ pub fn intimate_with_hessa(db: &str) -> String {
         stance: Stance::Comply,
         plan: "stays".into(),
         cause: None,
+        willing: Some(Willing::Yes),
     }];
     serde_json::to_string(&p).unwrap()
 }

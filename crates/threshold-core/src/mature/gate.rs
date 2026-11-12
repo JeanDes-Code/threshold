@@ -14,7 +14,7 @@ use crate::{
         Cancel, Canon, Cause, CheckDraft, ClockMin, DecisionProposal, DetailLevel, Effect,
         EntityId, EntityKind, EntityRef, EventDraft, FactSource, Factor, Handle, Knowing, Leave,
         LedgerOp, NO_ITEM, NewFact, NewNpc, OPEN_KEY_PREFIX, Reaction, Settle, Slot, SlotDraft,
-        Stance, Trigger, is_adult, is_state_key,
+        Trigger, Willing, is_adult, is_state_key,
     },
     normalize,
     store::{Claim, Entity, Fact, Knowledge, WorldView},
@@ -582,9 +582,13 @@ impl Replay {
 /// 3. `clearance` over the place (`checked_here`) and the characters of
 ///    rule 2: one `AdultsOnly` rejection per blocked character, with its
 ///    handle.
-/// 4. For `intimate` only: no reaction, or a reacting NPC below comply:
-///    `Unwilling`. Not final: it keeps the one retry. An NPC may accept or
-///    decline an advance in the story freely.
+/// 4. For `intimate` only: no reaction, or a reacting NPC whose `willing`
+///    is not `yes` (`unsure`, `no`, or no value): `Unwilling`. The rule
+///    reads `willing`, never the stance (live evaluation of 2026-11-12: the
+///    model gave a willing partner `resist` while her plan went along). Not
+///    final: it keeps the one retry. The NPC-folds ceiling caps `yes` as it
+///    caps a stance (`checks::shortcuts`). An NPC may accept or decline an
+///    advance in the story freely.
 pub fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
     if !p.intimacy.gated() {
         return;
@@ -636,14 +640,20 @@ pub fn check(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) 
         errs.push(Rejection::new(
             CheckKind::Unwilling,
             None,
-            "an intimate Turn needs at least one NPC who reacts with comply or help",
+            "an intimate Turn needs at least one NPC who reacts with willing yes",
         ));
     }
-    for r in p.reactions.iter().filter(|r| r.stance < Stance::Comply) {
+    // The rule reads `willing`, never the stance (live evaluation of
+    // 2026-11-12). A missing value refuses: it fails closed.
+    for r in p
+        .reactions
+        .iter()
+        .filter(|r| r.willing != Some(Willing::Yes))
+    {
         errs.push(Rejection::new(
             CheckKind::Unwilling,
             Some(r.npc),
-            "in an intimate Turn each reacting NPC complies or helps",
+            "in an intimate Turn each reacting NPC is willing yes",
         ));
     }
 }
@@ -729,6 +739,7 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         stance: _,
         plan: _,
         cause,
+        willing: _,
     } in reactions
     {
         add(*npc, "reactions.npc");

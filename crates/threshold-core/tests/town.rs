@@ -233,6 +233,7 @@ fn town_demo_offscreen_consequence() {
         stance: Stance::Resist,
         plan: "smiles, will have the scribe investigated".into(),
         cause: None,
+        willing: None,
     }];
     insult.schedule = Some(EventDraft {
         in_minutes: 3 * DAY,
@@ -320,6 +321,7 @@ fn town_demo_offscreen_consequence() {
         stance: Stance::Neutral,
         plan: "whispers what Doul did".into(),
         cause: None,
+        willing: None,
     }];
     gossip.facts = vec![NewFact {
         slot: slot(e(pc), "reputation", "under_suspicion"),
@@ -374,6 +376,7 @@ fn plan(npc: u64, stance: Stance, plan: &str) -> Reaction {
         stance,
         plan: plan.into(),
         cause: None,
+        willing: None,
     }
 }
 

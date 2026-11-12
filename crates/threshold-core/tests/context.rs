@@ -295,6 +295,7 @@ fn narration_input_has_no_gm_only_fact() {
         stance: Stance::Resist,
         plan: "polite on the surface, hostile underneath".into(),
         cause: None,
+        willing: None,
     }];
     let prompt = narration_prompt(
         &w.view,
@@ -412,6 +413,62 @@ fn the_intimacy_definition_is_one_text() {
     }
     for value in ["\"none\"", "\"advance\"", "\"intimate\""] {
         assert!(INTIMACY_DEFINITION.contains(value), "{value}");
+    }
+}
+
+/// `willing` has one definition (ADR 0008, changed after the live
+/// evaluation of 2026-11-12: the model gave a willing partner `resist`
+/// while her plan went along, so the stance rule now reads its own field):
+/// the proposal rule line, the schema's description of a reaction's
+/// `willing`, the glossary and ADR 0008 hold the same text,
+/// `domain::WILLING_DEFINITION`. The field is required on every reaction,
+/// with the middle value `unsure`.
+#[test]
+fn the_willing_definition_is_one_text() {
+    use threshold_core::{
+        HandleContext,
+        context::WILLING_FIELD_LINE,
+        domain::{WILLING_DEFINITION, Willing},
+        proposal_schema_for,
+    };
+    assert_eq!(
+        WILLING_FIELD_LINE,
+        format!("- willing: {WILLING_DEFINITION}")
+    );
+    assert!(PROPOSAL_RULES.contains(WILLING_FIELD_LINE));
+    let schema = proposal_schema_for(&HandleContext {
+        entities: vec![Handle::Entity(2)],
+        ..HandleContext::default()
+    });
+    let reaction = &schema["$defs"]["Reaction"];
+    assert_eq!(
+        reaction["properties"]["willing"]["description"],
+        WILLING_DEFINITION
+    );
+    assert_eq!(
+        reaction["properties"]["willing"]["enum"],
+        serde_json::json!(["yes", "unsure", "no"])
+    );
+    assert!(
+        reaction["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("willing")),
+        "{reaction}"
+    );
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for doc in [
+        "GLOSSARY.md",
+        "docs/adr/0008-confirmed-ages-and-final-refusal.md",
+    ] {
+        let text = std::fs::read_to_string(root.join(doc)).unwrap();
+        assert!(text.contains(WILLING_DEFINITION), "{doc}");
+    }
+    assert!(WILLING_DEFINITION.contains("THIS Turn"));
+    for value in [Willing::Yes, Willing::Unsure, Willing::No] {
+        let word = serde_json::to_value(value).unwrap();
+        let quoted = format!("\"{}\"", word.as_str().unwrap());
+        assert!(WILLING_DEFINITION.contains(&quoted), "{quoted}");
     }
 }
 
@@ -816,6 +873,7 @@ fn gm_only_open_fact_stays_a_secret_to_the_narrator() {
         stance: Stance::Resist,
         plan: "watch the courier closely".into(),
         cause: None,
+        willing: None,
     }];
     let reactions = guard_plans(&w.view, &reactions);
     let prompt = narration_prompt(
@@ -865,6 +923,7 @@ fn plan_naming_an_open_key_without_its_prefix_is_dropped() {
         stance: Stance::Resist,
         plan: "arrest Ada at dawn".into(),
         cause: None,
+        willing: None,
     }];
     let guarded = guard_plans(&w.view, &reactions);
     assert!(guarded[0].plan.is_empty(), "{guarded:?}");
@@ -920,6 +979,7 @@ fn the_guards_drop_a_first_name_an_other_name_and_a_hidden_place() {
         stance: Stance::Neutral,
         plan: text.into(),
         cause: None,
+        willing: None,
     };
     let reactions: Vec<Reaction> = texts.iter().map(|t| plan(t)).collect();
     let plans: Vec<String> = guard_plans(&w.view, &reactions)
@@ -956,6 +1016,7 @@ fn bare_open_prefix_key_gives_no_secret_term() {
         stance: Stance::Resist,
         plan: text.into(),
         cause: None,
+        willing: None,
     };
     let guarded = guard_plans(
         &w.view,
@@ -1012,6 +1073,7 @@ fn an_intimate_turn_is_told_with_the_implied_line() {
         stance: Stance::Comply,
         plan: "stays close".into(),
         cause: None,
+        willing: None,
     }];
     let tell = |told: &Told| {
         narration_prompt(

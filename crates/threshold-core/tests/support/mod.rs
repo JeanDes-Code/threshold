@@ -5,7 +5,7 @@
 pub mod hidden;
 pub mod rig;
 
-use threshold_core::domain::Intimacy;
+use threshold_core::domain::{Intimacy, Willing};
 use threshold_core::{
     domain::{
         ActionKind, AdventureSeed, Canon, CheckDraft, DecisionProposal, DetailLevel, EntityKind,
@@ -338,6 +338,13 @@ pub fn reaction(
         stance,
         plan: "reacts".into(),
         cause,
+        // An NPC who complies or helps agrees; one below does not. A test
+        // of the stance rule that needs another pair sets it itself.
+        willing: Some(if stance >= Stance::Comply {
+            Willing::Yes
+        } else {
+            Willing::No
+        }),
     }
 }
 

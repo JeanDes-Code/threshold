@@ -116,8 +116,9 @@ pub use narration_prompt::{
     narration_prompt, narration_prompt_with, opening_prompt, perceived_by_pc,
 };
 pub use proposal_prompt::{
-    CLOSING_ASK, INTIMACY_FIELD_LINE, PROPOSAL_RULES, ProposalContext, SCENE_LINE, closing_context,
-    closing_prompt, handle_context, proposal_context, proposal_prompt,
+    CLOSING_ASK, INTIMACY_FIELD_LINE, PROPOSAL_RULES, ProposalContext, SCENE_LINE,
+    WILLING_FIELD_LINE, closing_context, closing_prompt, handle_context, proposal_context,
+    proposal_prompt,
 };
 
 use std::collections::BTreeSet;

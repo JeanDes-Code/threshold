@@ -476,12 +476,14 @@ fn narrator_gets_only_reactions_of_seen_npcs() {
             stance: Stance::Neutral,
             plan: "shrugs_and_listens".into(),
             cause: None,
+            willing: None,
         },
         Reaction {
             npc: e(w.orsel),
             stance: Stance::Resist,
             plan: "watches_from_the_dark".into(),
             cause: None,
+            willing: None,
         },
     ];
     let gm = RecordedGm::new(vec![json(&p)], vec!["Brann shrugs.".into()]);
@@ -1360,12 +1362,14 @@ fn pc_reaction_and_pc_witness_are_removed_not_rejected() {
             stance: Stance::Comply,
             plan: "agrees".into(),
             cause: None,
+            willing: None,
         },
         Reaction {
             npc: e(w0.brann),
             stance: Stance::Neutral,
             plan: "shrugs".into(),
             cause: None,
+            willing: None,
         },
     ];
     p.schedule = Some(threshold_core::domain::EventDraft {
@@ -1485,6 +1489,7 @@ fn contested_act_without_a_check_rolls_on_the_retry() {
         stance: Stance::Resist,
         plan: "pushes back".into(),
         cause: None,
+        willing: None,
     }];
     let (mut engine, w, gm) = setup(vec![json(&p), json(&p)], vec!["You strain."]);
     let outcome = engine
@@ -1531,6 +1536,7 @@ fn contested_check_verdict_without_a_check_rolls_on_the_first_attempt() {
         stance: Stance::Neutral,
         plan: "stares at the hands".into(),
         cause: None,
+        willing: None,
     }];
     let brann = w0.brann;
     let gm = RecordedGm::new(vec![json(&p)], vec!["You strain.".into()]);
@@ -1748,6 +1754,7 @@ fn a_contest_reaches_the_narrator_with_its_opponent_and_result() {
         stance: Stance::Resist,
         plan: "laugh and try to win".into(),
         cause: None,
+        willing: None,
     }];
     let gm = RecordedGm::new(vec![json(&p)], vec!["Brann slams your hand down.".into()]);
     let (mut engine, campaign) = w.engine(&gm);

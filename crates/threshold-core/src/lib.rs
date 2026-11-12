@@ -254,6 +254,18 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
         schema["$defs"]["CheckDraft"]["properties"][stake] = json!({"$ref": "#/$defs/SlotDraft"});
         require(&mut schema, "/$defs/CheckDraft", stake);
     }
+    // The stance rule of an intimate Turn reads its own required field, with
+    // a middle value (ADR 0008, changed after the live evaluation of
+    // 2026-11-12: the stance went against the plan). The schema cannot know
+    // the tag before the call, so every reaction carries it; only an
+    // intimate Turn reads it.
+    let words: Vec<&str> = domain::Willing::ALL.iter().map(|w| w.word()).collect();
+    schema["$defs"]["Reaction"]["properties"]["willing"] = json!({
+        "type": "string",
+        "enum": words,
+        "description": domain::WILLING_DEFINITION,
+    });
+    require(&mut schema, "/$defs/Reaction", "willing");
     // Inside a cleared Intimate Scene a reaction plan is longer and never
     // empty (data shape 3.3); `checks::validate` holds the same limits.
     let plan = &mut schema["$defs"]["Reaction"]["properties"]["plan"];

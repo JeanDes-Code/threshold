@@ -6,7 +6,10 @@ use super::{
     writes,
 };
 use crate::{
-    domain::{Canon, Cause, DecisionProposal, Handle, Seen, Trigger, Verdict, is_state_key},
+    domain::{
+        Canon, Cause, DecisionProposal, Handle, Seen, Stance, Trigger, Verdict, Willing,
+        is_state_key,
+    },
     store::WorldView,
 };
 
@@ -75,13 +78,25 @@ fn coincidence(
 
 /// A stance above the NPC's ceiling toward the PC needs a cause: a Check
 /// against that NPC, or a valid cause fact the NPC holds after this Commit.
+/// In an intimate Turn, `willing: yes` counts as at least comply (owner's
+/// decision 4: the existing ceiling holds; a stranger may comply). On any
+/// other Turn nothing reads `willing`.
 fn npc_folds(p: &DecisionProposal, view: &WorldView, errs: &mut Vec<Rejection>) {
     for r in &p.reactions {
         let limit = handle_ceiling(view, r.npc);
-        if r.stance <= limit {
+        let willing = p.intimacy.intimate() && r.willing == Some(Willing::Yes);
+        let stance = if willing {
+            r.stance.max(Stance::Comply)
+        } else {
+            r.stance
+        };
+        if stance <= limit {
             continue;
         }
         let reason = match &r.cause {
+            None if willing && r.stance <= limit => format!(
+                "willing yes is above this NPC's ceiling {limit:?}; it needs a Check against this NPC or a fact the NPC holds"
+            ),
             None => format!(
                 "stance {:?} is above this NPC's ceiling {limit:?}; it needs a Check against this NPC or a fact the NPC holds",
                 r.stance

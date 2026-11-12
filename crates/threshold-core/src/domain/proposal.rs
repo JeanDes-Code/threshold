@@ -353,6 +353,60 @@ pub struct Reaction {
     #[schemars(length(max = 90))]
     pub plan: String,
     pub cause: Option<Cause>,
+    /// Whether this NPC freely agrees to what the PC does with it or asks
+    /// of it in this Turn (`WILLING_DEFINITION`, ADR 0008, changed after the
+    /// live evaluation of 2026-11-12). Required in the per-Turn schema on
+    /// every reaction; only the stance rule of an intimate Turn reads it
+    /// (`mature::check`), and the NPC-folds ceiling caps `yes` there. A
+    /// reaction stored before the field reads `None`, which that rule
+    /// refuses: it fails closed.
+    #[serde(default)]
+    pub willing: Option<Willing>,
+}
+
+/// The text of `WILLING_DEFINITION`, as a literal, so the proposal rules
+/// can hold it with `concat!`.
+macro_rules! willing_definition_text {
+    () => {
+        "whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: \"yes\" agrees and takes part; \"unsure\" hesitates or has not agreed yet; \"no\" declines or objects."
+    };
+}
+pub(crate) use willing_definition_text;
+
+/// The one definition of a reaction's `willing` field (ADR 0008, changed
+/// after the live evaluation of 2026-11-12), in neutral words. The proposal
+/// rules (`context::WILLING_FIELD_LINE`), the schema's description of
+/// `willing`, the glossary and ADR 0008 hold this text; a test pins them
+/// together. The owner reads it before the merge.
+pub const WILLING_DEFINITION: &str = willing_definition_text!();
+
+/// Whether an NPC freely agrees to what the PC does with it or asks of it
+/// in this Turn: the one question the stance rule of an intimate Turn
+/// needs. The live model gave a willing partner the stance `resist` while
+/// the plan it wrote went along, and named stance values pushed plain
+/// cooperation above the NPC-folds ceiling, so the rule has its own field.
+/// `Unsure` is the middle value (ADR 0007's lesson). Only `Yes` passes the
+/// rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Willing {
+    Yes,
+    Unsure,
+    No,
+}
+
+impl Willing {
+    /// Every value, in the order of the per-Turn schema's enum.
+    pub const ALL: [Self; 3] = [Self::Yes, Self::Unsure, Self::No];
+
+    /// The value as the schema and the prompt spell it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Yes => "yes",
+            Self::Unsure => "unsure",
+            Self::No => "no",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

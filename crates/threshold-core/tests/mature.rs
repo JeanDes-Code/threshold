@@ -23,7 +23,7 @@ use threshold_core::{
     context::{SCENE_LINE, narration_prompt, seen_present},
     domain::{
         ActionKind, Canon, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef, FactDraft,
-        FactSource, Handle, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict,
+        FactSource, Handle, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict, Willing,
     },
     mature::{
         Blocked, RefusalKind, Told, after, check_after, checked_here, clearance, stored_intimate,
@@ -365,6 +365,80 @@ fn confirmed_adults_who_comply_or_help_pass() {
         delta: 3,
     }]);
     assert!(validate(&intimate(&w, Stance::Help), &w.view).is_ok());
+}
+
+// --- Live evaluation of 2026-11-12: the stance rule reads `willing` --------
+
+/// `p` with every reaction's `willing` set to `value`.
+fn with_willing(mut p: DecisionProposal, value: Option<Willing>) -> DecisionProposal {
+    for r in &mut p.reactions {
+        r.willing = value;
+    }
+    p
+}
+
+/// The live model gave a willing partner `resist`, `oppose` or `neutral`
+/// while the plan it wrote went along. The stance rule reads `willing`:
+/// `yes` passes, whatever the stance under Brann's ceiling.
+#[test]
+fn a_willing_npc_passes_whatever_its_stance() {
+    let w = confirmed_gate();
+    for stance in [
+        Stance::Oppose,
+        Stance::Resist,
+        Stance::Neutral,
+        Stance::Comply,
+    ] {
+        let p = with_willing(intimate(&w, stance), Some(Willing::Yes));
+        assert!(validate(&p, &w.view).is_ok(), "{stance:?}");
+    }
+}
+
+/// `unsure` and `no` refuse whatever the stance, and so does a reaction
+/// with no `willing` (a stored proposal, or a raw answer that left it out):
+/// the rule fails closed. It stays the one retry, never final.
+#[test]
+fn an_npc_not_willing_is_refused_whatever_its_stance() {
+    let w = confirmed_gate();
+    for value in [Some(Willing::Unsure), Some(Willing::No), None] {
+        let p = with_willing(intimate(&w, Stance::Comply), value);
+        let errs = validate(&p, &w.view).expect_err("unwilling");
+        assert_eq!(kinds(&errs), [CheckKind::Unwilling], "{value:?}");
+        assert!(errs.iter().all(|r| !r.check.is_final()), "{errs:?}");
+    }
+}
+
+/// Owner's decision 4: the existing ceiling holds for `willing`. In an
+/// intimate Turn, `yes` from an NPC whose ceiling is below comply (Orsel,
+/// whose goal is against the PC) needs a cause, as a stance above the
+/// ceiling does. On a Turn that is not intimate nothing reads `willing`,
+/// so plain play keeps its ceiling on the stance alone.
+#[test]
+fn willing_above_the_ceiling_needs_a_cause() {
+    let w = confirmed_gate();
+    let mut p = proposal(Verdict::Allowed);
+    p.intimacy = Intimacy::Intimate;
+    p.reactions = vec![reaction(e(w.orsel), Stance::Resist, None)];
+    let p = with_willing(p, Some(Willing::Yes));
+    let errs = validate(&p, &w.view).expect_err("folds");
+    assert!(
+        errs.iter()
+            .any(|r| r.check == CheckKind::NpcFolds && r.handle == Some(e(w.orsel))),
+        "{errs:?}"
+    );
+    for intimacy in [Intimacy::None, Intimacy::Advance] {
+        let mut plain = p.clone();
+        plain.intimacy = intimacy;
+        assert!(validate(&plain, &w.view).is_ok(), "{intimacy:?}");
+    }
+}
+
+/// A reaction stored before `willing` existed still loads, with no value.
+#[test]
+fn a_stored_reaction_without_willing_still_loads() {
+    let r: threshold_core::domain::Reaction =
+        serde_json::from_str(r#"{"npc":"E2","stance":"comply","plan":"x","cause":null}"#).unwrap();
+    assert_eq!(r.willing, None);
 }
 
 /// Path 18: the sample pack asks the model to ignore the age rule. In an
@@ -1246,6 +1320,7 @@ const PROPOSAL_FIELDS: &[(&str, bool)] = &[
     ("reactions[].npc", true),
     ("reactions[].plan", false),
     ("reactions[].stance", false),
+    ("reactions[].willing", false),
     ("schedule.actor", true),
     ("schedule.effects[].key", false),
     ("schedule.effects[].subject", true),

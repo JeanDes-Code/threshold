@@ -84,6 +84,10 @@ _Avoid_: Flag, rating, NSFW tag
 A Turn whose Intimacy Tag is "advance": a romantic or sexual invitation, without the act. The age rule runs for it, with the same final Refusal. It is told as a plain Turn, opens no Intimate Scene, and an NPC may accept or decline it in the story.
 _Avoid_: Flirt mode, pre-scene
 
+**Willing**:
+The value each reaction of a Decision Proposal gives its NPC, in the field `willing`: whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: "yes" agrees and takes part; "unsure" hesitates or has not agreed yet; "no" declines or objects. Only the stance rule of an intimate Turn reads it: every reacting NPC must say "yes", or the Turn is refused after the one retry. A missing value refuses. The NPC's attitude toward the PC and its goals cap "yes" as they cap a stance: above that cap it needs a cause.
+_Avoid_: Consent flag, mood, stance (the stance rule does not read the stance)
+
 **Romance Word**:
 A neutral word or phrase of the core's short list (`mature::ROMANCE_WORDS`), such as "kiss" or "spend the night with". When the Player's Intent holds one, the Turn is at least an Advance, whatever the model says. A Content Pack may ship its own word list; an Intent that holds one of those terms is at least intimate.
 _Avoid_: Bad word, filter list, blacklist
