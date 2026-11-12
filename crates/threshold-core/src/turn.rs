@@ -208,13 +208,19 @@ struct Planned {
     intimate: bool,
 }
 
-pub const OOC_RULES: &str = "\
+/// The OOC rules. The last line is `context::INTIMATE_RULE`, the narrator's
+/// stable neutral line: an OOC answer holds no intimate content either.
+pub const OOC_RULES: &str = concat!(
+    "\
 You answer the player's out-of-character question about a single-player tabletop role-playing game. The player plays the player character (PC): answer the player as \"you\".
 Answer only from the adventure and the blocks below. Together they hold everything the PC knows, and every block counts: a request, an offer, a plan or a promise also tells what you know about each person it names. Say that you do not know only when no block holds the answer.
 NOW: where you are, the time, and who is here with you. STILL OPEN: the requests, offers, plans and promises not answered or not done yet. ALREADY ANSWERED: each one you accepted, refused, did, failed or gave up, and how. RECENT TURNS: what the player last did and read. WHAT YOU KNOW: the other things you know about people, places and things.
 Never invent facts about the world, and never continue the story.
 Answer briefly, in plain prose.
-";
+",
+    crate::context::intimate_rule_text!(),
+    "\n"
+);
 
 impl Engine {
     pub fn new(

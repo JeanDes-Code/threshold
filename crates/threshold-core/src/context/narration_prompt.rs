@@ -38,6 +38,7 @@ macro_rules! intimate_rule_text {
         "Tell intimate or sexual content only as far as a line headed INTIMATE TURN allows; with no such line, tell none."
     };
 }
+pub(crate) use intimate_rule_text;
 
 /// The narrator's rules. The line before the last is `INTIMATE_RULE`; the
 /// last is `speech::RULE`, the speech mark.

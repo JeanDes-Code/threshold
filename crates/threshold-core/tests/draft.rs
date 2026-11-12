@@ -1241,6 +1241,68 @@ fn a_built_campaign_marks_only_confirmed_ages() {
     );
 }
 
+/// Builds a Campaign file from `seed` with the confirmed ages `ages`.
+fn built_seed(seed: &AdventureSeed, ages: &ConfirmedAges, name: &str) -> WorldView {
+    let dir = TempDir::new(name);
+    fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join("campaign.sqlite");
+    create_campaign_file(&path, seed, &WorldSetup::default(), 7, Some(ages)).unwrap();
+    let store = Store::open_existing(&path).unwrap();
+    store.snapshot(store.campaigns().unwrap()[0]).unwrap()
+}
+
+/// Review minor: the seed marks only the entries the Player confirmed, with
+/// the same kind, the exact main name and the same age. Another character
+/// of either kind, the same name with another age, kind or case: unmarked.
+#[test]
+fn the_seed_marks_only_the_confirmed_entries() {
+    let draft = valid_draft();
+    let ages = confirmed_ages(&draft).unwrap();
+
+    // A confirmed PC and NPC, and an NPC nobody confirmed.
+    let mut seed = draft.seed.clone();
+    seed.entities
+        .push(entity("Mara", EntityKind::Npc, Some(30)));
+    assert_eq!(
+        marks(&built_seed(&seed, &ages, "one-of-each")),
+        [
+            ("Wren".to_owned(), true),
+            ("Jean".to_owned(), true),
+            ("Mara".to_owned(), false),
+        ]
+    );
+
+    // The same names with another age.
+    let mut seed = draft.seed.clone();
+    seed.pc.age = 30;
+    seed.entities[0].age = Some(41);
+    assert_eq!(
+        marks(&built_seed(&seed, &ages, "other-age")),
+        [("Wren".to_owned(), false), ("Jean".to_owned(), false)]
+    );
+
+    // The same name in another case.
+    let mut seed = draft.seed.clone();
+    seed.entities[0].name = "jean".into();
+    seed.start.present = vec!["jean".into()];
+    assert_eq!(
+        marks(&built_seed(&seed, &ages, "other-case")),
+        [("Wren".to_owned(), true), ("jean".to_owned(), false)]
+    );
+
+    // The same name and age under the other kind.
+    let mut seed = draft.seed.clone();
+    seed.pc.name = "Jean".into();
+    seed.pc.age = 40;
+    seed.pc.other_names = vec![];
+    seed.entities[0] = entity("Wren", EntityKind::Npc, Some(29));
+    seed.start.present = vec!["Wren".into()];
+    assert_eq!(
+        marks(&built_seed(&seed, &ages, "other-kind")),
+        [("Jean".to_owned(), false), ("Wren".to_owned(), false)]
+    );
+}
+
 /// Path 2: an age edited after its confirmation is not confirmed; once the
 /// Player confirms it again, the mark holds the new age only.
 #[test]

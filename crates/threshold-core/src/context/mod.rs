@@ -14,6 +14,7 @@
 mod narration_prompt;
 mod proposal_prompt;
 
+pub(crate) use narration_prompt::intimate_rule_text;
 pub use narration_prompt::{
     FAILED_CHECK_LINE, HERE_AFTER_LINE, IMPLIED_LINE, IMPOSSIBLE_LINE, INTIMATE_RULE,
     NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE, NOT_MOVED_LINE, PC_PLACE_LINE,

@@ -1406,3 +1406,59 @@ fn every_final_kind_ends_the_turn_after_one_call() {
     );
     assert_eq!(calls, 1, "adults only");
 }
+
+/// G2 alone, with no G3 behind it: a hidden minor at the PC's place, whom
+/// the PC does not see, refuses the tagged proposal in `mature::check`.
+#[test]
+fn g2_alone_refuses_a_hidden_minor() {
+    let mut seed = adventure_seed();
+    seed.detail = DetailLevel::Implied;
+    seed.entities.push(SeedEntity {
+        name: "Moth".into(),
+        kind: EntityKind::Npc,
+        age: Some(16),
+        other_names: vec![],
+        hidden: true,
+    });
+    seed.decided
+        .push(seed_fact("Moth", "location", "gate square"));
+    let mut w = World::with_seed(seed);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    let moth = w.view.entity_by_name("Moth").unwrap().id;
+    assert!(
+        !seen_present(&w.view).contains(&moth),
+        "the PC does not see Moth"
+    );
+
+    let mut errs = Vec::new();
+    threshold_core::mature::check(&intimate(&w, Stance::Comply), &w.view, &mut errs);
+    assert_eq!(adults_only(&errs), [Some(e(moth))]);
+    assert!(
+        errs.iter().all(|r| r.check != CheckKind::Unwilling),
+        "{errs:?}"
+    );
+}
+
+/// OOC: the stable neutral rule line holds for an out-of-character answer
+/// too, so "off" does not wait for the scene tasks.
+#[test]
+fn the_ooc_rules_hold_the_intimate_rule() {
+    use threshold_core::{context::INTIMATE_RULE, turn::OOC_RULES};
+    assert!(OOC_RULES.contains(INTIMATE_RULE));
+
+    let mut w = confirmed_gate();
+    let gm = RecordedGm::new(vec![], vec!["You stand at the gate.".into()]);
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    engine.ooc("q1".into(), "Where am I?").unwrap();
+    let calls = gm.calls();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].prompt.system.contains(INTIMATE_RULE));
+}
