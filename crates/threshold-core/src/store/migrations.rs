@@ -20,7 +20,7 @@ pub(super) fn apply(db: &Connection) -> Result<(), StoreError> {
 
 /// The tables of the world: the ledger and its projections. Schema 4 adds
 /// `campaign.detail_level` (projection: the seed's `detail`),
-/// `campaign.scene_open_turn` (written by nothing yet), `entity.age_confirmed`
+/// `campaign.scene_open_turn` (projection: `SetScene`), `entity.age_confirmed`
 /// (projection: `AddEntity`, `ConfirmAge`) and `turn.faded` (not a
 /// projection; written by nothing yet).
 const STORE_SCHEMA: &str = r#"

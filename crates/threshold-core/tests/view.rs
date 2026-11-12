@@ -16,8 +16,8 @@ use threshold_core::{
     store::{Store, TurnId, TurnKind, TurnRecord},
     turn::create_campaign,
     view::{
-        Block, JournalView, NameRef, Part, PlayView, StoryTurn, TurnBody, character_view,
-        entity_card, journal_view, pins_resolving_to, play_view,
+        Block, JournalView, NameRef, Part, PlayView, SceneState, StoryTurn, TurnBody,
+        character_view, entity_card, journal_view, pins_resolving_to, play_view,
     },
     world::unnameable_names,
 };
@@ -1969,4 +1969,87 @@ fn the_character_tab_says_where_you_are() {
         !texts.iter().any(|t| t.starts_with("Ada is at")),
         "{texts:?}"
     );
+}
+
+// --- The Intimate Scene (mature content module, Task 4) ---------------------
+
+/// A marker in a scene Narration.
+const SCENE_MARKER: &str = "MARKER-SCENE-1";
+
+/// The hidden world, then one Play Turn committed with `intimate` that
+/// opens an Intimate Scene, read in full.
+fn in_a_scene() -> (HiddenWorld, TurnId) {
+    let mut w = HiddenWorld::new();
+    let mut record: Value = serde_json::from_str(&observe()).unwrap();
+    record["proposal"]["intimate"] = Value::Bool(true);
+    let turn = w.play(
+        "I stay close to Brann.",
+        &record.to_string(),
+        5,
+        vec![LedgerOp::SetScene {
+            open: true,
+            why: threshold_core::domain::SceneWhy::Opened,
+        }],
+    );
+    w.narrate(turn, &format!("{SCENE_MARKER} Brann nods."));
+    (w, turn)
+}
+
+#[test]
+fn play_view_shows_the_intimate_scene_state() {
+    let plain = view_of(&HiddenWorld::new());
+    assert_eq!(plain.scene, SceneState::Plain);
+    let (w, turn) = in_a_scene();
+    let view = view_of(&w);
+    assert_eq!(view.scene, SceneState::Intimate { since_turn: turn });
+    let json = serde_json::to_value(&view).unwrap();
+    assert_eq!(
+        json["scene"],
+        serde_json::json!({"kind": "intimate", "since_turn": turn})
+    );
+    // The Play story shows a Turn the Player read in full.
+    let story = story_turn(&view, turn);
+    assert_eq!(story.intent, "I stay close to Brann.");
+    assert!(
+        serde_json::to_string(&story.body)
+            .unwrap()
+            .contains(SCENE_MARKER)
+    );
+    assert_eq!(w.sight().scene, Some(turn));
+}
+
+/// The OOC sheet gives a Turn committed with `intimate` as its neutral
+/// line, in place of its Intent and its Narration.
+#[test]
+fn ooc_sheet_gives_the_neutral_line_for_an_intimate_turn() {
+    let (w, turn) = in_a_scene();
+    let sight = w.sight();
+    let story = sight.story.iter().find(|t| t.turn == turn).unwrap();
+    let stored = w.store.turn(turn).unwrap().unwrap();
+    let line = threshold_core::mature::neutral_line(&stored).unwrap();
+    assert_eq!(story.line.as_deref(), Some(line.as_str()));
+    let sheet = threshold_core::view::ooc_sheet(&sight);
+    assert!(sheet.contains(&line), "{sheet}");
+    assert!(!sheet.contains(SCENE_MARKER), "{sheet}");
+    assert!(!sheet.contains("I stay close to Brann"), "{sheet}");
+    // A plain Turn has no line.
+    assert!(
+        sight
+            .story
+            .iter()
+            .filter(|t| t.turn != turn)
+            .all(|t| t.line.is_none())
+    );
+}
+
+/// The view tests of the play-experience shape, again with an open scene.
+#[test]
+fn play_and_journal_views_show_pc_knowledge_only_in_a_scene() {
+    let (w, _) = in_a_scene();
+    let play = serde_json::to_string(&view_of(&w)).unwrap();
+    let journal = serde_json::to_string(&journal_of(&w)).unwrap();
+    for hidden in HIDDEN {
+        assert!(!play.contains(hidden), "{hidden} leaks: {play}");
+        assert!(!journal.contains(hidden), "{hidden} leaks: {journal}");
+    }
 }

@@ -260,10 +260,19 @@ pub struct Factor {
     pub helps: bool,
 }
 
+/// The longest reaction plan, in characters, outside an Intimate Scene.
+pub const PLAN_MAX_CHARS: usize = 90;
+
+/// The longest reaction plan inside a cleared Intimate Scene, in characters
+/// (data shape 3.3, a first value). There a plan is also never empty.
+pub const SCENE_PLAN_MAX_CHARS: usize = 200;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Reaction {
     pub npc: Handle,
     pub stance: Stance,
+    /// At most `PLAN_MAX_CHARS`; 1 to `SCENE_PLAN_MAX_CHARS` inside a
+    /// cleared Intimate Scene (`checks::validate` and the per-Turn schema).
     #[schemars(length(max = 90))]
     pub plan: String,
     pub cause: Option<Cause>,

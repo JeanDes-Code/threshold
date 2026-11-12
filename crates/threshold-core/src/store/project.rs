@@ -538,6 +538,16 @@ fn apply(
             }
             false
         }
+        // The scene opens at the Turn that commits the op, and closes with
+        // no Turn (data shape 3.4).
+        LedgerOp::SetScene { open, .. } => {
+            let opened = open.then_some(turn);
+            db.execute(
+                "UPDATE campaign SET scene_open_turn=?2 WHERE id=?1",
+                params![c, opened],
+            )?;
+            false
+        }
     };
     Ok(made.then(|| db.last_insert_rowid() as u64))
 }
@@ -643,7 +653,8 @@ pub(super) fn rebuild(db: &Connection, c: u64) -> Result<(), StoreError> {
     ] {
         db.execute(sql, [c])?;
     }
-    // The Detail Level starts again from the seed; the ops replay on it.
+    // The Detail Level starts again from the seed and no scene is open; the
+    // ops replay on both.
     let seed: String = db.query_row(
         "SELECT adventure_seed_json FROM campaign WHERE id=?1",
         [c],
@@ -651,7 +662,7 @@ pub(super) fn rebuild(db: &Connection, c: u64) -> Result<(), StoreError> {
     )?;
     let seed: AdventureSeed = parse(seed)?;
     db.execute(
-        "UPDATE campaign SET clock_min=0,detail_level=?2 WHERE id=?1",
+        "UPDATE campaign SET clock_min=0,detail_level=?2,scene_open_turn=NULL WHERE id=?1",
         params![c, enum_text(&seed.detail)?],
     )?;
     for (turn, op, id) in ops {
@@ -703,11 +714,11 @@ fn ids(db: &Connection, sql: &str, c: u64) -> Result<Vec<u64>, StoreError> {
     Ok(result)
 }
 pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError> {
-    let (clock, adventure_seed, detail): (u64, String, String) = db
+    let (clock, adventure_seed, detail, scene_open): (u64, String, String, Option<u64>) = db
         .query_row(
-            "SELECT clock_min,adventure_seed_json,detail_level FROM campaign WHERE id=?1",
+            "SELECT clock_min,adventure_seed_json,detail_level,scene_open_turn FROM campaign WHERE id=?1",
             [c],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()?
         .ok_or_else(|| StoreError::Invalid("unknown campaign".into()))?;
@@ -1010,6 +1021,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         clock_min: clock,
         adventure_seed,
         detail,
+        scene_open,
         entities,
         live_facts,
         facts,

@@ -165,7 +165,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
     ];
     for (name, intent) in scenarios {
-        let ctx = proposal_context(&view, &[], intent);
+        let ctx = proposal_context(&view, &[], intent, None);
         let schema = proposal_schema_for(&ctx.handles);
         let mut s = Stats::default();
         for run in 1..=RUNS {

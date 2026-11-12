@@ -12,7 +12,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use super::beliefs::{Belief, belief, held};
 use crate::{
     context::seen_present,
-    domain::{Canon, ClockMin, EntityId, EntityKind, FactSource, Key, Knowing, is_alias_key},
+    domain::{
+        Canon, ClockMin, DetailLevel, EntityId, EntityKind, FactSource, Key, Knowing, is_alias_key,
+    },
+    mature::{TurnText, turn_text},
     normalize,
     rules::RollResult,
     speech::{self, Line},
@@ -84,6 +87,11 @@ pub struct SightTurn {
     /// The Narration's lines, each speech mark resolved. Empty when the
     /// Narration is missing. A reverted Turn holds prose lines only.
     pub lines: Vec<SightLine>,
+    /// The Turn's Neutral Line, for a reader that is not the Play story
+    /// (the OOC sheet): `Some` for a Turn committed with `intimate`
+    /// (`mature::turn_text` with no scene and no clearance). The Play story
+    /// shows a Turn the Player read in full.
+    pub line: Option<String>,
 }
 
 /// One line of a Narration, as the PC can read it.
@@ -138,6 +146,11 @@ pub struct PcSight {
     pub needs_begin: bool,
     /// The latest Turn is a standing Play Turn (`Engine::correct_last`).
     pub can_correct: bool,
+    /// The Turn that opened the Intimate Scene, while one is open
+    /// (`WorldView::scene_open`).
+    pub scene: Option<TurnId>,
+    /// The stored Detail Level (`WorldView::detail`).
+    pub detail: DetailLevel,
 }
 
 impl PcSight {
@@ -387,6 +400,10 @@ pub fn pc_sight(
                 reverted: reverted.contains(&t.id),
                 narration: t.narration.clone(),
                 lines,
+                line: match turn_text(t, None, None) {
+                    TurnText::Line(line) => Some(line),
+                    TurnText::Full { .. } => None,
+                },
             }
         })
         .collect();
@@ -426,6 +443,8 @@ pub fn pc_sight(
         can_correct: ordered
             .last()
             .is_some_and(|t| t.record.kind == TurnKind::Play && !reverted.contains(&t.id)),
+        scene: view.scene_open,
+        detail: view.detail,
     })
 }
 

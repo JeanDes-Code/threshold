@@ -22,17 +22,18 @@ pub use narration_prompt::{
     narration_prompt, narration_prompt_with, opening_prompt, perceived_by_pc,
 };
 pub use proposal_prompt::{
-    INTIMATE_FIELD_LINE, PROPOSAL_RULES, ProposalContext, handle_context, proposal_context,
-    proposal_prompt,
+    INTIMATE_FIELD_LINE, PROPOSAL_RULES, ProposalContext, SCENE_LINE, handle_context,
+    proposal_context, proposal_prompt,
 };
 
 use std::collections::BTreeSet;
 
 use crate::{
     domain::{AdventureSeed, Canon, EntityId, EntityKind, Trigger, alias_key, is_open_key},
+    mature::{Cleared, TurnText, turn_text},
     normalize,
     pack::{ContentPack, InsertPoint},
-    store::{Entity, Fact, Goal, StoredTurn, TurnKind, VoiceCard, WorldEvent, WorldView},
+    store::{Entity, Fact, Goal, StoredTurn, TurnId, TurnKind, VoiceCard, WorldEvent, WorldView},
     world::{hidden, holders_of, pc_can_name, pc_knowledge},
 };
 
@@ -402,19 +403,21 @@ pub(crate) fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// One recent Turn. The Opening Turn has no Player line: the PC did nothing
-/// in it.
-fn render_turn(turn: &StoredTurn) -> String {
+/// One recent Turn, as `mature::turn_text` gives it to a prompt: its Intent
+/// and its Narration, or its Neutral Line in place of both. The Opening
+/// Turn has no Player line: the PC did nothing in it. `scene` is the open
+/// scene of the prompt's state and `cleared` the prompt's clearance.
+fn render_turn(turn: &StoredTurn, scene: Option<TurnId>, cleared: Option<&Cleared>) -> String {
+    let (intent, narration) = match turn_text(turn, scene, cleared) {
+        TurnText::Line(line) => return format!("Turn {}\n{}\n", turn.seq, one_line(&line)),
+        TurnText::Full { intent, narration } => (intent, narration),
+    };
     let mut out = if turn.record.kind == TurnKind::Opening {
         format!("Turn {} (opening)\n", turn.seq)
     } else {
-        format!(
-            "Turn {}\nPlayer: {}\n",
-            turn.seq,
-            one_line(&turn.record.intent)
-        )
+        format!("Turn {}\nPlayer: {}\n", turn.seq, one_line(intent))
     };
-    if let Some(narration) = turn.narration.as_deref().filter(|n| !n.trim().is_empty()) {
+    if let Some(narration) = narration.filter(|n| !n.trim().is_empty()) {
         out.push_str(&format!("Narration: {}\n", narration.trim()));
     }
     out
@@ -436,7 +439,11 @@ fn render_turn(turn: &StoredTurn) -> String {
 /// so the next prompt differs only after the newest Turn. Over
 /// `TURNS_WINDOW_MAX_CHARS` it starts one step later, down to the last
 /// Turn alone.
-pub(crate) fn turns_window(view: &WorldView, before_seq: u64) -> String {
+///
+/// Each Turn goes through `mature::turn_text`: a Turn committed with
+/// `intimate` is shown in full only with `cleared` and inside the open
+/// scene of `view` (data shape 3.6).
+pub(crate) fn turns_window(view: &WorldView, before_seq: u64, cleared: Option<&Cleared>) -> String {
     let past: Vec<&StoredTurn> = view
         .recent_turns
         .iter()
@@ -454,7 +461,7 @@ pub(crate) fn turns_window(view: &WorldView, before_seq: u64) -> String {
         let rendered: String = past
             .iter()
             .filter(|t| t.seq >= first)
-            .map(|t| render_turn(t))
+            .map(|t| render_turn(t, view.scene_open, cleared))
             .collect();
         if rendered.len() <= TURNS_WINDOW_MAX_CHARS || first >= last {
             return if rendered.is_empty() {

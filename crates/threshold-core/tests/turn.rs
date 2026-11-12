@@ -1237,11 +1237,30 @@ fn turn_makes_the_same_model_calls() {
     // gate after the World Events and the implied telling add none.
     let w0 = gate_at_implied(false);
     let tagged = json(&intimate_with_brann(&w0, Stance::Comply));
-    let (mut engine, _w, gm) = engine_for(w0, vec![tagged], vec!["Brann smiles."]);
+    let (mut engine, w, gm) = engine_for(
+        w0,
+        vec![tagged.clone(), tagged],
+        vec!["Brann smiles.", "Brann stays."],
+    );
     engine
         .play_turn("t1".into(), "I lean closer.", &mut |_| {})
         .unwrap();
     assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
+    // A Turn inside the Intimate Scene that opened makes the same two calls:
+    // the gate before the proposal call (G1) adds none.
+    assert!(snapshot(&engine, &w).scene_open.is_some());
+    engine
+        .play_turn("t2".into(), "I stay close.", &mut |_| {})
+        .unwrap();
+    assert_eq!(
+        kinds(&gm),
+        [
+            CallKind::Propose,
+            CallKind::Narrate,
+            CallKind::Propose,
+            CallKind::Narrate
+        ]
+    );
 }
 
 // --- QA, 2026-11-10 -----------------------------------------------------------

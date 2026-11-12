@@ -727,6 +727,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         open_items: vec!["E1 pending_trip".into()],
         leavers: vec![Handle::Entity(2)],
         destinations: vec![Handle::Entity(7), Handle::Entity(8)],
+        scene: false,
     };
     let schema = proposal_schema_for(&ctx);
     let validator = jsonschema::validator_for(&schema).unwrap();

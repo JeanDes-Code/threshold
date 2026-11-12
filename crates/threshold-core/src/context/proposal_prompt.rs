@@ -8,6 +8,7 @@ use super::{
 use crate::{
     HandleContext,
     domain::{Canon, EntityId, EntityKind, Handle, Trigger, is_open_key},
+    mature::Cleared,
     model::Prompt,
     pack::ContentPack,
     store::{Entity, Fact},
@@ -26,6 +27,13 @@ macro_rules! intimate_field_text {
 /// words (mature content module, Task 1). Part of `PROPOSAL_RULES`. The
 /// owner reads it before the merge.
 pub const INTIMATE_FIELD_LINE: &str = intimate_field_text!();
+
+/// The head of the proposal prompt's `recent` block inside a cleared
+/// Intimate Scene (data shape 3.10): one line, in neutral words. It reaches
+/// a prompt only with a `Cleared` value (`proposal_context`). It names the
+/// longer plan limit, `domain::SCENE_PLAN_MAX_CHARS`. The owner reads it
+/// before the merge.
+pub const SCENE_LINE: &str = "INTIMATE SCENE (open): the Turns of this scene below are shown in full. Each NPC takes part only as far as their own stance and plan go; a reaction plan holds 1 to 200 characters. Decide nothing the PC does, says or feels.\n";
 
 /// The rules part of the system prompt. Its first lines are the wording
 /// measured by the live probe (`threshold-ollama/examples/probe.rs`); the
@@ -77,24 +85,34 @@ pub struct ProposalContext {
     pub handles: HandleContext,
 }
 
+/// The proposal prompt of a Turn outside a cleared Intimate Scene:
+/// `proposal_context` with no clearance.
 pub fn proposal_prompt(
     view: &crate::store::WorldView,
     packs: &[ContentPack],
     intent: &str,
 ) -> Prompt {
-    proposal_context(view, packs, intent).prompt
+    proposal_context(view, packs, intent, None).prompt
 }
 
 /// The handles that `proposal_prompt(view, _, intent)` shows. Packs never
 /// change them.
 pub fn handle_context(view: &crate::store::WorldView, intent: &str) -> HandleContext {
-    handles(&Retrieval::new(view, intent), intent)
+    handles(&Retrieval::new(view, intent), intent, false)
 }
 
+/// The proposal prompt and its handles. `cleared` is G1's value
+/// (`mature::scene_gate`): with `Some`, the `recent` block opens with
+/// `SCENE_LINE` and the Turns of the open scene are shown in full
+/// (`mature::turn_text`), and the schema takes the longer plan. With
+/// `None`, the prompt holds no scene text at all. The system, stable and
+/// scene blocks do not depend on it, so the cached prefix stays the same
+/// when a scene opens or ends (ADR 0001).
 pub fn proposal_context(
     view: &crate::store::WorldView,
     packs: &[ContentPack],
     intent: &str,
+    cleared: Option<&Cleared>,
 ) -> ProposalContext {
     let r = Retrieval::new(view, intent);
     let prompt = Prompt {
@@ -105,15 +123,15 @@ pub fn proposal_context(
             names_block(r.view, NamesAudience::Gm)
         ),
         scene: scene(&r),
-        recent: recent(&r, intent),
+        recent: recent(&r, intent, cleared),
     };
     ProposalContext {
         prompt,
-        handles: handles(&r, intent),
+        handles: handles(&r, intent, cleared.is_some()),
     }
 }
 
-fn handles(r: &Retrieval<'_>, intent: &str) -> HandleContext {
+fn handles(r: &Retrieval<'_>, intent: &str, scene: bool) -> HandleContext {
     let places = known_places(r.view);
     let mut entities: Vec<EntityId> = r.scene_entities.clone();
     entities.extend(&r.mentioned);
@@ -142,6 +160,7 @@ fn handles(r: &Retrieval<'_>, intent: &str) -> HandleContext {
             .into_iter()
             .map(|(subject, key, _)| open_item_ref(subject, &key))
             .collect(),
+        scene,
     }
 }
 
@@ -386,7 +405,7 @@ fn scene(r: &Retrieval<'_>) -> String {
     out
 }
 
-fn recent(r: &Retrieval<'_>, intent: &str) -> String {
+fn recent(r: &Retrieval<'_>, intent: &str, cleared: Option<&Cleared>) -> String {
     let mut head = format!("NOW\nMinute {}\n", r.view.clock_min);
     if !r.mentioned.is_empty() {
         head.push_str("MENTIONED ENTITIES (not present)\n");
@@ -413,6 +432,10 @@ fn recent(r: &Retrieval<'_>, intent: &str) -> String {
     tail.push_str(&format!("INTENT\n{}\n", intent.trim()));
     // The past Turns first, then the clock and the Intent: the next Turn's
     // prompt differs from this one only after the newest Turn (bug pass 5,
-    // M4).
-    format!("{}{head}{tail}", turns_window(r.view, r.view.turn_seq + 1))
+    // M4). Inside a cleared scene the scene line comes before them.
+    let scene_line = if cleared.is_some() { SCENE_LINE } else { "" };
+    format!(
+        "{scene_line}{}{head}{tail}",
+        turns_window(r.view, r.view.turn_seq + 1, cleared)
+    )
 }

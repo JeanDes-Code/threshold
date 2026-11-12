@@ -45,6 +45,10 @@ pub struct HandleContext {
     /// Every place entity, in id order: the values of `leaves.to` and of
     /// `schedule.moves_actor_to` besides `away` (bug pass 5, M1).
     pub destinations: Vec<domain::Handle>,
+    /// The prompt holds a cleared Intimate Scene (G1 passed): a reaction
+    /// plan takes 1 to `domain::SCENE_PLAN_MAX_CHARS` characters, not at
+    /// most `domain::PLAN_MAX_CHARS`.
+    pub scene: bool,
 }
 
 pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
@@ -242,6 +246,15 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
     for stake in ["win", "lose"] {
         schema["$defs"]["CheckDraft"]["properties"][stake] = json!({"$ref": "#/$defs/SlotDraft"});
         require(&mut schema, "/$defs/CheckDraft", stake);
+    }
+    // Inside a cleared Intimate Scene a reaction plan is longer and never
+    // empty (data shape 3.3); `checks::validate` holds the same limits.
+    let plan = &mut schema["$defs"]["Reaction"]["properties"]["plan"];
+    if ctx.scene {
+        plan["maxLength"] = json!(domain::SCENE_PLAN_MAX_CHARS);
+        plan["minLength"] = json!(1);
+    } else {
+        plan["maxLength"] = json!(domain::PLAN_MAX_CHARS);
     }
     schema
 }

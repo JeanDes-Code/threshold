@@ -23,7 +23,7 @@ use crate::{
         ActionKind, EntityId, EntityKind, EntityRef, Handle, Knowing, LedgerOp, Reaction, Verdict,
         is_open_key, is_state_key, outcome_key,
     },
-    mature::Told,
+    mature::{Cleared, Told},
     model::Prompt,
     normalize,
     pack::ContentPack,
@@ -318,14 +318,18 @@ pub fn narration_prompt(
         turn,
         &[],
         told,
+        None,
     )
 }
 
 /// `narration_prompt` with outcome lines the engine adds after the
 /// perceived ops: a wait cut short (`turn::wait_cut_line`, bug pass 5).
 /// `told` is the telling `mature::told` chose (G4): `Implied` opens the
-/// `recent` block with `IMPLIED_LINE`. The rules, stable and scene blocks
-/// do not depend on it.
+/// `recent` block with `IMPLIED_LINE`. `cleared` is the clearance of the
+/// open scene (`mature::narration_clearance`): with `Some`, the earlier
+/// Turns of that scene are shown in full; with `None`, each Turn committed
+/// with `intimate` is its Neutral Line (`mature::turn_text`). The rules,
+/// stable and scene blocks depend on neither.
 #[allow(clippy::too_many_arguments)]
 pub fn narration_prompt_with(
     view_after: &WorldView,
@@ -337,6 +341,7 @@ pub fn narration_prompt_with(
     turn: Option<(ActionKind, Verdict)>,
     extra: &[String],
     told: &Told,
+    cleared: Option<&Cleared>,
 ) -> Prompt {
     let r = Retrieval::new(view_after, "");
     let head = match told {
@@ -353,7 +358,9 @@ pub fn narration_prompt_with(
         scene: scene(&r),
         recent: format!(
             "{head}{}",
-            recent(&r, perceived, events, reactions, intent, turn, extra)
+            recent(
+                &r, perceived, events, reactions, intent, turn, extra, cleared
+            )
         ),
     }
 }
@@ -625,6 +632,7 @@ fn place_line(
     Some(format!("{line}{}.\n", one_line(&place)))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recent(
     r: &Retrieval<'_>,
     perceived: &[LedgerOp],
@@ -633,6 +641,7 @@ fn recent(
     intent: &str,
     turn: Option<(ActionKind, Verdict)>,
     extra: &[String],
+    cleared: Option<&Cleared>,
 ) -> String {
     let mut tail = format!("THIS TURN\nPlayer intent: {}\n", one_line(intent));
     let verdict = turn.map(|(_, verdict)| verdict);
@@ -687,5 +696,5 @@ fn recent(
     }
     // The Turn being narrated is the last of the view: THIS TURN tells it,
     // so the window stops before it (bug pass 5, M4).
-    format!("{}{tail}", turns_window(r.view, r.view.turn_seq))
+    format!("{}{tail}", turns_window(r.view, r.view.turn_seq, cleared))
 }

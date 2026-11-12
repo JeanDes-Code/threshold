@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use super::{CheckKind, Rejection};
 use crate::{
-    domain::{Cause, DecisionProposal, Handle},
+    domain::{Cause, DecisionProposal, Handle, PLAN_MAX_CHARS, SCENE_PLAN_MAX_CHARS},
     normalize,
     store::WorldView,
 };
@@ -41,6 +41,26 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
     for ((field, cap), len) in CAPS.iter().zip(lengths) {
         if len > *cap {
             err(None, format!("{field} has {len} items; the cap is {cap}"));
+        }
+    }
+
+    // The plan limit, as the per-Turn schema states it: at most
+    // `PLAN_MAX_CHARS`, or 1 to `SCENE_PLAN_MAX_CHARS` while an Intimate
+    // Scene is open (data shape 3.3). The validator never trusts the
+    // grammar. It reads `view.scene_open`, not the result of G1 (plan
+    // deviation 16).
+    let (min, max) = if view.scene_open.is_some() {
+        (1, SCENE_PLAN_MAX_CHARS)
+    } else {
+        (0, PLAN_MAX_CHARS)
+    };
+    for r in &p.reactions {
+        let len = r.plan.chars().count();
+        if len < min || len > max {
+            err(
+                Some(r.npc),
+                format!("reactions.plan has {len} characters; it takes {min} to {max}"),
+            );
         }
     }
 

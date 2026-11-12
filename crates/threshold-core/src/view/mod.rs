@@ -251,11 +251,15 @@ pub struct PinLine {
     pub text: String,
 }
 
-/// The mature content module adds an `Intimate` variant.
+/// The scene the Play screen is in (data shape 3.11).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SceneState {
     Plain,
+    /// An Intimate Scene is open, since the Turn that opened it.
+    Intimate {
+        since_turn: TurnId,
+    },
 }
 
 /// The Play screen of `sight`. `marks` holds the Player's Notes and Pins.
@@ -272,7 +276,11 @@ pub fn play_view(sight: &PcSight, marks: &Marks) -> PlayView {
         clock_min: sight.clock_min,
         needs_begin: sight.needs_begin,
         can_correct: sight.can_correct,
-        scene: SceneState::Plain,
+        scene: sight
+            .scene
+            .map_or(SceneState::Plain, |since_turn| SceneState::Intimate {
+                since_turn,
+            }),
         story: sight
             .story
             .iter()
@@ -1258,6 +1266,12 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
     if !recent.is_empty() {
         out.push_str("RECENT TURNS (oldest first)\n");
         for turn in recent {
+            // A Turn committed with `intimate` is its Neutral Line, in place
+            // of its Intent and its Narration (data shape 3.6).
+            if let Some(line) = &turn.line {
+                out.push_str(&format!("{}\n", one_line(line)));
+                continue;
+            }
             if turn.kind != TurnKind::Opening {
                 out.push_str(&format!("Player: {}\n", one_line(&turn.intent)));
             }

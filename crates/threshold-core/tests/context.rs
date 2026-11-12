@@ -1218,7 +1218,8 @@ fn proposal_rules_describe_contested_in_one_line() {
 fn proposal_prompt_lists_the_places_for_move_to() {
     let mut w = World::new();
     let market = w.add_place("Market");
-    let ctx = threshold_core::context::proposal_context(&w.view, &[], "I walk to the market.");
+    let ctx =
+        threshold_core::context::proposal_context(&w.view, &[], "I walk to the market.", None);
     assert!(
         ctx.prompt.scene.contains(&format!(
             "PLACES (for move_to): E{} Gate, E{market} Market",
@@ -1274,6 +1275,7 @@ fn proposal_prompt_offers_the_items_the_intent_names() {
         &w.view,
         &[],
         "I tell Brann yes: I am carrying the post tomorrow.",
+        None,
     );
     let post = format!("E{brann} pending_winter_post");
     assert_eq!(ctx.handles.open_items, std::slice::from_ref(&post));
@@ -1306,7 +1308,8 @@ fn proposal_prompt_offers_the_items_the_intent_names() {
     let all = fields(&ctx.prompt).concat();
     assert!(!all.contains("write x only"), "{all}");
     // An Intent that names no item offers none: no list, no `settles`.
-    let quiet = threshold_core::context::proposal_context(&w.view, &[], "I sharpen my quill.");
+    let quiet =
+        threshold_core::context::proposal_context(&w.view, &[], "I sharpen my quill.", None);
     assert!(quiet.handles.open_items.is_empty());
     assert!(!quiet.prompt.recent.contains("OPEN ITEMS"));
     let schema = threshold_core::proposal_schema_for(&quiet.handles);
@@ -1429,7 +1432,7 @@ fn a_place_the_pc_cannot_name_is_no_move_target() {
         age_confirmed: false,
     }]);
     let cove = w.view.entity_by_name("Smugglers Cove").unwrap().id;
-    let ctx = threshold_core::context::proposal_context(&w.view, &[], "I go to the cove.");
+    let ctx = threshold_core::context::proposal_context(&w.view, &[], "I go to the cove.", None);
     assert!(!ctx.handles.places.contains(&Handle::Entity(cove)));
     // The GM may still send an NPC there (`leaves`, bug pass 5): only the
     // `move_to` line leaves it out.

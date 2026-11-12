@@ -27,7 +27,7 @@ use crate::{
         ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, EntityId, EntityKind,
         EntityRef, FactSource, Handle, LedgerOp, Reaction, Verdict,
     },
-    mature::{self, RefusalKind},
+    mature::{self, RefusalKind, Told},
     model::{Gm, GmError, Prompt, Stream},
     pack::ContentPack,
     proposal_schema_for,
@@ -697,7 +697,11 @@ impl Engine {
     /// (`guard_plans`, `guard_events`). `now` is the current state: the
     /// stream filter reads it (`narrate_through`). G4: `mature::told`
     /// chooses how the Turn is told; an intimate Turn is told by
-    /// implication only, with the core's own line.
+    /// implication only, with the core's own line. Inside an open scene
+    /// that is still open `now`, the earlier Turns of the scene reach the
+    /// prompt in full only through the clearance of the state after the
+    /// Turn (`mature::narration_clearance`), and a Narration told by
+    /// implication carries `mature::SCENE_NARRATION_MAX_TOKENS`.
     fn narrate(
         &mut self,
         op_id: &str,
@@ -737,6 +741,9 @@ impl Engine {
             events.push(QUIET_EVENT_LINE.to_owned());
         }
         let told = mature::told(view_after, now, committed.intimate);
+        let cleared = mature::narration_clearance(view_after, now);
+        let max_tokens = (told == Told::Implied && view_after.scene_open.is_some())
+            .then_some(mature::SCENE_NARRATION_MAX_TOKENS);
         let prompt = narration_prompt_with(
             view_after,
             &self.packs,
@@ -747,10 +754,11 @@ impl Engine {
             committed.turn,
             &committed.extra,
             &told,
+            cleared.as_ref(),
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
-        let narration = narrate_through(self.gm.as_ref(), &prompt, None, hidden, ctl);
+        let narration = narrate_through(self.gm.as_ref(), &prompt, max_tokens, hidden, ctl);
         let cut = narration.is_ok() && self.gm.last_done_reason().as_deref() == Some("length");
         let logged = if cut {
             format!("{}\n[generation stopped: length]", answer_text(&narration))
@@ -805,6 +813,14 @@ impl Engine {
     /// parsing), the retry is checked as intimate too, so a retry cannot
     /// drop the tag (plan deviation 4, review M2). A retry that
     /// fails the stance rule only is an `Unwilling` Refusal.
+    ///
+    /// G1 (data shape 3.5) runs first, before the proposal call: with an
+    /// open scene whose place is cleared (`mature::scene_gate`), the prompt
+    /// gets the clearance (the scene line and the scene Turns in full) and
+    /// the schema the longer plan. When the place is not cleared, the Turn
+    /// is planned as a plain one and its own Commit closes the scene
+    /// (`resolve`, plan deviation 1). The clearance lives in this call
+    /// only: it is never stored.
     fn plan(
         &mut self,
         op_id: &str,
@@ -813,7 +829,20 @@ impl Engine {
         seed: u64,
         timings: &mut Timings,
     ) -> Result<Planned, TurnError> {
-        let ctx = proposal_context(view, &self.packs, intent);
+        let gate = mature::scene_gate(view);
+        if let Err(blocked) = &gate {
+            let raw = format!("scene not cleared: {:?}", blocked.who);
+            self.log(
+                op_id,
+                "scene_gate",
+                &Prompt::default(),
+                &raw,
+                Instant::now(),
+            )?;
+        }
+        let gate_failed = gate.is_err();
+        let cleared = gate.as_ref().ok().and_then(Option::as_ref);
+        let ctx = proposal_context(view, &self.packs, intent, cleared);
         let schema = proposal_schema_for(&ctx.handles);
         let mut prompt = ctx.prompt;
         let mut wait_asked = None;
@@ -878,7 +907,15 @@ impl Engine {
             let errs = match checked {
                 Ok(valid) => {
                     self.log(op_id, "validate", &Prompt::default(), "ok", step)?;
-                    return self.resolve(op_id, valid, view, seed, wait_asked, timings);
+                    return self.resolve(
+                        op_id,
+                        valid,
+                        view,
+                        seed,
+                        wait_asked,
+                        gate_failed,
+                        timings,
+                    );
                 }
                 Err(errs) => errs,
             };
@@ -917,7 +954,10 @@ impl Engine {
     /// proposal, everyone at the PC's place once these ops are committed,
     /// arrivals of this Turn included, must be cleared too. A failure is a
     /// final Refusal before the Commit, so a due World Event fires in a
-    /// later Turn.
+    /// later Turn. Last, `mature::scene_op` adds the one op that opens or
+    /// closes the Intimate Scene, if any, to this Turn's Commit
+    /// (`gate_failed`: G1 failed in `plan`).
+    #[allow(clippy::too_many_arguments)]
     fn resolve(
         &mut self,
         op_id: &str,
@@ -925,6 +965,7 @@ impl Engine {
         view: &WorldView,
         seed: u64,
         wait_asked: Option<u32>,
+        gate_failed: bool,
         timings: &mut Timings,
     ) -> Result<Planned, TurnError> {
         let p = valid.proposal();
@@ -950,14 +991,16 @@ impl Engine {
         );
         let clock_after = view.clock_min + ClockMin::from(p.minutes);
         ops = world::with_arrival(view, ops, clock_after);
-        let (ops, events) = world::with_witnessed_events(view, ops);
+        let (mut ops, events) = world::with_witnessed_events(view, ops);
         timings.world_ms = ms(step);
         self.log(op_id, "world", &Prompt::default(), "", step)?;
 
-        if p.intimate {
+        // Who is at the PC's place once the ops are committed: G3 and the
+        // scene's state read it. With no scene and no tag, neither does.
+        let presence = (p.intimate || view.scene_open.is_some()).then(|| mature::after(view, &ops));
+        if let (true, Some(presence)) = (p.intimate, &presence) {
             let step = Instant::now();
-            let presence = mature::after(view, &ops);
-            if let Err(blocked) = mature::check_after(p, view, &presence) {
+            if let Err(blocked) = mature::check_after(p, view, presence) {
                 let raw = format!("adults only after the ops: {:?}", blocked.who);
                 self.log(op_id, "gate_after", &Prompt::default(), &raw, step)?;
                 return Err(TurnError::Refused {
@@ -966,6 +1009,19 @@ impl Engine {
                 });
             }
             self.log(op_id, "gate_after", &Prompt::default(), "ok", step)?;
+        }
+        if let Some(op) = presence
+            .as_ref()
+            .and_then(|presence| mature::scene_op(view, p, presence, gate_failed))
+        {
+            self.log(
+                op_id,
+                "scene",
+                &Prompt::default(),
+                &format!("{op:?}"),
+                Instant::now(),
+            )?;
+            ops.push(op);
         }
 
         let proposal_json = json!({

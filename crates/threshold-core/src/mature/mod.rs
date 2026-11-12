@@ -9,16 +9,21 @@
 //! Task 1 of the plan lands the gate before the proposal is committed (G2,
 //! `check`) and the final Refusal. Task 2 adds the same rule after the
 //! World Events of the Turn (G3, `after` and `check_after`) and the
-//! telling of an intimate Turn (`told`, in `text`). The scene and the
-//! buttons come in later tasks.
+//! telling of an intimate Turn (`told`, in `text`). Task 4 adds the
+//! Intimate Scene (`scene`): the gate before the proposal call (G1), the
+//! one op a Turn adds to open or close a scene, and what each reader gets
+//! of a Turn committed with `intimate` (`turn_text`). The buttons come in
+//! later tasks.
 
 mod gate;
+mod scene;
 mod text;
 
 use serde::{Deserialize, Serialize};
 
 pub use gate::{Blocked, Cleared, Presence, after, check, check_after, checked_here, clearance};
-pub use text::{Told, stored_intimate, told};
+pub use scene::{SCENE_NARRATION_MAX_TOKENS, narration_clearance, scene_gate, scene_op};
+pub use text::{INTIMATE_TEMPLATE, Told, TurnText, neutral_line, stored_intimate, told, turn_text};
 
 use crate::{
     checks::{CheckKind, Rejection},

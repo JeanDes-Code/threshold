@@ -236,6 +236,31 @@ pub enum Knowing {
     Told,
 }
 
+/// Why an Intimate Scene opened or closed (data shape 3.4). Each value is one
+/// row of the table of `mature::scene_op`, or a button or a setting of a
+/// later task.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SceneWhy {
+    /// An intimate Turn passed G2 and G3 with no scene open.
+    Opened,
+    /// The Player pressed "End scene" (a Closing Turn).
+    EndScene,
+    /// The Player pressed "Fade to black" (a Closing Turn born faded).
+    FadeToBlack,
+    /// A Turn of the scene was not intimate.
+    NotIntimate,
+    /// The PC's place changed in an intimate Turn.
+    Moved,
+    /// A character the PC sees arrived in an intimate Turn.
+    Arrival,
+    /// G1: the place of the open scene was no longer cleared when a Turn
+    /// started.
+    Gate,
+    /// The Player set the Detail Level to `excluded`.
+    Excluded,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GoalStatus {
@@ -480,6 +505,13 @@ pub enum LedgerOp<E = EntityRef> {
     RevertTurn {
         turn_id: u64,
     },
+    /// The Intimate Scene opens or closes (data shape 3.4). The projection
+    /// `campaign.scene_open_turn` holds the Turn that opened it. Only the
+    /// core writes it, in the Commit of the Turn whose rule it follows.
+    SetScene {
+        open: bool,
+        why: SceneWhy,
+    },
 }
 
 fn map_all<E, T, X>(items: Vec<E>, f: &mut impl FnMut(E) -> Result<T, X>) -> Result<Vec<T>, X> {
@@ -702,6 +734,7 @@ impl<E> LedgerOp<E> {
                 outcome,
             },
             Self::RevertTurn { turn_id } => LedgerOp::RevertTurn { turn_id },
+            Self::SetScene { open, why } => LedgerOp::SetScene { open, why },
         })
     }
 }

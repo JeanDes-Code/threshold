@@ -248,8 +248,9 @@ export interface EntityCard {
   pinned: boolean;
 }
 
-/** The mature content module adds a variant; the UI reads the tag only. */
-export type SceneState = { kind: "plain" };
+/** The scene the Play screen is in: plain, or an Intimate Scene open
+ * since a Turn (data shape 3.11). The action bar reads the tag. */
+export type SceneState = { kind: "plain" } | { kind: "intimate"; since_turn: number };
 
 export interface PlayView {
   pc_name: string;

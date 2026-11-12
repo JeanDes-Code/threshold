@@ -196,6 +196,9 @@ pub struct WorldView {
     /// The Detail Level (projection `campaign.detail_level`): the seed's
     /// `detail` at creation and after a rebuild.
     pub detail: DetailLevel,
+    /// The Turn that opened the Intimate Scene, while one is open
+    /// (projection `campaign.scene_open_turn`, `LedgerOp::SetScene`).
+    pub scene_open: Option<TurnId>,
     pub entities: Vec<Entity>,
     pub live_facts: Vec<Fact>,
     pub facts: Vec<Fact>,
