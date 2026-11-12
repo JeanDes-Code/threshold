@@ -180,7 +180,13 @@ impl OllamaGm {
         }
     }
 
-    fn chat_body(&self, prompt: &Prompt, stream: bool, schema: Option<&Value>) -> Value {
+    fn chat_body(
+        &self,
+        prompt: &Prompt,
+        stream: bool,
+        schema: Option<&Value>,
+        max_tokens: Option<u32>,
+    ) -> Value {
         let mut body = json!({
             "model": self.config.model,
             "messages": [
@@ -197,6 +203,9 @@ impl OllamaGm {
         });
         if let Some(schema) = schema {
             body["format"] = schema.clone();
+        }
+        if let Some(max_tokens) = max_tokens {
+            body["options"]["num_predict"] = json!(max_tokens);
         }
         body
     }
@@ -231,7 +240,7 @@ impl OllamaGm {
 impl Gm for OllamaGm {
     fn propose(&self, prompt: &Prompt, schema: &Value) -> Result<String, GmError> {
         self.clear_metrics();
-        let body = self.chat_body(prompt, false, Some(schema));
+        let body = self.chat_body(prompt, false, Some(schema), None);
         let (status, raw) = self.post_text("/api/chat", &body)?;
         let parsed = parse_chat(&raw, status)?;
         self.record_metrics(&parsed);
@@ -241,11 +250,11 @@ impl Gm for OllamaGm {
     fn narrate(
         &self,
         prompt: &Prompt,
-        _max_tokens: Option<u32>,
+        max_tokens: Option<u32>,
         on_chunk: &mut dyn FnMut(&str) -> Stream,
     ) -> Result<String, GmError> {
         self.clear_metrics();
-        let body = self.chat_body(prompt, true, None);
+        let body = self.chat_body(prompt, true, None, max_tokens);
         let response = self.post("/api/chat", &body)?;
         let status = response.status();
         let mut narration = String::new();
@@ -256,8 +265,12 @@ impl Gm for OllamaGm {
             }
             let chunk = parse_chat(&line, status)?;
             self.record_metrics(&chunk);
-            let _ = on_chunk(&chunk.message.content);
             narration.push_str(&chunk.message.content);
+            if on_chunk(&chunk.message.content) == Stream::Stop {
+                // Dropping the reader drops the response, which ends the
+                // generation on the server (data shape 3.6).
+                break;
+            }
         }
         Ok(narration)
     }

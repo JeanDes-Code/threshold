@@ -13,7 +13,10 @@ use threshold_core::{
     mature::RefusalKind,
     rules::{D10, Ruleset, turn_seed},
     store::{Store, WorldView},
-    turn::{Engine, MAX_INTENT_CHARS, REFUSAL_STEP, TurnError, create_campaign, stored_action},
+    turn::{
+        Engine, MAX_INTENT_CHARS, REFUSAL_STEP, TurnControl, TurnError, create_campaign,
+        stored_action,
+    },
 };
 
 fn json(p: &DecisionProposal) -> String {
@@ -2475,4 +2478,105 @@ fn a_thing_at_the_place_blocks_no_intimate_turn() {
         .play_turn("t1".into(), "I lean closer.", &mut no_chunks())
         .unwrap();
     assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
+}
+
+// --- Task 3: a stream that stops, a token cap --------------------------------
+
+/// A `Gm` whose narration stopped at the token cap (`done_reason: length`).
+struct LengthCut(RecordedGm);
+
+impl Gm for LengthCut {
+    fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
+        self.0.propose(prompt, schema)
+    }
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
+        self.0.narrate(prompt, max_tokens, on_chunk)
+    }
+    fn last_done_reason(&self) -> Option<String> {
+        Some("length".into())
+    }
+}
+
+/// The stored and returned Narration of a Turn the cap cut, for `told`.
+fn cut_narration(told: &str) -> (String, String, String) {
+    let w = World::new();
+    let gm = RecordedGm::new(vec![json(&proposal(Verdict::Allowed))], vec![told.into()]);
+    let mut engine = Engine::new(
+        w.store,
+        Box::new(LengthCut(gm)),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    let mut shown = String::new();
+    let outcome = engine
+        .play_turn("t1".into(), "I wait.", &mut |chunk: &str| {
+            shown.push_str(chunk);
+        })
+        .unwrap();
+    let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    (outcome.narration, stored.narration.unwrap(), shown)
+}
+
+/// Task 3: a Narration cut by the token cap is stored up to its last full
+/// sentence. The stream already showed the rest.
+#[test]
+fn a_length_stop_stores_the_last_full_sentence() {
+    let (returned, stored, shown) = cut_narration("One. Two thr");
+    assert_eq!(stored, "One.");
+    assert_eq!(returned, "One.");
+    assert_eq!(shown, "One. Two thr");
+    for (told, kept) in [
+        (
+            "Rain falls! Is it late? The gate cre",
+            "Rain falls! Is it late?",
+        ),
+        (
+            "Orsel: \"Go now.\" Brann nods. \"Wait,\" he",
+            "Orsel: \"Go now.\" Brann nods.",
+        ),
+        (
+            "He says \u{201c}Stop!\u{201d} and",
+            "He says \u{201c}Stop!\u{201d}",
+        ),
+        ("It weighs 3.5 stone and", "It weighs 3.5 stone and"),
+        ("No full stop at all", "No full stop at all"),
+        ("Done.", "Done."),
+    ] {
+        assert_eq!(cut_narration(told).1, kept, "{told:?}");
+    }
+}
+
+/// Task 3 adds the fade flag to the engine's interface only: a flag that is
+/// up changes nothing yet (Task 6 reads it).
+#[test]
+fn play_turn_with_reads_no_flag_yet() {
+    let (mut engine, _w, gm) = setup(
+        vec![json(&proposal(Verdict::Allowed))],
+        vec!["The gate creaks. Rain falls."],
+    );
+    let mut shown = String::new();
+    let mut on_chunk = |chunk: &str| shown.push_str(chunk);
+    let faded = || true;
+    let mut ctl = TurnControl {
+        on_chunk: &mut on_chunk,
+        faded: &faded,
+    };
+    let outcome = engine
+        .play_turn_with("t1".into(), "I wait.", &mut ctl)
+        .unwrap();
+    assert_eq!(outcome.narration, "The gate creaks. Rain falls.");
+    assert_eq!(shown, "The gate creaks. Rain falls.");
+    let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    assert_eq!(
+        stored.narration.as_deref(),
+        Some("The gate creaks. Rain falls.")
+    );
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
+    assert_eq!(gm.calls()[1].max_tokens, None, "no cap anywhere yet");
 }

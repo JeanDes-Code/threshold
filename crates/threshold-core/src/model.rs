@@ -150,6 +150,8 @@ pub struct RecordedGm {
     proposals: Arc<Mutex<VecDeque<String>>>,
     narrations: Arc<Mutex<VecDeque<String>>>,
     calls: Arc<Mutex<Vec<RecordedCall>>>,
+    /// Stream each narration word by word (`chunked`), not in one chunk.
+    chunked: bool,
 }
 
 impl RecordedGm {
@@ -158,7 +160,18 @@ impl RecordedGm {
             proposals: Arc::new(Mutex::new(proposals.into())),
             narrations: Arc::new(Mutex::new(narrations.into())),
             calls: Arc::new(Mutex::new(Vec::new())),
+            chunked: false,
         }
+    }
+
+    /// Streams each narration word by word, each chunk a word with the
+    /// spaces before it, and honours `Stream::Stop`: after a stop no chunk
+    /// follows and the call returns the text sent so far. Without it, a
+    /// narration is one chunk.
+    #[must_use]
+    pub fn chunked(mut self) -> Self {
+        self.chunked = true;
+        self
     }
 
     /// Queues one more proposal, after the recorded ones. A test uses it when
@@ -233,7 +246,38 @@ impl Gm for RecordedGm {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .pop_front()
             .ok_or_else(|| GmError::Unreachable("no recorded narration remains".into()))?;
-        let _ = on_chunk(&narration);
-        Ok(narration)
+        if !self.chunked {
+            let _ = on_chunk(&narration);
+            return Ok(narration);
+        }
+        let mut sent = String::new();
+        for chunk in words(&narration) {
+            sent.push_str(chunk);
+            if on_chunk(chunk) == Stream::Stop {
+                break;
+            }
+        }
+        Ok(sent)
     }
+}
+
+/// `text` cut where spaces follow a word: each piece is a word with the
+/// spaces before it. The pieces add up to `text`.
+fn words(text: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let mut in_word = false;
+    for (at, c) in text.char_indices() {
+        if !c.is_whitespace() {
+            in_word = true;
+        } else if in_word {
+            pieces.push(&text[start..at]);
+            start = at;
+            in_word = false;
+        }
+    }
+    if start < text.len() {
+        pieces.push(&text[start..]);
+    }
+    pieces
 }

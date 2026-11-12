@@ -321,3 +321,93 @@ fn cancel_aborts_a_call_to_a_silent_server_promptly() {
     assert_eq!(gm.propose(&prompt(), &proposal_schema()), Ok("{}".into()));
     handle.join().unwrap();
 }
+
+/// One streamed answer of `words` lines, then a done line.
+fn stream_of(words: &[&str]) -> String {
+    let mut lines: Vec<String> = words
+        .iter()
+        .map(|w| json!({ "message": { "content": w } }).to_string())
+        .collect();
+    lines.push(
+        json!({ "message": { "content": "" }, "done": true, "done_reason": "stop" }).to_string(),
+    );
+    lines.join("\n")
+}
+
+/// Task 3: a capped narration call sends the cap as `num_predict`.
+#[test]
+fn narrate_sends_num_predict_when_capped() {
+    let (base_url, request, server) = serve_response(stream_of(&["Done."]));
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url,
+        ..OllamaConfig::default()
+    });
+    gm.narrate(&prompt(), Some(280), &mut |_| Stream::More)
+        .unwrap();
+    server.join().unwrap();
+    let body = request_body(&request.recv().unwrap());
+    assert_eq!(body["options"]["num_predict"], 280);
+    assert_eq!(body["options"]["num_ctx"], 16_384);
+}
+
+#[test]
+fn narrate_sends_no_num_predict_without_a_cap() {
+    let (base_url, request, server) = serve_response(stream_of(&["Done."]));
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url,
+        ..OllamaConfig::default()
+    });
+    gm.narrate(&prompt(), None, &mut |_| Stream::More).unwrap();
+    server.join().unwrap();
+    let body = request_body(&request.recv().unwrap());
+    assert!(body["options"].get("num_predict").is_none(), "{body}");
+}
+
+/// Task 3: on `Stop` the adapter reads no more line and returns the text so
+/// far.
+#[test]
+fn narrate_stops_reading_on_stop() {
+    let words = [
+        "One", " two", " three", " four", " five", " six", " seven", " eight", " nine", " ten.",
+    ];
+    let (base_url, _request, server) = serve_response(stream_of(&words));
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url,
+        ..OllamaConfig::default()
+    });
+    let mut chunks = Vec::new();
+    let text = gm
+        .narrate(&prompt(), None, &mut |chunk| {
+            chunks.push(chunk.to_owned());
+            if chunks.len() == 2 {
+                Stream::Stop
+            } else {
+                Stream::More
+            }
+        })
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!(chunks, ["One", " two"]);
+    assert_eq!(text, "One two");
+    assert_eq!(gm.last_done_reason(), None, "a stop is not a length cut");
+}
+
+/// A stream read to the end keeps its done reason.
+#[test]
+fn narrate_keeps_the_done_reason() {
+    let (base_url, _request, server) = serve_response(
+        [
+            json!({ "message": { "content": "One. Two" } }).to_string(),
+            json!({ "message": { "content": "" }, "done": true, "done_reason": "length", "eval_count": 280 }).to_string(),
+        ]
+        .join("\n"),
+    );
+    let gm = OllamaGm::new(OllamaConfig {
+        base_url,
+        ..OllamaConfig::default()
+    });
+    gm.narrate(&prompt(), Some(280), &mut |_| Stream::More)
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!(gm.last_done_reason().as_deref(), Some("length"));
+}

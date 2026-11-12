@@ -177,6 +177,21 @@ pub fn create_campaign(
     })
 }
 
+/// What the caller of a Turn hands the engine for its Narration (data
+/// shape 3.6): the reader of the stream, and the Player's fade flag.
+pub struct TurnControl<'a> {
+    /// Gets each piece of the Narration the Player may read.
+    pub on_chunk: &'a mut dyn FnMut(&str),
+    /// True once the Player asked to fade the Narration. Read by Task 6 of
+    /// the plan; nothing reads it yet.
+    pub faded: &'a dyn Fn() -> bool,
+}
+
+/// The fade flag of a caller with no fade button: never up.
+fn never_faded() -> bool {
+    false
+}
+
 pub struct Engine {
     store: Store,
     gm: Box<dyn Gm + Send>,
@@ -263,9 +278,24 @@ impl Engine {
         intent: &str,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnOutcome, TurnError> {
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &never_faded,
+        };
+        self.play_turn_with(op_id, intent, &mut ctl)
+    }
+
+    /// `play_turn` with the full control of the Narration: the stream
+    /// reader and the fade flag.
+    pub fn play_turn_with(
+        &mut self,
+        op_id: OpId,
+        intent: &str,
+        ctl: &mut TurnControl<'_>,
+    ) -> Result<TurnOutcome, TurnError> {
         let start = Instant::now();
         if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
-            return self.stored_outcome(stored, on_chunk);
+            return self.stored_outcome(stored, ctl);
         }
         self.stored_refusal(&op_id)?;
         check_intent(intent)?;
@@ -283,7 +313,7 @@ impl Engine {
             clock_before: view.clock_min,
             clock_after: view.clock_min + ClockMin::from(planned.minutes),
         };
-        self.finish(record, planned, Vec::new(), timings, start, on_chunk)
+        self.finish(record, planned, Vec::new(), timings, start, ctl)
     }
 
     /// Corrects the last play Turn: re-plans it from the state before it,
@@ -297,9 +327,24 @@ impl Engine {
         why: &str,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnOutcome, TurnError> {
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &never_faded,
+        };
+        self.correct_last_with(op_id, clarified_intent, why, &mut ctl)
+    }
+
+    /// `correct_last` with the full control of the Narration.
+    pub fn correct_last_with(
+        &mut self,
+        op_id: OpId,
+        clarified_intent: &str,
+        why: &str,
+        ctl: &mut TurnControl<'_>,
+    ) -> Result<TurnOutcome, TurnError> {
         let start = Instant::now();
         if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
-            return self.stored_outcome(stored, on_chunk);
+            return self.stored_outcome(stored, ctl);
         }
         self.stored_refusal(&op_id)?;
         check_intent(clarified_intent)?;
@@ -346,7 +391,7 @@ impl Engine {
             clock_before: view.clock_min,
             clock_after: view.clock_min + ClockMin::from(planned.minutes),
         };
-        self.finish(record, planned, head, timings, start, on_chunk)
+        self.finish(record, planned, head, timings, start, ctl)
     }
 
     /// Begin: commits the Opening Turn (zero ops, empty Intent, no World
@@ -355,10 +400,15 @@ impl Engine {
     /// model call, unless its Narration is missing: then it narrates again.
     /// Refused once a play Turn exists.
     pub fn begin(&mut self, on_chunk: &mut dyn FnMut(&str)) -> Result<TurnOutcome, TurnError> {
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &never_faded,
+        };
+        let ctl = &mut ctl;
         let start = Instant::now();
         let op_id: OpId = BEGIN_OP_ID.to_owned();
         if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
-            return self.stored_outcome(stored, on_chunk);
+            return self.stored_outcome(stored, ctl);
         }
         if self
             .store
@@ -380,12 +430,12 @@ impl Engine {
         };
         let mut timings = Timings::default();
         let Some(turn_id) = self.commit_logged(record, Vec::new(), &mut timings)? else {
-            return self.duplicate_outcome(&op_id, on_chunk);
+            return self.duplicate_outcome(&op_id, ctl);
         };
         let view_after = self.store.snapshot(self.campaign)?;
         let step = Instant::now();
         let narration = self
-            .narrate_opening(&op_id, &view_after, &view_after, on_chunk)
+            .narrate_opening(&op_id, &view_after, &view_after, ctl)
             .map_err(|e| narration_failed(turn_id, e))?;
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
@@ -430,6 +480,19 @@ impl Engine {
         turn: TurnId,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, TurnError> {
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &never_faded,
+        };
+        self.renarrate_with(turn, &mut ctl)
+    }
+
+    /// `renarrate` with the full control of the Narration.
+    pub fn renarrate_with(
+        &mut self,
+        turn: TurnId,
+        ctl: &mut TurnControl<'_>,
+    ) -> Result<String, TurnError> {
         let stored = self
             .store
             .turn(turn)?
@@ -441,7 +504,7 @@ impl Engine {
         let now = self.store.snapshot(self.campaign)?;
         if stored.record.kind == TurnKind::Opening {
             let op_id = &stored.record.op_id;
-            let narration = self.narrate_opening(op_id, &view_after, &now, on_chunk)?;
+            let narration = self.narrate_opening(op_id, &view_after, &now, ctl)?;
             self.store.set_narration(turn, &narration)?;
             return Ok(narration);
         }
@@ -476,7 +539,7 @@ impl Engine {
             &now,
             &committed,
             &stored.record.intent,
-            on_chunk,
+            ctl,
         )?;
         self.store.set_narration(turn, &narration)?;
         Ok(narration)
@@ -528,12 +591,12 @@ impl Engine {
     fn stored_outcome(
         &mut self,
         stored: StoredTurn,
-        on_chunk: &mut dyn FnMut(&str),
+        ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
         let narration = match stored.narration {
             Some(narration) => narration,
             None => self
-                .renarrate(stored.id, on_chunk)
+                .renarrate_with(stored.id, ctl)
                 .map_err(|e| narration_failed(stored.id, e))?,
         };
         Ok(TurnOutcome {
@@ -572,13 +635,13 @@ impl Engine {
     fn duplicate_outcome(
         &mut self,
         op_id: &OpId,
-        on_chunk: &mut dyn FnMut(&str),
+        ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
         let stored = self
             .store
             .turn_by_campaign_op(self.campaign, op_id)?
             .ok_or_else(|| StoreError::Invalid("duplicate op without a turn".into()))?;
-        self.stored_outcome(stored, on_chunk)
+        self.stored_outcome(stored, ctl)
     }
 
     /// Commits the planned ops (after `head`), then narrates.
@@ -589,14 +652,14 @@ impl Engine {
         head: Vec<LedgerOp>,
         mut timings: Timings,
         start: Instant,
-        on_chunk: &mut dyn FnMut(&str),
+        ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
         let op_id = record.op_id.clone();
         let intent = record.intent.clone();
         let mut ops = head;
         ops.extend(planned.ops);
         let Some(turn_id) = self.commit_logged(record, ops.clone(), &mut timings)? else {
-            return self.duplicate_outcome(&op_id, on_chunk);
+            return self.duplicate_outcome(&op_id, ctl);
         };
 
         let view_after = self.store.snapshot(self.campaign)?;
@@ -614,14 +677,7 @@ impl Engine {
             intimate: planned.intimate,
         };
         let narration = self
-            .narrate(
-                &op_id,
-                &view_after,
-                &view_after,
-                &committed,
-                &intent,
-                on_chunk,
-            )
+            .narrate(&op_id, &view_after, &view_after, &committed, &intent, ctl)
             .map_err(|e| narration_failed(turn_id, e))?;
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
@@ -649,7 +705,7 @@ impl Engine {
         now: &WorldView,
         committed: &Committed<'_>,
         intent: &str,
-        on_chunk: &mut dyn FnMut(&str),
+        ctl: &mut TurnControl<'_>,
     ) -> Result<String, TurnError> {
         let perceived = perceived_by_pc(committed.ops, view_after);
         let seen = seen_present(view_after);
@@ -694,10 +750,23 @@ impl Engine {
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
-        let narration = narrate_through(self.gm.as_ref(), &prompt, hidden, on_chunk);
-        self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
+        let narration = narrate_through(self.gm.as_ref(), &prompt, None, hidden, ctl);
+        let cut = narration.is_ok() && self.gm.last_done_reason().as_deref() == Some("length");
+        let logged = if cut {
+            format!("{}\n[generation stopped: length]", answer_text(&narration))
+        } else {
+            answer_text(&narration).to_owned()
+        };
+        self.log(op_id, "narrate", &prompt, &logged, start)?;
         self.log_stats(op_id, "narrate")?;
-        Ok(narration?)
+        let narration = narration?;
+        // The token cap cut the answer: the stream showed the rest, the
+        // stored Narration ends on its last full sentence (data shape 3.10).
+        Ok(if cut {
+            last_full_sentence(&narration).to_owned()
+        } else {
+            narration
+        })
     }
 
     /// The opening narration call: `opening_prompt` on the state after the
@@ -708,12 +777,12 @@ impl Engine {
         op_id: &str,
         view_after: &WorldView,
         now: &WorldView,
-        on_chunk: &mut dyn FnMut(&str),
+        ctl: &mut TurnControl<'_>,
     ) -> Result<String, TurnError> {
         let prompt = opening_prompt(view_after, &self.packs);
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
-        let narration = narrate_through(self.gm.as_ref(), &prompt, hidden, on_chunk);
+        let narration = narrate_through(self.gm.as_ref(), &prompt, None, hidden, ctl);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
         self.log_stats(op_id, "narrate")?;
         Ok(narration?)
@@ -1187,6 +1256,35 @@ fn ooc_prompt(view: &WorldView, sight: Option<&PcSight>, question: &str) -> Prom
     }
 }
 
+/// `text` up to its last full sentence: the last `.`, `!` or `?` that ends
+/// the text or comes before a space or a closing quote, with the closing
+/// quotes after it. The whole text when no sentence ends in it. A decimal
+/// point ("3.5") ends no sentence.
+fn last_full_sentence(text: &str) -> &str {
+    const CLOSING: [char; 6] = ['"', '\'', '\u{201d}', '\u{2019}', '\u{bb}', ')'];
+    let mut end = None;
+    let mut chars = text.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if !matches!(c, '.' | '!' | '?') {
+            continue;
+        }
+        let mut stop = at + c.len_utf8();
+        while let Some(&(next_at, next)) = chars.peek() {
+            if !CLOSING.contains(&next) {
+                break;
+            }
+            stop = next_at + next.len_utf8();
+            chars.next();
+        }
+        match chars.peek() {
+            None => end = Some(stop),
+            Some(&(_, next)) if next.is_whitespace() => end = Some(stop),
+            Some(_) => {}
+        }
+    }
+    end.map_or(text, |end| &text[..end])
+}
+
 /// One narrator call whose stream passes through `speech::TagFilter`: a tag
 /// that names someone the PC cannot name never reaches `on_chunk`. The
 /// answer, which becomes the stored Narration, is returned unchanged; the
@@ -1194,11 +1292,13 @@ fn ooc_prompt(view: &WorldView, sight: Option<&PcSight>, question: &str) -> Prom
 fn narrate_through(
     gm: &dyn Gm,
     prompt: &Prompt,
+    max_tokens: Option<u32>,
     hidden: HashSet<String>,
-    on_chunk: &mut dyn FnMut(&str),
+    ctl: &mut TurnControl<'_>,
 ) -> Result<String, GmError> {
     let mut filter = TagFilter::new(hidden);
-    let answer = gm.narrate(prompt, None, &mut |chunk| {
+    let on_chunk = &mut *ctl.on_chunk;
+    let answer = gm.narrate(prompt, max_tokens, &mut |chunk| {
         let shown = filter.push(chunk);
         if !shown.is_empty() {
             on_chunk(&shown);
