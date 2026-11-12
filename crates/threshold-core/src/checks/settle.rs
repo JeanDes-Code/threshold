@@ -4,11 +4,11 @@
 //! voluntary act of the PC: the Agency rule holds. Every repair returns one
 //! note for the debug log.
 
-use super::{closed, is_involuntary_key, pc, references::is_known_place, same_key};
+use super::{closed, handle_ceiling, is_involuntary_key, pc, references::is_known_place, same_key};
 use crate::{
     domain::{
         ActionKind, DecisionProposal, EntityKind, FIND_MAX_ITEMS, Finds, Handle, Intimacy, NO_ITEM,
-        SlotDraft, SourceKind, Verdict,
+        SlotDraft, SourceKind, Verdict, Willing,
     },
     mature::SCENE_CLOSE_MAX_MIN,
     normalize,
@@ -41,7 +41,37 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     settle_leaves(&mut p, view, &mut notes);
     settle_finds(&mut p, &mut notes);
     spell_places(&mut p, view, &mut notes);
+    settle_stances(&mut p, view, &mut notes);
     (p, notes)
+}
+
+/// A reaction whose own `willing` says the NPC does not agree (`no` or
+/// `unsure`) does not give in to the PC, so its stance is never above the
+/// NPC's ceiling: with no cause, a stance above it is lowered to it (polish
+/// pass, 2026-11-12). Measured on the live tag scenario at f11978c: 27 of
+/// the 30 reactions the NPC-folds check rejected paired the stance `help`,
+/// above the ceiling `comply`, with `willing: no` or `unsure`, mostly on
+/// plain Turns and advances; each cost a retry, and a Turn failed when the
+/// retry did it again. A stance with a cause, `yes` and a missing value
+/// keep the check. Lowering a stance removes model output and adds no PC
+/// act. On an intimate Turn the stance rule still refuses `no` and
+/// `unsure`: it reads `willing`, not the stance.
+fn settle_stances(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
+    for r in &mut p.reactions {
+        if r.cause.is_some() || !matches!(r.willing, Some(Willing::No | Willing::Unsure)) {
+            continue;
+        }
+        let limit = handle_ceiling(view, r.npc);
+        if r.stance > limit {
+            notes.push(format!(
+                "lowered the stance of {} from {:?} to its ceiling {limit:?}: willing {} says it does not agree",
+                r.npc,
+                r.stance,
+                r.willing.map_or("", Willing::word)
+            ));
+            r.stance = limit;
+        }
+    }
 }
 
 /// `finds` (ADR 0007, 2026-11-12). A Turn the age rule runs for keeps none:

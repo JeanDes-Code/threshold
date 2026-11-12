@@ -28,20 +28,6 @@ macro_rules! intimacy_field_text {
 /// Part of `PROPOSAL_RULES`. The owner reads it before the merge.
 pub const INTIMACY_FIELD_LINE: &str = intimacy_field_text!();
 
-/// The text of `WILLING_FIELD_LINE`, as a literal, so `PROPOSAL_RULES` can
-/// hold it with `concat!`.
-macro_rules! willing_field_text {
-    () => {
-        concat!("- willing: ", crate::domain::willing_definition_text!())
-    };
-}
-
-/// The one line that defines a reaction's required `willing` field:
-/// `domain::WILLING_DEFINITION` after the field's name (ADR 0008, changed
-/// after the live evaluation of 2026-11-12). Part of `PROPOSAL_RULES`,
-/// under LATER ACTIONS. The owner reads it before the merge.
-pub const WILLING_FIELD_LINE: &str = willing_field_text!();
-
 /// The text of `FINDS_FIELD_LINE`, as a literal, so `PROPOSAL_RULES` can
 /// hold it with `concat!`.
 macro_rules! finds_field_text {
@@ -73,7 +59,10 @@ pub const CLOSING_ASK: &str = "SCENE ENDS: the player ends the intimate scene he
 /// VERDICT and LATER ACTIONS parts answer two failures that probe found: a
 /// Check on every proposal, and no scheduled event for a delayed action.
 /// The `move_to`, `settles`, `contested` and `intimacy` lines describe
-/// required fields (ADR 0007, ADR 0008), one line each. `context::PACK_RULE`
+/// required fields (ADR 0007, ADR 0008), one line each. The required
+/// `willing` of a reaction has no rule line (polish pass, 2026-11-12): the
+/// line pushed plain cooperation above the NPC-folds ceiling on the live
+/// model; the field's name and values carry it. `context::PACK_RULE`
 /// says that a Content Pack line is a style note only (review M1).
 pub const PROPOSAL_RULES: &str = concat!(
     "\
@@ -99,9 +88,7 @@ VERDICT
 LATER ACTIONS
 - reactions: what each affected NPC intends right now, as a short plan, not prose.
 ",
-    willing_field_text!(),
-    "
-- When an NPC decides to act later (revenge, a report, a visit, fetching someone), use schedule: actor = that NPC, in_minutes = minutes until it happens, text = what happens, effects = the slot writes it causes, seen_by = the NPCs who will witness it (never the PC; omit when nobody does), public = true when everyone at the place will see or hear what it changes (an announcement, a public act), false when only seen_by notice it, moves_actor_to = the place under ALL PLACES where the actor is when it happens, away for a place not listed, null when the actor stays where they are. Never record such a plan as a fact.
+    "- When an NPC decides to act later (revenge, a report, a visit, fetching someone), use schedule: actor = that NPC, in_minutes = minutes until it happens, text = what happens, effects = the slot writes it causes, seen_by = the NPCs who will witness it (never the PC; omit when nobody does), public = true when everyone at the place will see or hear what it changes (an announcement, a public act), false when only seen_by notice it, moves_actor_to = the place under ALL PLACES where the actor is when it happens, away for a place not listed, null when the actor stays where they are. Never record such a plan as a fact.
 - An NPC who is insulted, threatened or wronged, and who would hit back later rather than now, gets a schedule.
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.

@@ -116,3 +116,26 @@ Considered: a rule that reads both the stance and `willing` (rejected: the stanc
 The scene scenarios changed too. An invitation ("I ask Maren to come to bed with me.") is an `advance` and opens no scene, so the act now comes as its own Intent, then one or two Turns of the act going on, then "End scene". The unwilling arm of `npc_will` gained the act with an NPC who does not go along. The live numbers are in `evals/reports/2026-11-mature-content.md` (attempts 4 to 6).
 
 Measured cost (attempt 6): on plain Turns of the tag scenario, Hessa's stance rose to `help` above her ceiling far more often (55 Turns with an NPC-folds rejection, 7 before), often with `willing: no`. Retries rose from 19 to 47 of 240 and failed Turns from 2 to 9. `play_basics` and `speech` did not show it. What stays open: whether the field or its rule line moves the stance; and an act with an NPC who does not go along is tagged `advance` by the model (3 of 3), so it commits as a plain Turn in which the NPC declines, and the stance rule does not run.
+
+## Changed in the polish pass (2026-11-12): no rule line for `willing`; a "no" never stands above the ceiling
+
+The cost of `willing` on plain Turns (the section above) had no separated cause. A fresh run of `intimate_tag` on f11978c (7 of 10 runs, 167 Turns, before the tool's time limit stopped it) gave 27 Turns with a retry and 8 failed Turns (7 by the NPC-folds check, 1 by a model timeout). Its raw log shows two kinds of rejection, both on Hessa:
+
+- The NPC-folds check: 27 of the 30 rejected reactions paired the stance `help`, above her ceiling `comply`, with `willing: no` or `unsure`, on plain Turns and on invitations alike.
+- "verdict is check but check is missing": 20 rejections, every one on an invitation tagged `advance`.
+
+The model writes a reaction's keys in the schema's order (`npc`, `plan`, `stance`, `willing`), and Ollama does not put a schema's descriptions in the prompt, so the field itself cannot move the stance written before it. What the model reads is the rule line. Two A/B runs, 10 runs of 240 Turns each, separate it:
+
+| Code | Turns with a retry | Failed Turns | Turns with an NPC-folds rejection | "check is missing" rejections |
+|---|---|---|---|---|
+| f11978c (7 runs, 167 Turns) | 27 | 8 | 24 | 20 |
+| `settle` lowers a contradicting stance (below), rule line kept | 24 | 4 | 13 | 17 |
+| rule line removed, nothing else | 15 | 0 | 9 | 5 |
+
+The rule line ("whether this NPC freely agrees ... to what the PC does with it or asks of it") is the cause: with it, an ordinary question to Hessa read as a request she agrees to, and an invitation read as an uncertain outcome.
+
+- **No rule line.** `PROPOSAL_RULES` no longer holds `WILLING_FIELD_LINE`; the constant is gone. The field stays required on every reaction with the same enum, and `WILLING_DEFINITION` stays the schema's description, the glossary's and this ADR's text (test `the_willing_definition_is_one_text`, which also checks that the rules name no `willing`). The model reads the field's name and its three values.
+- **A "no" never stands above the ceiling.** `checks::settle` lowers the stance of a reaction whose `willing` is `no` or `unsure` and that gives no cause to the NPC's ceiling, on any Turn, with one note (`settle_stances`). The model's own field says that the NPC does not agree, so it does not give in; the stance above the ceiling contradicted it. Lowering a stance removes model output and adds no PC act. `yes`, a missing value and a stance with a cause keep the NPC-folds check as before; in an intimate Turn the stance rule still refuses `no` and `unsure`. Test: `a_stance_above_the_ceiling_with_willing_no_is_lowered_to_the_ceiling`. With the rule line removed, 6 of the 9 rejected reactions were still `help` with `no`.
+
+This replaces "On any other Turn nothing reads `willing`": `settle` reads it on every Turn, to lower a stance only. Final numbers and the scene scenarios with both changes: `evals/reports/2026-11-polish-pass.md`.
+

@@ -120,8 +120,7 @@ pub use narration_prompt::{
 };
 pub use proposal_prompt::{
     CLOSING_ASK, FINDS_FIELD_LINE, INTIMACY_FIELD_LINE, PROPOSAL_RULES, ProposalContext,
-    SCENE_LINE, WILLING_FIELD_LINE, closing_context, closing_prompt, handle_context,
-    proposal_context, proposal_prompt,
+    SCENE_LINE, closing_context, closing_prompt, handle_context, proposal_context, proposal_prompt,
 };
 
 use std::collections::BTreeSet;

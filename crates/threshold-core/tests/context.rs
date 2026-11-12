@@ -419,23 +419,25 @@ fn the_intimacy_definition_is_one_text() {
 /// `willing` has one definition (ADR 0008, changed after the live
 /// evaluation of 2026-11-12: the model gave a willing partner `resist`
 /// while her plan went along, so the stance rule now reads its own field):
-/// the proposal rule line, the schema's description of a reaction's
-/// `willing`, the glossary and ADR 0008 hold the same text,
-/// `domain::WILLING_DEFINITION`. The field is required on every reaction,
-/// with the middle value `unsure`.
+/// the schema's description of a reaction's `willing`, the glossary and
+/// ADR 0008 hold the same text, `domain::WILLING_DEFINITION`. The field is
+/// required on every reaction, with the middle value `unsure`.
+///
+/// Polish pass (2026-11-12): the proposal rules no longer hold it. On the
+/// live tag scenario the rule line pushed plain cooperation above the
+/// NPC-folds ceiling and invitations to a `check` verdict with no Check:
+/// retries 27 of 167 Turns with the line, 15 of 240 without it, failed
+/// Turns 8 and 0. The model reads the field's name and values only (Ollama
+/// does not put a schema's descriptions in the prompt).
 #[test]
 fn the_willing_definition_is_one_text() {
     use threshold_core::{
         HandleContext,
-        context::WILLING_FIELD_LINE,
         domain::{WILLING_DEFINITION, Willing},
         proposal_schema_for,
     };
-    assert_eq!(
-        WILLING_FIELD_LINE,
-        format!("- willing: {WILLING_DEFINITION}")
-    );
-    assert!(PROPOSAL_RULES.contains(WILLING_FIELD_LINE));
+    assert!(!PROPOSAL_RULES.contains(WILLING_DEFINITION));
+    assert!(!PROPOSAL_RULES.contains("willing"), "no rule line names it");
     let schema = proposal_schema_for(&HandleContext {
         entities: vec![Handle::Entity(2)],
         ..HandleContext::default()

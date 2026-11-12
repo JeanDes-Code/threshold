@@ -566,29 +566,23 @@ pub struct Reaction {
     /// Whether this NPC freely agrees to what the PC does with it or asks
     /// of it in this Turn (`WILLING_DEFINITION`, ADR 0008, changed after the
     /// live evaluation of 2026-11-12). Required in the per-Turn schema on
-    /// every reaction; only the stance rule of an intimate Turn reads it
-    /// (`mature::check`), and the NPC-folds ceiling caps `yes` there. A
+    /// every reaction. The stance rule of an intimate Turn reads it
+    /// (`mature::check`), and the NPC-folds ceiling caps `yes` there; on
+    /// any Turn, `checks::settle` lowers to the ceiling the stance of a
+    /// reaction that says `no` or `unsure` with no cause. A
     /// reaction stored before the field reads `None`, which that rule
     /// refuses: it fails closed.
     #[serde(default)]
     pub willing: Option<Willing>,
 }
 
-/// The text of `WILLING_DEFINITION`, as a literal, so the proposal rules
-/// can hold it with `concat!`.
-macro_rules! willing_definition_text {
-    () => {
-        "whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: \"yes\" agrees and takes part; \"unsure\" hesitates or has not agreed yet; \"no\" declines or objects."
-    };
-}
-pub(crate) use willing_definition_text;
-
 /// The one definition of a reaction's `willing` field (ADR 0008, changed
-/// after the live evaluation of 2026-11-12), in neutral words. The proposal
-/// rules (`context::WILLING_FIELD_LINE`), the schema's description of
-/// `willing`, the glossary and ADR 0008 hold this text; a test pins them
-/// together. The owner reads it before the merge.
-pub const WILLING_DEFINITION: &str = willing_definition_text!();
+/// after the live evaluation of 2026-11-12), in neutral words. The schema's
+/// description of `willing`, the glossary and ADR 0008 hold this text; a
+/// test pins them together. The proposal rules hold no line for it since
+/// the polish pass (2026-11-12): that line moved the stance of plain
+/// Turns. The owner reads it before the merge.
+pub const WILLING_DEFINITION: &str = "whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: \"yes\" agrees and takes part; \"unsure\" hesitates or has not agreed yet; \"no\" declines or objects.";
 
 /// Whether an NPC freely agrees to what the PC does with it or asks of it
 /// in this Turn: the one question the stance rule of an intimate Turn
