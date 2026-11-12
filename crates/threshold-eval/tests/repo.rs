@@ -294,9 +294,16 @@ fn the_scan_names_a_file_whose_path_holds_a_colon() {
     let line = "a plain line of the private pack, for the colon test";
     std::fs::write(repo.join("dir:x/a:b.md"), format!("intro\n{line}\n")).unwrap();
     let git = |args: &[&str]| {
+        // Inside a git hook, git exports its own repository to child
+        // processes. Without this, `init` and `add` act on the real one.
         Command::new("git")
             .args(args)
             .current_dir(&repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_PREFIX")
+            .env_remove("GIT_COMMON_DIR")
             .output()
             .unwrap()
     };

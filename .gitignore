@@ -7,3 +7,6 @@ src-tauri/gen/
 # folder, never here (mature content module, plan Task 9).
 *.sqlite*
 *.debug.jsonl
+
+# Agent worktrees
+.claude/
