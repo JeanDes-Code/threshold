@@ -2543,13 +2543,20 @@ fn cut_narration(told: &str) -> (String, String, String) {
 }
 
 /// Task 3: a Narration cut by the token cap is stored up to its last full
-/// sentence. The stream already showed the rest.
+/// sentence. Review B2: the last line the stream filter still holds when
+/// the cap cut the answer streams only as far as the stored text keeps it;
+/// a line the filter already let through has streamed in full.
 #[test]
 fn a_length_stop_stores_the_last_full_sentence() {
     let (returned, stored, shown) = cut_narration("One. Two thr");
     assert_eq!(stored, "One.");
     assert_eq!(returned, "One.");
-    assert_eq!(shown, "One. Two thr");
+    assert_eq!(shown, "One.");
+    let (_, stored, shown) = cut_narration("Dusk falls.\nVale");
+    assert_eq!(
+        (stored.as_str(), shown.as_str()),
+        ("Dusk falls.", "Dusk falls.\n")
+    );
     for (told, kept) in [
         (
             "Rain falls! Is it late? The gate cre",
@@ -2566,6 +2573,19 @@ fn a_length_stop_stores_the_last_full_sentence() {
         ("It weighs 3.5 stone and", "It weighs 3.5 stone and"),
         ("No full stop at all", "No full stop at all"),
         ("Done.", "Done."),
+        // Review B2: a last line that is a speech mark cut short goes.
+        ("Dusk falls.\nVale: \"Go.", "Dusk falls."),
+        ("Dusk falls.\nVale: (nods) \"Go. Now", "Dusk falls."),
+        ("Dusk falls.\nVale: Go now.", "Dusk falls."),
+        ("Dusk falls.\nShe says \u{201c}Go.", "Dusk falls."),
+        (
+            "Dusk falls.\nVale: \"Go.\" She turns.",
+            "Dusk falls.\nVale: \"Go.\" She turns.",
+        ),
+        (
+            "Dusk falls.\nVale: \"Go.\"\nRain",
+            "Dusk falls.\nVale: \"Go.\"",
+        ),
     ] {
         assert_eq!(cut_narration(told).1, kept, "{told:?}");
     }

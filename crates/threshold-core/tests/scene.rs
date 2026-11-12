@@ -991,3 +991,121 @@ fn a_refused_turn_after_a_failed_gate_shows_no_scene() {
     assert_eq!(rig.scene_ops(t3), [(false, SceneWhy::Gate)]);
     assert_eq!(rig.scene(), None);
 }
+
+// --- A Narration cut by the token cap (review B2) ------------------------------
+
+/// A model whose every narration stopped at the token cap
+/// (`done_reason: length`).
+struct LengthCut(threshold_core::RecordedGm);
+
+impl Gm for LengthCut {
+    fn propose(&self, prompt: &Prompt, schema: &serde_json::Value) -> Result<String, GmError> {
+        self.0.propose(prompt, schema)
+    }
+
+    fn narrate(
+        &self,
+        prompt: &Prompt,
+        max_tokens: Option<u32>,
+        on_chunk: &mut dyn FnMut(&str) -> Stream,
+    ) -> Result<String, GmError> {
+        self.0.narrate(prompt, max_tokens, on_chunk)
+    }
+
+    fn last_done_reason(&self) -> Option<String> {
+        Some("length".into())
+    }
+}
+
+/// What the Play screen shows of one Turn after it ends: each prose line,
+/// and each speech line as its speaker's name (as the PC knows it) and its
+/// words.
+fn shown_after(rig: &Rig, turn: TurnId) -> String {
+    use threshold_core::world::SightLine;
+    let sight = rig.sight();
+    let story = sight
+        .story
+        .iter()
+        .find(|t| t.turn == turn)
+        .expect("the Turn");
+    story
+        .lines
+        .iter()
+        .map(|line| match line {
+            SightLine::Prose(text) => format!("{text}\n"),
+            SightLine::Speech { speaker, words, .. } => {
+                let name = sight
+                    .known
+                    .iter()
+                    .find(|k| k.id == *speaker)
+                    .and_then(|k| k.name.clone())
+                    .unwrap_or_default();
+                format!("{name}: {words}\n")
+            }
+        })
+        .collect()
+}
+
+/// Review B2: a Narration that the token cap cuts inside a speech mark must
+/// never show a name that the uncut Narration would not show. Vale is an
+/// NPC the Adventure Seed hides, Kett an NPC the PC cannot name, Brann an
+/// NPC here whom the PC can name. For every cut point, the screen after the
+/// Turn and the stream show neither Vale nor Kett, as the uncut text does.
+#[test]
+fn a_cut_narration_never_shows_a_name_the_full_text_hides() {
+    let full = "Dusk falls over the square.\n\
+                Brann: \"Stay a while.\"\n\
+                Vale: \"Go now. Go.\"\n\
+                Kett: (quietly) \"Not yet.\"\n\
+                The lamps go out.";
+    let hidden = ["Vale", "Kett"];
+
+    // The uncut Narration: the reference.
+    let mut rig = Rig::new("cut-full");
+    rig.add_npc("Kett", 34, false, "gate square");
+    let p = rig.plain();
+    let t = rig.played("t0", &p, full);
+    let reference = shown_after(&rig, t);
+    assert!(reference.contains("Brann: Stay a while."), "{reference}");
+    for name in hidden {
+        assert!(!reference.contains(name), "the uncut text shows {name}");
+    }
+
+    // Every cut point, one Turn each, with a model that says it was cut.
+    let mut rig = Rig::new("cut-points");
+    rig.add_npc("Kett", 34, false, "gate square");
+    let gm = rig.gm.clone();
+    rig.with_gm(Box::new(LengthCut(gm)));
+    let cuts: Vec<usize> = full
+        .char_indices()
+        .map(|(at, _)| at)
+        .chain([full.len()])
+        .filter(|at| *at > 0)
+        .collect();
+    for (n, at) in cuts.into_iter().enumerate() {
+        let told = &full[..at];
+        let p = rig.plain();
+        rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+        rig.gm.push_narration(told.into());
+        let mut streamed = String::new();
+        let out = rig
+            .engine()
+            .play_turn(format!("cut-{n}"), "I wait.", &mut |c| streamed.push_str(c))
+            .unwrap();
+        let shown = shown_after(&rig, out.turn_id);
+        for name in hidden {
+            assert!(
+                !shown.contains(name),
+                "cut at {at} ({told:?}): the screen shows {name}: {shown:?}"
+            );
+            assert!(
+                !streamed.contains(name),
+                "cut at {at}: the stream showed {name}: {streamed:?}"
+            );
+        }
+        // The stored text is a part of the text the stream showed, line by
+        // line: the Player never reads more after the Turn than during it.
+        let stored = rig.turn(out.turn_id).narration.unwrap_or_default();
+        assert!(full.starts_with(&stored), "cut at {at}: {stored:?}");
+    }
+}

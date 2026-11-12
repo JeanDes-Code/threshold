@@ -34,7 +34,7 @@ use crate::{
     pack::ContentPack,
     proposal_schema_for,
     rules::{RollResult, Ruleset, turn_seed},
-    speech::TagFilter,
+    speech::{self, TagFilter},
     store::{
         CampaignId, CommitError, DebugEntry, OpId, Store, StoreError, StoredTurn, TurnId, TurnKind,
         TurnRecord, WorldView,
@@ -1038,10 +1038,12 @@ impl Engine {
             return Ok(Narrated::Faded);
         }
         let narration = narration?;
-        // The token cap cut the answer: the stream showed the rest, the
-        // stored Narration ends on its last full sentence (data shape 3.10).
+        // The token cap cut the answer: the stored Narration ends on its
+        // last full sentence (data shape 3.10), without a last line that is
+        // a speech mark cut short (review B2): the reader of a stored
+        // Narration would show its tag as prose.
         Ok(Narrated::Read(if cut {
-            last_full_sentence(&narration).to_owned()
+            stored_cut(&narration).to_owned()
         } else {
             narration
         }))
@@ -1647,6 +1649,16 @@ fn last_full_sentence(text: &str) -> &str {
     end.map_or(text, |end| &text[..end])
 }
 
+/// A Narration that the token cap cut, as it is stored: up to its last full
+/// sentence (`last_full_sentence`), then without a last line that is a
+/// speech mark cut short (`speech::without_cut_mark`, review B2). The stored
+/// text then holds only lines the model ended, so the reader of a stored
+/// Narration (`world::pc_sight`) cleans it as it cleans a full one, and it
+/// never shows a tag that the stream held back.
+fn stored_cut(text: &str) -> &str {
+    speech::without_cut_mark(last_full_sentence(text))
+}
+
 /// One narrator call whose stream passes through `speech::TagFilter`: a tag
 /// that names someone the PC cannot name never reaches `on_chunk`. The
 /// answer, which becomes the stored Narration, is returned unchanged; the
@@ -1690,7 +1702,17 @@ fn narrate_through(
     if stopped || faded() {
         return (answer, true);
     }
-    let rest = filter.finish();
+    // The start of the last line, which the filter still holds: no colon
+    // and no line end came. When the token cap cut the answer, that line is
+    // cut too, and it may be a tag whose colon never came. The stream then
+    // shows of it only what the stored Narration keeps (`stored_cut`), so
+    // the two agree (review B2).
+    let mut rest = filter.finish();
+    if let (Ok(text), Some("length")) = (&answer, gm.last_done_reason().as_deref()) {
+        let line = text.rfind('\n').map_or(0, |at| at + 1);
+        let kept = stored_cut(text).len().saturating_sub(line).min(rest.len());
+        rest = rest.get(..kept).unwrap_or_default().to_owned();
+    }
     if !rest.is_empty() {
         on_chunk(&rest);
     }

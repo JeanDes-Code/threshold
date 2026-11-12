@@ -418,6 +418,8 @@ turn      + faded INTEGER NOT NULL DEFAULT 0      -- not a projection (3.6)
 
 A cut at the token cap can end in the middle of a sentence. When `last_done_reason` is `length`, the core stores the Narration up to its last full sentence.
 
+**Changed after review (2026-11-12, second review, B2).** A cut can also end inside a speech mark: `Dusk falls.` then `Vale: "Go.` on the next line. The reader of a stored Narration shows a line that is not a complete mark as prose, its tag included, so the stored text printed the name of a hidden NPC that the stream filter had held back. Now, after the cut to the last full sentence, a last line that opens a quote it does not close, or that has a speech tag and no complete quoted span after it, is dropped whole (`speech::without_cut_mark`): the stored text ends at the end of the line before it. It then holds only lines the model ended, and the reader cleans it as it cleans a full Narration. The stream agrees: the start of the last line that the stream filter still holds at a cut (a tag whose colon never came, or a short line) streams only as far as the stored text keeps it. When the Turn ends, the Play screen reloads the view and shows the stored text in place of the stream, so the Player sees the cut line disappear, never a new name. Test: `a_cut_narration_never_shows_a_name_the_full_text_hides` (every cut point over a text with the marks of a hidden NPC, an NPC the PC cannot name and a present NPC).
+
 ### 3.11 Player screens
 
 ```rust
@@ -572,7 +574,7 @@ The view tests of the play-experience shape run again on the hidden-world fixtur
 - **The app stops during a stream.** `narration` is NULL and `faded` is 0: the Turn shows as `Missing` and can be narrated again, as today.
 - **A pack is malformed.** It is skipped and listed. Play goes on at `implied`.
 - **The Closing Turn's model call fails.** The default closing commits.
-- **The token cap cuts a sentence.** The stored Narration ends at the last full sentence. The stream showed a few more words.
+- **The token cap cuts a sentence.** The stored Narration ends at the last full sentence, without a last line that is a speech mark cut short (3.10). The stream showed a few more words of a long last line; it never showed a tag that the stored text leaves out.
 - **A World Event keeps a scene Turn refused.** The Player reads the fixed sentence each time. A plain Intent lets the event fire.
 - **`fade_to_black` arrives just after the Turn ended.** With a scene open it closes the scene, faded. With none it returns `NothingToFade` and the UI drops it.
 

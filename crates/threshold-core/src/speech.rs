@@ -65,7 +65,9 @@ pub fn parse(narration: &str) -> Vec<Line<'_>> {
         .collect()
 }
 
-fn mark(line: &str) -> Option<Line<'_>> {
+/// The tag and the rest of a line that has the shape of a speech mark's
+/// start: one to four words with no quote mark, then a colon.
+fn tag(line: &str) -> Option<(&str, &str)> {
     let (name, said) = line.split_once(':')?;
     let name = name.trim();
     let words = name.split_whitespace().count();
@@ -74,6 +76,47 @@ fn mark(line: &str) -> Option<Line<'_>> {
     {
         return None;
     }
+    Some((name, said))
+}
+
+/// `text` without its last line when the token cap cut that line inside a
+/// speech mark (review B2, 2026-11-12): the line opens a quote it does not
+/// close, or it has a speech tag (`tag`) and no complete quoted span after
+/// it. The reader of a stored Narration (`parse`) would show such a line as
+/// prose, its tag included, so a cut could print a name that the full
+/// Narration hides; the stream filter held that tag back. The text then
+/// ends at the end of the line before it. Any other text comes back
+/// unchanged, trailing blanks removed.
+pub fn without_cut_mark(text: &str) -> &str {
+    let text = text.trim_end();
+    let start = text.rfind('\n').map_or(0, |at| at + 1);
+    let last = &text[start..];
+    let cut = opens_a_quote(last) || tag(last).is_some_and(|(_, said)| !holds_a_quote(said));
+    if cut { text[..start].trim_end() } else { text }
+}
+
+/// True when `line` opens a quote it does not close.
+fn opens_a_quote(line: &str) -> bool {
+    QUOTES.iter().any(|&(open, close)| {
+        if open == close {
+            line.matches(open).count() % 2 == 1
+        } else {
+            line.matches(open).count() > line.matches(close).count()
+        }
+    })
+}
+
+/// True when `text` holds a complete quoted span: an opening quote mark,
+/// then its closing mark after it.
+fn holds_a_quote(text: &str) -> bool {
+    QUOTES.iter().any(|&(open, close)| {
+        text.find(open)
+            .is_some_and(|at| text[at + open.len_utf8()..].contains(close))
+    })
+}
+
+fn mark(line: &str) -> Option<Line<'_>> {
+    let (name, said) = tag(line)?;
     let said = said.trim();
     let (note, quoted) = stage_note(said);
     let (open, close) = QUOTES
