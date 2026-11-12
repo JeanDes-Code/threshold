@@ -193,7 +193,7 @@ pub struct Presence { pub truth: BTreeSet<EntityId>, pub seen: BTreeSet<EntityId
 | G1 | `turn::plan`, before the proposal call, when `view.scene_open` is set | `clearance(view, &[])` | the core commits `SetScene { open: false, why: Gate }` in an OOC Turn, then plans the Turn as a plain one |
 | G2 | `checks::validate`, after the proposal call | the three rules of 3.3 | final refusal, or the retry for the stance rule |
 | G3 | `turn::resolve`, after the due World Events fire, before the Commit | `clearance` over `after.checked` (`checked_here` after the ops) | final refusal; nothing commits, so the event fires in a later Turn |
-| G4 | `Engine::narrate`, before every narration call, `renarrate` included | `mature::told` | the Narration is told at `Implied` |
+| G4 | `Engine::narrate`, before every narration call, `renarrate` and a retry under the same `op_id` included | `mature::told` and `mature::narration_clearance`: G1 on the state after the Turn AND on the state now, and the same open scene now (`mature::open_scene`) | the Narration is told at `Implied`, with no pack fragment and the scene's other Turns as Neutral Lines |
 
 G1 gives `Option<Cleared>` to `context::proposal_context`. With `None`, the proposal prompt holds no scene line, no pack scene fragment and no Narration of the scene.
 
@@ -202,13 +202,16 @@ G1 gives `Option<Cleared>` to `context::proposal_context`. With `None`, the prop
 ```
 not intimate                                               -> Plain
 intimate, and the scene is open after this Commit,
-  and it is still the open scene now,
+  and it is still the open scene now (open_scene(now)),
   and effective(now.detail, packs) is explicit,
-  and clearance(view_after) passes                         -> Explicit(Cleared)
+  and clearance(view_after) passes,
+  and clearance(now) passes                                -> Explicit(Cleared)
 intimate, any other case                                   -> Implied
 ```
 
 A Turn that ends a scene is never told at `Explicit`. A `renarrate` of a Turn of a scene that has ended is told at `Implied`.
+
+**Changed after review (2026-11-12, second review, B1).** The clearance of a narration call (`mature::narration_clearance`) needs G1 to pass on BOTH the state right after the Turn and the state now, and the scene of the state after the Turn to be the open scene now as every reader sees it (`mature::open_scene`). Before, it read the state after the Turn only: a `renarrate` of a scene Turn whose Narration had failed, or the same op sent again, after another program brought an unconfirmed minor to the place, was told at `Explicit` with the pack fragments and the scene's earlier Narrations. Now such a Turn is told at `Implied`, with no pack fragment, and the scene's other Turns are their Neutral Lines. Test: `a_scene_narration_told_again_reads_the_gate_now`.
 
 G1 cannot fail on a file that this code wrote: an open scene means that G2 and G3 passed on its last Turn, and no op removes a confirmation. It exists for a file that another program changed. The core does not defend against a Player who edits the SQLite file by hand. `rebuild_projections` puts the projections back to what the ledger says.
 

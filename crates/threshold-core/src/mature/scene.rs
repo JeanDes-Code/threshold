@@ -73,11 +73,17 @@ pub fn scene_gate(view: &WorldView) -> Result<Option<Cleared>, Blocked> {
 }
 
 /// The clearance a narration call of an open scene may hold (G4): the
-/// state right after the Turn holds an open scene, it is still the open
-/// scene `now`, and G1 passes on the state after the Turn. `None` in any
-/// other case: a `renarrate` of a scene that has ended gets none.
+/// state right after the Turn holds an open scene, that scene is still the
+/// open scene `now` as every reader sees it (`open_scene`, so G1 passes on
+/// the state now), and G1 passes on the state after the Turn too. `None` in
+/// any other case: a `renarrate` of a scene that has ended gets none, and
+/// so does a `renarrate` (or the same op sent again) after a character who
+/// is not cleared came to the place (review B1, 2026-11-12). The Turn is
+/// then told by implication, with no pack fragment, and the other Turns of
+/// the scene are their Neutral Lines.
 pub fn narration_clearance(view_after: &WorldView, now: &WorldView) -> Option<Cleared> {
-    if view_after.scene_open.is_none() || now.scene_open != view_after.scene_open {
+    let scene = view_after.scene_open?;
+    if open_scene(now) != Some(scene) {
         return None;
     }
     scene_gate(view_after).ok().flatten()

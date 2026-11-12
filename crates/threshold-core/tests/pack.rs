@@ -410,6 +410,58 @@ fn a_removed_pack_gives_implied() {
     }
 }
 
+/// Review B1 (2026-11-12): a narration of a scene Turn reads the gate on the
+/// state after that Turn AND on the state now, and needs the scene to be
+/// the same open scene now (`mature::open_scene`). Turn 2's Narration
+/// fails; another program then brings an unconfirmed 16-year-old to the
+/// place. `renarrate(t2)`, and the same op sent again, are told implied:
+/// no explicit line, no pack fragment, and Turn 1 as its Neutral Line.
+#[test]
+fn a_scene_narration_told_again_reads_the_gate_now() {
+    const EARLIER: &str = "MARKER-B1-T1";
+    for again in ["renarrate", "same op"] {
+        let mut rig = Rig::with("b1-now", DetailLevel::Explicit, vec![sample()]);
+        let p = rig.intimate();
+        let t1 = rig.played("t1", &p, &format!("{EARLIER} Brann nods."));
+        // Turn 2 commits; its Narration fails (no narration is queued).
+        rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+        let err = rig
+            .engine()
+            .play_turn("t2".into(), "I stay with Brann.", &mut |_| {})
+            .expect_err("the narration fails");
+        let TurnError::NarrationFailed { turn_id: t2, .. } = err else {
+            panic!("{err:?}");
+        };
+        rig.add_npc("Kip", 16, false, "gate square");
+        assert_eq!(rig.scene(), Some(t1), "the ledger still holds the scene");
+        rig.gm.push_narration("Brann waits.".into());
+        let before = rig.calls(CallKind::Narrate).len();
+        match again {
+            "renarrate" => {
+                rig.engine().renarrate(t2, &mut |_| {}).unwrap();
+            }
+            _ => {
+                rig.engine()
+                    .play_turn("t2".into(), "I stay with Brann.", &mut |_| {})
+                    .unwrap();
+            }
+        }
+        let narrations = rig.calls(CallKind::Narrate);
+        assert_eq!(narrations.len(), before + 1, "{again}: one narration call");
+        let call = narrations.last().unwrap();
+        assert!(
+            call.prompt.recent.starts_with(IMPLIED_LINE),
+            "{again}: {}",
+            call.prompt.recent
+        );
+        for marker in MARKERS.iter().chain(&[EXPLICIT_LINE, EARLIER]) {
+            assert!(!holds(call, marker), "{again}: the prompt holds {marker}");
+        }
+        let line = threshold_core::mature::neutral_line(&rig.turn(t1)).unwrap();
+        assert!(call.prompt.recent.contains(&line), "{again}");
+    }
+}
+
 /// The sample pack still asks the model to ignore the age rule, and a pack
 /// changes no Commit check: the gate rejects a minor and a new NPC.
 #[test]

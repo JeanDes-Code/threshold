@@ -131,11 +131,14 @@ pub fn effective(stored: DetailLevel, packs: &[ContentPack]) -> DetailLevel {
 /// ```text
 /// not intimate                                          -> Plain
 /// intimate, and the scene is open after this Commit,
-///   and it is still the open scene now,
+///   and it is still the open scene now (`open_scene(now)`),
 ///   and effective(now.detail, packs) is explicit,
-///   and clearance(view_after) passes                    -> Explicit(Cleared)
+///   and clearance(view_after) passes,
+///   and clearance(now) passes                           -> Explicit(Cleared)
 /// intimate, any other case                              -> Implied
 /// ```
+///
+/// The clearance is `narration_clearance` (review B1, 2026-11-12).
 ///
 /// A Turn that ends a scene is never told at `Explicit`, and neither is a
 /// `renarrate` of a Turn of a scene that has ended. `now` and `packs` are
