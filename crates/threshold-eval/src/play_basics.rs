@@ -26,6 +26,7 @@ struct Stats {
     turns: usize,
     failed: usize,
     total_ms: Vec<u64>,
+    echo: super::echo::EchoCount,
     moves: usize,
     moved: usize,
     impossible: usize,
@@ -148,6 +149,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
             9_000 + run as u64,
             |store, campaign| seed_pending(store, campaign, &sc.pending),
         )?;
+        let pc = super::echo::pc_name(&s.engine, s.campaign);
         for step in &sc.steps {
             let before = place(&s)?;
             let clock_before = clock(&s)?;
@@ -160,6 +162,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                     if opens_with_time(&o.narration) {
                         st.time_first += 1;
                     }
+                    st.echo.add(&step.intent, &o.narration, &pc);
                     if clock(&s)? > clock_before {
                         st.advanced += 1;
                     }
@@ -316,6 +319,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         ratio(st.stayed, st.unknown),
         ratio(st.told_stayed, st.unknown)
     );
+    out.push_str(&st.echo.lines());
     let _ = writeln!(out, "- Turns failed: {}", ratio(st.failed, st.turns));
     let _ = writeln!(
         out,

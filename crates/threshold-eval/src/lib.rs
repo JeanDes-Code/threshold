@@ -8,6 +8,7 @@
 //! gives counts, never a pass/fail, except the latency pass line.
 
 mod departures;
+pub mod echo;
 pub mod finds;
 mod judge;
 pub mod mature;
@@ -44,7 +45,7 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 18] = [
+pub const SCENARIOS: [&str; 19] = [
     "latency",
     "memory",
     "voices",
@@ -62,23 +63,30 @@ pub const SCENARIOS: [&str; 18] = [
     "scene_agency",
     "npc_will",
     "scene_latency",
+    "scene_first_act",
     "replay",
 ];
 
 /// The scenarios of the mature content module (plan Task 9). They run when
 /// named: `all` leaves them out, as it leaves out `replay`.
-pub const MATURE_SCENARIOS: [&str; 4] =
-    ["intimate_tag", "scene_agency", "npc_will", "scene_latency"];
+pub const MATURE_SCENARIOS: [&str; 5] = [
+    "intimate_tag",
+    "scene_agency",
+    "npc_will",
+    "scene_latency",
+    "scene_first_act",
+];
 
 /// The scenarios that `--scenario all` leaves out: `replay` needs a
 /// Campaign file, and the mature ones are measured on their own (plan
 /// Task 10).
-pub const NOT_IN_ALL: [&str; 5] = [
+pub const NOT_IN_ALL: [&str; 6] = [
     "replay",
     "intimate_tag",
     "scene_agency",
     "npc_will",
     "scene_latency",
+    "scene_first_act",
 ];
 
 /// The latency pass line (design §10): p90 at or under 15 s, warm.
@@ -338,7 +346,7 @@ pub fn run(
             "ooc" => ooc::scenario(&mut ctx)?,
             "departures" => departures::scenario(&mut ctx)?,
             "finds" => finds::scenario(&mut ctx)?,
-            "intimate_tag" | "scene_agency" | "npc_will" | "scene_latency" => {
+            "intimate_tag" | "scene_agency" | "npc_will" | "scene_latency" | "scene_first_act" => {
                 mature::scenario(&mut ctx, name)?
             }
             "replay" => replay::scenario(&mut ctx)?,

@@ -1799,7 +1799,10 @@ mod mature {
     };
     use threshold_eval::{
         Config, MATURE_SCENARIOS, check_private_out,
-        mature::{Ended, Step, agency_count, bends_will, npc_will_count, tag_count, tag_report},
+        mature::{
+            Ended, FirstAct, Step, agency_count, bends_will, first_act_count, npc_will_count,
+            same_scene_count, tag_count, tag_report,
+        },
         run,
     };
     use threshold_eval::{Judge, JudgeError};
@@ -1814,6 +1817,68 @@ mod mature {
             ended,
             ..Step::default()
         }
+    }
+
+    /// Polish pass (2026-11-12): a `same_scene` step counts only with a
+    /// scene open before it, and is kept when the scene after is the same.
+    #[test]
+    fn same_scene_counts_marked_steps_with_a_scene_before() {
+        let marked = |before, after| Step {
+            marked_same: true,
+            scene_before: before,
+            scene_after: after,
+            ..Step::default()
+        };
+        let steps = [
+            marked(Some(3), Some(3)),
+            marked(Some(3), None),
+            marked(Some(3), Some(9)),
+            marked(None, Some(9)),
+            Step::default(),
+        ];
+        assert_eq!(same_scene_count(&steps), (1, 3, 4));
+    }
+
+    /// Polish pass (2026-11-12): the `opens` steps, by how they ended.
+    #[test]
+    fn first_act_counts_tag_willing_and_opening() {
+        let opens = |ended, willing, after| Step {
+            marked_opens: true,
+            ended,
+            all_willing: willing,
+            scene_after: after,
+            ..Step::default()
+        };
+        let intimate = Ended::Committed {
+            intimacy: Intimacy::Intimate,
+        };
+        let advance = Ended::Committed {
+            intimacy: Intimacy::Advance,
+        };
+        let steps = [
+            opens(intimate, true, Some(4)),
+            opens(advance, true, None),
+            Step {
+                refused_unwilling: true,
+                ..opens(Ended::Refused, false, None)
+            },
+            opens(Ended::Failed, true, None),
+            step(true, intimate),
+        ];
+        assert_eq!(
+            first_act_count(&steps),
+            FirstAct {
+                steps: 4,
+                intimate: 1,
+                advance: 1,
+                none: 0,
+                refused: 1,
+                unwilling: 1,
+                failed: 1,
+                willing: 2,
+                opened: 1,
+            }
+        );
     }
 
     fn config(scenarios: &[&str], scenarios_dir: Option<PathBuf>) -> Config {
@@ -2036,16 +2101,22 @@ mod mature {
             &mut |_| {},
         )
         .unwrap();
-        // scene_agency: the invitation and three Turns of the act, all
-        // tagged by the recorded model, the closing, then a step the
-        // recorded model tags, which opens the next scene.
+        // scene_agency: the invitation, two Turns of the act, the talk
+        // step and one more Turn of the act, all tagged by the recorded
+        // model, the closing, then a step the recorded model tags, which
+        // opens the next scene.
         assert!(
-            report.contains("- Scene Turns: 5 committed with the tag"),
+            report.contains("- Scene Turns: 6 committed with the tag"),
             "{report}"
         );
         assert!(
             report
-                .contains("- Scene Narrations the judge reads as setting a PC act: 5 of 5 judged"),
+                .contains("- Scene Narrations the judge reads as setting a PC act: 6 of 6 judged"),
+            "{report}"
+        );
+        // The two steps marked `same_scene` (polish pass, 2026-11-12).
+        assert!(
+            report.contains("- Same scene after a step marked same_scene (plain talk inside a scene, then the act): 2 of 2 with a scene open before (pass line: all: PASS); 0 marked steps had no scene open before"),
             "{report}"
         );
         assert!(

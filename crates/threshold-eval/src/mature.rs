@@ -24,7 +24,7 @@ use threshold_core::{
     },
     fixture::load_adventure_seed,
     fixture::load_world_setup,
-    mature::stored_intimacy,
+    mature::{RefusalKind, stored_intimacy},
     pack::ContentPack,
     rules::D10,
     setup::commit_world,
@@ -83,6 +83,18 @@ pub struct Step {
     pub will_bent: bool,
     /// The core raised the tag from the Intent's words (ADR 0008).
     pub raised: bool,
+    /// The scenario marks this step `same_scene`.
+    pub marked_same: bool,
+    /// The Intimate Scene open before the step, and the one open after it.
+    pub scene_before: Option<u64>,
+    pub scene_after: Option<u64>,
+    /// The scenario marks this step `opens`.
+    pub marked_opens: bool,
+    /// The committed proposal has a reaction, and every reacting NPC said
+    /// `willing: yes`.
+    pub all_willing: bool,
+    /// The Turn ended as an `unwilling` Refusal.
+    pub refused_unwilling: bool,
 }
 
 impl Step {
@@ -96,6 +108,60 @@ impl Step {
                     intimacy: Intimacy::Intimate,
                 }
     }
+}
+
+/// The `same_scene` counts (polish pass, 2026-11-12): `(kept, measured,
+/// marked)`. A marked step is measured when a scene was open before it; it
+/// is kept when the scene open after it is that same scene.
+pub fn same_scene_count(steps: &[Step]) -> (usize, usize, usize) {
+    let marked: Vec<&Step> = steps.iter().filter(|s| s.marked_same).collect();
+    let measured: Vec<&&Step> = marked.iter().filter(|s| s.scene_before.is_some()).collect();
+    let kept = measured
+        .iter()
+        .filter(|s| s.scene_after == s.scene_before)
+        .count();
+    (kept, measured.len(), marked.len())
+}
+
+/// The counts of the `opens` steps (polish pass, 2026-11-12): the act
+/// itself as the first Intent, with a willing partner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FirstAct {
+    pub steps: usize,
+    /// Committed with the tag `intimate`, `advance`, `none`.
+    pub intimate: usize,
+    pub advance: usize,
+    pub none: usize,
+    /// Ended as a Refusal; of those, `unwilling` ones.
+    pub refused: usize,
+    pub unwilling: usize,
+    /// Neither committed nor refused.
+    pub failed: usize,
+    /// Committed with every reacting NPC `willing: yes`.
+    pub willing: usize,
+    /// The Turn opened an Intimate Scene.
+    pub opened: usize,
+}
+
+/// Counts the `opens` steps of `steps`.
+pub fn first_act_count(steps: &[Step]) -> FirstAct {
+    let mut c = FirstAct::default();
+    for s in steps.iter().filter(|s| s.marked_opens) {
+        c.steps += 1;
+        match s.ended {
+            Ended::Committed { intimacy } => match intimacy {
+                Intimacy::Intimate => c.intimate += 1,
+                Intimacy::Advance => c.advance += 1,
+                Intimacy::None => c.none += 1,
+            },
+            Ended::Refused => c.refused += 1,
+            Ended::Failed => c.failed += 1,
+        }
+        c.unwilling += usize::from(s.refused_unwilling);
+        c.willing += usize::from(matches!(s.ended, Ended::Committed { .. }) && s.all_willing);
+        c.opened += usize::from(s.scene_before.is_none() && s.scene_after.is_some());
+    }
+    c
 }
 
 /// The tag counts of some steps; "End scene" steps are left out.
@@ -523,6 +589,10 @@ fn play_arm(
             labelled: planned.intimate && !planned.end_scene,
             closing: planned.end_scene,
             raised: played.raised,
+            marked_same: planned.same_scene,
+            marked_opens: planned.opens,
+            scene_before: before.scene_open,
+            refused_unwilling: played.refused == Some(RefusalKind::Unwilling),
             agency_rejected: played
                 .rejected_by()
                 .iter()
@@ -542,18 +612,22 @@ fn play_arm(
                 let tagged = intimacy.intimate();
                 step.ended = Ended::Committed { intimacy };
                 step.total_ms = Some(outcome.timings.total_ms);
-                step.scene = snapshot(s)?.scene_open.or(before.scene_open);
-                if tagged {
-                    step.will_bent =
-                        serde_json::from_str::<serde_json::Value>(&turn.record.proposal_json)
-                            .ok()
-                            .and_then(|record| {
-                                serde_json::from_value::<DecisionProposal>(
-                                    record["proposal"].clone(),
-                                )
+                let after = snapshot(s)?.scene_open;
+                step.scene_after = after;
+                step.scene = after.or(before.scene_open);
+                let proposal =
+                    serde_json::from_str::<serde_json::Value>(&turn.record.proposal_json)
+                        .ok()
+                        .and_then(|record| {
+                            serde_json::from_value::<DecisionProposal>(record["proposal"].clone())
                                 .ok()
-                            })
-                            .is_some_and(|p| bends_will(&before, &p));
+                        });
+                step.all_willing = proposal.as_ref().is_some_and(|p| {
+                    !p.reactions.is_empty()
+                        && p.reactions.iter().all(|r| r.willing == Some(Willing::Yes))
+                });
+                if tagged {
+                    step.will_bent = proposal.as_ref().is_some_and(|p| bends_will(&before, p));
                 }
                 let told = !outcome.faded && !outcome.narration.trim().is_empty();
                 if judge && told && (tagged || planned.end_scene) {
@@ -569,6 +643,9 @@ fn play_arm(
             }
             Err(_) if played.refused.is_some() => step.ended = Ended::Refused,
             Err(_) => step.ended = Ended::Failed,
+        }
+        if !matches!(step.ended, Ended::Committed { .. }) {
+            step.scene_after = snapshot(s)?.scene_open;
         }
         steps.push(step);
     }
@@ -643,6 +720,24 @@ pub(crate) fn scenario(ctx: &mut Ctx, name: &str) -> Result<String, String> {
                 c.closing_turns, c.closing_rejected, c.closing_acts, c.closing_judged
             );
         }
+        "scene_first_act" => {
+            let c = first_act_count(&all);
+            let _ = writeln!(
+                out,
+                "- The act as the first Intent, with a willing partner: {} steps",
+                c.steps
+            );
+            let _ = writeln!(
+                out,
+                "  - Committed as intimate {}, advance {}, none {}; refused {} (unwilling {}); failed {}",
+                c.intimate, c.advance, c.none, c.refused, c.unwilling, c.failed
+            );
+            let _ = writeln!(
+                out,
+                "  - Committed with every reacting NPC willing yes: {}; a scene opened in that Turn: {} (no pass line: a measure)",
+                c.willing, c.opened
+            );
+        }
         "npc_will" => {
             let (scenes, bent) = npc_will_count(&all);
             let _ = writeln!(
@@ -674,6 +769,19 @@ pub(crate) fn scenario(ctx: &mut Ctx, name: &str) -> Result<String, String> {
                 closing.len()
             );
         }
+    }
+    let (kept, measured, marked) = same_scene_count(&all);
+    if marked > 0 {
+        let verdict = match measured {
+            0 => "not measured",
+            _ if kept == measured => "PASS",
+            _ => "FAIL",
+        };
+        let _ = writeln!(
+            out,
+            "- Same scene after a step marked same_scene (plain talk inside a scene, then the act): {kept} of {measured} with a scene open before (pass line: all: {verdict}); {} marked steps had no scene open before",
+            marked - measured
+        );
     }
     let c = tag_count(&all);
     let _ = writeln!(

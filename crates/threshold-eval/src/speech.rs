@@ -268,6 +268,7 @@ struct RunStats {
     total_ms: Vec<u64>,
     failed: usize,
     tally: Tally,
+    echo: super::echo::EchoCount,
 }
 
 fn rate_text(tally: &Tally) -> String {
@@ -290,11 +291,13 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
             |_, _| Ok(()),
         )?;
         let mut stats = RunStats::default();
+        let pc = super::echo::pc_name(&s.engine, s.campaign);
         for intent in &sc.intents {
             let played = ctx.play(&mut s, intent);
             let turn = match &played.outcome {
                 Ok(o) => {
                     stats.total_ms.push(o.timings.total_ms);
+                    stats.echo.add(intent, &o.narration, &pc);
                     o.turn_id
                 }
                 Err(_) => {
@@ -326,10 +329,14 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     }
 
     let mut total = Tally::default();
+    let mut echo = super::echo::EchoCount::default();
     let mut times: Vec<u64> = Vec::new();
     let mut failed = 0;
     for r in &runs {
         total.add(&r.tally);
+        echo.narrations += r.echo.narrations;
+        echo.echoes += r.echo.echoes;
+        echo.feelings += r.echo.feelings;
         times.extend(&r.total_ms);
         failed += r.failed;
     }
@@ -370,6 +377,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         total.other
     );
     let _ = writeln!(out, "- Marked lines without quotes: {}", total.unquoted);
+    out.push_str(&echo.lines());
     let _ = writeln!(
         out,
         "- Wrong marks (judge): {wrong} / {judged} judged bubbles ({}); judge could not tell: {cannot_tell}; judge errors: {judge_errors}",

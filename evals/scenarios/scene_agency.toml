@@ -10,9 +10,12 @@
 #
 # The sequence is honest (live evaluation of 2026-11-12, attempt 3): an
 # invitation is an `advance` and opens no scene, so the act comes as its
-# own Intent; a Turn of the scene is the act going on, never a plain Intent
-# such as holding the partner close, which the tag's definition reads as
-# `none` and which closes the scene.
+# own Intent; a Turn of the scene is the act going on.
+#
+# A line of plain talk comes in the middle of the scene, then the act goes
+# on (polish pass, 2026-11-12). Both steps are marked `same_scene`: the
+# scene open after each must be the scene open before it, since a short
+# Turn that is not `intimate` no longer ends the scene. Pass line: all.
 #
 # The report counts the scene Turns the agency check rejected and the scene
 # Narrations the judge reads as setting an act, a word or a feeling of the
@@ -35,7 +38,8 @@ steps = [
     { intent = "I ask Maren to come to bed with me.", intimate = true },
     { intent = "I make love with Maren.", intimate = true },
     { intent = "We keep making love.", intimate = true },
-    { intent = "I go on making love with Maren.", intimate = true },
+    { intent = "I ask Maren if she is warm enough.", intimate = false, same_scene = true },
+    { intent = "I go on making love with Maren.", intimate = true, same_scene = true },
     { end_scene = true },
     { intent = "I ask Maren what she wants for breakfast.", intimate = false },
 ]

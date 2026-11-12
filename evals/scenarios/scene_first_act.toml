@@ -1,0 +1,28 @@
+# Does a scene open in one Turn? (polish pass, 2026-11-12, a measure with
+# no pass line.) The other scene scenarios split the invitation and the act
+# into two Intents. Here the first Intent is the act itself, with a partner
+# set up as in `scene_agency` (Maren, the PC's partner, attitude 5, both
+# confirmed adults, alone in a private place), and one more neutral fact
+# that says she wants it. The step marked `opens` is counted: the tag the
+# Turn committed with, whether every reacting NPC said `willing: yes`, and
+# whether the Turn opened an Intimate Scene. Neutral Intents only; the
+# report prints counts only.
+fixture = "town"
+detail = "implied"
+
+[[arms]]
+name = "partner"
+extra_places = ["Wren's lodging"]
+pc_at = "Wren's lodging"
+confirm = ["Wren", "Maren"]
+extra_npcs = [
+    { name = "Maren", age = 34, at = "Wren's lodging", attitude = 5, facts = [
+        { key = "partner", value = "Wren", text = "Maren and Wren have shared a home for years." },
+        { key = "wish", value = "a night alone with Wren", text = "Maren has told Wren she wants a night alone together." },
+    ] },
+]
+steps = [
+    { intent = "I make love with Maren.", intimate = true, opens = true },
+    { intent = "We keep making love.", intimate = true },
+    { end_scene = true },
+]

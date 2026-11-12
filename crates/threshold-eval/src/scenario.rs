@@ -408,6 +408,16 @@ pub struct MatureStep {
     /// "End scene" (`Engine::end_scene`) in place of an Intent.
     #[serde(default)]
     pub end_scene: bool,
+    /// The scenario expects the Intimate Scene open before this step to be
+    /// the scene open after it (polish pass, 2026-11-12: a line of plain
+    /// talk inside a scene, and the act that goes on after it).
+    #[serde(default)]
+    pub same_scene: bool,
+    /// The scenario expects this step, the act itself with a willing
+    /// partner and no invitation before it, to open an Intimate Scene
+    /// (polish pass, 2026-11-12: does a scene open in one Turn?).
+    #[serde(default)]
+    pub opens: bool,
 }
 
 /// A mature scenario from `dir`. When `dir` lies inside the repository,
