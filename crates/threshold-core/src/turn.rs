@@ -50,6 +50,17 @@ pub const METRICS_STEP: &str = "metrics";
 /// The `op_id` of the Opening Turn: a Campaign has one Begin at most.
 pub const BEGIN_OP_ID: &str = "__begin__";
 
+/// The debug step of the row that records a Refusal under its `op_id`
+/// (`Engine::stored_refusal`).
+pub const REFUSAL_STEP: &str = "refusal";
+
+/// The raw text of a `REFUSAL_STEP` row.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredRefusal {
+    kind: RefusalKind,
+    blocked: Vec<EntityId>,
+}
+
 /// Milliseconds per pipeline step, and the prompt tokens the adapter
 /// reported for the last proposal call (`None` when it reports none).
 /// `propose` and `validate` add up both attempts when the retry runs.
@@ -256,11 +267,13 @@ impl Engine {
         if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
             return self.stored_outcome(stored, on_chunk);
         }
+        self.stored_refusal(&op_id)?;
         check_intent(intent)?;
         let view = self.store.snapshot(self.campaign)?;
         let seed = turn_seed(self.store.campaign_seed(self.campaign)?, view.turn_seq + 1);
         let mut timings = Timings::default();
-        let planned = self.plan(&op_id, &view, intent, seed, &mut timings)?;
+        let planned = self.plan(&op_id, &view, intent, seed, &mut timings);
+        let planned = self.logged_refusal(&op_id, planned)?;
         let record = TurnRecord {
             campaign_id: self.campaign,
             op_id,
@@ -288,6 +301,7 @@ impl Engine {
         if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
             return self.stored_outcome(stored, on_chunk);
         }
+        self.stored_refusal(&op_id)?;
         check_intent(clarified_intent)?;
         let now = self.store.snapshot(self.campaign)?;
         let last = now
@@ -310,7 +324,8 @@ impl Engine {
             |roll| Ok(roll.seed),
         )?;
         let mut timings = Timings::default();
-        let mut planned = self.plan(&op_id, &view, clarified_intent, seed, &mut timings)?;
+        let planned = self.plan(&op_id, &view, clarified_intent, seed, &mut timings);
+        let mut planned = self.logged_refusal(&op_id, planned)?;
         for op in &mut planned.ops {
             as_correction(op);
         }
@@ -465,6 +480,48 @@ impl Engine {
         )?;
         self.store.set_narration(turn, &narration)?;
         Ok(narration)
+    }
+
+    /// A Refusal is not a failed Turn (review M3): the same `op_id` gets the
+    /// same Refusal back, with no model call. `Err` with that Refusal when
+    /// the debug log holds a `REFUSAL_STEP` row for `op_id`; the log is
+    /// written in every Campaign file, so this holds after a restart too.
+    fn stored_refusal(&self, op_id: &str) -> Result<(), TurnError> {
+        let refusal = self
+            .store
+            .debug_log(op_id)?
+            .into_iter()
+            .rev()
+            .find(|row| row.step == REFUSAL_STEP)
+            .and_then(|row| serde_json::from_str::<StoredRefusal>(&row.raw).ok());
+        match refusal {
+            Some(StoredRefusal { kind, blocked }) => Err(TurnError::Refused { kind, blocked }),
+            None => Ok(()),
+        }
+    }
+
+    /// Writes one `REFUSAL_STEP` row when `planned` is a Refusal, then hands
+    /// `planned` on.
+    fn logged_refusal(
+        &self,
+        op_id: &str,
+        planned: Result<Planned, TurnError>,
+    ) -> Result<Planned, TurnError> {
+        if let Err(TurnError::Refused { kind, blocked }) = &planned {
+            let raw = serde_json::to_string(&StoredRefusal {
+                kind: *kind,
+                blocked: blocked.clone(),
+            })
+            .map_err(|e| StoreError::Invalid(e.to_string()))?;
+            self.log(
+                op_id,
+                REFUSAL_STEP,
+                &Prompt::default(),
+                &raw,
+                Instant::now(),
+            )?;
+        }
+        planned
     }
 
     /// The outcome of a Turn already stored under this `op_id`.

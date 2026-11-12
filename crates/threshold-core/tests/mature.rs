@@ -1462,3 +1462,40 @@ fn the_ooc_rules_hold_the_intimate_rule() {
     assert_eq!(calls.len(), 1);
     assert!(calls[0].prompt.system.contains(INTIMATE_RULE));
 }
+
+// --- Review of Tasks 1 and 2: a Refusal is not a failed Turn ----------------
+
+/// M3: the same `op_id` after a Refusal gets the same Refusal, with no
+/// model call, so a resend cannot run the model until it answers
+/// otherwise. A new Intent is a new op and is judged afresh.
+#[test]
+fn the_same_op_after_a_refusal_makes_no_model_call() {
+    let mut w = confirmed_gate();
+    let pip = w.pip;
+    bring(&mut w, pip, "Gate Square");
+    let raw = serde_json::to_string(&intimate(&w, Stance::Comply)).unwrap();
+    let gm = RecordedGm::new(vec![raw.clone(), raw.clone(), raw], vec![]);
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    let refused = |r: Result<threshold_core::turn::TurnOutcome, TurnError>| match r {
+        Err(TurnError::Refused { kind, blocked }) => (kind, blocked),
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    let first = refused(engine.play_turn("t1".into(), "I lean closer.", &mut |_| {}));
+    assert_eq!(first, (RefusalKind::AdultsOnly, vec![pip]));
+    assert_eq!(gm.calls().len(), 1);
+
+    let again = refused(engine.play_turn("t1".into(), "I lean closer.", &mut |_| {}));
+    assert_eq!(again, first);
+    assert_eq!(gm.calls().len(), 1, "no model call for the same op");
+
+    let fresh = refused(engine.play_turn("t2".into(), "I lean closer.", &mut |_| {}));
+    assert_eq!(fresh, first);
+    assert_eq!(gm.calls().len(), 2, "a new op runs the model");
+}

@@ -15,7 +15,7 @@
 mod gate;
 mod text;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use gate::{Blocked, Cleared, Presence, after, check, check_after, checked_here, clearance};
 pub use text::{Told, stored_intimate, told};
@@ -28,7 +28,7 @@ use crate::{
 /// Why the core refused a Turn (a Refusal, glossary). The Player reads one
 /// fixed sentence per kind (`view::refusal_text`), never a name, an id or
 /// an age.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefusalKind {
     /// The Campaign's Detail Level is `excluded`.

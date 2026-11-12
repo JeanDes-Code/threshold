@@ -13,7 +13,7 @@ use threshold_core::{
     mature::RefusalKind,
     rules::{D10, Ruleset, turn_seed},
     store::{Store, WorldView},
-    turn::{Engine, MAX_INTENT_CHARS, TurnError, create_campaign, stored_action},
+    turn::{Engine, MAX_INTENT_CHARS, REFUSAL_STEP, TurnError, create_campaign, stored_action},
 };
 
 fn json(p: &DecisionProposal) -> String {
@@ -2131,8 +2131,9 @@ fn an_age_refusal_makes_no_second_proposal_call() {
             .unwrap()
             .is_none()
     );
+    // No retry; the last row records the Refusal under its op (review M3).
     let steps: Vec<String> = steps(&engine, "t1").into_iter().map(|(s, _)| s).collect();
-    assert_eq!(steps, ["propose", "validate"]);
+    assert_eq!(steps, ["propose", "validate", REFUSAL_STEP]);
     // One proposal stays queued.
     assert!(
         gm.propose(&Prompt::default(), &serde_json::json!({}))
