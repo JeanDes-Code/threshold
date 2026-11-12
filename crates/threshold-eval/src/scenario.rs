@@ -323,6 +323,18 @@ pub struct Mature {
 pub struct Arm {
     /// A name for the scenario file; the report never prints it.
     pub name: String,
+    /// Places added to the fixture's Adventure Seed (a private place for a
+    /// willing partner, live evaluation of 2026-11-12).
+    #[serde(default)]
+    pub extra_places: Vec<String>,
+    /// Where the PC starts, in place of the fixture's place: a location
+    /// value, as a seed fact writes it.
+    #[serde(default)]
+    pub pc_at: Option<String>,
+    /// The characters this arm confirms in play, in place of the
+    /// scenario's `confirm`.
+    #[serde(default)]
+    pub confirm: Option<Vec<String>>,
     /// Characters added to the fixture's Adventure Seed before the Campaign
     /// is made, each at a place.
     #[serde(default)]
@@ -337,6 +349,23 @@ pub struct ExtraNpc {
     pub age: u16,
     /// The location value, as a seed fact writes it.
     pub at: String,
+    /// The NPC's attitude toward the PC, -5 to 5, written in the World
+    /// Setup.
+    #[serde(default)]
+    pub attitude: Option<i8>,
+    /// Facts about the NPC that the PC and the NPC both hold, written in
+    /// the World Setup: neutral words only.
+    #[serde(default)]
+    pub facts: Vec<ExtraFact>,
+}
+
+/// A fact of an extra NPC (`ExtraNpc::facts`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtraFact {
+    pub key: String,
+    pub value: String,
+    pub text: String,
 }
 
 /// One step: an Intent with the tag the scenario expects, or "End scene".

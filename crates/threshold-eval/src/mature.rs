@@ -13,15 +13,21 @@
 //! The counting is pure (`tag_count`, `agency_count`, `npc_will_count`,
 //! `bends_will`) and unit-tested on recorded answers.
 
-use std::{collections::BTreeSet, fmt::Write as _};
+use std::{collections::BTreeSet, fmt::Write as _, path::Path};
 
 use threshold_core::{
+    Gm,
+    domain::{AttitudeEntry, FactEntry},
     domain::{
         DecisionProposal, DetailLevel, EntityKind, Handle, Intimacy, SeedEntity, SeedFact, Stance,
     },
-    fixture::{load_adventure_seed, load_world},
+    fixture::load_adventure_seed,
+    fixture::load_world_setup,
     mature::stored_intimacy,
+    pack::ContentPack,
     rules::D10,
+    setup::commit_world,
+    store::CampaignId,
     store::{Store, WorldView},
     turn::{Engine, TurnControl, create_campaign},
 };
@@ -344,19 +350,42 @@ fn agency_task(pc: &str, intent: &str, narration: &str) -> String {
 }
 
 /// A Campaign of one arm: the fixture's Adventure Seed at the scenario's
-/// level, with the arm's extra characters, then the confirmations in play
-/// (`Engine::confirm_age`, an OOC Turn each).
-fn session(
-    ctx: &mut Ctx,
+/// level, with the arm's extra places and characters and the PC's place,
+/// the fixture's World Setup with the extra characters' attitudes toward
+/// the PC and the facts the PC and they hold, then the confirmations in
+/// play (`Engine::confirm_age`, an OOC Turn each).
+fn arm_campaign(
+    root: &Path,
     sc: &scenario::Mature,
     arm: &scenario::Arm,
-    label: String,
+    gm: Box<dyn Gm + Send>,
+    packs: Vec<ContentPack>,
+    label: &str,
     rng_seed: u64,
-) -> Result<Session, String> {
-    let dir = ctx.config.root.join("fixtures").join(&sc.fixture);
+) -> Result<(Engine, CampaignId), String> {
+    let dir = root.join("fixtures").join(&sc.fixture);
     let mut seed =
         load_adventure_seed(&dir.join("adventure-seed.toml")).map_err(|e| e.to_string())?;
     seed.detail = level(&sc.detail)?;
+    let pc = seed.pc.name.clone();
+    for place in &arm.extra_places {
+        seed.entities.push(SeedEntity {
+            name: place.clone(),
+            kind: EntityKind::Place,
+            age: None,
+            other_names: Vec::new(),
+            hidden: false,
+        });
+    }
+    if let Some(at) = &arm.pc_at {
+        let fact = seed
+            .decided
+            .iter_mut()
+            .find(|f| f.subject == pc && f.key == "location")
+            .ok_or("the fixture gives the PC no place")?;
+        fact.value.clone_from(at);
+        fact.text = format!("{pc} is at {at}.");
+    }
     for npc in &arm.extra_npcs {
         seed.entities.push(SeedEntity {
             name: npc.name.clone(),
@@ -372,17 +401,32 @@ fn session(
             text: format!("{} is at {}.", npc.name, npc.at),
         });
     }
+    let mut world = load_world_setup(&dir.join("world.toml")).map_err(|e| e.to_string())?;
+    for npc in &arm.extra_npcs {
+        if let Some(attitude) = npc.attitude {
+            world.attitudes.push(AttitudeEntry {
+                from: npc.name.clone(),
+                to: pc.clone(),
+                attitude,
+            });
+        }
+        for fact in &npc.facts {
+            world.facts.push(FactEntry {
+                subject: npc.name.clone(),
+                key: fact.key.clone(),
+                value: fact.value.clone(),
+                text: fact.text.clone(),
+                known_by: vec![pc.clone(), npc.name.clone()],
+                open: false,
+            });
+        }
+    }
     let mut store = Store::open_in_memory().map_err(|e| e.to_string())?;
     let campaign = create_campaign(&mut store, &seed, rng_seed, None).map_err(|e| e.to_string())?;
-    load_world(&mut store, campaign, &dir.join("world.toml")).map_err(|e| e.to_string())?;
-    let mut engine = Engine::new(
-        store,
-        (ctx.gm)(),
-        Box::new(D10),
-        ctx.packs.clone(),
-        campaign,
-    );
-    for (n, name) in sc.confirm.iter().enumerate() {
+    commit_world(&mut store, campaign, &world).map_err(|e| format!("{e:?}"))?;
+    let mut engine = Engine::new(store, gm, Box::new(D10), packs, campaign);
+    let confirm = arm.confirm.as_ref().unwrap_or(&sc.confirm);
+    for (n, name) in confirm.iter().enumerate() {
         let view = engine
             .store()
             .snapshot(campaign)
@@ -392,6 +436,47 @@ fn session(
             .confirm_age(format!("{label}-confirm-{n}"), id)
             .map_err(|e| format!("{label}: confirmation {}: {e}", n + 1))?;
     }
+    Ok((engine, campaign))
+}
+
+/// The Campaign of the arm `arm` of the mature scenario `name` in `dir`,
+/// after its setup and confirmations, with a model that answers nothing:
+/// for tests and tools that check a scenario's setup.
+pub fn arm_session(
+    root: &Path,
+    dir: &Path,
+    name: &str,
+    arm: &str,
+    rng_seed: u64,
+) -> Result<(Engine, CampaignId), String> {
+    let inside = !is_outside(root, dir);
+    let sc = scenario::load_mature(dir, inside, name)?;
+    let arm = sc
+        .arms
+        .iter()
+        .find(|a| a.name == arm)
+        .ok_or_else(|| format!("{name}: no arm {arm}"))?;
+    let gm = Box::new(threshold_core::RecordedGm::new(Vec::new(), Vec::new()));
+    arm_campaign(root, &sc, arm, gm, Vec::new(), "setup", rng_seed)
+}
+
+/// A Session of one arm (`arm_campaign`) for the run.
+fn session(
+    ctx: &mut Ctx,
+    sc: &scenario::Mature,
+    arm: &scenario::Arm,
+    label: String,
+    rng_seed: u64,
+) -> Result<Session, String> {
+    let (engine, campaign) = arm_campaign(
+        &ctx.config.root,
+        sc,
+        arm,
+        (ctx.gm)(),
+        ctx.packs.clone(),
+        &label,
+        rng_seed,
+    )?;
     Ok(Session {
         engine,
         campaign,

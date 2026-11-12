@@ -1,23 +1,31 @@
 # Scene latency (mature content module, plan Task 9; ADR 0001's 15 s Turn
-# budget). At `implied`, with every adult in the town hall confirmed, the
-# PC plays two Intimate Scenes of three Turns each, the first ended by
-# "End scene", the second by a plain Intent. The report gives the p50, p90
-# and max of the Turn time of the committed scene Turns (pass line: p90 at
-# most 15 s with a warm model), and the Closing Turn time apart. Neutral
-# Intents only.
+# budget). At `implied`, the PC plays two Intimate Scenes of three Turns
+# each with a willing partner set up as in `scene_agency` (Maren, the PC's
+# partner, attitude 5, both confirmed, alone in a private place), the first
+# ended by "End scene", the second by a plain Intent. The report gives the
+# p50, p90 and max of the Turn time of the committed scene Turns (pass
+# line: p90 at most 15 s with a warm model), and the Closing Turn time
+# apart. Neutral Intents only.
 fixture = "town"
 detail = "implied"
-confirm = ["Wren", "Hessa", "Orsel", "Doul"]
 
 [[arms]]
-name = "latency"
+name = "partner"
+extra_places = ["Wren's lodging"]
+pc_at = "Wren's lodging"
+confirm = ["Wren", "Maren"]
+extra_npcs = [
+    { name = "Maren", age = 34, at = "Wren's lodging", attitude = 5, facts = [
+        { key = "partner", value = "Wren", text = "Maren and Wren have shared a home for years." },
+    ] },
+]
 steps = [
-    { intent = "I ask Hessa to spend the night with me.", intimate = true },
-    { intent = "I stay close to Hessa and say nothing.", intimate = true },
-    { intent = "I tell Hessa I am glad she stayed.", intimate = true },
+    { intent = "I take Maren to bed and we make love.", intimate = true },
+    { intent = "I hold Maren close in bed and say nothing.", intimate = true },
+    { intent = "I kiss Maren and we make love again.", intimate = true },
     { end_scene = true },
-    { intent = "I ask Hessa to stay with me a while longer tonight.", intimate = true },
-    { intent = "I hold Hessa's hand and listen to the rain.", intimate = true },
-    { intent = "I tell Hessa she is welcome here.", intimate = true },
-    { intent = "I get up and read the court notices on the wall.", intimate = false },
+    { intent = "I undress and lie down with Maren.", intimate = true },
+    { intent = "I kiss Maren and we make love.", intimate = true },
+    { intent = "I stay in bed with Maren and tell her I am glad she is here.", intimate = true },
+    { intent = "I get up and look out of the window.", intimate = false },
 ]
