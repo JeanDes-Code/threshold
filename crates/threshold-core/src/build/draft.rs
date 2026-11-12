@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -276,7 +276,8 @@ pub enum GapKind {
     /// A known fact on a slot that another fact holds: a second known fact
     /// on the same subject, key and open state; a known fact on the slot of
     /// a `decided` fact or of an other name; or a settled and an open known
-    /// fact on the same subject and key. `at` names the later entry.
+    /// fact on the same subject and key. `at` names the later entry, `with`
+    /// the first entry that holds the slot; the first gets no gap of its own.
     SlotConflict,
 }
 
@@ -289,10 +290,21 @@ pub enum GapKind {
 /// `entities[0].other_names[1].known_to[0]`, `start.present[2]`,
 /// `decided[0].subject`), `knowledge[5].subject` for PC Knowledge, and
 /// `seed` for the stable block as a whole.
+///
+/// `with` names the other entry of a pair, in the same path form, so the
+/// review can show both. Only two kinds set it. `DuplicateName`: the entry
+/// that holds the name first (`entities[0].name`, `pc.other_names[1]`); none
+/// for the reserved name "world". `SlotConflict`: the first entry that holds
+/// the slot, a seed slot before any known fact (`decided[2]`,
+/// `entities[0].other_names[1]`, `knowledge[0]`). With three facts on one
+/// slot, the second and the third each name the first. A gap without
+/// `with` serializes as before.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gap {
     pub kind: GapKind,
     pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub with: Option<String>,
 }
 
 /// Every gap of `draft`, in field order. Derived, never stored. It mirrors
@@ -302,7 +314,15 @@ pub struct Gap {
 pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
     let seed = &draft.seed;
     let mut out = Vec::new();
-    let mut gap = |kind, at: String| out.push(Gap { kind, at });
+    let mut gap = |kind, at: String| {
+        out.push(Gap {
+            kind,
+            at,
+            with: None,
+        })
+    };
+    // The other entry of each pair gap, by kind and `at`; set at the end.
+    let mut pairs: Vec<(GapKind, String, String)> = Vec::new();
     let below_min = |age: u16| seed.min_age.is_some_and(|min| age < min);
     let roster = Roster::of(seed);
 
@@ -329,7 +349,23 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
         .map(|(n, _)| normalize::name(n))
         .filter(|n| !n.is_empty())
         .collect();
-    let mut seen = HashSet::new();
+    // Each name, normalized, and the path of the entry that holds it first.
+    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut duplicate = |norm: String, at: String| -> bool {
+        if norm == "world" {
+            return true;
+        }
+        match seen.get(&norm) {
+            Some(first) => {
+                pairs.push((GapKind::DuplicateName, at, first.clone()));
+                true
+            }
+            None => {
+                seen.insert(norm, at);
+                false
+            }
+        }
+    };
     for (name, at) in names(&pc.name, &pc.other_names) {
         let at = at.map_or_else(|| "pc.name".to_owned(), |j| format!("pc.other_names[{j}]"));
         let norm = normalize::name(name);
@@ -337,7 +373,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
             if at != "pc.name" {
                 gap(GapKind::Missing, at);
             }
-        } else if norm == "world" || !seen.insert(norm) {
+        } else if duplicate(norm, at.clone()) {
             gap(GapKind::DuplicateName, at);
         }
     }
@@ -365,7 +401,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
                 gap(GapKind::Missing, at);
             } else if pc_names.contains(&norm) {
                 gap(GapKind::PcInRoster, at);
-            } else if norm == "world" || !seen.insert(norm) {
+            } else if duplicate(norm, at.clone()) {
                 gap(GapKind::DuplicateName, at);
             }
         }
@@ -417,8 +453,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
     // One fact per slot (data shape 3.6). A known fact may not share its
     // subject and key with an earlier known fact, open or settled, nor take
     // a slot of the seed's Setup Turn.
-    let taken = seed_slots(seed, &roster);
-    let mut known: Vec<(usize, String)> = Vec::new();
+    let mut holders = seed_slots(seed, &roster);
     for (i, fact) in draft.knowledge.iter().enumerate() {
         let (Some(owner), key) = (roster.owner(&fact.subject), normalize::key(&fact.key)) else {
             continue;
@@ -427,10 +462,12 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
             continue;
         }
         let slot = (owner, key);
-        if taken.contains(&slot) || known.contains(&slot) {
-            gap(GapKind::SlotConflict, format!("knowledge[{i}]"));
+        let at = format!("knowledge[{i}]");
+        if let Some((_, first)) = holders.iter().find(|(s, _)| *s == slot) {
+            pairs.push((GapKind::SlotConflict, at.clone(), first.clone()));
+            gap(GapKind::SlotConflict, at.clone());
         }
-        known.push(slot);
+        holders.push((slot, at));
     }
 
     // Where play starts.
@@ -456,6 +493,11 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
 
     if adventure_block_chars(seed) > ADVENTURE_BLOCK_MAX_CHARS {
         gap(GapKind::SeedBlockTooLong, "seed".into());
+    }
+    for (kind, at, with) in pairs {
+        if let Some(g) = out.iter_mut().find(|g| g.kind == kind && g.at == at) {
+            g.with = Some(with);
+        }
     }
     out
 }
@@ -886,24 +928,28 @@ impl Roster {
 
 /// The slots of the seed's Setup Turn that a known fact may not take: one
 /// `alias_` fact per other name, and each `decided` fact. A slot is a roster
-/// entry and a normalized key.
-fn seed_slots(seed: &AdventureSeed, roster: &Roster) -> Vec<(usize, String)> {
-    let pc = std::iter::once((0, &seed.pc.other_names));
+/// entry and a normalized key; each comes with the `Gap.at` path of the
+/// field that holds it.
+fn seed_slots(seed: &AdventureSeed, roster: &Roster) -> Vec<((usize, String), String)> {
+    let pc = std::iter::once((0, "pc".to_owned(), &seed.pc.other_names));
     let entities = seed
         .entities
         .iter()
         .enumerate()
-        .map(|(i, e)| (i + 1, &e.other_names));
-    let aliases = pc.chain(entities).flat_map(|(owner, others)| {
-        others.iter().map(move |o| {
+        .map(|(i, e)| (i + 1, format!("entities[{i}]"), &e.other_names));
+    let aliases = pc.chain(entities).flat_map(|(owner, path, others)| {
+        others.iter().enumerate().map(move |(j, o)| {
             let key = alias_key(&o.name);
-            (owner, normalize::key(&key))
+            (
+                (owner, normalize::key(&key)),
+                format!("{path}.other_names[{j}]"),
+            )
         })
     });
-    let decided = seed.decided.iter().filter_map(|f| {
+    let decided = seed.decided.iter().enumerate().filter_map(|(k, f)| {
         roster
             .owner(&f.subject)
-            .map(|o| (o, normalize::key(&f.key)))
+            .map(|o| ((o, normalize::key(&f.key)), format!("decided[{k}]")))
     });
     aliases.chain(decided).collect()
 }

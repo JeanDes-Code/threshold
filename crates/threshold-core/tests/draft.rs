@@ -175,6 +175,15 @@ fn gap(kind: GapKind, at: &str) -> Gap {
     Gap {
         kind,
         at: at.into(),
+        with: None,
+    }
+}
+
+/// A gap of a pair: `at` is the later entry, `with` the first earlier one.
+fn paired(kind: GapKind, at: &str, with: &str) -> Gap {
+    Gap {
+        with: Some(with.into()),
+        ..gap(kind, at)
     }
 }
 
@@ -266,12 +275,14 @@ fn gaps_name_each_problem() {
     // DuplicateName: one normal name twice, counting other names and
     // accents; the same other name twice on one entity; the reserved "world".
     // Each row has its own age mark, so both ages can be confirmed.
+    // `with` names the entry that holds the name first.
+    let dup = |at: &str, with: &str| vec![paired(GapKind::DuplicateName, at, with)];
     assert_eq!(
         gaps_after(|d| d
             .seed
             .entities
             .push(entity("JÉAN", EntityKind::Npc, Some(30)))),
-        vec![gap(GapKind::DuplicateName, "entities[2].name")]
+        dup("entities[2].name", "entities[0].name")
     );
     assert_eq!(
         gaps_after(|d| {
@@ -279,16 +290,21 @@ fn gaps_name_each_problem() {
             mara.other_names = vec![other("jean")];
             d.seed.entities.push(mara);
         }),
-        vec![gap(GapKind::DuplicateName, "entities[2].other_names[0]")]
+        dup("entities[2].other_names[0]", "entities[0].name")
     );
     assert_eq!(
         gaps_after(|d| d.seed.entities[0].other_names = vec![other("Old Jean"), other("old jean")]),
-        vec![gap(GapKind::DuplicateName, "entities[0].other_names[1]")]
+        dup("entities[0].other_names[1]", "entities[0].other_names[0]")
     );
     assert_eq!(
         gaps_after(|d| d.seed.entities[0].other_names = vec![other("Jean")]),
-        vec![gap(GapKind::DuplicateName, "entities[0].other_names[0]")]
+        dup("entities[0].other_names[0]", "entities[0].name")
     );
+    assert_eq!(
+        gaps_after(|d| d.seed.pc.other_names.push(other("WREN"))),
+        dup("pc.other_names[1]", "pc.name")
+    );
+    // The reserved name has no other entry to name.
     assert_eq!(
         gaps_after(|d| d
             .seed
@@ -345,27 +361,28 @@ fn open(mut fact: KnownFact) -> KnownFact {
 
 #[test]
 fn slot_conflicts_are_gaps() {
-    let conflict = |at: &str| vec![gap(GapKind::SlotConflict, at)];
+    // `at` names the later entry, `with` the entry that holds the slot first.
+    let conflict = |at: &str, with: &str| vec![paired(GapKind::SlotConflict, at, with)];
 
     // Two known facts on one slot, any values; names resolve first.
     assert_eq!(
         gaps_after(|d| d.knowledge.push(known("jean", "Job", "Ferryman"))),
-        conflict("knowledge[2]")
+        conflict("knowledge[2]", "knowledge[0]")
     );
     assert_eq!(
         gaps_after(|d| d.knowledge.push(known("Jean", "job", "sailor"))),
-        conflict("knowledge[2]")
+        conflict("knowledge[2]", "knowledge[0]")
     );
     assert_eq!(
         gaps_after(|d| d.knowledge.push(known("Wren", "debt", "twelve"))),
-        conflict("knowledge[2]")
+        conflict("knowledge[2]", "knowledge[1]")
     );
     assert_eq!(
         gaps_after(|d| {
             d.knowledge.push(open(known("Jean", "move", "the city")));
             d.knowledge.push(open(known("Jean", "move", "the coast")));
         }),
-        conflict("knowledge[3]")
+        conflict("knowledge[3]", "knowledge[2]")
     );
 
     // A known fact on the slot of a seed `decided` fact, or of an other name.
@@ -377,30 +394,72 @@ fn slot_conflicts_are_gaps() {
     };
     assert_eq!(
         gaps_after(|d| d.seed.decided.push(decided.clone())),
-        conflict("knowledge[0]")
+        conflict("knowledge[0]", "decided[0]")
     );
     assert_eq!(
         gaps_after(|d| {
             d.seed.decided.push(decided.clone());
             d.knowledge[0].open = true;
         }),
-        conflict("knowledge[0]")
+        conflict("knowledge[0]", "decided[0]")
     );
     assert_eq!(
         gaps_after(|d| d.knowledge.push(known("Wren", "alias_jay", "Jay"))),
-        conflict("knowledge[2]")
+        conflict("knowledge[2]", "pc.other_names[0]")
     );
 
     // A settled and an open known fact on one subject and key: the later
     // entry is named, in either order.
     assert_eq!(
         gaps_after(|d| d.knowledge.push(open(known("Jean", "job", "captain")))),
-        conflict("knowledge[2]")
+        conflict("knowledge[2]", "knowledge[0]")
     );
     assert_eq!(
         gaps_after(|d| d.knowledge.insert(0, open(known("Jean", "job", "captain")))),
-        conflict("knowledge[1]")
+        conflict("knowledge[1]", "knowledge[0]")
     );
+}
+
+#[test]
+fn a_conflict_names_the_first_other_fact() {
+    // Two facts on one slot: one gap, on the later fact, and it points at
+    // the earlier one. The earlier fact gets no gap of its own.
+    let two = gaps_after(|d| d.knowledge.push(known("Jean", "job", "sailor")));
+    assert_eq!(
+        two,
+        vec![paired(
+            GapKind::SlotConflict,
+            "knowledge[2]",
+            "knowledge[0]"
+        )]
+    );
+
+    // Three facts on one slot: each later fact points at the first one.
+    let three = gaps_after(|d| {
+        d.knowledge.push(known("Jean", "job", "sailor"));
+        d.knowledge.push(known("Jean", "job", "smuggler"));
+    });
+    assert_eq!(
+        three,
+        vec![
+            paired(GapKind::SlotConflict, "knowledge[2]", "knowledge[0]"),
+            paired(GapKind::SlotConflict, "knowledge[3]", "knowledge[0]"),
+        ]
+    );
+
+    // No other kind carries `with`, but a duplicate name.
+    let mut draft = valid_draft();
+    draft.seed.premise = String::new();
+    draft.seed.start.place = "Nowhere".into();
+    draft.knowledge[0].key = "pending_job".into();
+    draft.seed.entities[1].age = Some(3);
+    draft
+        .seed
+        .entities
+        .push(entity("World", EntityKind::Place, None));
+    let found = gaps(&draft);
+    assert!(found.len() >= 5, "{found:?}");
+    assert!(found.iter().all(|g| g.with.is_none()), "{found:?}");
 }
 
 #[test]
@@ -568,10 +627,28 @@ fn build_types_use_snake_case_on_the_wire() {
         serde_json::to_value(gap(GapKind::SeedBlockTooLong, "seed")).unwrap(),
         serde_json::json!({"kind": "seed_block_too_long", "at": "seed"})
     );
+    // A gap with no other entry keeps its old form: no `with` key at all.
     assert_eq!(
-        serde_json::to_value(gap(GapKind::SlotConflict, "knowledge[1]")).unwrap(),
-        serde_json::json!({"kind": "slot_conflict", "at": "knowledge[1]"})
+        serde_json::to_string(&gap(GapKind::SlotConflict, "knowledge[1]")).unwrap(),
+        r#"{"kind":"slot_conflict","at":"knowledge[1]"}"#
     );
+    assert_eq!(
+        serde_json::to_string(&gap(GapKind::Missing, "premise")).unwrap(),
+        r#"{"kind":"missing","at":"premise"}"#
+    );
+    assert_eq!(
+        serde_json::to_value(paired(
+            GapKind::SlotConflict,
+            "knowledge[1]",
+            "knowledge[0]"
+        ))
+        .unwrap(),
+        serde_json::json!({"kind": "slot_conflict", "at": "knowledge[1]", "with": "knowledge[0]"})
+    );
+    // An older gap with no `with` still reads.
+    let old: Gap =
+        serde_json::from_str(r#"{"kind":"duplicate_name","at":"entities[2].name"}"#).unwrap();
+    assert_eq!(old, gap(GapKind::DuplicateName, "entities[2].name"));
     assert_eq!(
         serde_json::to_value(DraftState::Approved).unwrap(),
         serde_json::json!("approved")

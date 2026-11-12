@@ -1041,10 +1041,12 @@ done = ["owns ferry", "bought ferry"]
                 Gap {
                     kind: GapKind::AgeMissing,
                     at: "entities[2].age".into(),
+                    with: None,
                 },
                 Gap {
                     kind: GapKind::UnknownName,
                     at: "start.place".into(),
+                    with: None,
                 },
             ],
             ..BuildRun::default()
