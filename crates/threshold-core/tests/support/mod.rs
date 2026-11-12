@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod hidden;
+pub mod rig;
 
 use threshold_core::{
     domain::{

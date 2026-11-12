@@ -56,6 +56,11 @@ pub const BEGIN_OP_ID: &str = "__begin__";
 /// (`Engine::stored_refusal`).
 pub const REFUSAL_STEP: &str = "refusal";
 
+/// The end of the `op_id` of the Closing Turn that follows a faded Turn of
+/// an Intimate Scene: the faded Turn's `op_id`, then this. A retry of the
+/// same op finds it.
+pub const FADE_CLOSE_SUFFIX: &str = "__fade_close";
+
 /// The raw text of a `REFUSAL_STEP` row.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredRefusal {
@@ -83,8 +88,11 @@ pub struct Timings {
 pub struct TurnOutcome {
     pub turn_id: TurnId,
     pub roll: Option<RollResult>,
+    /// The Narration; for a faded Turn, its Neutral Line.
     pub narration: String,
     pub timings: Timings,
+    /// The Player faded this Turn's Narration (Fade to Black).
+    pub faded: bool,
 }
 
 #[derive(Debug)]
@@ -117,6 +125,10 @@ pub enum TurnError {
     },
     /// "End scene" with no Intimate Scene open.
     NoScene,
+    /// "Fade to black" with no Turn running and no Intimate Scene open.
+    NothingToFade,
+    /// `renarrate` of a faded Turn: a Fade to Black cannot be undone.
+    Faded,
 }
 
 impl fmt::Display for TurnError {
@@ -145,6 +157,8 @@ impl fmt::Display for TurnError {
             }
             Self::Refused { kind, .. } => f.write_str(crate::view::refusal_text(*kind)),
             Self::NoScene => f.write_str("no Intimate Scene is open"),
+            Self::NothingToFade => f.write_str("nothing to fade"),
+            Self::Faded => f.write_str("this Turn was faded: it is not narrated again"),
         }
     }
 }
@@ -187,9 +201,23 @@ pub fn create_campaign(
 pub struct TurnControl<'a> {
     /// Gets each piece of the Narration the Player may read.
     pub on_chunk: &'a mut dyn FnMut(&str),
-    /// True once the Player asked to fade the Narration. Read by Task 6 of
-    /// the plan; nothing reads it yet.
+    /// True once the Player asked to fade the Narration (Fade to Black).
+    /// `narrate_through` reads it before the narration call and after each
+    /// chunk; the Engine reads it once more when the call returns.
     pub faded: &'a dyn Fn() -> bool,
+}
+
+/// The fade flag of a Closing Turn that is born faded: always up.
+fn always_faded() -> bool {
+    true
+}
+
+/// What one narration call gave.
+enum Narrated {
+    /// The Narration, read in full.
+    Read(String),
+    /// The Player faded it: no text is kept.
+    Faded,
 }
 
 /// The fade flag of a caller with no fade button: never up.
@@ -472,6 +500,75 @@ impl Engine {
         self.close_scene(op_id, SceneWhy::EndScene, ctl)
     }
 
+    /// "Fade to black" while no Turn runs (data shape 3.6): with an
+    /// Intimate Scene open, a Closing Turn born faded closes it (one
+    /// proposal call, no narration call, `why: FadeToBlack`); the Turns
+    /// already read keep their text. With no scene, `NothingToFade`. While a
+    /// Turn runs, the shell raises the caller's fade flag instead and the
+    /// running Turn fades itself (`TurnControl::faded`).
+    ///
+    /// `op_id` may name the Turn that was streaming when the Player pressed
+    /// the button and that ended before it read the flag: when that Turn is
+    /// the latest Turn of the Campaign, not faded and not the Opening, it is
+    /// faded now (and a scene it left open closes, faded), with no model
+    /// call but the closing proposal. Any other stored Turn is returned as
+    /// it is, so a second call changes nothing.
+    pub fn fade(&mut self, op_id: OpId) -> Result<TurnOutcome, TurnError> {
+        let mut sink = |_: &str| {};
+        let mut ctl = TurnControl {
+            on_chunk: &mut sink,
+            faded: &always_faded,
+        };
+        if let Some(stored) = self.store.turn_by_campaign_op(self.campaign, &op_id)? {
+            let latest = self.store.turns(self.campaign)?.last().map(|t| t.id) == Some(stored.id);
+            let kind = stored.record.kind;
+            if latest && !stored.faded && kind.tells() && kind != TurnKind::Opening {
+                let narration = self.after_fade(stored.id, &op_id)?;
+                return Ok(TurnOutcome {
+                    turn_id: stored.id,
+                    roll: stored_roll(&stored.record.proposal_json),
+                    narration,
+                    timings: Timings::default(),
+                    faded: true,
+                });
+            }
+            return self.stored_outcome(stored, &mut ctl);
+        }
+        if self.store.snapshot(self.campaign)?.scene_open.is_none() {
+            return Err(TurnError::NothingToFade);
+        }
+        self.close_scene(op_id, SceneWhy::FadeToBlack, &mut ctl)
+    }
+
+    /// After the Player faded the Narration of `turn_id`: the row loses
+    /// its text for good (`Store::set_faded`). When an Intimate Scene is
+    /// still open and the Turn is not itself a Closing Turn, a Closing Turn
+    /// born faded closes it, in the same call, under the op
+    /// `<op_id>FADE_CLOSE_SUFFIX`. The faded Turn's outcome carries its
+    /// Neutral Line.
+    fn after_fade(&mut self, turn_id: TurnId, op_id: &str) -> Result<String, TurnError> {
+        self.store.set_faded(turn_id)?;
+        let stored = self
+            .store
+            .turn(turn_id)?
+            .ok_or_else(|| StoreError::Invalid("unknown turn".into()))?;
+        if stored.record.kind != TurnKind::Closing
+            && self.store.snapshot(self.campaign)?.scene_open.is_some()
+        {
+            let mut sink = |_: &str| {};
+            let mut ctl = TurnControl {
+                on_chunk: &mut sink,
+                faded: &always_faded,
+            };
+            let close = format!("{op_id}{FADE_CLOSE_SUFFIX}");
+            match self.close_scene(close, SceneWhy::FadeToBlack, &mut ctl) {
+                Ok(_) | Err(TurnError::NoScene) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(mature::neutral_line(&stored).unwrap_or_default())
+    }
+
     /// The Closing Turn of "End scene" (and of a Fade to Black), for `why`.
     fn close_scene(
         &mut self,
@@ -571,6 +668,7 @@ impl Engine {
             roll: None,
             narration,
             timings,
+            faded: false,
         })
     }
 
@@ -623,6 +721,9 @@ impl Engine {
             .turn(turn)?
             .filter(|t| t.record.campaign_id == self.campaign)
             .ok_or_else(|| StoreError::Invalid("unknown turn".into()))?;
+        if stored.faded {
+            return Err(TurnError::Faded);
+        }
         let view_after = self.store.snapshot_before(self.campaign, stored.seq + 1)?;
         // The screens read the story against the state now, so the stream
         // filter does too.
@@ -659,7 +760,7 @@ impl Engine {
             intimate: mature::stored_intimate(&stored.record.proposal_json),
             closing: stored.record.kind == TurnKind::Closing,
         };
-        let narration = self.narrate(
+        let narrated = self.narrate(
             &stored.record.op_id,
             &view_after,
             &now,
@@ -667,8 +768,13 @@ impl Engine {
             &stored.record.intent,
             ctl,
         )?;
-        self.store.set_narration(turn, &narration)?;
-        Ok(narration)
+        match narrated {
+            Narrated::Read(narration) => {
+                self.store.set_narration(turn, &narration)?;
+                Ok(narration)
+            }
+            Narrated::Faded => self.after_fade(turn, &stored.record.op_id),
+        }
     }
 
     /// A Refusal is not a failed Turn (review M3): the same `op_id` gets the
@@ -719,17 +825,21 @@ impl Engine {
         stored: StoredTurn,
         ctl: &mut TurnControl<'_>,
     ) -> Result<TurnOutcome, TurnError> {
-        let narration = match stored.narration {
-            Some(narration) => narration,
-            None => self
+        // A faded Turn gives its Neutral Line and makes no model call.
+        let narration = match (&stored.narration, stored.faded) {
+            (_, true) => mature::neutral_line(&stored).unwrap_or_default(),
+            (Some(narration), false) => narration.clone(),
+            (None, false) => self
                 .renarrate_with(stored.id, ctl)
                 .map_err(|e| narration_failed(stored.id, e))?,
         };
+        let faded = stored.faded || self.store.turn(stored.id)?.is_some_and(|t| t.faded);
         Ok(TurnOutcome {
             turn_id: stored.id,
             roll: stored_roll(&stored.record.proposal_json),
             narration,
             timings: Timings::default(),
+            faded,
         })
     }
 
@@ -804,18 +914,25 @@ impl Engine {
             intimate: planned.intimate,
             closing,
         };
-        let narration = self
+        let narrated = self
             .narrate(&op_id, &view_after, &view_after, &committed, &intent, ctl)
             .map_err(|e| narration_failed(turn_id, e))?;
         timings.narrate_ms = ms(step);
         timings.narration_prompt_tokens = self.gm.last_prompt_tokens();
-        self.store.set_narration(turn_id, &narration)?;
+        let (narration, faded) = match narrated {
+            Narrated::Read(narration) => {
+                self.store.set_narration(turn_id, &narration)?;
+                (narration, false)
+            }
+            Narrated::Faded => (self.after_fade(turn_id, &op_id)?, true),
+        };
         timings.total_ms = ms(start);
         Ok(TurnOutcome {
             turn_id,
             roll: planned.roll,
             narration,
             timings,
+            faded,
         })
     }
 
@@ -838,7 +955,7 @@ impl Engine {
         committed: &Committed<'_>,
         intent: &str,
         ctl: &mut TurnControl<'_>,
-    ) -> Result<String, TurnError> {
+    ) -> Result<Narrated, TurnError> {
         let perceived = perceived_by_pc(committed.ops, view_after);
         let seen = seen_present(view_after);
         let reactions: Vec<Reaction> = committed
@@ -891,23 +1008,40 @@ impl Engine {
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
-        let narration = narrate_through(self.gm.as_ref(), &prompt, max_tokens, hidden, ctl);
-        let cut = narration.is_ok() && self.gm.last_done_reason().as_deref() == Some("length");
-        let logged = if cut {
+        // A flag already up makes no call, so no `metrics` row either.
+        let called = !(ctl.faded)();
+        let (narration, stopped) =
+            narrate_through(self.gm.as_ref(), &prompt, max_tokens, hidden, ctl);
+        // The flag rose during the call, or after its last chunk: the Turn
+        // is faded all the same.
+        let faded = stopped || (ctl.faded)();
+        let cut =
+            !faded && narration.is_ok() && self.gm.last_done_reason().as_deref() == Some("length");
+        // The debug row keeps the text received before the stop, then a
+        // `[faded]` line (owner's decision 5). Only `get_debug` reads it,
+        // in debug mode.
+        let logged = if faded {
+            format!("{}\n[faded]", answer_text(&narration))
+        } else if cut {
             format!("{}\n[generation stopped: length]", answer_text(&narration))
         } else {
             answer_text(&narration).to_owned()
         };
         self.log(op_id, "narrate", &prompt, &logged, start)?;
-        self.log_stats(op_id, "narrate")?;
+        if called {
+            self.log_stats(op_id, "narrate")?;
+        }
+        if faded {
+            return Ok(Narrated::Faded);
+        }
         let narration = narration?;
         // The token cap cut the answer: the stream showed the rest, the
         // stored Narration ends on its last full sentence (data shape 3.10).
-        Ok(if cut {
+        Ok(Narrated::Read(if cut {
             last_full_sentence(&narration).to_owned()
         } else {
             narration
-        })
+        }))
     }
 
     /// The opening narration call: `opening_prompt` on the state after the
@@ -923,7 +1057,13 @@ impl Engine {
         let prompt = opening_prompt(view_after, &self.packs);
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
-        let narration = narrate_through(self.gm.as_ref(), &prompt, None, hidden, ctl);
+        // No fade of the Opening Narration (data shape 10): the flag is not
+        // read.
+        let mut ctl = TurnControl {
+            on_chunk: &mut *ctl.on_chunk,
+            faded: &never_faded,
+        };
+        let (narration, _) = narrate_through(self.gm.as_ref(), &prompt, None, hidden, &mut ctl);
         self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
         self.log_stats(op_id, "narrate")?;
         Ok(narration?)
@@ -1508,25 +1648,48 @@ fn last_full_sentence(text: &str) -> &str {
 /// that names someone the PC cannot name never reaches `on_chunk`. The
 /// answer, which becomes the stored Narration, is returned unchanged; the
 /// commit-time rule of `world::pc_sight` handles it.
+///
+/// Fade to Black (data shape 3.6): the fade flag is read before the call and
+/// after each chunk. A flag already up makes no call. Once it is up, no more
+/// text reaches `on_chunk` and the model gets `Stream::Stop`; the text
+/// received so far comes back for the debug log only. The second value is
+/// true when the flag stopped the Narration.
 fn narrate_through(
     gm: &dyn Gm,
     prompt: &Prompt,
     max_tokens: Option<u32>,
     hidden: HashSet<String>,
     ctl: &mut TurnControl<'_>,
-) -> Result<String, GmError> {
+) -> (Result<String, GmError>, bool) {
+    let faded = ctl.faded;
+    if faded() {
+        return (Ok(String::new()), true);
+    }
     let mut filter = TagFilter::new(hidden);
     let on_chunk = &mut *ctl.on_chunk;
+    let mut stopped = false;
     let answer = gm.narrate(prompt, max_tokens, &mut |chunk| {
+        if stopped || faded() {
+            stopped = true;
+            return Stream::Stop;
+        }
         let shown = filter.push(chunk);
         if !shown.is_empty() {
             on_chunk(&shown);
         }
-        Stream::More
+        if faded() {
+            stopped = true;
+            Stream::Stop
+        } else {
+            Stream::More
+        }
     });
+    if stopped || faded() {
+        return (answer, true);
+    }
     let rest = filter.finish();
     if !rest.is_empty() {
         on_chunk(&rest);
     }
-    answer
+    (answer, false)
 }

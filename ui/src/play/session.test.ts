@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { renarrateOpId, type Attempt, type TurnSummary } from "../api";
 import { IDLE_TURN, createTurnStore, type TurnDeps } from "./session";
 
-const committed: TurnSummary = { turn_id: 4, roll: null, narration: "ok", narration_error: null, total_ms: 1 };
+const committed: TurnSummary = {
+  turn_id: 4,
+  roll: null,
+  narration: "ok",
+  narration_error: null,
+  total_ms: 1,
+  faded: false,
+};
 
 /** A promise the test settles by hand. */
 function deferred<T>() {
@@ -243,5 +250,74 @@ describe("createTurnStore", () => {
     off();
     store.chunk({ op_id: "op-1", text: "y" });
     expect(heard).toBe(2);
+  });
+
+  it("after a fade, later chunks of that op_id are dropped", async () => {
+    const { store, log } = harness();
+    const turn = attempt("op-1");
+    const done = store.run(turn.make, "I wait.");
+    store.chunk({ op_id: "op-1", text: "Dusk: the hall" });
+    const call = deferred<unknown>();
+    const fading = store.fade(() => call.promise);
+    // The text already streamed leaves the screen at once.
+    expect(store.get().faded).toBe(true);
+    expect(store.get().stream).toBe("");
+    store.chunk({ op_id: "op-1", text: " empties." });
+    expect(store.get().stream).toBe("");
+    call.resolve({ pending: true });
+    await fading;
+    // A second fade changes nothing.
+    let second = 0;
+    await store.fade(() => {
+      second += 1;
+      return Promise.resolve({ pending: true });
+    });
+    expect(second).toBe(0);
+    turn.result.resolve({ ...committed, faded: true, narration: "This part of the story is skipped (5 minutes)." });
+    await done;
+    expect(store.get().faded).toBe(false);
+    expect(store.get().busy).toBe(false);
+    expect(log.reloads).toBe(1);
+  });
+
+  it("a fade with no Turn running calls the shell, then reloads the view once", async () => {
+    const { store, log } = harness();
+    const call = deferred<unknown>();
+    const fading = store.fade(() => call.promise);
+    expect(store.get().busy).toBe(true);
+    expect(store.get().faded).toBe(true);
+    call.resolve({ pending: false });
+    await fading;
+    expect(store.get().busy).toBe(false);
+    expect(store.get().faded).toBe(false);
+    expect(log.reloads).toBe(1);
+  });
+
+  it("a fade the running Turn missed is sent again with its op_id once it ends", async () => {
+    const { store, log } = harness();
+    const turn = attempt("op-1");
+    const done = store.run(turn.make, "I wait.");
+    store.chunk({ op_id: "op-1", text: "Dusk: the hall empties." });
+    const sent: (string | null)[] = [];
+    await store.fade((opId) => {
+      sent.push(opId);
+      return Promise.resolve({ pending: true });
+    });
+    // The Turn ended before it read the flag: it comes back read in full.
+    turn.result.resolve(committed);
+    await done;
+    expect(sent).toEqual(["op-1", "op-1"]);
+    expect(log.reloads).toBe(1);
+    expect(store.get().faded).toBe(false);
+  });
+
+  it("a fade with no Turn running sends no op_id", async () => {
+    const { store } = harness();
+    const sent: (string | null)[] = [];
+    await store.fade((opId) => {
+      sent.push(opId);
+      return Promise.resolve({ pending: false });
+    });
+    expect(sent).toEqual([null]);
   });
 });

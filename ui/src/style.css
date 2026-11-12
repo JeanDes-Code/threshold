@@ -200,6 +200,13 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
   border: 1px dashed var(--card-border); border-radius: var(--radius-2);
 }
 
+.play-faded {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm); font-style: italic; color: var(--muted);
+  border-left: 2px solid var(--rule);
+}
+
 /* Side panel. */
 .play-panel {
   display: flex; flex-direction: column; gap: var(--space-3);

@@ -690,7 +690,7 @@ pub(super) fn rebuild(db: &Connection, c: u64) -> Result<(), StoreError> {
 }
 
 pub(super) fn read_turn(db: &Connection, id: u64) -> Result<StoredTurn, StoreError> {
-    let row=db.query_row("SELECT campaign_id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration FROM turn WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get::<_,String>(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?)))?;
+    let row=db.query_row("SELECT campaign_id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration,faded FROM turn WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get::<_,String>(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?)))?;
     Ok(StoredTurn {
         id,
         seq: row.1,
@@ -704,6 +704,7 @@ pub(super) fn read_turn(db: &Connection, id: u64) -> Result<StoredTurn, StoreErr
             clock_after: row.7,
         },
         narration: row.8,
+        faded: row.9,
     })
 }
 fn ids(db: &Connection, sql: &str, c: u64) -> Result<Vec<u64>, StoreError> {
@@ -930,7 +931,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             },
         )
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let mut stmt = db.prepare("SELECT t.id,t.seq,t.op_id,t.kind,t.intent,t.proposal_json,t.clock_before,t.clock_after,t.narration,l.op_json FROM turn t LEFT JOIN ledger l ON l.turn_id=t.id AND (json_type(l.op_json,'$.op.revert_turn') IS NOT NULL OR json_type(l.op_json,'$.revert_turn') IS NOT NULL) WHERE t.campaign_id=?1 ORDER BY t.seq DESC,l.seq DESC")?;
+    let mut stmt = db.prepare("SELECT t.id,t.seq,t.op_id,t.kind,t.intent,t.proposal_json,t.clock_before,t.clock_after,t.narration,l.op_json,t.faded FROM turn t LEFT JOIN ledger l ON l.turn_id=t.id AND (json_type(l.op_json,'$.op.revert_turn') IS NOT NULL OR json_type(l.op_json,'$.revert_turn') IS NOT NULL) WHERE t.campaign_id=?1 ORDER BY t.seq DESC,l.seq DESC")?;
     let rows = stmt
         .query_map([c], |r| {
             Ok((
@@ -944,6 +945,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
                 r.get::<_, u64>(7)?,
                 r.get::<_, Option<String>>(8)?,
                 r.get::<_, Option<String>>(9)?,
+                r.get::<_, bool>(10)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -953,8 +955,19 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
     // The Narration of every standing story Turn, for `story_names`.
     let mut narrations: Vec<String> = Vec::new();
     let mut visited = HashSet::new();
-    for (id, seq, op_id, kind, intent, proposal_json, clock_before, clock_after, narration, op) in
-        rows
+    for (
+        id,
+        seq,
+        op_id,
+        kind,
+        intent,
+        proposal_json,
+        clock_before,
+        clock_after,
+        narration,
+        op,
+        faded,
+    ) in rows
     {
         if reverted.contains(&id) {
             continue;
@@ -988,6 +1001,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
                     clock_after,
                 },
                 narration,
+                faded,
             });
         }
     }
@@ -1058,16 +1072,18 @@ pub(super) fn historical(db: &Connection, c: u64, seq: u64) -> Result<WorldView,
         "INSERT INTO campaign(id,adventure_seed_json,clock_min,seed) VALUES(?1,?2,?3,?4)",
         params![campaign.0, campaign.1, campaign.2, campaign.3],
     )?;
-    let mut stmt=db.prepare("SELECT id,campaign_id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration FROM turn WHERE campaign_id=?1 AND seq<?2 ORDER BY seq")?;
+    // `faded` is copied with the row (data shape 3.6): a faded Turn of the
+    // past stays faded in a historical view.
+    let mut stmt=db.prepare("SELECT id,campaign_id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration,faded FROM turn WHERE campaign_id=?1 AND seq<?2 ORDER BY seq")?;
     let rows = stmt
         .query_map(params![c, seq], |r| {
-            (0..10)
+            (0..11)
                 .map(|i| r.get::<_, rusqlite::types::Value>(i))
                 .collect::<Result<Vec<_>, _>>()
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for row in rows {
-        tx.execute("INSERT INTO turn(id,campaign_id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",rusqlite::params_from_iter(row))?;
+        tx.execute("INSERT INTO turn(id,campaign_id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration,faded) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",rusqlite::params_from_iter(row))?;
     }
     let mut stmt=db.prepare("SELECT l.seq,l.turn_id,l.op_json FROM ledger l JOIN turn t ON t.id=l.turn_id WHERE t.campaign_id=?1 AND t.seq<?2 ORDER BY l.seq")?;
     let rows = stmt

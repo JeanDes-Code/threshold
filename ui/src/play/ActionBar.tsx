@@ -54,6 +54,8 @@ interface Props {
   onBegin: () => void;
   /** "End scene": the Closing Turn of the open Intimate Scene. */
   onEndScene: () => void;
+  /** "Fade to black": stops and hides the Narration, or ends the scene faded. */
+  onFade: () => void;
   onDismissAnswer: () => void;
   /** A Scene is shown: a quick Note can be about it. */
   hasScene: boolean;
@@ -232,6 +234,16 @@ export default function ActionBar(props: Props) {
                 onClick={props.onEndScene}
               >
                 End scene
+              </button>
+            )}
+            {later.fade.shown && (
+              <button
+                type="button"
+                className="play-btn play-btn--outline"
+                disabled={!later.fade.enabled}
+                onClick={props.onFade}
+              >
+                Fade to black
               </button>
             )}
           </div>

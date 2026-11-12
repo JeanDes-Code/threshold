@@ -185,4 +185,18 @@ describe("Task 5 fixes", () => {
       expect(scene.end).toEqual({ shown: true, enabled: phase === "idle" });
     }
   });
+
+  it("Fade to black shows while narrating or in a scene, and is enabled as shape 3.12 says", () => {
+    const intimate = { kind: "intimate", since_turn: 7 } as const;
+    const plain = { kind: "plain" } as const;
+    expect(laterButtons(plain, "narrating").fade).toEqual({ shown: true, enabled: true });
+    expect(laterButtons(intimate, "narrating").fade).toEqual({ shown: true, enabled: true });
+    expect(laterButtons(intimate, "idle").fade).toEqual({ shown: true, enabled: true });
+    for (const phase of ["deciding", "answering", "fading"] as TurnPhase[]) {
+      expect(laterButtons(intimate, phase).fade).toEqual({ shown: true, enabled: false });
+      expect(laterButtons(plain, phase).fade).toEqual({ shown: false, enabled: false });
+    }
+    expect(laterButtons(plain, "idle").fade).toEqual({ shown: false, enabled: false });
+    expect(PHASE_TEXT.fading).not.toBe("");
+  });
 });

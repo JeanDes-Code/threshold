@@ -45,11 +45,12 @@ export const journalView: JournalView = {
         {
           turn_id: 2,
           intent: "I hand Maren the sealed manifest and ask whether the Gull has docked.",
+          faded: null,
           decision: true,
           closed: [],
         },
-        { turn_id: 3, intent: "I ask who keeps the berth roster at night.", decision: false, closed: [] },
-        { turn_id: 5, intent: "I ask Maren to let me read the ledger, politely.", decision: true, closed: [] },
+        { turn_id: 3, intent: "I ask who keeps the berth roster at night.", faded: null, decision: false, closed: [] },
+        { turn_id: 5, intent: "I ask Maren to let me read the ledger, politely.", faded: null, decision: true, closed: [] },
       ],
       learned: [
         fact(maren, "role", "Maren is the night clerk of the Harbour Office."),
@@ -69,11 +70,12 @@ export const journalView: JournalView = {
         {
           turn_id: 6,
           intent: "I put the ledger back on the counter and walk down to the Lantern Steps.",
+          faded: null,
           decision: true,
           closed: [{ outcome: "Done", text: ledger.text }],
         },
-        { turn_id: 7, intent: "I ask the porters who unloaded the Gull's last cargo.", decision: false, closed: [] },
-        { turn_id: 8, intent: "I pay Tovin two marks to show me the empty berth.", decision: true, closed: [] },
+        { turn_id: 7, intent: "I ask the porters who unloaded the Gull's last cargo.", faded: null, decision: false, closed: [] },
+        { turn_id: 8, intent: "I pay Tovin two marks to show me the empty berth.", faded: null, decision: true, closed: [] },
       ],
       learned: [
         fact(tovin, "role", "Tovin carries cargo for anyone who pays in coin."),
@@ -89,8 +91,8 @@ export const journalView: JournalView = {
       clock_to: at(4, 6, 50),
       present: [stranger],
       acts: [
-        { turn_id: 9, intent: "I wait by the cellar door for the day watch.", decision: false, closed: [] },
-        { turn_id: 10, intent: "I follow the man in the grey coat into the alley.", decision: true, closed: [] },
+        { turn_id: 9, intent: "I wait by the cellar door for the day watch.", faded: null, decision: false, closed: [] },
+        { turn_id: 10, intent: "I follow the man in the grey coat into the alley.", faded: null, decision: true, closed: [] },
       ],
       learned: [fact(guild, "watch", "The Salt Guild changes the cellar watch at dawn.")],
     },

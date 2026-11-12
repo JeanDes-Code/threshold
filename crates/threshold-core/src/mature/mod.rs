@@ -15,7 +15,8 @@
 //! of a Turn committed with `intimate` (`turn_text`). Task 5 adds the
 //! Closing Turn of "End scene": its limits and the core's own closing
 //! (`default_close`), and `open_scene`, the scene as every reader outside
-//! the ledger sees it.
+//! the ledger sees it. Task 6 adds the Neutral Line of a faded Turn
+//! (`FADED_TEMPLATE`): a faded Turn is its line for every reader.
 
 mod gate;
 mod scene;
@@ -30,8 +31,8 @@ pub use scene::{
     scene_op,
 };
 pub use text::{
-    CLOSING_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, neutral_line, stored_intimate, told,
-    turn_text,
+    CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, neutral_line,
+    stored_intimate, told, turn_text,
 };
 
 use crate::{

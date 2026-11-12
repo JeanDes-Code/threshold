@@ -99,6 +99,8 @@ function Turn({ turn, onName, onRenarrate, busy, tabbable }: TurnProps) {
         turn.body.blocks.map((block, i) => (
           <BlockView key={i} block={block} onName={onName} tabbable={tabbable} />
         ))
+      ) : turn.body.kind === "faded" ? (
+        <p className="play-faded">{turn.body.line}</p>
       ) : (
         <div className="play-missing">
           <span>The Narration of this Turn is missing. The Turn itself is committed.</span>

@@ -154,7 +154,7 @@ fn story_turn(view: &PlayView, turn: TurnId) -> &StoryTurn {
 fn blocks(view: &PlayView, turn: TurnId) -> &[Block] {
     match &story_turn(view, turn).body {
         TurnBody::Narration { blocks } => blocks,
-        TurnBody::Missing => panic!("turn {turn} has no Narration"),
+        TurnBody::Missing | TurnBody::Faded { .. } => panic!("turn {turn} has no Narration"),
     }
 }
 
@@ -887,7 +887,7 @@ fn journal_view_shows_pc_knowledge_only() {
     );
     assert_eq!(
         keys(&json["scenes"][0]["acts"][0]),
-        ["closed", "decision", "intent", "turn_id"]
+        ["closed", "decision", "faded", "intent", "turn_id"]
     );
     assert_eq!(
         keys(&json["closed"][0]),
@@ -2066,4 +2066,45 @@ fn play_and_journal_views_show_pc_knowledge_only_in_a_scene() {
         assert!(!play.contains(hidden), "{hidden} leaks: {play}");
         assert!(!journal.contains(hidden), "{hidden} leaks: {journal}");
     }
+}
+
+/// Fade to Black (Task 6): the Play story shows a faded Turn as its Intent
+/// and its Neutral Line, the Journal as its line in place of the Intent,
+/// and no screen holds the hidden text.
+#[test]
+fn a_faded_turn_shows_its_line_and_no_text() {
+    let mut w = HiddenWorld::new();
+    let turn = w.play("I look around the square.", &observe(), 5, vec![]);
+    w.narrate(turn, "MARKER-FADE-2 The square is busy.");
+    w.store.set_faded(turn).unwrap();
+    let stored = w.store.turn(turn).unwrap().unwrap();
+    assert!(stored.faded);
+    assert_eq!(stored.narration, None);
+    let line = threshold_core::mature::neutral_line(&stored).unwrap();
+    assert!(line.contains("5 minutes"), "{line}");
+
+    let view = view_of(&w);
+    let story = story_turn(&view, turn);
+    assert_eq!(story.intent, "I look around the square.");
+    assert_eq!(story.body, TurnBody::Faded { line: line.clone() });
+    let journal = journal_of(&w);
+    let act = journal
+        .scenes
+        .iter()
+        .flat_map(|s| &s.acts)
+        .find(|a| a.turn_id == turn)
+        .expect("the act");
+    assert_eq!(act.intent, "");
+    assert_eq!(act.faded.as_deref(), Some(line.as_str()));
+    let sheet = threshold_core::view::ooc_sheet(&w.sight());
+    assert!(sheet.contains(&line), "{sheet}");
+    for text in [
+        serde_json::to_string(&view).unwrap(),
+        serde_json::to_string(&journal).unwrap(),
+        sheet,
+    ] {
+        assert!(!text.contains("MARKER-FADE-2"), "{text}");
+    }
+    let journal = serde_json::to_string(&journal).unwrap();
+    assert!(!journal.contains("I look around the square."), "{journal}");
 }

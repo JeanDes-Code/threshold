@@ -163,7 +163,6 @@ pub struct StoryTurn {
     pub body: TurnBody,
 }
 
-/// The mature content module adds a `Faded` variant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TurnBody {
@@ -172,6 +171,11 @@ pub enum TurnBody {
     },
     /// The Turn is committed and its Narration failed.
     Missing,
+    /// The Player faded the Narration (Fade to Black): its Neutral Line, made
+    /// by the core from the Turn row. The hidden text is stored nowhere.
+    Faded {
+        line: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -359,7 +363,10 @@ pub struct SceneEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Act {
     pub turn_id: TurnId,
+    /// Empty when the Turn was faded: the Journal shows `faded` instead.
     pub intent: String,
+    /// The Neutral Line of a faded Turn (Fade to Black, data shape 3.11).
+    pub faded: Option<String>,
     /// A decision of the PC (data shape 3.2).
     pub decision: bool,
     /// The Open Items this Turn closed, each with how it ended (review
@@ -453,9 +460,15 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
             .filter(|m| m.kind.has_intent())
             .filter_map(|m| {
                 let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
+                let faded = turn.faded.then(|| turn.line.clone().unwrap_or_default());
                 Some(Act {
                     turn_id: m.turn,
-                    intent: turn.intent.clone(),
+                    intent: if faded.is_some() {
+                        String::new()
+                    } else {
+                        turn.intent.clone()
+                    },
+                    faded,
                     decision: m.decision,
                     closed: sight
                         .open_items
@@ -816,12 +829,15 @@ fn pin_lines(sight: &PcSight, marks: &Marks) -> Vec<PinLine> {
 
 /// The title and the text of a resolved Pin.
 fn pin_words(sight: &PcSight, marks: &Marks, target: &Target) -> Option<(String, String)> {
+    // A faded Turn's act is its Neutral Line, as in the Journal.
     let intent = |turn: TurnId| {
-        sight
-            .story
-            .iter()
-            .find(|t| t.turn == turn)
-            .map(|t| t.intent.clone())
+        sight.story.iter().find(|t| t.turn == turn).map(|t| {
+            if t.faded {
+                t.line.clone().unwrap_or_default()
+            } else {
+                t.intent.clone()
+            }
+        })
     };
     let scene_place = |turn: TurnId| {
         let scene = sight
@@ -886,6 +902,9 @@ fn place_title(sight: &PcSight, place: Option<&str>) -> String {
 
 fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {
     let body = match turn.narration {
+        None if turn.faded => TurnBody::Faded {
+            line: turn.line.clone().unwrap_or_default(),
+        },
         None => TurnBody::Missing,
         Some(_) => TurnBody::Narration {
             blocks: turn
@@ -1260,14 +1279,15 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
     let turns: Vec<&SightTurn> = sight
         .story
         .iter()
-        .filter(|t| !t.reverted && t.narration.is_some())
+        .filter(|t| !t.reverted && (t.narration.is_some() || t.faded))
         .collect();
     let recent = &turns[turns.len().saturating_sub(OOC_RECENT_TURNS)..];
     if !recent.is_empty() {
         out.push_str("RECENT TURNS (oldest first)\n");
         for turn in recent {
-            // A Turn committed with `intimate` is its Neutral Line, in place
-            // of its Intent and its Narration (data shape 3.6).
+            // A Turn committed with `intimate`, a Closing Turn and a faded
+            // Turn are their Neutral Line, in place of the Intent and the
+            // Narration (data shape 3.6).
             if let Some(line) = &turn.line {
                 out.push_str(&format!("{}\n", one_line(line)));
                 continue;

@@ -6,6 +6,7 @@ import PinButton from "../marks/PinButton";
 import { nameText, npcColor } from "../play/logic";
 import {
   aboutText,
+  actText,
   bySubject,
   clockSpan,
   closedText,
@@ -161,10 +162,10 @@ function Timeline({ view, actions, pin }: { view: JournalView; actions: JournalA
                           ›
                         </span>
                         <span className="journal-act__text">
-                          {act.intent}
+                          {actText(act)}
                           {act.decision && <span className="journal-badge">Decision</span>}
                         </span>
-                        {pin({ kind: "act", turn_id: act.turn_id }, act.intent)}
+                        {pin({ kind: "act", turn_id: act.turn_id }, actText(act))}
                       </li>
                     ))}
                   </ol>
@@ -210,7 +211,7 @@ function Decisions({ view, pin }: { view: JournalView; pin: Pin }) {
       {list.map(({ act, scene }) => (
         <li key={act.turn_id} className="journal-decision">
           <div className="journal-decision__main">
-            <p className="journal-decision__intent">{act.intent}</p>
+            <p className="journal-decision__intent">{actText(act)}</p>
             {act.closed.map((closed) => (
               <p key={closed.text} className="journal-decision__closed">
                 {closedText(closed)}
@@ -220,7 +221,7 @@ function Decisions({ view, pin }: { view: JournalView; pin: Pin }) {
               {placeTitle(scene.place)} · {clockSpan(scene.clock_from, scene.clock_to)}
             </p>
           </div>
-          {pin({ kind: "act", turn_id: act.turn_id }, act.intent)}
+          {pin({ kind: "act", turn_id: act.turn_id }, actText(act))}
         </li>
       ))}
     </ol>

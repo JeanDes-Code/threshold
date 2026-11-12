@@ -40,6 +40,10 @@ export interface PlayScreenProps {
   onBegin: () => void;
   /** "End scene": the Closing Turn of the open Intimate Scene. */
   onEndScene: () => void;
+  /** "Fade to black". */
+  onFade: () => void;
+  /** The Player faded the running Narration: its text is off the screen. */
+  faded?: boolean;
   onRenarrate: (turnId: number) => void;
   onDismissAnswer: () => void;
   /** Pins or unpins a target; the core then sends a new view. */
@@ -113,7 +117,7 @@ export default function PlayScreen(props: PlayScreenProps) {
       />
       <div className="play__body">
         <Story
-          items={storyItems(view, busy ? stream : null)}
+          items={storyItems(view, busy && !props.faded ? stream : null)}
           pendingIntent={pendingIntent}
           onName={showCard}
           onRenarrate={props.onRenarrate}
@@ -138,7 +142,7 @@ export default function PlayScreen(props: PlayScreenProps) {
       </div>
       <ActionBar
         scene={view.scene}
-        phase={turnPhase(busy, stream)}
+        phase={props.faded && busy ? "fading" : turnPhase(busy, stream)}
         startedMs={props.startedMs}
         pcName={view.pc_name}
         needsBegin={view.needs_begin}
@@ -157,6 +161,7 @@ export default function PlayScreen(props: PlayScreenProps) {
         onDismissFailure={props.onDismissFailure}
         onBegin={props.onBegin}
         onEndScene={props.onEndScene}
+        onFade={props.onFade}
         onDismissAnswer={props.onDismissAnswer}
         hasScene={scene !== null}
         onNote={(body, aboutScene) => props.onNote(body, aboutScene ? scene : null)}

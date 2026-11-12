@@ -92,6 +92,9 @@ pub struct SightTurn {
     /// (`mature::turn_text` with no scene and no clearance). The Play story
     /// shows a Turn the Player read in full.
     pub line: Option<String>,
+    /// The Player faded this Turn's Narration (Fade to Black): `narration`
+    /// is `None`, and every screen shows `line` in its place.
+    pub faded: bool,
 }
 
 /// One line of a Narration, as the PC can read it.
@@ -402,6 +405,7 @@ pub fn pc_sight(
                     TurnText::Line(line) => Some(line),
                     TurnText::Full { .. } => None,
                 },
+                faded: t.faded,
             }
         })
         .collect();

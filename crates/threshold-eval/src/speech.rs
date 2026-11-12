@@ -162,7 +162,7 @@ pub fn read_turn(store: &Store, campaign: CampaignId, turn: TurnId) -> Result<Tu
         .find(|t| t.turn_id == turn)
         .and_then(|t| match &t.body {
             TurnBody::Narration { blocks } => Some(blocks.as_slice()),
-            TurnBody::Missing => None,
+            TurnBody::Missing | TurnBody::Faded { .. } => None,
         })
         .unwrap_or_default();
     let lines = speech::parse(&narration);

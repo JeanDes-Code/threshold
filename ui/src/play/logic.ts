@@ -2,8 +2,11 @@
 
 import type { KnownLine, NameRef, PlayView, SceneState, StoryTurn } from "../api";
 
-/** "answering": the GM answers an out-of-character question; no Turn runs. */
-export type TurnPhase = "idle" | "deciding" | "narrating" | "answering";
+/**
+ * "answering": the GM answers an out-of-character question; no Turn runs.
+ * "fading": the Player faded the Narration; the call that ends it runs.
+ */
+export type TurnPhase = "idle" | "deciding" | "narrating" | "answering" | "fading";
 
 export type StoryItem = { kind: "turn"; turn: StoryTurn } | { kind: "stream"; text: string };
 
@@ -36,6 +39,7 @@ export const PHASE_TEXT: Record<TurnPhase, string> = {
   deciding: "The GM decides",
   narrating: "The GM narrates",
   answering: "The GM answers out of character",
+  fading: "Fading to black",
 };
 
 /** "Correct last Turn" opens only on a standing Play Turn, and never while a Turn runs. */
@@ -189,12 +193,15 @@ export interface LaterButton {
  * The buttons of the mature content module in the action bar's right slot
  * (data shape 3.12), from the scene and the phase only: the core sends no
  * list of actions. "End scene" shows in an Intimate Scene and works while
- * no call runs. "Fade to black" comes with the next task: hidden for now.
+ * no call runs. "Fade to black" shows while a Narration streams or in an
+ * Intimate Scene, and works while a Narration streams or, in a scene, while
+ * no call runs.
  */
 export function laterButtons(scene: SceneState, phase: TurnPhase): { end: LaterButton; fade: LaterButton } {
   const intimate = scene.kind === "intimate";
+  const narrating = phase === "narrating";
   return {
     end: { shown: intimate, enabled: intimate && phase === "idle" },
-    fade: { shown: false, enabled: false },
+    fade: { shown: narrating || intimate, enabled: narrating || (intimate && phase === "idle") },
   };
 }

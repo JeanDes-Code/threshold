@@ -141,6 +141,36 @@ pub struct TurnSummary {
     pub narration: Option<String>,
     pub narration_error: Option<String>,
     pub total_ms: u64,
+    /// The Player faded the Narration (Fade to Black): `narration` holds
+    /// the Neutral Line.
+    pub faded: bool,
+}
+
+/// What `fade_to_black` did: `pending` when a Turn was running, so the
+/// running command finishes the fade.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct FadeResult {
+    pub pending: bool,
+}
+
+/// "Fade to black" (data shape 3.12): raises the fade flag with no lock,
+/// then tries the session lock. A running Turn holds it: the result is
+/// `pending`, and that Turn reads the flag at its next chunk and finishes
+/// the fade. When the lock is free, the flag goes down again and the
+/// Engine fades with no Turn running (`Session::fade`). The shell runs this
+/// in a blocking task.
+pub fn fade_to_black(
+    shared: &Mutex<Session>,
+    flag: &AtomicBool,
+    op_id: String,
+) -> Result<FadeResult, AppError> {
+    flag.store(true, Ordering::SeqCst);
+    let mut session = match shared.try_lock() {
+        Ok(session) => session,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(FadeResult { pending: true }),
+    };
+    session.fade(op_id)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -228,6 +258,10 @@ pub struct Session {
     open: Option<Open>,
     /// Shared with the shell, so toggling never waits for a running Turn.
     debug: Arc<AtomicBool>,
+    /// The fade flag (Fade to Black): `fade_to_black` raises it with no
+    /// lock; each Turn command clears it when it starts and reads it
+    /// through `TurnControl`.
+    fade: Arc<AtomicBool>,
 }
 
 impl Session {
@@ -240,6 +274,7 @@ impl Session {
             make_gm,
             open: None,
             debug: Arc::new(AtomicBool::new(false)),
+            fade: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -397,6 +432,18 @@ impl Session {
         })
     }
 
+    /// The fade flag, cleared: a Turn command calls it when it starts.
+    fn fresh_fade(&self) -> Arc<AtomicBool> {
+        self.fade.store(false, Ordering::SeqCst);
+        self.fade.clone()
+    }
+
+    /// The fade flag itself, for the shell to raise without locking the
+    /// session.
+    pub fn fade_flag(&self) -> Arc<AtomicBool> {
+        self.fade.clone()
+    }
+
     pub fn submit_intent(
         &mut self,
         op_id: String,
@@ -404,8 +451,13 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let debug = self.debug();
+        let fade = self.fresh_fade();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
-        let played = open.engine.play_turn(op_id, text, on_chunk);
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &|| fade.load(Ordering::SeqCst),
+        };
+        let played = open.engine.play_turn_with(op_id, text, &mut ctl);
         committed(&open.engine, played, debug)
     }
 
@@ -426,8 +478,15 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let debug = self.debug();
+        let fade = self.fresh_fade();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
-        let played = open.engine.correct_last(op_id, clarified, why, on_chunk);
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &|| fade.load(Ordering::SeqCst),
+        };
+        let played = open
+            .engine
+            .correct_last_with(op_id, clarified, why, &mut ctl);
         committed(&open.engine, played, debug)
     }
 
@@ -439,13 +498,27 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
         let debug = self.debug();
+        let fade = self.fresh_fade();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let mut ctl = TurnControl {
             on_chunk,
-            faded: &|| false,
+            faded: &|| fade.load(Ordering::SeqCst),
         };
         let played = open.engine.end_scene(op_id, &mut ctl);
         committed(&open.engine, played, debug)
+    }
+
+    /// "Fade to black" with no Turn running (`fade_to_black` holds the
+    /// lock): with a scene open, a Closing Turn born faded; with none,
+    /// nothing, and no model call.
+    pub fn fade(&mut self, op_id: String) -> Result<FadeResult, AppError> {
+        let debug = self.debug();
+        self.fresh_fade();
+        let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
+        match open.engine.fade(op_id) {
+            Ok(_) | Err(TurnError::NothingToFade) => Ok(FadeResult { pending: false }),
+            Err(e) => Err(player_error(&e, debug)),
+        }
     }
 
     pub fn ask_ooc(&mut self, text: &str) -> Result<String, AppError> {
@@ -462,9 +535,14 @@ impl Session {
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, AppError> {
         let debug = self.debug();
+        let fade = self.fresh_fade();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
+        let mut ctl = TurnControl {
+            on_chunk,
+            faded: &|| fade.load(Ordering::SeqCst),
+        };
         open.engine
-            .renarrate(turn_id, on_chunk)
+            .renarrate_with(turn_id, &mut ctl)
             .map_err(|e| player_error(&e, debug))
     }
 
@@ -660,6 +738,7 @@ fn committed(
                 narration: None,
                 narration_error: Some(model_error(&error)),
                 total_ms: 0,
+                faded: false,
             })
         }
         Err(e) => Err(player_error(&e, debug)),
@@ -693,7 +772,9 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
         | TurnError::IntentTooLong
         | TurnError::NotCorrectable(_)
         | TurnError::PlayStarted
-        | TurnError::NoScene => e.to_string(),
+        | TurnError::NoScene
+        | TurnError::NothingToFade
+        | TurnError::Faded => e.to_string(),
         TurnError::Model(error) => model_error(error),
         TurnError::NarrationFailed { error, .. } => format!(
             "the Turn is committed, but its narration failed: {}",
@@ -737,5 +818,6 @@ fn turn_summary(outcome: TurnOutcome) -> TurnSummary {
         narration: Some(outcome.narration),
         narration_error: None,
         total_ms: outcome.timings.total_ms,
+        faded: outcome.faded,
     }
 }

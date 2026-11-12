@@ -138,6 +138,7 @@ describe("turnNotice", () => {
     narration,
     narration_error: narration === null ? "the game model request timed out" : null,
     total_ms: 1,
+    faded: false,
   });
 
   it("tells that a Turn is committed when its narration failed", () => {

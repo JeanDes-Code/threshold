@@ -20,6 +20,13 @@ pub const INTIMATE_TEMPLATE: &str = "An intimate moment passes ({minutes}). It i
 /// no model text and no act of the PC. The owner reads it before the merge.
 pub const CLOSING_TEMPLATE: &str = "The intimate scene ends ({minutes}).";
 
+/// The Neutral Line of a faded Play or Correction Turn (Fade to Black,
+/// glossary). The core fills `{minutes}` as for `INTIMATE_TEMPLATE`. It says
+/// only that the Player skipped this part: no name, no fact value, no model
+/// text, and nothing about what kind of Turn it was. The owner reads it
+/// before the merge.
+pub const FADED_TEMPLATE: &str = "This part of the story is skipped ({minutes}).";
+
 /// What a reader gets for one Turn: its Intent and its Narration in full,
 /// or one Neutral Line in place of both.
 #[derive(Debug, PartialEq, Eq)]
@@ -48,18 +55,23 @@ pub fn turn_text<'a>(
     };
     match neutral_line(turn) {
         None => full,
+        // A faded Turn is its line for every reader (ADR 0011).
+        Some(line) if turn.faded => TurnText::Line(line),
         Some(_) if cleared.is_some() && scene.is_some_and(|since| since <= turn.id) => full,
         Some(line) => TurnText::Line(line),
     }
 }
 
-/// The Neutral Line of `turn`: `Some` for a Play or Correction Turn
-/// committed with `intimate` (`INTIMATE_TEMPLATE`) and for a Closing Turn
-/// (`CLOSING_TEMPLATE`), `None` for any other Turn. Made from the Turn row
+/// The Neutral Line of `turn`, by kind: a Closing Turn, faded or not
+/// (`CLOSING_TEMPLATE`); a faded Play or Correction Turn (`FADED_TEMPLATE`);
+/// a Play or Correction Turn committed with `intimate`
+/// (`INTIMATE_TEMPLATE`). `None` for any other Turn. Made from the Turn row
 /// only; no model call.
 pub fn neutral_line(turn: &StoredTurn) -> Option<String> {
     let template = if turn.record.kind == TurnKind::Closing {
         CLOSING_TEMPLATE
+    } else if turn.faded && turn.record.kind.has_intent() {
+        FADED_TEMPLATE
     } else if turn.record.kind.has_intent() && stored_intimate(&turn.record.proposal_json) {
         INTIMATE_TEMPLATE
     } else {

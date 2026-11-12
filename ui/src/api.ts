@@ -41,6 +41,13 @@ export interface TurnSummary {
   narration: string | null;
   narration_error: string | null;
   total_ms: number;
+  /** The Player faded the Narration: `narration` holds its neutral line. */
+  faded: boolean;
+}
+
+/** What `fade_to_black` did: `pending` while a Turn was running, which finishes the fade itself. */
+export interface FadeResult {
+  pending: boolean;
 }
 
 export interface CharacterView {
@@ -108,7 +115,11 @@ export type Block =
       stage: Part[] | null;
     };
 
-export type TurnBody = { kind: "narration"; blocks: Block[] } | { kind: "missing" };
+/** `faded`: the Player faded the Narration; the core's neutral line stands in its place. */
+export type TurnBody =
+  | { kind: "narration"; blocks: Block[] }
+  | { kind: "missing" }
+  | { kind: "faded"; line: string };
 
 export interface StoryTurn {
   turn_id: number;
@@ -181,7 +192,10 @@ export interface Note {
 /** What the PC did in one Turn: its Intent. */
 export interface Act {
   turn_id: number;
+  /** Empty when the Turn was faded: show `faded` instead. */
   intent: string;
+  /** The neutral line of a faded Turn; null otherwise. */
+  faded: string | null;
   /** A decision of the PC: it lasts, and the PC saw it. */
   decision: boolean;
   /** The Open Items this Turn closed, each with how it ended. */
@@ -569,6 +583,8 @@ export function createApi(invoke: Invoke) {
     openCampaign: (dbPath: string) => invoke<CampaignSummary>("open_campaign", { db_path: dbPath }),
     askOoc: (text: string) => invoke<string>("ask_ooc", { text }),
     renarrate: (turnId: number) => invoke<string>("renarrate", { turn_id: turnId }),
+    /** "Fade to black": sets the fade flag with no lock; see `FadeResult`. */
+    fadeToBlack: (opId: string) => invoke<FadeResult>("fade_to_black", { op_id: opId }),
     getCharacter: () => invoke<CharacterView>("get_character"),
     /** One card. Refused with one fixed text for an entity the PC does not know. */
     getEntityCard: (entityId: number) =>

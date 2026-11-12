@@ -53,6 +53,12 @@ export interface TurnState {
   /** The last OOC answer. */
   answer: string | null;
   /**
+   * The Player faded the running Narration, or a fade with no Turn running
+   * is in flight: the stream text is off the screen, and later chunks of
+   * that op_id are dropped. The end of the call clears it.
+   */
+  faded: boolean;
+  /**
    * When the running call started, in ms since the epoch; null while idle.
    * The phase line counts its seconds from here, so a tab switch, which
    * mounts the Play screen again, does not start them over.
@@ -70,6 +76,7 @@ export const IDLE_TURN: TurnState = {
   canRetry: false,
   notice: null,
   answer: null,
+  faded: false,
   startedMs: null,
 };
 
@@ -94,6 +101,17 @@ export interface TurnStore {
   run(attempt: () => Attempt | null, intent: string | null): Promise<boolean>;
   /** Narrates a committed Turn again. Its chunks come under `opId` only. */
   renarrate(opId: string, call: () => Promise<unknown>): Promise<void>;
+  /**
+   * "Fade to black". While a Turn runs, the stream text leaves the screen at
+   * once, later chunks of its op_id are dropped, and `call` asks the shell
+   * to fade it, with that op_id: the Turn's own end reloads the view. When
+   * the Turn ends read in full (it ended before it read the flag), `call`
+   * runs once more with its op_id, before the reload, and the shell fades
+   * it then. With no Turn running, `call` gets null and is the whole fade
+   * (a Closing Turn born faded), then the view reloads. A second fade before
+   * the first ends changes nothing.
+   */
+  fade(call: (opId: string | null) => Promise<unknown>): Promise<void>;
   /** Asks the GM out of character. Refused (false) while another call runs. */
   ask(call: () => Promise<string>): Promise<boolean>;
   chunk(chunk: NarrationChunk): void;
@@ -108,6 +126,10 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
   let state = IDLE_TURN;
   // A reset starts a new generation; a late result of an older one is dropped.
   let generation = 0;
+  // The op_ids the Player faded: their chunks never reach the screen again.
+  const fadedOps = new Set<string>();
+  // The call of the last fade, for a Turn that ended before it read the flag.
+  let fadeCall: ((opId: string | null) => Promise<unknown>) | null = null;
   const listeners = new Set<() => void>();
   const now = deps.now ?? Date.now;
 
@@ -156,14 +178,27 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
       let notice: string | null = null;
       let failure: string | null = null;
       let refusal: string | null = null;
+      let read = false;
       try {
-        notice = turnNotice(await made.result);
+        const summary = await made.result;
+        notice = turnNotice(summary);
         committed = true;
+        read = !summary.faded;
       } catch (e) {
         refusal = refusalFromError(e);
         if (refusal === null) failure = errorText(e);
       }
       if (mine !== generation) return committed;
+      // The Player faded this Turn, and it ended read in full: fade it now.
+      const late = fadeCall;
+      if (read && fadedOps.has(made.opId) && late !== null) {
+        try {
+          await late(made.opId);
+        } catch (e) {
+          notice = `Fade to black failed: ${errorText(e)}`;
+        }
+        if (mine !== generation) return committed;
+      }
       set({ opId: null });
       // The new view lands before the stream goes, so the story does not jump back.
       const reloadNotice = await reload();
@@ -176,6 +211,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
         refusal,
         canRetry: failure !== null && deps.canRetry(),
         notice: reloadNotice ?? notice,
+        faded: false,
         startedMs: null,
       });
       return committed;
@@ -205,7 +241,35 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
       set({ opId: null });
       const reloadNotice = await reload();
       if (mine !== generation) return;
-      set({ busy: false, stream: null, notice: reloadNotice ?? notice, startedMs: null });
+      set({ busy: false, stream: null, notice: reloadNotice ?? notice, faded: false, startedMs: null });
+    },
+
+    fade: async (call) => {
+      if (state.faded) return;
+      fadeCall = call;
+      if (state.busy) {
+        const opId = state.opId;
+        if (opId !== null) fadedOps.add(opId);
+        set({ faded: true, stream: state.stream === null ? null : "" });
+        try {
+          await call(opId);
+        } catch (e) {
+          set({ notice: `Fade to black failed: ${errorText(e)}` });
+        }
+        return;
+      }
+      const mine = generation;
+      set({ busy: true, faded: true, failure: null, refusal: null, notice: null, startedMs: now() });
+      let notice: string | null = null;
+      try {
+        await call(null);
+      } catch (e) {
+        notice = `Fade to black failed: ${errorText(e)}`;
+      }
+      if (mine !== generation) return;
+      const reloadNotice = await reload();
+      if (mine !== generation) return;
+      set({ busy: false, faded: false, notice: reloadNotice ?? notice, startedMs: null });
     },
 
     ask: async (call) => {
@@ -226,7 +290,7 @@ export function createTurnStore(deps: TurnDeps): TurnStore {
     },
 
     chunk: (chunk) => {
-      if (state.opId === null || chunk.op_id !== state.opId) return;
+      if (state.opId === null || chunk.op_id !== state.opId || fadedOps.has(chunk.op_id)) return;
       set({ stream: (state.stream ?? "") + chunk.text });
     },
 

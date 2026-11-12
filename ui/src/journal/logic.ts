@@ -95,7 +95,7 @@ export function aboutText(view: JournalView, about: Target | null): string {
     }
     case "act": {
       const act = view.scenes.flatMap((s) => s.acts).find((a) => a.turn_id === about.turn_id);
-      return act ? `What you did: ${act.intent}` : "Something you did";
+      return act ? `What you did: ${actText(act)}` : "Something you did";
     }
     case "belief": {
       const line = [
@@ -113,4 +113,9 @@ export function aboutText(view: JournalView, about: Target | null): string {
     case "note":
       return "A note";
   }
+}
+
+/** What the Journal shows for an act: its Intent, or the neutral line of a faded Turn. */
+export function actText(act: Act): string {
+  return act.faded ?? act.intent;
 }

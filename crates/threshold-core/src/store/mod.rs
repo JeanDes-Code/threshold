@@ -124,6 +124,10 @@ pub struct StoredTurn {
     pub seq: u64,
     pub record: TurnRecord,
     pub narration: Option<String>,
+    /// The Player faded this Turn's Narration (Fade to Black, ADR 0011):
+    /// `narration` is `None` and stays so. Not a projection: `rebuild`
+    /// leaves it as it is.
+    pub faded: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entity {
@@ -916,10 +920,33 @@ impl Store {
     pub fn turn_ops(&self, t: TurnId) -> Result<Vec<LedgerOp<EntityId>>, StoreError> {
         project::turn_ops(&self.db, t)
     }
+    /// Stores the Narration of a Turn. A faded Turn takes none: a Fade to
+    /// Black cannot be undone (ADR 0011).
     pub fn set_narration(&mut self, t: TurnId, text: &str) -> Result<(), StoreError> {
+        if self.db.execute(
+            "UPDATE turn SET narration=?1 WHERE id=?2 AND faded=0",
+            params![text, t],
+        )? != 1
+        {
+            let faded: Option<bool> = self
+                .db
+                .query_row("SELECT faded FROM turn WHERE id=?1", [t], |r| r.get(0))
+                .optional()?;
+            return Err(StoreError::Invalid(match faded {
+                Some(true) => "the Turn is faded: it takes no Narration".into(),
+                _ => "unknown turn".into(),
+            }));
+        }
+        Ok(())
+    }
+
+    /// Fades a Turn (Fade to Black, data shape 3.6): its Narration goes, for
+    /// good, and the row says the Player skipped it. The ledger does not
+    /// change: the world keeps what the Turn committed.
+    pub fn set_faded(&mut self, t: TurnId) -> Result<(), StoreError> {
         if self
             .db
-            .execute("UPDATE turn SET narration=?1 WHERE id=?2", params![text, t])?
+            .execute("UPDATE turn SET narration=NULL, faded=1 WHERE id=?1", [t])?
             != 1
         {
             return Err(StoreError::Invalid("unknown turn".into()));

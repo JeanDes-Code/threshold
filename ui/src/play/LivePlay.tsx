@@ -39,6 +39,11 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
   // "End scene": a Closing Turn, streamed as an Intent's Turn.
   const endScene = () => void store.run(() => turns.endScene(), null);
 
+  // "Fade to black": the stream text leaves the screen at once; the shell
+  // fades the running Turn (named by its op_id), or ends the scene faded
+  // when none runs.
+  const fade = () => void store.fade((opId) => api.fadeToBlack(opId ?? crypto.randomUUID()));
+
   const renarrate = (turnId: number) =>
     void store.renarrate(renarrateOpId(turnId), () => api.renarrate(turnId));
 
@@ -92,6 +97,8 @@ export default function LivePlay({ view, onView, turn, store, fixing, onFixing, 
       onDismissFailure={store.dismissFailure}
       onBegin={begin}
       onEndScene={endScene}
+      onFade={fade}
+      faded={turn.faded}
       onRenarrate={renarrate}
       onDismissAnswer={store.dismissAnswer}
       onPin={(target, on) => void pin(target, on)}

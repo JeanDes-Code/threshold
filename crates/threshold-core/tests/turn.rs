@@ -2571,10 +2571,11 @@ fn a_length_stop_stores_the_last_full_sentence() {
     }
 }
 
-/// Task 3 adds the fade flag to the engine's interface only: a flag that is
-/// up changes nothing yet (Task 6 reads it).
+/// Task 3 added the fade flag to the engine's interface; Task 6 reads it: a
+/// flag that is up when the Narration would start makes no narration call,
+/// shows nothing and stores no text.
 #[test]
-fn play_turn_with_reads_no_flag_yet() {
+fn play_turn_with_reads_the_fade_flag() {
     let (mut engine, _w, gm) = setup(
         vec![json(&proposal(Verdict::Allowed))],
         vec!["The gate creaks. Rain falls."],
@@ -2589,15 +2590,12 @@ fn play_turn_with_reads_no_flag_yet() {
     let outcome = engine
         .play_turn_with("t1".into(), "I wait.", &mut ctl)
         .unwrap();
-    assert_eq!(outcome.narration, "The gate creaks. Rain falls.");
-    assert_eq!(shown, "The gate creaks. Rain falls.");
+    assert!(outcome.faded);
+    assert_eq!(shown, "");
     let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
-    assert_eq!(
-        stored.narration.as_deref(),
-        Some("The gate creaks. Rain falls.")
-    );
-    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
-    assert_eq!(gm.calls()[1].max_tokens, None, "no cap anywhere yet");
+    assert_eq!(stored.narration, None);
+    assert!(stored.faded);
+    assert_eq!(kinds(&gm), [CallKind::Propose]);
 }
 
 /// `TurnKind::tells` and `has_intent` replace the matches that meant "has a
