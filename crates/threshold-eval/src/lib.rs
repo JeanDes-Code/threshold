@@ -324,6 +324,11 @@ pub fn run(
             t.refused, t.turns
         );
     }
+    let _ = writeln!(
+        out,
+        "- Turns committed with an intimacy tag: {} advance, {} intimate, of {} committed; tags the core raised from the Intent's words: {}",
+        t.advance, t.intimate, t.committed, t.raised
+    );
     if let Some(line) = packs_line {
         let _ = writeln!(out, "{line}");
     }
@@ -371,6 +376,11 @@ struct Totals {
     retried: usize,
     /// Turns that ended as a Refusal: no Commit, and not a failure.
     refused: usize,
+    /// Committed Turns tagged `advance`, and `intimate`.
+    advance: usize,
+    intimate: usize,
+    /// Turns whose tag the core raised from the Intent's words.
+    raised: usize,
     total_ms: Vec<u64>,
     /// Turns with at least one proposal attempt the agency check rejected.
     agency_turns: usize,
@@ -389,6 +399,8 @@ struct Played {
     refused: Option<RefusalKind>,
     /// The rejection lines of each proposal attempt; empty when it passed.
     attempts: Vec<Vec<String>>,
+    /// The core raised the Turn's intimacy tag from the Intent's words.
+    raised: bool,
 }
 
 impl Played {
@@ -491,6 +503,7 @@ impl Ctx<'_> {
                     row.step.starts_with("propose")
                         || row.step == "settle"
                         || row.step == "validate"
+                        || row.step == "intimacy_floor"
                 })
                 // One row per line: the model writes newlines inside its
                 // JSON, and a row cut over lines reads as a cut answer.
@@ -520,16 +533,26 @@ impl Ctx<'_> {
                 }
             })
             .collect();
+        // The core raised the tag from the Intent's words (ADR 0008).
+        let raised = s
+            .engine
+            .store()
+            .debug_log(&op_id)
+            .unwrap_or_default()
+            .iter()
+            .any(|row| row.step == "intimacy_floor");
         let played = Played {
             op_id,
             outcome,
             refused,
             attempts,
+            raised,
         };
 
         let t = &mut self.totals;
         t.turns += 1;
         t.retried += usize::from(played.attempts.len() > 1);
+        t.raised += usize::from(played.raised);
         if played
             .rejected_by()
             .iter()
@@ -541,6 +564,14 @@ impl Ctx<'_> {
             Ok(o) => {
                 t.committed += 1;
                 t.total_ms.push(o.timings.total_ms);
+                let tag = s.engine.store().turn(o.turn_id).ok().flatten().map(|turn| {
+                    threshold_core::mature::stored_intimacy(&turn.record.proposal_json)
+                });
+                match tag {
+                    Some(threshold_core::domain::Intimacy::Advance) => t.advance += 1,
+                    Some(threshold_core::domain::Intimacy::Intimate) => t.intimate += 1,
+                    _ => {}
+                }
                 let view = s.engine.store().snapshot(s.campaign).unwrap_or_default();
                 let found = leaks(
                     &forbidden_tokens(&view, &s.intents, &self.declared),

@@ -1271,6 +1271,13 @@ impl Engine {
         let mut prompt = ctx.prompt;
         let mut wait_asked = None;
         let mut tagged = Intimacy::None;
+        // The net under the model (ADR 0008): the Intent's own words raise
+        // the tag before the gate, never lower it. A Closing Turn has no
+        // Intent.
+        let floor = match ask {
+            Ask::Play { intent } => mature::romance_floor(intent),
+            Ask::Closing { .. } => Intimacy::None,
+        };
         for attempt in ["propose", "propose_retry"] {
             let step = Instant::now();
             let raw = self.gm.propose(&prompt, &schema);
@@ -1300,6 +1307,14 @@ impl Engine {
                 }
                 Ok(mut p) => {
                     p.intimacy = p.intimacy.max(tagged);
+                    if floor > p.intimacy {
+                        // Which word raised it stays out of the log.
+                        let raw =
+                            format!("the core raised the tag to {floor:?} from the Intent's words")
+                                .to_lowercase();
+                        self.log(op_id, "intimacy_floor", &Prompt::default(), &raw, step)?;
+                        p.intimacy = floor;
+                    }
                     // The items the Intent names: the only ones `settles`
                     // may close (review M1).
                     p.offered.clone_from(&ctx.handles.open_items);

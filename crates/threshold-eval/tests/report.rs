@@ -1663,6 +1663,78 @@ mod mature {
         }
     }
 
+    /// Every report counts the Turns committed with an intimacy tag, and
+    /// the tags the core raised from the Intent's words (live evaluation
+    /// of 2026-11-12): a plain scenario must show none.
+    #[test]
+    fn every_report_counts_the_tags_and_the_raised_tags() {
+        let gm = RecordedGm::new(vec![PROPOSAL.to_owned(); 50], vec!["Text.".to_owned(); 50]);
+        let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+        let report = run(
+            &config(&["speech"], None),
+            &make,
+            &make,
+            &FirstChoice,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(
+            report.contains("- Turns committed with an intimacy tag: 0 advance, 0 intimate, of 10 committed; tags the core raised from the Intent's words: 0"),
+            "{report}"
+        );
+        // An advance commits where every character here is confirmed (the
+        // plain arm of intimate_tag), and is refused where a minor stands.
+        let advance = PROPOSAL.replace("\"none\"", "\"advance\"");
+        let gm = RecordedGm::new(vec![advance; 100], vec!["Text.".to_owned(); 100]);
+        let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+        let report = run(
+            &config(&["intimate_tag"], None),
+            &make,
+            &make,
+            &FirstChoice,
+            &mut |_| {},
+        )
+        .unwrap();
+        let line = report
+            .lines()
+            .find(|l| l.starts_with("- Turns committed with an intimacy tag: "))
+            .unwrap();
+        let numbers: Vec<usize> = line
+            .split(|c: char| !c.is_ascii_digit())
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        assert!(numbers[0] > 0, "{line}");
+        assert_eq!(
+            numbers[0], numbers[2],
+            "every committed Turn is an advance: {line}"
+        );
+        assert_eq!(numbers[1], 0, "{line}");
+    }
+
+    /// The tag section counts the steps whose tag the core raised from the
+    /// Intent's words, labelled and plain apart.
+    #[test]
+    fn the_tag_section_counts_the_raised_tags() {
+        let gm = RecordedGm::new(
+            vec![PROPOSAL.to_owned(); 100],
+            vec!["Text.".to_owned(); 100],
+        );
+        let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+        let report = run(
+            &config(&["intimate_tag"], None),
+            &make,
+            &make,
+            &FirstChoice,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(
+            report.contains("- Tags the core raised from the Intent's words: intimate-labelled "),
+            "{report}"
+        );
+        assert!(report.contains("; plain 0 of "), "{report}");
+    }
+
     #[test]
     fn report_has_every_mature_metric() {
         let gm = RecordedGm::new(vec![TAGGED.to_owned(); 500], vec!["Text.".to_owned(); 500]);

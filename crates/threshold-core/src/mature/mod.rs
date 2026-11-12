@@ -27,6 +27,7 @@
 mod gate;
 mod scene;
 mod text;
+mod words;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,7 @@ pub use text::{
     CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, effective, neutral_line,
     stored_intimacy, stored_intimate, told, turn_text,
 };
+pub use words::{ROMANCE_WORDS, romance_floor};
 
 use crate::{
     checks::{CheckKind, Rejection},

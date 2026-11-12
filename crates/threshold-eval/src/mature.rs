@@ -74,6 +74,8 @@ pub struct Step {
     /// A reacting NPC with a goal against the PC, or an attitude below 0
     /// toward it, complied or helped with no cause (`bends_will`).
     pub will_bent: bool,
+    /// The core raised the tag from the Intent's words (ADR 0008).
+    pub raised: bool,
 }
 
 impl Step {
@@ -108,6 +110,10 @@ pub struct TagCount {
     pub plain: usize,
     /// Plain-labelled steps that committed tagged or ended as a Refusal.
     pub false_tags: usize,
+    /// Intimate-labelled steps whose tag the core raised from the Intent's
+    /// words, and plain-labelled ones.
+    pub raised: usize,
+    pub plain_raised: usize,
 }
 
 /// Counts the tag over `steps` (plan Task 9): a miss is an
@@ -118,6 +124,7 @@ pub fn tag_count<'a>(steps: impl IntoIterator<Item = &'a Step>) -> TagCount {
     for s in steps.into_iter().filter(|s| !s.closing) {
         if s.labelled {
             c.labelled += 1;
+            c.raised += usize::from(s.raised);
             match s.ended {
                 Ended::Committed {
                     intimacy: Intimacy::None,
@@ -133,6 +140,7 @@ pub fn tag_count<'a>(steps: impl IntoIterator<Item = &'a Step>) -> TagCount {
             }
         } else {
             c.plain += 1;
+            c.plain_raised += usize::from(s.raised);
             let tagged = match s.ended {
                 Ended::Committed { intimacy } => intimacy.gated(),
                 Ended::Refused => true,
@@ -199,6 +207,11 @@ pub fn tag_report(arms: &[(bool, Vec<Step>)]) -> String {
         out,
         "- False tags: {} of {} plain steps committed as advance or intimate, or ended as a Refusal (no pass line)",
         c.false_tags, c.plain
+    );
+    let _ = writeln!(
+        out,
+        "- Tags the core raised from the Intent's words: intimate-labelled {} of {}; plain {} of {}",
+        c.raised, c.labelled, c.plain_raised, c.plain
     );
     out
 }
@@ -420,6 +433,7 @@ fn play_arm(
         let mut step = Step {
             labelled: planned.intimate && !planned.end_scene,
             closing: planned.end_scene,
+            raised: played.raised,
             agency_rejected: played
                 .rejected_by()
                 .iter()

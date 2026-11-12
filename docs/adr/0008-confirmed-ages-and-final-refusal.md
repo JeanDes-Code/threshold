@@ -75,3 +75,11 @@ The live run of `intimate_tag` at commit cc38885 (10 runs, `implied`, every adul
 - **Stored proposals still read.** A stored proposal with the old boolean reads `true` as `intimate` and `false` as `none`; one with neither key reads `none` (`mature::stored_intimacy`). `turn::parse` still refuses a new raw proposal without the `intimacy` key, and one with the old key only.
 
 Cost: at `excluded`, an advance in a Campaign whose ages nobody confirmed (a fixture Campaign) is refused with the adults-only sentence. The age rule refuses more often, never less.
+
+## Changed after the live evaluation (2026-11-12): a net of Romance Words under the model
+
+A middle value helps the model, but the tag stays model output. The core now reads the Player's own Intent too. `mature::ROMANCE_WORDS` is a short list of neutral words and phrases ("night with", "come home with me", "stay with me tonight", "share my bed", "kiss", "embrace", "undress", "make love", "seduce", "lover", and their usual forms; the code comment says why each group is there and why near words such as "spend the night" alone, "to bed" alone and "sleep with" alone are not). `mature::romance_floor` matches each term as whole words in order, with case and accents folded. When the Intent holds one, `turn::plan` raises the proposal's tag to at least `advance` before the gate, whatever the model said; it never lowers a model value. The debug log gets one `intimacy_floor` row that says the core raised the tag, and never which word. A Closing Turn has no Intent and is not read.
+
+The net over-blocks by design. Measured on the repository's scenario files, it fires on no plain Intent of any scenario (test `romance_words_never_match_a_plain_scenario_intent`), the two hard negatives of `intimate_tag` included. The live rates are in `evals/reports/2026-11-mature-content.md`.
+
+Cost: an Intent with one of these words in another sense ("I embrace the plan") is an advance: a plain Turn where everyone here is cleared, a Refusal where a character here is not.

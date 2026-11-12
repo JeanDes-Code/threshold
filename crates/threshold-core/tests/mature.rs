@@ -1996,3 +1996,167 @@ fn g3_runs_for_an_advance() {
     plain.intimacy = Intimacy::None;
     assert!(check_after(&plain, &w.view, &after).is_ok());
 }
+
+// --- Live evaluation of 2026-11-12: the core's net of Romance Words ---------
+
+/// Every Intent of the repository's scenario files, with the tag a mature
+/// scenario expects (`None` outside the mature scenarios).
+fn scenario_intents() -> Vec<(String, Option<bool>)> {
+    fn walk(value: &toml::Value, label: Option<bool>, out: &mut Vec<(String, Option<bool>)>) {
+        match value {
+            toml::Value::Table(t) => {
+                let label = t.get("intimate").and_then(toml::Value::as_bool).or(label);
+                for (key, v) in t {
+                    match (key.as_str(), v) {
+                        ("intent", toml::Value::String(s)) => out.push((s.clone(), label)),
+                        ("intents", toml::Value::Array(list)) => out.extend(
+                            list.iter()
+                                .filter_map(toml::Value::as_str)
+                                .map(|s| (s.to_owned(), label)),
+                        ),
+                        _ => walk(v, label, out),
+                    }
+                }
+            }
+            toml::Value::Array(list) => list.iter().for_each(|v| walk(v, label, out)),
+            _ => {}
+        }
+    }
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals/scenarios");
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        walk(&text.parse::<toml::Table>().unwrap().into(), None, &mut out);
+    }
+    assert!(out.len() > 50, "the scenarios hold Intents");
+    out
+}
+
+/// The core's list raises an Intent that holds a Romance Word to at least
+/// `advance`: whole words or phrases, case and accents folded.
+#[test]
+fn romance_words_raise_an_intent_to_advance() {
+    use threshold_core::mature::romance_floor;
+    for intent in [
+        "I ask Hessa to spend the night with me.",
+        "I take Hessa's hand and ask her to come home with me tonight.",
+        "I tell Hessa I want her to stay with me tonight.",
+        "I lean in and KISS Brann.",
+        "I kíss Brann on the cheek.",
+        "I ask Brann to share my bed tonight.",
+        "I try to seduce the guard.",
+        "Brann and I make love by the fire.",
+    ] {
+        assert_eq!(romance_floor(intent), Intimacy::Advance, "{intent}");
+    }
+    for intent in [
+        "I tell Doul I will spend the night on watch at the gate.",
+        "I ask Hessa to stay late and finish the tithe roll with me tonight.",
+        "I read the kissinger papers.",
+        "I sleep with my sword at hand.",
+        "I go to bed early.",
+        "I hold court in the hall.",
+        "",
+    ] {
+        assert_eq!(romance_floor(intent), Intimacy::None, "{intent}");
+    }
+}
+
+/// The net never fires on a plain Intent of the repository's scenarios:
+/// play_basics, speech, open_items and every other file, and the hard
+/// negatives of `intimate_tag`. The false-tag rate of the core's list on
+/// those Intents is 0.
+#[test]
+fn romance_words_never_match_a_plain_scenario_intent() {
+    use threshold_core::mature::romance_floor;
+    let plain: Vec<String> = scenario_intents()
+        .into_iter()
+        .filter(|(_, label)| *label != Some(true))
+        .map(|(intent, _)| intent)
+        .collect();
+    let fired: Vec<&String> = plain
+        .iter()
+        .filter(|i| romance_floor(i) != Intimacy::None)
+        .collect();
+    assert!(fired.is_empty(), "{fired:?}");
+}
+
+/// The list is short and neutral: lower-case words of letters only, at most
+/// four words a term, each term once.
+#[test]
+fn the_romance_word_list_is_short_and_neutral() {
+    use threshold_core::mature::ROMANCE_WORDS;
+    assert!(ROMANCE_WORDS.len() <= 80, "{}", ROMANCE_WORDS.len());
+    let mut seen = BTreeSet::new();
+    for term in ROMANCE_WORDS {
+        assert!(seen.insert(*term), "{term} twice");
+        assert!(
+            term.chars().all(|c| c.is_ascii_lowercase() || c == ' '),
+            "{term}"
+        );
+        assert!(term.split(' ').count() <= 4, "{term}");
+    }
+}
+
+/// The core raises the tag before the gate, from the Intent's words, and
+/// never lowers a model value. The debug log says that it raised the tag,
+/// and holds no word of the Intent.
+#[test]
+fn the_core_raises_the_tag_before_the_gate() {
+    let play = |mut w: World, model: Intimacy, intent: &str| {
+        let mut p = intimate(&w, Stance::Comply);
+        p.intimacy = model;
+        let gm = RecordedGm::new(
+            vec![serde_json::to_string(&p).unwrap()],
+            vec!["Brann smiles.".into()],
+        );
+        let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+        let mut engine = Engine::new(store, Box::new(gm), Box::new(D10), vec![], w.campaign);
+        let result = engine.play_turn("t1".into(), intent, &mut |_| {});
+        let rows = engine.store().debug_log("t1").unwrap();
+        let stored = result.as_ref().ok().map(|o| {
+            let turn = engine.store().turn(o.turn_id).unwrap().unwrap();
+            threshold_core::mature::stored_intimacy(&turn.record.proposal_json)
+        });
+        (result.map(|_| ()), stored, rows)
+    };
+    let with_pip = || {
+        let mut w = confirmed_gate();
+        let pip = w.pip;
+        bring(&mut w, pip, "Gate Square");
+        w
+    };
+    // The model says none; the Intent holds a Romance Word; Pip is here.
+    let (result, _, rows) = play(with_pip(), Intimacy::None, "I kiss Brann.");
+    assert!(
+        matches!(
+            result,
+            Err(TurnError::Refused {
+                kind: RefusalKind::AdultsOnly,
+                ..
+            })
+        ),
+        "{result:?}"
+    );
+    let raised: Vec<_> = rows.iter().filter(|r| r.step == "intimacy_floor").collect();
+    assert_eq!(raised.len(), 1, "{rows:?}");
+    assert!(raised[0].raw.contains("advance"), "{}", raised[0].raw);
+    assert!(
+        !raised[0].raw.to_lowercase().contains("kiss"),
+        "{}",
+        raised[0].raw
+    );
+    // With nobody to block, it commits as an advance: a plain Turn.
+    let (result, stored, _) = play(confirmed_gate(), Intimacy::None, "I kiss Brann.");
+    result.unwrap();
+    assert_eq!(stored, Some(Intimacy::Advance));
+    // A model value above the floor stays.
+    let (result, stored, rows) = play(confirmed_gate(), Intimacy::Intimate, "I kiss Brann.");
+    result.unwrap();
+    assert_eq!(stored, Some(Intimacy::Intimate));
+    assert!(rows.iter().all(|r| r.step != "intimacy_floor"));
+    // No Romance Word: the model's none stands.
+    let (result, stored, _) = play(with_pip(), Intimacy::None, "I greet Brann.");
+    result.unwrap();
+    assert_eq!(stored, Some(Intimacy::None));
+}

@@ -77,12 +77,16 @@ A Scene of sexual or erotic content between adults, from the first Turn tagged i
 _Avoid_: Sex scene, NSFW scene, adult scene
 
 **Intimacy Tag**:
-The value each Decision Proposal gives its Turn, in the field `intimacy`: "intimate" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches; "advance" when it is a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, and no such content happens in this Turn, whatever the answer; else "none". The age rule runs for "advance" and "intimate"; only "intimate" opens an Intimate Scene.
+The value each Decision Proposal gives its Turn, in the field `intimacy`: "intimate" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches; "advance" when it is a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, and no such content happens in this Turn, whatever the answer; else "none". The core can raise it from the Intent's words (a Romance Word), never lower it. The age rule runs for "advance" and "intimate"; only "intimate" opens an Intimate Scene.
 _Avoid_: Flag, rating, NSFW tag
 
 **Advance**:
 A Turn whose Intimacy Tag is "advance": a romantic or sexual invitation, without the act. The age rule runs for it, with the same final Refusal. It is told as a plain Turn, opens no Intimate Scene, and an NPC may accept or decline it in the story.
 _Avoid_: Flirt mode, pre-scene
+
+**Romance Word**:
+A neutral word or phrase of the core's short list (`mature::ROMANCE_WORDS`), such as "kiss" or "spend the night with". When the Player's Intent holds one, the Turn is at least an Advance, whatever the model says.
+_Avoid_: Bad word, filter list, blacklist
 
 **Fade to Black**:
 The Player's choice to skip the description of a Turn or of an Intimate Scene. The world keeps what happened, and the Player reads one neutral line.
