@@ -654,10 +654,10 @@ Every row of shape section 5 (gates) and section 6 (paths), plus the guards this
 | Path 9: NPC made in an earlier Turn | unconfirmed until `ConfirmAge` | 1, 8 | `an_npc_made_in_play_blocks_until_confirmed`; `confirm_age_in_play_clears_an_npc_made_in_play` |
 | Path 10: namesake of a minor | same-name rule | 1 | `a_namesake_of_a_minor_is_not_cleared` |
 | Path 11: proposal fact on `age` | dropped by `settle` | 2 | `a_fact_on_the_age_key_changes_no_clearance` |
-| Path 12: bystander, hidden character | `WorldView::present` | 1 | `a_hidden_minor_refuses_and_names_nobody` |
+| Path 12: bystander, hidden character | `mature::checked_here` (world truth) | 1 | `a_hidden_minor_refuses_and_names_nobody`; `g2_alone_refuses_a_hidden_minor` |
 | Path 13: arrival in the same Turn | G3 | 2 | `an_event_that_brings_a_minor_refuses_the_turn`; `a_hidden_minor_who_arrives_refuses_the_turn` |
 | Path 14: the minor moved away, or the PC moves in, in the same Turn | G2 before, G3 after | 1, 2 | `moving_the_minor_out_in_the_same_turn_still_refuses`; `moving_into_a_place_with_a_minor_refuses_after_the_ops` |
-| Path 15: retry that drops the tag | no retry; tag kept; check before references | 1 | `an_age_refusal_makes_no_second_proposal_call`; `a_retry_keeps_the_tag_of_the_first_attempt`; `an_intimate_check_runs_even_when_references_fail` |
+| Path 15: retry that drops the tag | no retry; tag kept, read from the raw text; check before references | 1 | `an_age_refusal_makes_no_second_proposal_call`; `a_retry_keeps_the_tag_of_the_first_attempt`; `an_intimate_check_runs_even_when_references_fail`; `a_malformed_first_answer_keeps_the_tag` |
 | Path 16: a Correction | same gates on `snapshot_before` | 1, 4 | `a_correction_runs_the_same_gates`; `a_correction_in_a_scene_runs_g1` |
 | Path 17: `renarrate`, retry under the same `op_id` | G4 in `Engine::narrate` | 4, 6 | `renarrate_of_an_ended_scene_is_implied`; `a_retry_of_a_faded_turn_gives_the_line_and_no_call` |
 | Path 18: pack tells the model to ignore the rule | gate takes no pack | 1, 7 | `the_sample_pack_asks_to_ignore_the_age_rule_and_the_check_rejects`; `no_check_names_a_pack` |
@@ -671,6 +671,15 @@ Every row of shape section 5 (gates) and section 6 (paths), plus the guards this
 | Added: the store refuses a bad confirmation | `project::apply` | 1 | `confirm_age_refuses_a_minor_a_place_and_no_age` |
 | Added: only the core writes the mature ops | source search | 8 | `no_shell_file_writes_a_mature_op` |
 | Added: one caller of `is_adult` | source search | 1 | `only_mature_calls_is_adult` |
+| Review B1: the gate checks who the PC believes is here (stale Belief, unseen World Event, Claim) | `mature::checked_here`: world truth, `seen_present`, the PC; G3 reads `Presence::checked` | 1, 2 | `the_gate_checks_who_the_pc_believes_is_here`; `the_narrator_present_line_is_a_subset_of_the_checked_set`; `presence_after_matches_the_next_snapshot` |
+| Review B2: every character a tagged proposal names, here or not | `mature::check` with the `named` collector (no `..`); unknown handle refused | 1 | `a_tagged_proposal_checks_every_character_it_names`; `a_tagged_proposal_that_names_an_unknown_handle_is_refused`; `a_check_against_a_minor_in_a_tagged_turn_is_refused`; `every_proposal_field_is_sorted_for_the_gate` |
+| Review M1: the gate's place rule; no location counts as here | `same_place` in `checked_here` | 1 | `a_near_place_name_counts_as_here`; `a_character_with_no_place_counts_as_here`; `another_place_does_not_block` |
+| Review M2: the sticky tag reads the raw answer | `turn::states_intimate`, no parsing | 1 | `a_malformed_first_answer_keeps_the_tag` |
+| Review M3: a Refusal is not a failed Turn; the same op is not run again | `Engine::stored_refusal`; `AppError::Refused`; `refusalFromError`; Play screen | 1 | `the_same_op_after_a_refusal_makes_no_model_call`; `a_refusal_is_its_own_result_kind`; `a Refusal leaves no Turn to send again`; `a Refusal is a quiet line, not a failure, and offers no retry` |
+| Review M4: the tag covers any characters, the PC taking part or watching | `INTIMATE_FIELD_LINE` | 1 | `the_intimate_line_covers_any_characters` |
+| Review: one list of final kinds | `CheckKind::is_final` read by `final_refusal` | 1 | `every_final_kind_ends_the_turn_after_one_call` |
+| Review: only the confirmed entries are marked | `ConfirmedAges::holds` | 2 | `the_seed_marks_only_the_confirmed_entries` |
+| Review: OOC answers hold the stable neutral line | `OOC_RULES` ends with `INTIMATE_RULE` | 2 | `the_ooc_rules_hold_the_intimate_rule` |
 
 ---
 

@@ -126,7 +126,7 @@ pub struct Reaction { npc, stance, plan /* 90 chars; SCENE_PLAN_MAX_CHARS inside
 pub const SCENE_PLAN_MAX_CHARS: usize = 200;                           // first value
 ```
 
-- `proposal_schema_for` puts `intimate` in `required`, on every Turn and at every level. The proposal rules define it in one neutral line. `#[serde(default)]` stays on the struct, so stored proposals still parse.
+- `proposal_schema_for` puts `intimate` in `required`, on every Turn and at every level. The proposal rules define it in one neutral line: true when this Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches (changed after review, 2026-11-12: it was contact between the PC and another character). `#[serde(default)]` stays on the struct, so stored proposals still parse.
 - The evidence for "required" is ADR 0007: `contested`, a required boolean, came back true in every run of the arm-wrestle. No run has measured `intimate` as a required field yet.
 - At `excluded` the field stays in the schema. The code needs the signal to refuse.
 - Inside a cleared scene the per-Turn schema raises `maxLength` of `plan` to `SCENE_PLAN_MAX_CHARS` and sets `minLength` 1. `validate` enforces both limits again. Outside a scene the limit stays 90.
@@ -137,10 +137,19 @@ pub const SCENE_PLAN_MAX_CHARS: usize = 200;                           // first 
 | Rule (design 6.2) | Test | Rejection kind | Retry |
 |---|---|---|---|
 | Setting | `view.detail` is not `excluded` | `DetailExcluded` | never |
-| Age | `new_npcs` is empty, and `clearance(view, reacting NPCs)` passes for everyone in `WorldView::present` (world truth, hidden characters included) | `AdultsOnly` | never |
-| Stance | at least one NPC reacts, and each reacting NPC has stance comply or help | `ContentBoundary` | the one normal retry |
+| Age | every character the proposal names, in any field, is cleared, and `clearance` passes for everyone in `mature::checked_here` (see below); a new NPC, or a handle that reaches nothing the world holds, refuses | `AdultsOnly` | never |
+| Stance | at least one NPC reacts, and each reacting NPC has stance comply or help | `Unwilling` (plan deviation 2) | the one normal retry |
 
-`CheckKind` gains `DetailExcluded` and `AdultsOnly`, and `CheckKind::is_final()`. `turn::plan` stops at a final rejection: no retry prompt, no second proposal call, `TurnError::Refused`.
+**Changed after review (2026-11-12).** The age rule reads more than the place and the reactions:
+
+- **The checked set.** `mature::checked_here(view)` is the union of world truth at the PC's place (`WorldView::present`, hidden characters included), everyone the PC believes is at the PC's place through `context::seen_present` (the exact set of the narrator's Present line, so a stale Belief or a Claim counts), and the PC. G2 and G3 both check it; G3 on the state after the Turn's ops.
+- **The place rule, for the gate only.** A character is at the PC's place when the two location values have the same words after case, accents, punctuation and a leading article, when one is a word-prefix of the other, or when both name one Place entity through any of its names. A character with no live location counts as here, and every character does when the PC's own place is unknown. Play keeps `normalize::value` equality.
+- **Every character the proposal names.** G2 collects every handle of a tagged proposal: fact subjects, `said_by`, `because`; Check `against`, stake subjects and factors' facts; blockers; reactions and their `cause`; `leaves.npc`; `move_to`; the `settles` item's subject; `cancel` event and cause; the scheduled event's actor, goal, effect subjects and `seen_by`; new NPCs. A fact handle reaches its subject, a World Event handle every entity it names, a goal handle its NPC and target. Each character it reaches must be cleared, here or not. A new NPC, and a handle that reaches nothing the world holds, refuses. Places named only as a destination (`leaves.to`, `moves_actor_to`) are left to G3.
+- **The sticky tag.** When the raw text of the first attempt says `intimate` is true anywhere, read without parsing (cut, fenced, with trailing text, the key twice), the retry is checked as intimate.
+
+`CheckKind` gains `DetailExcluded` and `AdultsOnly`, and `CheckKind::is_final()`. `turn::plan` stops at a final rejection: no retry prompt, no second proposal call, `TurnError::Refused`. `is_final` is the one list of final kinds (`mature::final_refusal` reads it).
+
+**A Refusal is not a failed Turn** (changed after review, 2026-11-12). The Engine records it under its `op_id`, and the same `op_id` gets the same Refusal with no model call. The shell returns it as its own result kind, `{"refusal": <sentence>}`, and the Play screen shows the sentence as one quiet line, with no Retry; the Intent goes back to the field. A new Intent is a new op and is judged afresh.
 
 **Why no retry.** The retry prompt lists the rejection lines. A model that reads "adults only" answers `intimate: false`, the proposal passes, and the narrator tells the same Intent. That is the model talking its way around the gate. **Rejected:** a schema that pins `intimate` to `false` when the place is not cleared. It loses the signal, and the Turn then commits as a plain one. **Cost if wrong:** a false tag at `excluded` costs the Player one refused Turn and one sentence. The evaluation counts those.
 
@@ -152,7 +161,7 @@ The stance rule keeps the retry. A missing reaction is a thing the model can rep
 LedgerOp::SetScene { open: bool, why: SceneWhy }
 pub enum SceneWhy { Opened, EndScene, FadeToBlack, NotIntimate, Moved, Arrival, Gate, Excluded }
 WorldView { pub scene_open: Option<TurnId> }                           // projection `campaign.scene_open_turn`
-pub struct Presence { pub truth: BTreeSet<EntityId>, pub seen: BTreeSet<EntityId>, pub pc_place: Option<String> }
+pub struct Presence { pub truth: BTreeSet<EntityId>, pub seen: BTreeSet<EntityId>, pub checked: BTreeSet<EntityId>, pub pc_place: Option<String> }
 ```
 
 `mature::scene_op` runs in `turn::resolve`, after `world::with_witnessed_events`, on the snapshot before the Turn and the Turn's ops. It returns at most one op, and that op is part of the Turn's single Commit.
@@ -183,7 +192,7 @@ pub struct Presence { pub truth: BTreeSet<EntityId>, pub seen: BTreeSet<EntityId
 |---|---|---|---|
 | G1 | `turn::plan`, before the proposal call, when `view.scene_open` is set | `clearance(view, &[])` | the core commits `SetScene { open: false, why: Gate }` in an OOC Turn, then plans the Turn as a plain one |
 | G2 | `checks::validate`, after the proposal call | the three rules of 3.3 | final refusal, or the retry for the stance rule |
-| G3 | `turn::resolve`, after the due World Events fire, before the Commit | `clearance` over `after.truth` | final refusal; nothing commits, so the event fires in a later Turn |
+| G3 | `turn::resolve`, after the due World Events fire, before the Commit | `clearance` over `after.checked` (`checked_here` after the ops) | final refusal; nothing commits, so the event fires in a later Turn |
 | G4 | `Engine::narrate`, before every narration call, `renarrate` included | `mature::told` | the Narration is told at `Implied` |
 
 G1 gives `Option<Cleared>` to `context::proposal_context`. With `None`, the proposal prompt holds no scene line, no pack scene fragment and no Narration of the scene.
@@ -497,8 +506,9 @@ About 12 s. The rates are the ones of `evals/reports/2026-11-turn-time.md`: 43 t
 |---|---|---|---|
 | Module off by default | `DetailLevel::default`; `mature::check` | "This Campaign excludes Intimate Scenes. You can change the Detail Level under Ask the GM." | `a_seed_without_detail_excludes`; `an_intimate_proposal_is_refused_at_excluded` |
 | Explicit needs a capable pack | `mature::effective`; `mature::told` | once: "No loaded Content Pack gives explicit description. Scenes are told by implication." | `explicit_without_a_capable_pack_is_told_implied` |
-| Every character present is a confirmed adult, before the Turn | G2, `mature::check` | "An Intimate Scene cannot happen here." and, when a perceived adult is unconfirmed, "Not confirmed as an adult:" with the names | `a_minor_in_the_place_refuses`; `an_unconfirmed_adult_refuses`; `a_hidden_minor_refuses_and_names_nobody`; `a_new_npc_in_an_intimate_turn_refuses` |
+| Every character the gate checks at the PC's place (`checked_here`: world truth, the PC's Beliefs, the gate's place rule, no known location), and every character the proposal names, is a confirmed adult, before the Turn | G2, `mature::check` | "An Intimate Scene cannot happen here." and, when a perceived adult is unconfirmed, "Not confirmed as an adult:" with the names | `a_minor_in_the_place_refuses`; `an_unconfirmed_adult_refuses`; `a_hidden_minor_refuses_and_names_nobody`; `a_new_npc_in_an_intimate_turn_refuses` |
 | The same, after the World Events of the Turn | G3, `mature::check_after` | the same sentence | `an_event_that_brings_a_minor_refuses_the_turn` |
+| A Refusal is not a failed Turn; the same op is not run again | `Engine::stored_refusal`; `AppError::Refused`; the Play screen | the same sentence, as a quiet line with no Retry; the Intent is back in the field | `the_same_op_after_a_refusal_makes_no_model_call`; `a_refusal_is_its_own_result_kind`; `a Refusal is a quiet line, not a failure, and offers no retry` |
 | An age refusal is final | `turn::plan`, `CheckKind::is_final` | the same sentence, after one proposal call | `an_age_refusal_makes_no_second_proposal_call` |
 | No scene text in a proposal without clearance | G1, `proposal_context` | nothing: the Turn is planned as a plain one | `a_scene_that_is_not_cleared_is_closed_before_the_proposal_call` |
 | No explicit text in a narration without clearance | G4, `Told::Explicit(Cleared)` | nothing: the Narration is implied | `explicit_fragments_need_a_cleared_value` (compile-level, plus a prompt search) |
@@ -526,7 +536,7 @@ Each row is a way a character could be in an Intimate Scene, or a way the rule c
 | 9 | A `NewNpc` created in an earlier Turn | unconfirmed until `ConfirmAge` | `an_npc_made_in_play_blocks_until_confirmed` |
 | 10 | A `NewNpc` with the name of a roster minor | the same-name rule of 3.2 | `a_namesake_of_a_minor_is_not_cleared` |
 | 11 | A proposal fact on the key `age` | dropped; the gate reads `entity.age` | `a_fact_on_the_age_key_changes_no_clearance` |
-| 12 | A bystander, a hidden character | `WorldView::present`, world truth | `a_hidden_minor_refuses_and_names_nobody` |
+| 12 | A bystander, a hidden character | `checked_here` holds world truth | `a_hidden_minor_refuses_and_names_nobody`; `g2_alone_refuses_a_hidden_minor` |
 | 13 | An arrival in the same Turn | G3 | `an_event_that_brings_a_minor_refuses_the_turn` |
 | 14 | A proposal that moves the minor away in the same Turn | G2 reads the place before the Turn, G3 after: both must pass | `moving_the_minor_out_in_the_same_turn_still_refuses` |
 | 15 | A retry that answers `intimate: false` after an age refusal | no retry | `an_age_refusal_makes_no_second_proposal_call` |
@@ -538,7 +548,12 @@ Each row is a way a character could be in an Intimate Scene, or a way the rule c
 | 21 | An old Campaign file | version 3 does not open; an old op has no `age_confirmed` | `a_version_3_file_is_refused`; `an_op_without_the_flag_is_unconfirmed` |
 | 22 | The Opening Turn, the OOC call, the draft and World Build calls | `Plain`, no pack scene text, by construction | `no_scene_text_outside_a_play_narration` |
 | 23 | An earlier scene Narration in a later prompt | `mature::turn_text` | `scene_narration_is_in_no_prompt_after_the_scene` |
-| 24 | The tag is wrong: an intimate Intent with `intimate: false` | not held by code. See section 9 | the evaluation `intimate_tag` |
+| 24 | The tag is wrong: an intimate Intent with `intimate: false` | not held by code. See section 9. The tag covers any characters and a PC who only watches | the evaluation `intimate_tag`; `the_intimate_line_covers_any_characters` |
+| 25 | A character the PC believes is here: a stale Belief, an unseen World Event, a Claim | `checked_here` holds `seen_present`; the narrator's Present line is a subset | `the_gate_checks_who_the_pc_believes_is_here`; `the_narrator_present_line_is_a_subset_of_the_checked_set` |
+| 26 | A tagged proposal that names a minor who is elsewhere: a fact, a speaker, a Check, a stake, a factor, a schedule | G2 clears every character the proposal names; an unknown handle refuses | `a_tagged_proposal_checks_every_character_it_names`; `a_tagged_proposal_that_names_an_unknown_handle_is_refused`; `a_check_against_a_minor_in_a_tagged_turn_is_refused`; `every_proposal_field_is_sorted_for_the_gate` |
+| 27 | A location written another way: case, accents, punctuation, a prefix, another name of the place; no location at all | the gate's place rule; unknown counts as here | `a_near_place_name_counts_as_here`; `a_character_with_no_place_counts_as_here`; `another_place_does_not_block` |
+| 28 | A first answer that says the tag but does not parse | the sticky tag reads the raw text | `a_malformed_first_answer_keeps_the_tag` |
+| 29 | The same op sent again after a Refusal | the Refusal is recorded under its op; no model call | `the_same_op_after_a_refusal_makes_no_model_call` |
 
 ## 7. Other acceptance tests
 
