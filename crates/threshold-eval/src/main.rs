@@ -4,7 +4,7 @@
 //! Options:
 //! - `--scenario <name|all>` (default `all`); names: latency, memory,
 //!   voices, shortcuts, agency_leaks, offscreen, world_build, speech,
-//!   play_basics, open_items, ooc, departures, intimate_tag, scene_agency,
+//!   play_basics, open_items, ooc, departures, finds, intimate_tag, scene_agency,
 //!   npc_will, scene_latency, replay. `all` leaves out replay, which needs a
 //!   Campaign file, and the four mature scenarios.
 //!   Repeat or comma-separate.

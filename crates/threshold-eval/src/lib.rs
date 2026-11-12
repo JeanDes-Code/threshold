@@ -8,6 +8,7 @@
 //! gives counts, never a pass/fail, except the latency pass line.
 
 mod departures;
+mod finds;
 mod judge;
 pub mod mature;
 mod ooc;
@@ -43,7 +44,7 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 17] = [
+pub const SCENARIOS: [&str; 18] = [
     "latency",
     "memory",
     "voices",
@@ -56,6 +57,7 @@ pub const SCENARIOS: [&str; 17] = [
     "open_items",
     "ooc",
     "departures",
+    "finds",
     "intimate_tag",
     "scene_agency",
     "npc_will",
@@ -335,6 +337,7 @@ pub fn run(
             "open_items" => open_items::scenario(&mut ctx)?,
             "ooc" => ooc::scenario(&mut ctx)?,
             "departures" => departures::scenario(&mut ctx)?,
+            "finds" => finds::scenario(&mut ctx)?,
             "intimate_tag" | "scene_agency" | "npc_will" | "scene_latency" => {
                 mature::scenario(&mut ctx, name)?
             }

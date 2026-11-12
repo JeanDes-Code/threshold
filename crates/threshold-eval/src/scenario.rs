@@ -257,6 +257,34 @@ pub struct OocQuestion {
     pub none_of: Vec<String>,
 }
 
+/// What the PC finds (ADR 0007, 2026-11-12): lookup Intents that must
+/// find something, and negative Intents that must find nothing. One
+/// campaign per run plays the steps in order.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Finds {
+    #[serde(default = "default_fixture")]
+    pub fixture: String,
+    pub steps: Vec<FindStep>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FindStep {
+    pub kind: FindKind,
+    pub intent: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindKind {
+    /// The Intent reads, opens, looks through or asks for a list: the Turn
+    /// must record what the PC finds, and the Narration must tell it.
+    Lookup,
+    /// A plain talk or a move: the Turn must find nothing.
+    Negative,
+}
+
 /// Departures (bug pass 5, M1): the Player sends an NPC away, a World Event
 /// makes another NPC leave, then the PC looks around. Each Narration is
 /// judged against who is here after its Turn.

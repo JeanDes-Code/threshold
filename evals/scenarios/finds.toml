@@ -1,0 +1,42 @@
+# What the PC finds (ADR 0007, 2026-11-12). An Intent that reads, opens,
+# looks through or asks for a list must get, in the same Turn, what the PC
+# finds: the proposal's required `finds`, kept on the Turn record when the
+# act happens, told by the narrator and shown under the Narration. One
+# campaign per run on the town fixture plays the steps in order: three
+# lookups and two negatives (a plain talk, then a move, last, so that every
+# lookup happens in the town hall).
+#
+# Measures: lookups whose Turn records at least one item (`what` is not
+# `nothing`, the act happened, the guard kept an item); negatives that record
+# one (false positives); lookup Narrations that tell at least one found item
+# (the judge reads the Narration and the items); Turn time.
+#
+# Pass lines, at --runs 4 (12 lookups, 8 negatives):
+# - Lookups that found something: at least 10 of 12.
+# - Negatives with a found result (false positives): at most 1 of 8.
+# - Lookup Narrations that tell a found item (judge): at least 10 of 12.
+# - Turn time p90 (committed Turns): under 15 s.
+#
+# Command (from the repository root, with the model loaded):
+#   cargo run --release -p threshold-eval -- --scenario finds --runs 4
+fixture = "town"
+
+[[steps]]
+kind = "lookup"
+intent = "I walk over to the wall by the door and read the court notices pinned there."
+
+[[steps]]
+kind = "negative"
+intent = "I tell Hessa good morning and ask how her week has been."
+
+[[steps]]
+kind = "lookup"
+intent = "I open the drawer of the spare desk by the window and look through what is inside."
+
+[[steps]]
+kind = "lookup"
+intent = "I ask Hessa, the clerk, for the list of fees the town hall charges, and read it."
+
+[[steps]]
+kind = "negative"
+intent = "I leave the town hall and walk down the river road to the Varn mill."

@@ -89,14 +89,17 @@ fn report_has_every_metric() {
         "Proposal prompt tokens",
         "Right answers in total",
         "Departures told with no recorded departure",
+        "Lookups that found something",
+        "Negatives with a found result (false positives)",
+        "Lookup Narrations that tell a found item (judge)",
     ] {
         assert!(report.contains(metric), "missing {metric}:\n{report}");
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
     // agency_leaks 12, offscreen 4, speech 10, play_basics 8, open_items 9,
-    // departures 5 = 115 Turns. The OOC scenario plays no Turn.
-    assert!(report.contains("- Turns played: 230 (0 failed"), "{report}");
+    // departures 5, finds 5 = 120 Turns. The OOC scenario plays no Turn.
+    assert!(report.contains("- Turns played: 240 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
@@ -1703,6 +1706,60 @@ fn open_items_counts_right_and_wrong_closes() {
         "| Unrelated | 5 | (none asked) | 0 | 0 |",
         "- Wrong closes in total: 1",
         "- Wrong closes by item: flour_debt 1",
+    ] {
+        assert!(report.contains(line), "missing {line}:\n{report}");
+    }
+}
+
+/// ADR 0007 (2026-11-12): the finds counts, on recorded answers. The first
+/// lookup finds two items, the drawer finds nothing, the fee list finds one;
+/// the plain talk finds one (a false positive) and the move nothing. The
+/// judge says yes to every Narration it reads.
+#[test]
+fn finds_counts_lookups_false_positives_and_told() {
+    let found = |source: &str, titles: &[&str]| {
+        let items: Vec<String> = titles
+            .iter()
+            .map(|t| format!(r#"{{"title":"{t}","line":"A plain line."}}"#))
+            .collect();
+        format!(
+            r#"{{"action":"observe","verdict":"allowed","intimacy":"none","finds":{{"what":"found","source":"{source}","items":[{}]}},"minutes":5}}"#,
+            items.join(",")
+        )
+    };
+    let gm = RecordedGm::new(
+        vec![
+            found("the court notices", &["Market day court", "Lost mule"]),
+            found("Hessa's answer", &["Her week"]),
+            PROPOSAL.to_owned(),
+            found("the fee list", &["Copying, per page"]),
+            PROPOSAL.to_owned(),
+        ],
+        vec!["It happens.".to_owned(); 5],
+    );
+    let config = Config {
+        root: root(),
+        scenarios: vec!["finds".into()],
+        runs: 1,
+        model: "recorded".into(),
+        judge: "first-choice".into(),
+        memory_turns: None,
+        source: None,
+        expected: None,
+        raw_log: None,
+        campaign: None,
+        intents: None,
+        packs_dir: None,
+        scenarios_dir: None,
+    };
+    let make = || Box::new(gm.clone()) as Box<dyn Gm + Send>;
+    let report = run(&config, &make, &make, &FirstChoice, &mut |_| {}).unwrap();
+    for line in [
+        "- Lookups that found something: 2 / 3 (67%)",
+        "- Items per lookup that found something: 1.5",
+        "- Negatives with a found result (false positives): 1 / 2 (50%)",
+        "- Lookup Narrations that tell a found item (judge): 2 / 3 (67%) (0 judge errors)",
+        "- Turns failed: 0 / 5 (0%)",
     ] {
         assert!(report.contains(line), "missing {line}:\n{report}");
     }
