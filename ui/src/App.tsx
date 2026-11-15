@@ -273,7 +273,7 @@ export default function App() {
         )}
         {campaign && tab === "character" && (
           <ScreenFrame label="Character" title={campaign.pc_name} tools={tools}>
-            <Character revision={story.length} />
+            <Character revision={story.length} campaign={campaign.db_path} running={turnBusy} />
           </ScreenFrame>
         )}
         {campaign && tab === "debug" && debug && (

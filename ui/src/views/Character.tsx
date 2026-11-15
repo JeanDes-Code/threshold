@@ -3,24 +3,50 @@ import { clockText, errorText, type CharacterView, type NameRef } from "../api";
 import { nameText } from "../play/logic";
 import { api } from "../tauri";
 
+/** The last Character view read, per Campaign file: shown at once when the
+ * tab opens again, even while a Turn runs and `get_character` waits for it
+ * (QA m4, 2026-11-15: the tab showed a bare "Loading…" for the whole Turn). */
+let lastRead: { campaign: string; view: CharacterView } | null = null;
+
+/** The line above a Character view that a running Turn will change. */
+export const CHARACTER_RUNNING_LINE = "The GM is playing a Turn. This shows you as of the last Turn.";
+
+interface Props {
+  /** Changes after each Turn: the view is read again. */
+  revision: number;
+  /** The open Campaign's file: the last view read is kept per Campaign. */
+  campaign: string;
+  /** A Turn is running: the tab keeps the last view read until it ends. */
+  running: boolean;
+}
+
 /**
  * The PC as the PC knows itself, in the cards of the Play screen: who the
  * PC is, the state the core holds, what the PC knows about itself, and its
  * open items. The text comes from the view as it is. `revision` changes
  * after each Turn.
  */
-export default function Character({ revision }: { revision: number }) {
-  const [view, setView] = useState<CharacterView | null>(null);
+export default function Character({ revision, campaign, running }: Props) {
+  const [view, setView] = useState<CharacterView | null>(() =>
+    lastRead?.campaign === campaign ? lastRead.view : null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getCharacter().then(setView, (e: unknown) => setError(errorText(e)));
-  }, [revision]);
+    api.getCharacter().then(
+      (read) => {
+        lastRead = { campaign, view: read };
+        setView(read);
+      },
+      (e: unknown) => setError(errorText(e)),
+    );
+  }, [revision, campaign]);
 
   if (error) return <p className="error">{error}</p>;
-  if (!view) return <p className="play-empty">Loading…</p>;
+  if (!view) return <p className="muted">{running ? CHARACTER_RUNNING_LINE : "Loading…"}</p>;
   return (
     <div className="character">
+      {running && <p className="muted character__running">{CHARACTER_RUNNING_LINE}</p>}
       <section className="play-card" aria-label="You">
         <h2 className="play-label">You</h2>
         <p className="play-you__name">{view.name}</p>
