@@ -1321,7 +1321,8 @@ fn move_to_moves_the_pc_and_a_model_location_fact_is_dropped() {
 }
 
 /// R4: a move with no known destination commits; the PC stays, and the
-/// narrator is told that the move does not happen and where the PC still is.
+/// narrator is told that the PC reaches no other place and where the PC
+/// still is.
 #[test]
 fn move_with_no_destination_commits_and_the_pc_stays() {
     let mut p = proposal(Verdict::Allowed);
@@ -1347,6 +1348,59 @@ fn move_with_no_destination_commits_and_the_pc_stays() {
         "{}",
         narration.recent
     );
+}
+
+/// QA polish pass, M1: the model sends `move` with no place for a plain act
+/// inside the room. The narrator is told where the PC still is, and never
+/// that the act does not happen: the old line made it tell the PC
+/// hesitating.
+#[test]
+fn a_plain_act_sent_as_a_move_is_not_told_as_undone() {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    let (mut engine, w, gm) = setup(vec![json(&p)], vec!["You sit down."]);
+    engine
+        .play_turn(
+            "t1".into(),
+            "I sit down on the bench by the fire.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let view = snapshot(&engine, &w);
+    assert_eq!(
+        view.live_fact(w.ada, "location").unwrap().slot.value,
+        "gate square"
+    );
+    let recent = prompts(&gm, CallKind::Narrate).pop().unwrap().recent;
+    let outcome = &recent[recent.find("Outcome:").unwrap()..];
+    assert!(!outcome.contains("does not happen"), "{outcome}");
+    assert!(!outcome.contains("does not arrive"), "{outcome}");
+    assert!(outcome.contains("still at gate square."), "{outcome}");
+}
+
+/// QA polish pass, M6: the Correction's proposal and Narration read the
+/// whole corrected Intent, and the stored Turn holds it. (QA's Campaign
+/// stored "I ask Maren" as the Intent and the rest of the sentence in
+/// `why`: the core got the Intent already cut.)
+#[test]
+fn a_correction_reads_the_whole_corrected_intent() {
+    let p = proposal(Verdict::Allowed);
+    let (mut engine, _, gm) = setup(vec![json(&p), json(&p)], vec!["First.", "Second."]);
+    engine
+        .play_turn("t1".into(), "I ask Orsel.", &mut no_chunks())
+        .unwrap();
+    let corrected = "I ask Orsel if he is warm enough by the gate.";
+    let outcome = engine
+        .correct_last("c1".into(), corrected, "a plain question", &mut no_chunks())
+        .unwrap();
+    let propose = prompts(&gm, CallKind::Propose).pop().unwrap();
+    let ask = format!("INTENT\n{corrected}\n");
+    assert!(propose.recent.contains(&ask), "{}", propose.recent);
+    let line = format!("Player intent: {corrected}\n");
+    let narrate = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(narrate.recent.contains(&line), "{}", narrate.recent);
+    let stored = engine.store().turn(outcome.turn_id).unwrap().unwrap();
+    assert_eq!(stored.record.intent, corrected);
 }
 
 /// B4: a PC reaction, the PC in an event's seen_by, and an event whose

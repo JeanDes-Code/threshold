@@ -527,10 +527,17 @@ pub const IMPOSSIBLE_LINE: &str = "- The attempt does not happen: the world prev
 /// Commit (ADR 0007). The place's name follows.
 pub const PC_PLACE_LINE: &str = "- After this Turn the PC is at ";
 
-/// The outcome line of a move that the Commit did not make: the PC does not
-/// arrive (ADR 0007). The place's name follows.
+/// The outcome line of a move that the Commit did not make: the PC reaches
+/// no other place (ADR 0007). The place's name follows.
+///
+/// QA polish pass, M1: the model also sends `move` with no place for a
+/// plain act inside the room ("I walk over to the traveler by the window").
+/// The old line, "The move does not happen: the PC does not arrive.", made
+/// the narrator tell the PC hesitating, and the next Turn's narrator then
+/// told the open act (M2). This line says only that the PC reaches no
+/// other place.
 pub const NOT_MOVED_LINE: &str =
-    "- The move does not happen: the PC does not arrive. After this Turn the PC is still at ";
+    "- The PC reaches no other place this Turn: after this Turn the PC is still at ";
 
 /// The words after a lost Check's result line.
 pub const FAILED_CHECK_LINE: &str =
