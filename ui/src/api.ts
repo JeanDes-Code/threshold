@@ -456,6 +456,7 @@ export type BuildStage =
   | "npc_state"
   | "world_events"
   | "start_state"
+  | "place_tree"
   | "commit";
 
 /** Why a build stopped: names only, never model text. */

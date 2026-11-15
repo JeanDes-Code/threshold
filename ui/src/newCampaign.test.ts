@@ -115,6 +115,7 @@ describe("stageLabel", () => {
     expect(stageLabel("npc_state")).toBe("Preparing characters");
     expect(stageLabel("world_events")).toBe("Preparing events");
     expect(stageLabel("start_state")).toBe("Preparing the start");
+    expect(stageLabel("place_tree")).toBe("Mapping the places");
     expect(stageLabel("commit")).toBe("Saving the campaign");
   });
 

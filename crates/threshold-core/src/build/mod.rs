@@ -39,6 +39,7 @@ pub enum Stage {
     NpcState,
     WorldEvents,
     StartState,
+    PlaceTree,
     Commit,
 }
 

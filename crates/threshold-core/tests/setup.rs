@@ -401,3 +401,66 @@ fn a_fixture_campaign_has_no_confirmed_age() {
     assert!(characters.len() > 2, "{characters:?}");
     assert!(view.entities.iter().all(|e| !e.age_confirmed));
 }
+
+/// ADR 0008 (Inside Links): the places list of a World Setup becomes one
+/// stored link per Place. A Place it does not name keeps an unknown link.
+#[test]
+fn world_places_become_inside_links() {
+    use threshold_core::domain::Inside;
+    let (mut store, campaign) = campaign(&town_seed());
+    let setup = world(
+        r#"
+[[places]]
+place = "Varn town hall"
+inside = "none"
+
+[[places]]
+place = "tithe archive"
+inside = "Varn town hall"
+"#,
+    );
+    commit_world(&mut store, campaign, &setup).unwrap();
+    let view = store.snapshot(campaign).unwrap();
+    let link = |name: &str| {
+        view.entities
+            .iter()
+            .find(|e| e.name == name)
+            .unwrap()
+            .inside
+    };
+    assert_eq!(link("Varn town hall"), Inside::Top);
+    assert_eq!(
+        link("Tithe archive"),
+        Inside::Place(id(&view, "Varn town hall"))
+    );
+    assert_eq!(link("Varn mill"), Inside::Unknown);
+}
+
+/// A link to a name that is no Place, a Place named twice, a Place inside
+/// itself and a loop are refused, and nothing is written.
+#[test]
+fn a_bad_inside_link_fails_and_writes_nothing() {
+    for (text, why) in [
+        ("place = \"Varn mill\"\ninside = \"Orsel\"", "no place"),
+        ("place = \"Nowhere\"\ninside = \"none\"", "no place"),
+        (
+            "place = \"Varn mill\"\ninside = \"Varn mill\"",
+            "inside itself",
+        ),
+        (
+            "place = \"Varn mill\"\ninside = \"none\"\n\n[[places]]\nplace = \"Varn mill\"\ninside = \"none\"",
+            "two Inside Links",
+        ),
+        (
+            "place = \"Varn mill\"\ninside = \"Tithe archive\"\n\n[[places]]\nplace = \"Tithe archive\"\ninside = \"Varn mill\"",
+            "cycle",
+        ),
+    ] {
+        let (mut store, campaign) = campaign(&town_seed());
+        let before = store.snapshot(campaign).unwrap();
+        let setup = world(&format!("[[places]]\n{text}\n"));
+        let err = commit_world(&mut store, campaign, &setup).unwrap_err();
+        assert!(format!("{err:?}").contains(why), "{why}: {err:?}");
+        assert_eq!(store.snapshot(campaign).unwrap(), before, "{why}");
+    }
+}

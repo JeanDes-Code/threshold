@@ -1211,6 +1211,10 @@ fn added_character_reaches_the_world_build() {
             {"npc": "Ada Venn", "place": "Tide Hall"},
             {"npc": "Nell Quay", "place": "Tide Hall"}
         ]}),
+        json!({"places": [
+            {"place": "Gull Point", "inside": "none"},
+            {"place": "Tide Hall", "inside": "none"}
+        ]}),
     ];
     let gm_build = gm(&outputs);
     let mut progress = |_| {};

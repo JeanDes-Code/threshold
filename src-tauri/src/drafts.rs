@@ -484,6 +484,7 @@ fn job_error(failure: BuildFailure) -> AppError {
         Stage::NpcState => ("The world build", "the characters step"),
         Stage::WorldEvents => ("The world build", "the world events step"),
         Stage::StartState => ("The world build", "the start step"),
+        Stage::PlaceTree => ("The world build", "the places step"),
         Stage::Commit => ("The world build", "the campaign file step"),
     };
     let check = match failure.check {

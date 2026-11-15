@@ -1,5 +1,6 @@
-//! The four World Build stages: hidden facts, the hidden state of each NPC,
-//! World Events and the start state (design 6.3, data shape 3.6). Each
+//! The five World Build stages: hidden facts, the hidden state of each NPC,
+//! World Events, the start state (design 6.3, data shape 3.6) and the place
+//! tree (ADR 0008, Inside Links). Each
 //! stage output is a private type with length caps; code checks it
 //! (`checks`) and turns it into a `WorldSetup`, which it never writes.
 
@@ -8,15 +9,17 @@ use serde::Deserialize;
 
 use super::{
     BuildCheck, BuildFailure, Control, DraftState, SeedDraft, Stage,
-    checks::{self, FactBook, Member, NpcItem, Roster, fact_entry, location},
+    checks::{
+        self, FactBook, Member, NpcItem, Roster, TreeItem, fact_entry, is_top_level, location,
+    },
     draft::gaps,
     stages::{Staged, essential, report, run_stage, sections},
-    world_prompts::{events_call, hidden_call, npc_call, start_call},
+    world_prompts::{events_call, hidden_call, npc_call, start_call, tree_call},
 };
 use crate::{
     domain::{
-        AttitudeEntry, EffectEntry, EntityKind, EventEntry, FactEntry, GoalEntry, VoiceCardEntry,
-        WorldSetup,
+        AttitudeEntry, EffectEntry, EntityKind, EventEntry, FactEntry, GoalEntry, PlaceEntry,
+        TOP_LEVEL, VoiceCardEntry, WorldSetup,
     },
     model::Gm,
     normalize,
@@ -81,10 +84,12 @@ pub fn build_world(
         let npc = placement.npc.clone();
         book.add(location(&npc, &placement.place, vec![npc.clone()]));
     }
+    let places = place_tree(draft, gm, ctl, &roster, &book)?;
 
     let mut world = WorldSetup {
         facts: book.into_facts(),
         events,
+        places,
         ..WorldSetup::default()
     };
     for state in states {
@@ -394,6 +399,49 @@ fn start_state(
         .collect())
 }
 
+/// One call when the roster holds a Place: the Inside Link of each Place
+/// (ADR 0008, Inside Links), the Place that holds it or `none`. The call
+/// is essential. A link that fails its repair is dropped, and a Place with
+/// no link left keeps an unknown link, which the age gate doubts.
+fn place_tree(
+    draft: &SeedDraft,
+    gm: &dyn Gm,
+    ctl: &mut Control,
+    roster: &Roster,
+    book: &FactBook,
+) -> Result<Vec<PlaceEntry>, BuildFailure> {
+    let places: Vec<&str> = roster
+        .members()
+        .iter()
+        .filter(|m| m.kind == EntityKind::Place)
+        .map(|m| m.main.as_str())
+        .collect();
+    if places.is_empty() {
+        return Ok(vec![]);
+    }
+    report(ctl, Stage::PlaceTree, 0, 1);
+    let call = tree_call(draft, roster, book, &places);
+    let staged = run_stage(gm, ctl, &draft.id, &call, |out| {
+        checks::place_tree(roster, out)
+    })?;
+    let Staged { output, drop, .. } = essential(Stage::PlaceTree, staged)?;
+    report(ctl, Stage::PlaceTree, 1, 1);
+    Ok(output
+        .places
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !drop.contains(&TreeItem::Link(*i)))
+        .map(|(_, link)| PlaceEntry {
+            place: roster.main(&link.place),
+            inside: if is_top_level(&link.inside) {
+                TOP_LEVEL.to_owned()
+            } else {
+                roster.main(&link.inside)
+            },
+        })
+        .collect())
+}
+
 /// A checked NpcState answer, without its dropped items.
 fn npc_state_of(roster: &Roster, npc: &Member, staged: Staged<NpcOut, NpcItem>) -> NpcState {
     let Staged { output, drop, .. } = staged;
@@ -584,4 +632,20 @@ pub(super) struct PlacementOut {
     pub npc: String,
     #[schemars(length(max = 60))]
     pub place: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(super) struct TreeOut {
+    #[schemars(length(max = 80))]
+    pub places: Vec<LinkOut>,
+}
+
+/// The Inside Link of one Place.
+#[derive(Deserialize, JsonSchema)]
+pub(super) struct LinkOut {
+    #[schemars(length(max = 60))]
+    pub place: String,
+    /// The place from PLACES that directly holds `place`, or `none`.
+    #[schemars(length(max = 60))]
+    pub inside: String,
 }

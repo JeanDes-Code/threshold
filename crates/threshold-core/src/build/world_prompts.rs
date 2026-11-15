@@ -7,11 +7,11 @@ use super::{
     SeedDraft, Stage,
     checks::{FactBook, Member, Roster},
     stages::{Need, StageCall, name_field, name_list, schema_of},
-    world_stages::{EventsOut, HiddenOut, NpcCall, NpcOut, NpcState, StartOut},
+    world_stages::{EventsOut, HiddenOut, NpcCall, NpcOut, NpcState, StartOut, TreeOut},
 };
 use crate::{
     checks::PC_INVOLUNTARY_KEYS,
-    domain::{EntityKind, FactEntry},
+    domain::{EntityKind, FactEntry, TOP_LEVEL},
     model::Prompt,
 };
 
@@ -406,6 +406,54 @@ pub(super) fn start_call(
                 },
                 list(&absent),
                 list(places),
+                fact_lines(book.facts(), true),
+            ),
+        ),
+        schema,
+        need: Need::Essential,
+    }
+}
+
+const TREE_SYSTEM: &str = "\
+You state which place holds each place of a role-playing world, as JSON. A game uses it to know which places are part of others.
+Rules:
+- places: one entry for each name under PLACES, each name once, spelled as written there.
+- inside: the one place from PLACES that directly holds this place, spelled as written there: the town that holds a square, the house that holds a room. none when no place under PLACES holds it.
+- Use the WORLD FACTS. When a fact says or shows that a place lies in, at or within another place, use that place.
+- Never put a place inside itself. Never make a loop: when A is inside B, B is not inside A.";
+
+/// `places`: every Place of the roster, the start place too.
+pub(super) fn tree_call(
+    draft: &SeedDraft,
+    roster: &Roster,
+    book: &FactBook,
+    places: &[&str],
+) -> StageCall {
+    let mut schema = schema_of::<TreeOut>();
+    name_field(
+        &mut schema,
+        "/$defs/LinkOut/properties/place",
+        places,
+        false,
+    );
+    let mut parents = places.to_vec();
+    parents.push(TOP_LEVEL);
+    name_field(
+        &mut schema,
+        "/$defs/LinkOut/properties/inside",
+        &parents,
+        false,
+    );
+    let list: Vec<String> = places.iter().map(|n| format!("- {n}")).collect();
+    StageCall {
+        stage: Stage::PlaceTree,
+        step: "place_tree".into(),
+        prompt: prompt(
+            TREE_SYSTEM.into(),
+            format!(
+                "{}\n\nPLACES\n{}\n\nWORLD FACTS\n{}",
+                context(draft, roster),
+                list.join("\n"),
                 fact_lines(book.facts(), true),
             ),
         ),

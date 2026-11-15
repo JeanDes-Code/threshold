@@ -42,6 +42,7 @@ const STAGES: Record<BuildStage, string> = {
   npc_state: "Preparing characters",
   world_events: "Preparing events",
   start_state: "Preparing the start",
+  place_tree: "Mapping the places",
   commit: "Saving the campaign",
 };
 

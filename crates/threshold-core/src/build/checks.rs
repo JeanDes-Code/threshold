@@ -10,11 +10,11 @@ use super::{
     BuildCheck,
     draft_stages::open_key,
     stages::{Problem, StageItem, Step},
-    world_stages::{EventsOut, FactOut, GoalOut, HiddenOut, NpcOut, NpcState, StartOut},
+    world_stages::{EventsOut, FactOut, GoalOut, HiddenOut, NpcOut, NpcState, StartOut, TreeOut},
 };
 use crate::{
     checks::{PC_INVOLUNTARY_KEYS, is_involuntary_key},
-    domain::{AdventureSeed, EntityKind, FactEntry, OtherName, alias_key, is_open_key},
+    domain::{AdventureSeed, EntityKind, FactEntry, OtherName, TOP_LEVEL, alias_key, is_open_key},
     normalize,
 };
 
@@ -927,4 +927,125 @@ pub(super) fn start_state(
         }
     }
     problems
+}
+
+// ---- Place tree --------------------------------------------------------------
+
+/// An item of the place tree answer: one link by index, or a Place of the
+/// roster the answer leaves out. A missing Place asks for a repair; when
+/// the repair still leaves it out, its Inside Link stays unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TreeItem {
+    Link(usize),
+    Missing,
+}
+
+impl StageItem for TreeItem {
+    fn at(path: &[Step]) -> Option<Self> {
+        match path {
+            [Step::Field(_), Step::Index(i), ..] => Some(Self::Link(*i)),
+            _ => None,
+        }
+    }
+}
+
+/// True when `inside` says the Place sits inside no other Place.
+pub(super) fn is_top_level(inside: &str) -> bool {
+    normalize::value(inside) == TOP_LEVEL
+}
+
+/// Each problem drops one link (ADR 0008, Inside Links): a name that is no
+/// Place of the roster, a Place listed twice, a Place inside itself, and a
+/// link that closes a loop. A Place of the roster with no link left asks
+/// for a repair.
+pub(super) fn place_tree(roster: &Roster, out: &TreeOut) -> Vec<Problem<TreeItem>> {
+    let mut problems = vec![];
+    // Accepted links, by main name: the parent, or `None` for top level.
+    let mut links: Vec<(String, Option<String>)> = vec![];
+    for (i, link) in out.places.iter().enumerate() {
+        let note = || Note::item("places", i);
+        let place = roster.find(&link.place);
+        let parent = if is_top_level(&link.inside) {
+            Ok(None)
+        } else {
+            roster.find(&link.inside).ok_or(()).map(Some)
+        };
+        let problem = match (place, parent) {
+            (None, _) => Some((
+                BuildCheck::References,
+                note().field("place").says("is not a name from PLACES"),
+            )),
+            (_, Err(())) => Some((
+                BuildCheck::References,
+                note()
+                    .field("inside")
+                    .says("is not a name from PLACES, nor none"),
+            )),
+            (Some(p), _) if p.kind != EntityKind::Place => Some((
+                BuildCheck::Kinds,
+                note().field("place").of(p).says("is not a place"),
+            )),
+            (_, Ok(Some(q))) if q.kind != EntityKind::Place => Some((
+                BuildCheck::Kinds,
+                note().field("inside").of(q).says("is not a place"),
+            )),
+            (Some(p), _) if links.iter().any(|(name, _)| *name == p.main) => Some((
+                BuildCheck::References,
+                note().of(p).says("this place is listed twice"),
+            )),
+            (Some(p), Ok(Some(q))) if p.main == q.main => Some((
+                BuildCheck::References,
+                note().of(p).says("a place cannot be inside itself"),
+            )),
+            (Some(p), Ok(Some(q))) if reaches(&links, &q.main, &p.main) => Some((
+                BuildCheck::References,
+                note()
+                    .of(p)
+                    .says("this link makes a loop: the parent is inside this place"),
+            )),
+            (Some(p), Ok(parent)) => {
+                links.push((p.main.clone(), parent.map(|q| q.main.clone())));
+                None
+            }
+        };
+        if let Some((check, note)) = problem {
+            problems.push(Problem::optional(check, TreeItem::Link(i), note));
+        }
+    }
+    for place in roster
+        .members()
+        .iter()
+        .filter(|m| m.kind == EntityKind::Place)
+    {
+        if !links.iter().any(|(name, _)| *name == place.main) {
+            problems.push(Problem::optional(
+                BuildCheck::Completeness,
+                TreeItem::Missing,
+                Note::part("places")
+                    .of(place)
+                    .says("this place has no entry: give the place that holds it, or none"),
+            ));
+        }
+    }
+    problems
+}
+
+/// True when the chain of accepted links from `from` reaches `to`.
+fn reaches(links: &[(String, Option<String>)], from: &str, to: &str) -> bool {
+    let mut at = Some(from.to_owned());
+    let mut steps = 0;
+    while let Some(name) = at {
+        if name == to {
+            return true;
+        }
+        steps += 1;
+        if steps > links.len() {
+            return false;
+        }
+        at = links
+            .iter()
+            .find(|(place, _)| *place == name)
+            .and_then(|(_, parent)| parent.clone());
+    }
+    false
 }

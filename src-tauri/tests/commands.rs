@@ -699,6 +699,10 @@ fn build_outputs() -> Vec<Value> {
             "public": false
         }]}),
         json!({"placements": [{"npc": "Ada Venn", "place": "Tide Hall"}]}),
+        json!({"places": [
+            {"place": "Gull Point", "inside": "none"},
+            {"place": "Tide Hall", "inside": "Gull Point"}
+        ]}),
     ]
 }
 
@@ -991,7 +995,7 @@ fn one_build_at_a_time() {
     drop(release_tx);
     let summary = first.join().unwrap().unwrap();
     assert!(summary.needs_begin);
-    assert_eq!(rig.build.calls().len(), 4 + 6);
+    assert_eq!(rig.build.calls().len(), 4 + 7);
     // The guard is free again: the next refusal is about the draft.
     let again = rig.drafts.start_build(&id, &mut |_| {}).unwrap_err();
     assert!(!again.to_string().contains("running"), "{again}");
@@ -1149,7 +1153,7 @@ fn get_build_debug_refused_when_debug_off() {
     rig.drafts.start_build(&id, &mut |_| {}).unwrap();
     // A build replaces the records of the draft.
     let lines = rig.drafts.get_build_debug(&id).unwrap();
-    assert_eq!(lines.len(), 6, "one line per build call");
+    assert_eq!(lines.len(), 7, "one line per build call");
 
     rig.session().set_debug(false);
     assert!(matches!(
