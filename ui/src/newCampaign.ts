@@ -281,8 +281,8 @@ export function gapSentence(gap: Gap, form: ReviewForm): string {
       "The story setup is too long for the GM to read. Shorten the premise, the GM agreement or the content limits.",
     slot_conflict: () =>
       other === null
-        ? `${field} says something about the same thing as another fact. Delete one of them, or merge them.`
-        : `${field} and ${otherField} say something about the same thing. Delete one of them, or merge them.`,
+        ? `${field} says something about the same thing as another fact. Delete one of them.`
+        : `${field} and ${otherField} say something about the same thing. Delete one of them.`,
   };
   return Object.hasOwn(sentences, gap.kind)
     ? sentences[gap.kind]()
@@ -462,6 +462,24 @@ export const DETAIL_LEVELS: readonly (readonly [DetailLevel, string])[] = [
   ["explicit", "Explicit, only with a Content Pack that gives it"],
 ];
 
+/** One plain line per Detail Level, under the "Intimate scenes" select (QA m8). */
+export function detailHelp(level: DetailLevel, explicitPack: boolean | null): string {
+  if (level === "excluded") return "Left out: intimate scenes never happen in the story.";
+  if (level === "implied") return "Implied: an intimate scene happens off the page; the story moves on.";
+  const loaded =
+    explicitPack === null
+      ? "The app is still reading the Content Packs."
+      : explicitPack
+        ? "One is loaded."
+        : "None is loaded now, so the scene is told as Implied.";
+  return `Explicit: described only with a Content Pack that allows it. ${loaded}`;
+}
+
+/** True when a loaded Content Pack gives explicit description; null until the shell answers. */
+export function explicitPackLoaded(packs: readonly { explicit: boolean; problem: string | null }[] | null): boolean | null {
+  return packs === null ? null : packs.some((p) => p.explicit && p.problem === null);
+}
+
 /** The hint under the "Intimate scenes" select. */
 export const DETAIL_HINT =
   "Off by default. Only characters whose age you confirmed as 18 or more can take part. Anyone younger, or unconfirmed, in the place stops the scene.";
@@ -576,16 +594,23 @@ export function ageLineOf(ages: AgeLine[], form: ReviewForm, row: Row): AgeLine 
   );
 }
 
+/** The oldest age a field takes (QA m8, 2026-11-15: 65535 was taken). */
+export const MAX_AGE = 150;
+
+/** What an age field says under a text it does not take. */
+export const AGE_PROBLEM = `Enter an age in whole years, from 0 to ${MAX_AGE}.`;
+
 /**
- * An age typed as text: whole years, in decimal digits only. `null` for an
- * empty field; `undefined` for any other text ("0x10", "1e1", "16.5", "-3").
+ * An age typed as text: whole years, in decimal digits only, `MAX_AGE` at
+ * most. `null` for an empty field; `undefined` for any other text ("0x10",
+ * "1e1", "16.5", "-3", "151").
  */
 export function parseAge(text: string): number | null | undefined {
   const t = text.trim();
   if (t === "") return null;
-  if (!/^\d{1,5}$/.test(t)) return undefined;
+  if (!/^\d{1,3}$/.test(t)) return undefined;
   const n = Number(t);
-  return n <= 65535 ? n : undefined;
+  return n <= MAX_AGE ? n : undefined;
 }
 
 /**

@@ -34,6 +34,8 @@ interface Props {
   onJob?: (running: boolean) => void;
   /** Debug mode: the review shows the internal fields of each fact. */
   debug?: boolean;
+  /** A loaded Content Pack gives explicit description; null until the shell answers. */
+  explicitPack?: boolean | null;
 }
 
 /** Source: the text and the saved drafts. Review: the Seed Draft. Build: the World Build. */
@@ -51,7 +53,7 @@ const STATES: Record<DraftState, string> = {
 const screenOf = (view: DraftView): Screen => ({ kind: draftScreen(view), view });
 
 /** A new Campaign from a document: Source Text, review, World Build. */
-export default function NewCampaign({ onOpened, locked, initialDraft = null, onJob, debug = false }: Props) {
+export default function NewCampaign({ onOpened, locked, initialDraft = null, onJob, debug = false, explicitPack = null }: Props) {
   const [screen, setScreen] = useState<Screen>({ kind: "source" });
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<DraftLine[]>([]);
@@ -219,6 +221,7 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
           key={screen.view.draft_id}
           view={screen.view}
           debug={debug}
+          explicitPack={explicitPack}
           onApproved={(view) => go({ kind: "build", view })}
           onBack={() => {
             go({ kind: "source" });

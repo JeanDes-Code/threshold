@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import type { OtherName } from "../api";
-import { fieldId, parseAge, parseHour, removeAt, replaceAt, splitList } from "../newCampaign";
+import { AGE_PROBLEM, fieldId, parseAge, parseHour, removeAt, replaceAt, splitList } from "../newCampaign";
 
 interface TextProps {
   path: string;
@@ -104,26 +104,34 @@ export function AgeInput({ path, label, value, nullable, onChange, onText }: Age
     setText(next);
     onText?.(next);
   };
+  const refused = text !== null && parseAge(text) === undefined;
   return (
-    <input
-      id={fieldId(path)}
-      className="number"
-      inputMode="numeric"
-      aria-label={label}
-      aria-invalid={text !== null && parseAge(text) === undefined ? true : undefined}
-      value={text ?? (value === null ? "" : String(value))}
-      onBlur={() => show(null)}
-      onChange={(e) => {
-        const raw = e.target.value;
-        show(raw);
-        const n = parseAge(raw);
-        if (n === null) {
-          if (nullable) onChange(null);
-        } else if (n !== undefined) {
-          onChange(n);
-        }
-      }}
-    />
+    <>
+      <input
+        id={fieldId(path)}
+        className="number"
+        inputMode="numeric"
+        aria-label={label}
+        aria-invalid={refused ? true : undefined}
+        value={text ?? (value === null ? "" : String(value))}
+        onBlur={() => show(null)}
+        onChange={(e) => {
+          const raw = e.target.value;
+          show(raw);
+          const n = parseAge(raw);
+          if (n === null) {
+            if (nullable) onChange(null);
+          } else if (n !== undefined) {
+            onChange(n);
+          }
+        }}
+      />
+      {refused && (
+        <span className="field-problem" role="alert">
+          {AGE_PROBLEM}
+        </span>
+      )}
+    </>
   );
 }
 

@@ -19,6 +19,7 @@ import { createTurnStore } from "./play/session";
 import { api, play, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
 import Debug from "./views/Debug";
+import { explicitPackLoaded } from "./newCampaign";
 import NewCampaign from "./views/NewCampaign";
 import ScreenFrame from "./views/ScreenFrame";
 
@@ -247,6 +248,7 @@ export default function App() {
                 locked={turnBusy}
                 onJob={setJob}
                 debug={debug}
+                explicitPack={explicitPackLoaded(packs)}
               />
             </ScreenFrame>
           </div>
