@@ -102,6 +102,7 @@ pub const CORE_HEADINGS: &[&str] = &[
     "The move does not happen",
     "The attempt does not happen",
     "The wait ends early",
+    "This Turn is only an advance",
     "What the PC finds",
     "Time this Turn takes:",
     "NPC intentions",
@@ -112,8 +113,8 @@ pub const CORE_HEADINGS: &[&str] = &[
 
 pub(crate) use narration_prompt::intimate_rule_text;
 pub use narration_prompt::{
-    CLOSING_LINE, EXPLICIT_LINE, FAILED_CHECK_LINE, FOUND_LINE, HERE_AFTER_LINE, IMPLIED_LINE,
-    IMPOSSIBLE_LINE, INTIMATE_RULE, NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE,
+    ADVANCE_LINE, CLOSING_LINE, EXPLICIT_LINE, FAILED_CHECK_LINE, FOUND_LINE, HERE_AFTER_LINE,
+    IMPLIED_LINE, IMPOSSIBLE_LINE, INTIMATE_RULE, NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE,
     NOT_MOVED_LINE, PC_PLACE_LINE, QUIET_EVENT_LINE, TIME_LINE, WON_CHECK_LINE, found_lines,
     guard_events, guard_found, guard_plans, names_unheard, narration_prompt, narration_prompt_with,
     opening_prompt, perceived_by_pc,

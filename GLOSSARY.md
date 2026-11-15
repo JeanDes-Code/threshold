@@ -93,7 +93,7 @@ A neutral word or phrase of the core's short list (`mature::ROMANCE_WORDS`), suc
 _Avoid_: Bad word, filter list, blacklist
 
 **Act Word**:
-A neutral phrase of the core's shorter list (`mature::ACT_WORDS`) that names the intimate act itself, such as "make love". When the Player's Intent holds one, the Turn is intimate, whatever the model says: at `excluded` it is refused. A kiss or an invitation is a Romance Word, not an Act Word.
+A neutral phrase of the core's shorter list (`mature::ACT_WORDS`) that names the intimate act itself, such as "make love", or the phrase "take or lead someone to bed" (`mature::TO_BED_VERBS`). When the Player's Intent holds one, the Turn is intimate, whatever the model says: at `excluded` it is refused. A kiss or an invitation is a Romance Word, not an Act Word.
 _Avoid_: Bad word, filter list, blacklist
 
 **Fade to Black**:

@@ -21,9 +21,9 @@ use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     closing_schema_for,
     context::{
-        QUIET_EVENT_LINE, adventure_block, closing_context, found_lines, guard_events, guard_plans,
-        narration_prompt_with, one_line, opening_prompt, perceived_by_pc, proposal_context,
-        seen_present,
+        ADVANCE_LINE, QUIET_EVENT_LINE, adventure_block, closing_context, found_lines,
+        guard_events, guard_plans, narration_prompt_with, one_line, opening_prompt,
+        perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, DetailLevel,
@@ -258,7 +258,8 @@ struct Committed<'a> {
     /// attempt, or a move the Commit did not make, as one that does not
     /// happen. Never the blockers (GM-only text).
     turn: Option<(ActionKind, Verdict)>,
-    /// Outcome lines the engine adds: a wait cut short (`wait_cut_line`).
+    /// Outcome lines the engine adds: a wait cut short (`wait_cut_line`),
+    /// the found lines, the line of an advance (`advance_line`).
     extra: Vec<String>,
     /// The Turn was committed with `intimate`: G4 (`mature::told`) reads it.
     intimate: bool,
@@ -806,6 +807,9 @@ impl Engine {
                 })
                 .into_iter()
                 .chain(stored_found(&stored.record.proposal_json).map(|f| found_lines(&f)))
+                .chain(advance_line(mature::stored_intimacy(
+                    &stored.record.proposal_json,
+                )))
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
             closing: stored.record.kind == TurnKind::Closing,
@@ -1086,6 +1090,7 @@ impl Engine {
                 .and_then(|asked| wait_cut_line(planned.minutes, asked))
                 .into_iter()
                 .chain(planned.found.as_ref().map(found_lines))
+                .chain(advance_line(planned.intimacy))
                 .collect(),
             intimate: planned.intimacy.intimate(),
             closing,
@@ -1819,6 +1824,13 @@ fn engine_time(
             .min(crate::rules::max_minutes(p.action).max(stated));
     }
     (p, asked)
+}
+
+/// The narrator's outcome line of a Turn tagged `advance`
+/// (`context::ADVANCE_LINE`): it opens no Intimate Scene, so its Narration
+/// stops before intimate content (QA run 3).
+fn advance_line(intimacy: Intimacy) -> Option<String> {
+    (intimacy == Intimacy::Advance).then(|| ADVANCE_LINE.to_owned())
 }
 
 /// The outcome line of a wait that a World Event (or the longest wait,

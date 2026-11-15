@@ -2742,3 +2742,34 @@ fn an_open_scene_ends_when_a_minor_may_be_in_the_room() {
         "{err:?}"
     );
 }
+
+// --- QA run 3: taking someone to bed is the act ------------------------------
+
+/// "Take" or "lead" someone named, or her, him, them or me, to bed or into
+/// bed is an Act Word phrase. Going to bed alone, or taking a thing to bed,
+/// is not.
+#[test]
+fn taking_someone_to_bed_is_an_act() {
+    use threshold_core::mature::{Floor, intimacy_floor};
+    for intent in [
+        "I take Maren to bed.",
+        "I take her to bed.",
+        "She takes me to bed.",
+        "I lead Maren Brandt into bed.",
+        "I TOOK Maren to bed.",
+    ] {
+        assert_eq!(
+            intimacy_floor(intent, &[]),
+            (Intimacy::Intimate, Floor::ActWords),
+            "{intent}"
+        );
+    }
+    for intent in [
+        "I go to bed early.",
+        "I take my book to bed.",
+        "I take the lamp to bed.",
+        "Maren takes the dog out before bed.",
+    ] {
+        assert_eq!(intimacy_floor(intent, &[]).0, Intimacy::None, "{intent}");
+    }
+}

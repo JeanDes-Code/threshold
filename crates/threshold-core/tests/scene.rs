@@ -14,8 +14,8 @@ use threshold_core::{
     checks::{CheckKind, settle_closing, validate},
     closing_schema_for,
     context::{
-        CLOSING_ASK, CLOSING_LINE, EXPLICIT_LINE, IMPLIED_LINE, PACK_SCENE_HEAD, SCENE_LINE,
-        opening_prompt,
+        ADVANCE_LINE, CLOSING_ASK, CLOSING_LINE, EXPLICIT_LINE, IMPLIED_LINE, PACK_SCENE_HEAD,
+        SCENE_LINE, opening_prompt,
     },
     domain::{
         ActionKind, DecisionProposal, DetailLevel, Handle, LedgerOp, SCENE_PLAN_MAX_CHARS,
@@ -2129,4 +2129,59 @@ fn turns_read_at_once_match_each_turn_read_alone() {
     let closing = turns.iter().find(|t| t.id == closed.turn_id).unwrap();
     assert_eq!(closing.scene_closed, Some(SceneWhy::EndScene));
     assert_eq!(turns.iter().filter(|t| t.scene_closed.is_some()).count(), 1);
+}
+
+// --- QA run 3: "I take Maren to bed." opened no scene ------------------------
+
+/// QA run 3 (Implied): "I take Maren to bed." came back tagged `advance`.
+/// No scene opened, but the Narration led Maren to the alcove and she began
+/// to undress the PC. Taking someone to bed names the act itself (the
+/// intimacy definition says "going to bed together"), so the core's Act
+/// Words make it `intimate` whatever the model tags, and the scene opens.
+#[test]
+fn taking_someone_to_bed_opens_the_scene_whatever_the_model_tags() {
+    for intent in ["I take Brann to bed.", "I lead him to bed."] {
+        let mut rig = Rig::new("take-to-bed");
+        let mut p = rig.intimate();
+        p.intimacy = Intimacy::Advance;
+        p.action = ActionKind::Talk;
+        rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+        rig.gm.push_narration("Brann nods.".into());
+        let t1 = rig
+            .engine()
+            .play_turn("t1".into(), intent, &mut |_| {})
+            .expect(intent)
+            .turn_id;
+        assert_eq!(rig.scene(), Some(t1), "{intent}");
+        let narrate = rig.last_call(CallKind::Narrate);
+        assert!(narrate.prompt.recent.contains(IMPLIED_LINE), "{intent}");
+    }
+}
+
+/// QA run 3: an `advance` Turn opens no scene, so its Narration must not
+/// go intimate. The narrator of such a Turn reads one outcome line that
+/// says so: the advance and the answer, then it stops.
+#[test]
+fn an_advance_tells_the_narrator_that_no_scene_begins() {
+    let mut rig = Rig::new("advance-line");
+    let mut p = rig.intimate();
+    p.intimacy = Intimacy::Advance;
+    p.action = ActionKind::Talk;
+    rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    rig.gm.push_narration("Brann smiles.".into());
+    rig.engine()
+        .play_turn("t1".into(), "I kiss Brann.", &mut |_| {})
+        .unwrap();
+    assert_eq!(rig.scene(), None);
+    let narrate = rig.last_call(CallKind::Narrate);
+    assert!(
+        narrate.prompt.recent.contains(ADVANCE_LINE),
+        "{}",
+        narrate.prompt.recent
+    );
+    // A plain Turn gets no such line.
+    let p = rig.plain();
+    rig.played("t2", &p, "Dusk falls.");
+    let narrate = rig.last_call(CallKind::Narrate);
+    assert!(!narrate.prompt.recent.contains(ADVANCE_LINE));
 }

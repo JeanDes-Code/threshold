@@ -89,6 +89,14 @@ pub const EXPLICIT_LINE: &str = "INTIMATE TURN (explicit): tell this moment only
 /// owner reads it before the merge.
 pub const CLOSING_LINE: &str = "SCENE ENDS: the player chose to end the intimate scene. In a few plain sentences, tell how it closes and what the NPCs here do, then pass over the time. Tell nothing intimate, and no act, word or feeling of the PC.\n";
 
+/// The outcome line of a Turn tagged `advance` (ADR 0008): no Intimate
+/// Scene begins, so the narrator tells the advance and the answer and stops
+/// there. QA run 3: "I take Maren to bed." was tagged `advance`, opened no
+/// scene, and the Narration still told Maren undressing the PC; the stable
+/// `INTIMATE_RULE` alone did not hold it back. One line, in neutral words.
+/// The owner reads it before the merge.
+pub const ADVANCE_LINE: &str = "- This Turn is only an advance or an invitation, and no intimate scene begins: tell the advance and the answer, then stop before anyone undresses or anything intimate happens.\n";
+
 /// The lines that follow `NARRATION_RULES` in the opening prompt.
 pub const OPENING_RULES: &str = "\
 This is the opening of the adventure: there is no THIS TURN. Narrate the start given under OPENING.

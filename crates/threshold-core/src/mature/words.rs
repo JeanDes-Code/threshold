@@ -97,6 +97,63 @@ pub const ROMANCE_WORDS: &[&str] = &[
 /// design. A kiss and an invitation ("share my bed") stay Romance Words.
 pub const ACT_WORDS: &[&str] = &["make love", "makes love", "made love", "making love"];
 
+/// The verbs of the Act Word phrase "take someone to bed" (QA run 3): "I
+/// take Maren to bed." was tagged `advance`, opened no Intimate Scene, and
+/// the Narration told Maren undressing the PC. The intimacy definition
+/// already counts going to bed together as intimate; this phrase makes the
+/// core agree when the model does not. Not "put", "carry" or "tuck": those
+/// are the words of putting a child or a sick person to bed.
+pub const TO_BED_VERBS: &[&str] = &[
+    "take", "takes", "took", "taking", "lead", "leads", "led", "leading",
+];
+
+/// The pronouns that can stand for the person taken to bed.
+const TO_BED_PRONOUNS: &[&str] = &["her", "him", "them", "me"];
+
+/// True when `intent` takes or leads a person to bed or into bed: a
+/// `TO_BED_VERBS` verb, then a pronoun of `TO_BED_PRONOUNS` or one or two
+/// words that start with a capital (a name), then "to bed" or "into bed".
+/// "I take Maren to bed" and "I lead her into bed" hold it; "I go to bed",
+/// "I take my book to bed" and "I take the lamp to bed" do not. The capital
+/// is read from the Player's own words (`normalize::cased_words`). Cost:
+/// "I take Pim to bed" holds it too, so the age rule refuses it when Pim is
+/// a child; the net over-blocks by design.
+fn takes_to_bed(intent: &str) -> bool {
+    let cased = normalize::cased_words(intent);
+    let lower: Vec<String> = cased.iter().map(|w| w.to_lowercase()).collect();
+    let ends_in_bed = |at: usize| {
+        matches!(
+            (
+                lower.get(at).map(String::as_str),
+                lower.get(at + 1).map(String::as_str)
+            ),
+            (Some("to" | "into"), Some("bed"))
+        )
+    };
+    let named = |at: usize| {
+        cased
+            .get(at)
+            .is_some_and(|w| w.chars().next().is_some_and(char::is_uppercase))
+            && !matches!(
+                lower[at].as_str(),
+                "the" | "a" | "an" | "my" | "your" | "our" | "i"
+            )
+    };
+    (0..lower.len())
+        .filter(|&i| TO_BED_VERBS.contains(&lower[i].as_str()))
+        .any(|i| {
+            let person = i + 1;
+            if lower
+                .get(person)
+                .is_some_and(|w| TO_BED_PRONOUNS.contains(&w.as_str()))
+            {
+                return ends_in_bed(person + 1);
+            }
+            named(person)
+                && (ends_in_bed(person + 1) || (named(person + 1) && ends_in_bed(person + 2)))
+        })
+}
+
 /// The words of `text` as the net reads them: lower case, accents dropped,
 /// split on every character that is not a letter or a digit.
 pub fn folded(text: &str) -> Vec<String> {
@@ -127,7 +184,7 @@ pub fn romance_floor(intent: &str) -> Intimacy {
 /// The tag the Intent's words give, and where it comes from (ADR 0008):
 /// `intimate` when the Intent holds a term of a loaded pack's word list
 /// (`ContentPack::intimate_words`), else `intimate` when it holds an Act
-/// Word (`ACT_WORDS`), else `advance` when it holds a Romance Word, else
+/// Word (`ACT_WORDS`) or takes a person to bed (`takes_to_bed`), else `advance` when it holds a Romance Word, else
 /// `none`. The Turn's tag is the stronger of this and the model's
 /// (`turn::plan`); the core never lowers a model value.
 pub fn intimacy_floor(intent: &str, packs: &[ContentPack]) -> (Intimacy, Floor) {
@@ -136,7 +193,7 @@ pub fn intimacy_floor(intent: &str, packs: &[ContentPack]) -> (Intimacy, Floor) 
         .iter()
         .flat_map(|p| p.intimate_words.terms())
         .any(|term| holds(&words, term));
-    let act_hit = ACT_WORDS.iter().any(|term| holds(&words, &folded(term)));
+    let act_hit = ACT_WORDS.iter().any(|term| holds(&words, &folded(term))) || takes_to_bed(intent);
     if pack_hit {
         (Intimacy::Intimate, Floor::PackWords)
     } else if act_hit {
