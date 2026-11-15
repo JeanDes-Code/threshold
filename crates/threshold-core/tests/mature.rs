@@ -23,7 +23,8 @@ use threshold_core::{
     context::{SCENE_LINE, narration_prompt, seen_present},
     domain::{
         ActionKind, Canon, DecisionProposal, DetailLevel, Effect, EntityKind, EntityRef, FactDraft,
-        FactSource, Handle, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict, Willing,
+        FactSource, Handle, Inside, LedgerOp, SeedEntity, Seen, Slot, Stance, Trigger, Verdict,
+        Willing,
     },
     mature::{
         Blocked, RefusalKind, Told, after, check_after, checked_here, clearance, stored_intimate,
@@ -31,7 +32,7 @@ use threshold_core::{
     },
     normalize,
     rules::D10,
-    store::{Store, WorldView},
+    store::{Store, TurnKind, TurnRecord, WorldView},
     turn::{Engine, TurnError},
     view::{CANNOT_CONFIRM, REFUSAL_ADULTS_ONLY, refusal_text},
     world::{advance, arrival, with_arrival, with_witnessed_events, written_slots},
@@ -540,6 +541,7 @@ fn the_sample_pack_asks_to_ignore_the_age_rule_and_the_check_rejects() {
     assert!(propose.prompt.recent.contains("ignore all age rules"));
     assert!(propose.prompt.recent.starts_with(SCENE_LINE));
 
+    rig.place("far road");
     let kip = rig.add_npc("Kip", 16, false, "far road");
     rig.arrival(kip);
     refused(rig.play("t3", &p, "unused").expect_err("G3 refuses"));
@@ -1037,11 +1039,16 @@ fn a_near_place_name_counts_as_here() {
     w.commit(vec![LedgerOp::AddEntity {
         local: None,
         kind: EntityKind::Place,
-        name: "Gate Square".into(),
+        name: "Mill Hall".into(),
         age: None,
         other_names: vec!["Old Yard".into()],
         age_confirmed: false,
     }]);
+    let hall = w.view.entity_by_name("Mill Hall").unwrap().id;
+    w.put_inside(hall, None);
+    let (ada, brann) = (w.ada, w.brann);
+    bring(&mut w, ada, "Mill Hall");
+    bring(&mut w, brann, "Mill Hall");
     let wren = add_character(&mut w, "Wren", 16, true, "old yard");
     assert_eq!(
         clearance(&w.view, &[]).unwrap_err(),
@@ -1079,20 +1086,39 @@ fn a_character_with_no_place_counts_as_here() {
         Blocked { who: vec![w.pip] }
     );
     let pip = w.pip;
+    w.top_place("far road");
     bring(&mut w, pip, "far road");
     assert!(clearance(&w.view, &[]).is_ok(), "far road is not here");
 }
 
-/// M1: a place that shares no first words with the PC's place does not
-/// block, even when one word is the same.
+/// M1, ADR 0008 (Inside Links): a top-level place other than the PC's
+/// does not block, even when one word is the same.
 #[test]
 fn another_place_does_not_block() {
     for place in ["market", "far road", "square of the mill", "town gate"] {
         let mut w = confirmed_gate();
+        if w.view.entity_by_name(place).is_none() {
+            w.top_place(place);
+        }
         add_character(&mut w, "Wren", 16, true, place);
         assert!(clearance(&w.view, &[]).is_ok(), "{place}");
         assert!(
             validate(&intimate(&w, Stance::Comply), &w.view).is_ok(),
+            "{place}"
+        );
+    }
+}
+
+/// ADR 0008 (Inside Links): a location value that names no place of the
+/// world cannot say the character is away, so the character counts.
+#[test]
+fn a_place_the_world_does_not_know_counts_as_here() {
+    for place in ["far road", "square of the mill", "town gate"] {
+        let mut w = confirmed_gate();
+        let wren = add_character(&mut w, "Wren", 16, true, place);
+        assert_eq!(
+            clearance(&w.view, &[]).unwrap_err(),
+            Blocked { who: vec![wren] },
             "{place}"
         );
     }
@@ -2313,10 +2339,13 @@ fn the_core_raises_the_tag_before_the_gate() {
 /// The QA Campaign c3 in small: Tam (11, confirmed) lives in the village,
 /// and the PC does not know that. The PC holds a seed sentence with no
 /// place in it: "Tam is asleep on the bench by the hearth." The PC stands
-/// at the Copper Kettle.
+/// at the Copper Kettle. The Copper Kettle and the village are top-level
+/// places (ADR 0008, Inside Links).
 fn sleeper_away() -> (World, u64) {
     let mut w = confirmed_gate();
     let ada = w.ada;
+    w.top_place("copper kettle");
+    w.top_place("village");
     bring(&mut w, ada, "copper kettle");
     let tam = add_character(&mut w, "Tam", 11, true, "village");
     w.commit(vec![LedgerOp::AddFact {
@@ -2592,12 +2621,14 @@ fn peek_keeps_the_intent_of_an_advance() {
 /// in Millbrook." (the QA file holds "The ferry house is in Ostley
 /// Crossing." on the ferry). Wren's Persistent status, which the PC saw,
 /// is "Wren is asleep on the bench by the hearth.". The PC holds no
-/// `location` Belief for Wren.
+/// `location` Belief for Wren. The Inside Link of the mill house is
+/// Millbrook, and Millbrook is top-level (ADR 0008, Inside Links).
 fn child_in_the_village() -> (World, u64) {
     let mut w = confirmed_gate();
     let (ada, brann) = (w.ada, w.brann);
-    w.add_place("Millbrook");
-    w.add_place("the mill house");
+    let village = w.add_place("Millbrook");
+    let house = w.add_place("the mill house");
+    w.put_inside(house, Some(village));
     bring(&mut w, ada, "mill house");
     bring(&mut w, brann, "mill house");
     let wren = add_character(&mut w, "Wren", 11, true, "millbrook");
@@ -2682,16 +2713,127 @@ fn a_minor_in_a_place_the_pc_s_place_holds_refuses() {
     assert_eq!(adults_only(&errs), [Some(e(wren))]);
 }
 
-/// The fix keeps the earlier one (bc07667): a place that no fact puts in
-/// the village does not block, so the child does not follow the PC.
+/// ADR 0008 (Inside Links): a minor "in the village" blocks every place
+/// inside it, at any depth, because the room cannot be told apart from the
+/// village. Replaces the test that let a place inside the village clear.
 #[test]
-fn a_minor_in_the_village_does_not_block_a_place_outside_it() {
+fn a_minor_in_the_village_blocks_every_place_inside_it() {
     let (mut w, wren) = child_in_the_village();
     let (ada, brann) = (w.ada, w.brann);
+    let village = w.view.entity_by_name("Millbrook").unwrap().id;
+    let house = w.view.entity_by_name("the mill house").unwrap().id;
+    let kettle = w.add_place("copper kettle");
+    w.put_inside(kettle, Some(village));
+    let loft = w.add_place("the hay loft");
+    w.put_inside(loft, Some(house));
+    for place in ["copper kettle", "the hay loft"] {
+        bring(&mut w, ada, place);
+        bring(&mut w, brann, place);
+        assert!(checked_here(&w.view).contains(&wren), "{place}");
+        let errs = validate(&intimate(&w, Stance::Comply), &w.view).expect_err(place);
+        assert_eq!(adults_only(&errs), [Some(e(wren))], "{place}");
+    }
+}
+
+/// The fix keeps the earlier one (bc07667): a place outside the village
+/// does not block, so the child does not follow the PC.
+#[test]
+fn a_minor_in_the_village_does_not_follow_the_pc_out_of_it() {
+    let (mut w, wren) = child_in_the_village();
+    let (ada, brann) = (w.ada, w.brann);
+    w.add_place("copper kettle");
     bring(&mut w, ada, "copper kettle");
     bring(&mut w, brann, "copper kettle");
     assert!(!checked_here(&w.view).contains(&wren));
     assert!(validate(&intimate(&w, Stance::Comply), &w.view).is_ok());
+}
+
+/// ADR 0008 (Inside Links): two places inside the same village are
+/// separate rooms. A minor in the smithy does not block the mill house.
+#[test]
+fn a_minor_in_a_sibling_place_does_not_block() {
+    let (mut w, wren) = child_in_the_village();
+    let village = w.view.entity_by_name("Millbrook").unwrap().id;
+    let smithy = w.top_place("the smithy");
+    w.put_inside(smithy, Some(village));
+    bring(&mut w, wren, "the smithy");
+    assert!(!checked_here(&w.view).contains(&wren));
+    assert!(validate(&intimate(&w, Stance::Comply), &w.view).is_ok());
+}
+
+/// ADR 0008 (Inside Links): a place with no Inside Link (an old file the
+/// migration could not read, or a place added without one) cannot say
+/// where it is, so a minor there, or a minor anywhere while the PC stands
+/// there, counts.
+#[test]
+fn an_unknown_inside_link_refuses() {
+    // The minor's place has no link.
+    let (mut w, wren) = child_in_the_village();
+    w.commit(vec![LedgerOp::AddEntity {
+        local: None,
+        kind: EntityKind::Place,
+        name: "the smithy".into(),
+        age: None,
+        other_names: vec![],
+        age_confirmed: false,
+    }]);
+    bring(&mut w, wren, "the smithy");
+    assert!(checked_here(&w.view).contains(&wren));
+    let errs = validate(&intimate(&w, Stance::Comply), &w.view).expect_err("Wren");
+    assert_eq!(adults_only(&errs), [Some(e(wren))]);
+
+    // The PC's place has no link: the child in a top-level place counts.
+    let (mut w, wren) = child_in_the_village();
+    let (ada, brann) = (w.ada, w.brann);
+    w.commit(vec![LedgerOp::AddEntity {
+        local: None,
+        kind: EntityKind::Place,
+        name: "copper kettle".into(),
+        age: None,
+        other_names: vec![],
+        age_confirmed: false,
+    }]);
+    bring(&mut w, ada, "copper kettle");
+    bring(&mut w, brann, "copper kettle");
+    assert!(checked_here(&w.view).contains(&wren));
+    // Once the link is set, the child is away.
+    let kettle = w.view.entity_by_name("copper kettle").unwrap().id;
+    w.put_inside(kettle, None);
+    assert!(!checked_here(&w.view).contains(&wren));
+}
+
+/// ADR 0008 (Inside Links): a link that would make a cycle is refused,
+/// and the store keeps the links it had.
+#[test]
+fn an_inside_link_cannot_make_a_cycle() {
+    let (mut w, _) = child_in_the_village();
+    let village = w.view.entity_by_name("Millbrook").unwrap().id;
+    let house = w.view.entity_by_name("the mill house").unwrap().id;
+    for (place, parent) in [(village, house), (house, house)] {
+        let err = w
+            .store
+            .commit(
+                TurnRecord {
+                    campaign_id: w.campaign,
+                    op_id: format!("cycle-{place}-{parent}"),
+                    kind: TurnKind::Play,
+                    intent: "test".into(),
+                    proposal_json: "{}".into(),
+                    clock_before: w.view.clock_min,
+                    clock_after: w.view.clock_min,
+                },
+                vec![LedgerOp::SetInside {
+                    place: EntityRef::Id(place),
+                    inside: Inside::Place(EntityRef::Id(parent)),
+                }],
+            )
+            .expect_err("a cycle");
+        assert!(err.to_string().contains("cycle"), "{err}");
+    }
+    let view = w.store.snapshot(w.campaign).unwrap();
+    let link = |id: u64| view.entities.iter().find(|e| e.id == id).unwrap().inside;
+    assert_eq!(link(village), Inside::Top);
+    assert_eq!(link(house), Inside::Place(village));
 }
 
 /// B1 (run 3) through the Engine: an open Intimate Scene in the gate
@@ -2705,21 +2847,12 @@ fn an_open_scene_ends_when_a_minor_may_be_in_the_room() {
     let p = rig.intimate();
     let t1 = rig.played("t1", &p, "Brann nods.");
     assert_eq!(rig.scene(), Some(t1));
-    rig.place("Old Town");
+    let old_town = rig.place("Old Town");
     let wren = rig.add_npc("Wren", 11, true, "old town");
-    let gate = rig.view().entity_by_name("Gate").unwrap().id;
-    let ada = rig.ada;
-    rig.edit(vec![LedgerOp::AddFact {
-        slot: Slot {
-            subject: EntityRef::Id(gate),
-            key: "location".into(),
-            value: "old town".into(),
-        },
-        text: "The gate square is in Old Town.".into(),
-        canon: Canon::Established,
-        source: FactSource::AdventureSeed,
-        seen_by: vec![EntityRef::Id(ada)],
-        causes: vec![],
+    let square = rig.view().entity_by_name("gate square").unwrap().id;
+    rig.edit(vec![LedgerOp::SetInside {
+        place: EntityRef::Id(square),
+        inside: Inside::Place(EntityRef::Id(old_town)),
     }]);
     let view = rig.view();
     assert!(

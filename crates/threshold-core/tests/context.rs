@@ -517,7 +517,11 @@ fn second_npc_with_a_shared_name_is_perceived_when_present() {
 
 #[test]
 fn scene_place_is_the_place_when_a_lower_id_shares_its_name() {
-    let mut w = World::new();
+    // The gate world without its hidden map places: here the place is the
+    // one this test adds.
+    let mut seed = adventure_seed();
+    seed.entities.retain(|e| !e.hidden);
+    let mut w = World::with_seed(seed);
     let npc = add_named(&mut w, EntityKind::Npc, "Gate Square");
     let place = add_named(&mut w, EntityKind::Place, "Gate Square");
     assert!(npc < place);
@@ -643,7 +647,10 @@ fn every_handle_in_the_proposal_prompt_is_in_the_schema() {
     assert!(handles.entities.contains(&Handle::Entity(pip)));
     for field in fields(&prompt) {
         for h in handle_tokens(field) {
+            // A place the PC cannot name is shown under ALL PLACES only:
+            // the schema offers it for `leaves.to` and `moves_actor_to`.
             let listed = match h {
+                Handle::Entity(_) if handles.destinations.contains(&h) => continue,
                 Handle::Entity(_) => &handles.entities,
                 Handle::Fact(_) => &handles.facts,
                 Handle::WorldEvent(_) => &handles.events,
@@ -694,6 +701,7 @@ fn unknown_entity_ids_are_never_rendered() {
         age: Some(40),
         other_names: vec![],
         age_confirmed: false,
+        inside: Default::default(),
     };
     let view = WorldView {
         entities: vec![

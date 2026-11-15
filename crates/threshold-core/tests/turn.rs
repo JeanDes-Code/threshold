@@ -527,6 +527,7 @@ fn arrival_shows_open_npcs_and_keeps_hidden_out() {
         value: "market".into(),
         text: "Vell lurks in the market.".into(),
     });
+    seed.entities.retain(|e| e.name != "Market");
     seed.entities.push(place("Market"));
     let mut store = Store::open_in_memory().unwrap();
     let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();

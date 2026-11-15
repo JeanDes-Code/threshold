@@ -17,7 +17,7 @@ use std::{collections::BTreeSet, fmt::Write as _, path::Path};
 
 use threshold_core::{
     Gm,
-    domain::{AttitudeEntry, FactEntry},
+    domain::{AttitudeEntry, FactEntry, PlaceEntry, TOP_LEVEL},
     domain::{
         DecisionProposal, DetailLevel, EntityKind, Handle, Intimacy, SeedEntity, SeedFact, Stance,
         Willing,
@@ -523,6 +523,13 @@ fn arm_campaign(
         });
     }
     let mut world = load_world_setup(&dir.join("world.toml")).map_err(|e| e.to_string())?;
+    // An arm's extra place is top-level (ADR 0008, Inside Links).
+    for place in &arm.extra_places {
+        world.places.push(PlaceEntry {
+            place: place.clone(),
+            inside: TOP_LEVEL.into(),
+        });
+    }
     for npc in &arm.extra_npcs {
         if let Some(attitude) = npc.attitude {
             world.attitudes.push(AttitudeEntry {

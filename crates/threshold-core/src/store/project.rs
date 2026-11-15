@@ -556,8 +556,70 @@ fn apply(
             )?;
             false
         }
+        // The Inside Link of a Place (ADR 0008, Inside Links): one parent at
+        // most, a Place of the same Campaign, and no cycle.
+        LedgerOp::SetInside { place, inside } => {
+            set_inside(db, c, *place, *inside)?;
+            false
+        }
     };
     Ok(made.then(|| db.last_insert_rowid() as u64))
+}
+
+/// Writes the Inside Link of `place`. Refuses a subject or a parent that
+/// is not a Place of campaign `c`, a Place inside itself, and a parent
+/// whose own chain of links reaches `place` (a cycle).
+fn set_inside(
+    db: &Connection,
+    c: u64,
+    place: EntityId,
+    inside: Inside<EntityId>,
+) -> Result<(), StoreError> {
+    let is_place = |id: EntityId| -> Result<bool, StoreError> {
+        Ok(db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM entity WHERE id=?1 AND campaign_id=?2 AND kind='place')",
+            params![id, c],
+            |r| r.get(0),
+        )?)
+    };
+    if !is_place(place)? {
+        return Err(StoreError::Invalid(
+            "only a place has an Inside Link".into(),
+        ));
+    }
+    let (known, parent) = match inside {
+        Inside::Unknown => (false, None),
+        Inside::Top => (true, None),
+        Inside::Place(parent) => {
+            if !is_place(parent)? {
+                return Err(StoreError::Invalid(
+                    "a place can only be inside a place".into(),
+                ));
+            }
+            let mut at = Some(parent);
+            let mut steps = 0;
+            while let Some(id) = at {
+                if id == place {
+                    return Err(StoreError::Invalid(
+                        "an Inside Link cannot make a cycle".into(),
+                    ));
+                }
+                steps += 1;
+                if steps > 10_000 {
+                    return Err(StoreError::Invalid("the place tree has a cycle".into()));
+                }
+                at = db.query_row("SELECT inside_id FROM entity WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })?;
+            }
+            (true, Some(parent))
+        }
+    };
+    db.execute(
+        "UPDATE entity SET inside_known=?2, inside_id=?3 WHERE id=?1",
+        params![place, known, parent],
+    )?;
+    Ok(())
 }
 
 fn promote_seen(
@@ -866,8 +928,8 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
         "SELECT id FROM entity WHERE campaign_id=?1 ORDER BY id",
         c,
     )? {
-        let (kind, name, norm_name, age, other_names, age_confirmed) = db.query_row(
-            "SELECT kind,name,norm_name,age,other_names_json,age_confirmed FROM entity WHERE id=?1",
+        let (kind, name, norm_name, age, other_names, age_confirmed, inside_known, inside_id) = db.query_row(
+            "SELECT kind,name,norm_name,age,other_names_json,age_confirmed,inside_known,inside_id FROM entity WHERE id=?1",
             [id],
             |r| {
                 Ok((
@@ -877,6 +939,8 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
                     r.get(3)?,
                     r.get::<_, String>(4)?,
                     r.get(5)?,
+                    r.get::<_, bool>(6)?,
+                    r.get::<_, Option<EntityId>>(7)?,
                 ))
             },
         )?;
@@ -888,6 +952,11 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
             age,
             other_names: parse(other_names)?,
             age_confirmed,
+            inside: match (inside_known, inside_id) {
+                (false, _) => Inside::Unknown,
+                (true, None) => Inside::Top,
+                (true, Some(parent)) => Inside::Place(parent),
+            },
         });
     }
     let mut facts = Vec::new();

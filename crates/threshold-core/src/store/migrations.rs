@@ -1,22 +1,90 @@
-use super::{SCHEMA_VERSION, StoreError};
-use rusqlite::Connection;
+use super::{SCHEMA_VERSION, StoreError, project};
+use crate::domain::{EntityId, Inside, LedgerOp};
+use rusqlite::{Connection, params};
 
-/// Creates the schema in an empty database. An older version is refused:
-/// there is no migration, and the file stays as it is.
+/// The oldest schema version this build migrates. Version 4 files are the
+/// Campaigns of QA run 3 (ADR 0008, Inside Links); an older file is
+/// refused and stays as it is (ADR 0012).
+pub const MIGRATES_FROM: u32 = 4;
+
+/// Creates the schema in an empty database, or migrates a version 4 file to
+/// `SCHEMA_VERSION` in one transaction. Any other version is refused, and
+/// the file stays as it is.
 pub(super) fn apply(db: &Connection) -> Result<(), StoreError> {
     let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if version != 0 && version != SCHEMA_VERSION {
+    if version != 0 && version != MIGRATES_FROM && version != SCHEMA_VERSION {
         return Err(StoreError::Version(version));
     }
     db.execute_batch("PRAGMA foreign_keys=ON;")?;
     if version == 0 {
         db.execute_batch(&format!(
-            "BEGIN;\n{STORE_SCHEMA}{}PRAGMA user_version={SCHEMA_VERSION};\nCOMMIT;",
+            "BEGIN;\n{STORE_SCHEMA}{}{V5_COLUMNS}PRAGMA user_version={SCHEMA_VERSION};\nCOMMIT;",
             crate::player::SCHEMA
         ))?;
+    } else if version == MIGRATES_FROM {
+        db.execute_batch("BEGIN;")?;
+        let migrated = to_v5(db);
+        if migrated.is_ok() {
+            db.execute_batch("COMMIT;")?;
+        } else {
+            db.execute_batch("ROLLBACK;")?;
+        }
+        migrated?;
     }
     Ok(())
 }
+
+/// Version 4 to 5: the Inside Link columns, then the links each Campaign's
+/// facts give, once (`world::presence::inferred_links`). The links go to
+/// the ledger as `SetInside` ops, so a rebuild finds them again. Each op
+/// joins the Turn of the later of the two `AddEntity` ops it names, so a
+/// historical view never reads a link to a Place that does not exist yet.
+fn to_v5(db: &Connection) -> Result<(), StoreError> {
+    db.execute_batch(V5_COLUMNS)?;
+    let campaigns: Vec<u64> = {
+        let mut stmt = db.prepare("SELECT id FROM campaign ORDER BY id")?;
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?
+    };
+    for c in campaigns {
+        let view = project::snapshot(db, c)?;
+        for (place, parent) in crate::world::presence::inferred_links(&view) {
+            let turn = later_turn(db, place, parent)?;
+            project::append(
+                db,
+                c,
+                turn,
+                &LedgerOp::SetInside {
+                    place,
+                    inside: Inside::Place(parent),
+                },
+            )?;
+        }
+    }
+    db.execute_batch(&format!("PRAGMA user_version={SCHEMA_VERSION};"))?;
+    Ok(())
+}
+
+/// The Turn of the later `AddEntity` op of `a` and `b` (by Turn seq).
+fn later_turn(db: &Connection, a: EntityId, b: EntityId) -> Result<u64, StoreError> {
+    Ok(db.query_row(
+        "SELECT l.turn_id FROM ledger l JOIN turn t ON t.id=l.turn_id \
+         WHERE json_type(l.op_json,'$.op.add_entity') IS NOT NULL \
+         AND CAST(json_extract(l.op_json,'$.id') AS INTEGER) IN (?1,?2) \
+         ORDER BY t.seq DESC LIMIT 1",
+        params![a, b],
+        |r| r.get(0),
+    )?)
+}
+
+/// Schema 5 adds the Inside Link of a Place (projection: `SetInside`):
+/// `inside_known` is 0 for no link and 1 for a stored one; `inside_id` is
+/// the parent Place, or NULL for a top-level Place. A new file and a
+/// migrated one get the same columns from this one text.
+const V5_COLUMNS: &str = r#"
+ALTER TABLE entity ADD COLUMN inside_known INTEGER NOT NULL DEFAULT 0 CHECK (inside_known IN (0,1));
+ALTER TABLE entity ADD COLUMN inside_id INTEGER REFERENCES entity(id) CHECK (inside_id IS NULL OR inside_known = 1);
+"#;
 
 /// The tables of the world: the ledger and its projections. Schema 4 adds
 /// `campaign.detail_level` (projection: the seed's `detail`),
@@ -25,7 +93,7 @@ pub(super) fn apply(db: &Connection) -> Result<(), StoreError> {
 /// projection; `Store::set_faded`) and `turn.told` (not a projection: the
 /// level an intimate Turn's stored Narration was told at,
 /// `Store::set_told_narration`; added in place after the final review of
-/// 2026-11-12, before version 4 shipped).
+/// 2026-11-12, before version 4 shipped). Schema 5 adds `V5_COLUMNS`.
 const STORE_SCHEMA: &str = r#"
 CREATE TABLE campaign (id INTEGER PRIMARY KEY, adventure_seed_json TEXT NOT NULL, clock_min INTEGER NOT NULL, seed INTEGER NOT NULL, detail_level TEXT NOT NULL DEFAULT 'excluded' CHECK (detail_level IN ('excluded','implied','explicit')), scene_open_turn INTEGER REFERENCES turn(id));
 CREATE TABLE entity (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL REFERENCES campaign(id), kind TEXT NOT NULL, name TEXT NOT NULL, norm_name TEXT NOT NULL, age INTEGER, other_names_json TEXT NOT NULL, age_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (age_confirmed IN (0,1)) CHECK (age_confirmed = 0 OR age IS NOT NULL), CHECK ((kind IN ('pc','npc')) = (age IS NOT NULL)));

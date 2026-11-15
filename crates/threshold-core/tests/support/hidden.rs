@@ -271,7 +271,10 @@ impl HiddenWorld {
                     seen_by: vec![],
                     public: false,
                 },
-            ],
+            ]
+            .into_iter()
+            .chain(super::gate_map(&view))
+            .collect(),
         );
         w.meet = w.view().live_fact(ada, "pending_meet").unwrap().id;
         w.opening = w.commit(TurnKind::Opening, "", "{}", 0, vec![]);

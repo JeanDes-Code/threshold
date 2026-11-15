@@ -12,9 +12,9 @@ use crate::{
     context::seen_present,
     domain::{
         Cancel, Canon, Cause, CheckDraft, ClockMin, DecisionProposal, DetailLevel, Effect,
-        EntityId, EntityKind, EntityRef, EventDraft, FactSource, Factor, Handle, Knowing, Leave,
-        LedgerOp, NO_ITEM, NewFact, NewNpc, OPEN_KEY_PREFIX, Reaction, Settle, Slot, SlotDraft,
-        Trigger, Willing, is_adult, is_state_key,
+        EntityId, EntityKind, EntityRef, EventDraft, FactSource, Factor, Handle, Inside, Knowing,
+        Leave, LedgerOp, NO_ITEM, NewFact, NewNpc, OPEN_KEY_PREFIX, Reaction, Settle, Slot,
+        SlotDraft, Trigger, Willing, is_adult, is_state_key,
     },
     normalize,
     store::{Claim, Entity, Fact, Knowledge, WorldView},
@@ -292,6 +292,7 @@ impl Replay {
                     age,
                     other_names,
                     age_confirmed,
+                    inside: Inside::Unknown,
                 });
             }
             LedgerOp::AddFact {
@@ -345,6 +346,18 @@ impl Replay {
                 let before = self.world.clock_min;
                 self.world.clock_min = before.saturating_add(ClockMin::from(minutes));
                 self.promote_seen(Some(before), None);
+            }
+            // An Inside Link set in this Turn counts for G3 as it will in
+            // the next snapshot. The store checks it at the Commit.
+            LedgerOp::SetInside { place, inside } => {
+                if let Some(e) = self
+                    .world
+                    .entities
+                    .iter_mut()
+                    .find(|e| e.id == place && e.kind == EntityKind::Place)
+                {
+                    e.inside = inside;
+                }
             }
             _ => {}
         }

@@ -200,6 +200,33 @@ pub enum EntityKind {
     Item,
 }
 
+/// The Inside Link of a Place (glossary): the one Place it sits inside, or
+/// the statement that it is top level, or nothing known. The age gate
+/// reads it (`world::presence`): a minor counts as away from the PC only at
+/// a Place on another branch of the place tree, with every link on both
+/// chains known. `Unknown` is the default: a Place no one has linked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Inside<E = EntityId> {
+    /// No link is stored. The gate counts it as doubt.
+    #[default]
+    Unknown,
+    /// The Place sits inside no other Place: a top-level place.
+    Top,
+    /// The Place sits inside this Place, its parent.
+    Place(E),
+}
+
+impl<E> Inside<E> {
+    pub fn try_map<T, X>(self, f: &mut impl FnMut(E) -> Result<T, X>) -> Result<Inside<T>, X> {
+        Ok(match self {
+            Self::Unknown => Inside::Unknown,
+            Self::Top => Inside::Top,
+            Self::Place(e) => Inside::Place(f(e)?),
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Canon {
@@ -523,6 +550,14 @@ pub enum LedgerOp<E = EntityRef> {
     SetDetailLevel {
         level: DetailLevel,
     },
+    /// Sets the Inside Link of a Place (glossary): the World Build for each
+    /// Place, the open of an old Campaign file once (`store::migrations`),
+    /// or a test. The store refuses a subject or a parent that is not a
+    /// Place of the Campaign, a Place inside itself and a cycle.
+    SetInside {
+        place: E,
+        inside: Inside<E>,
+    },
 }
 
 fn map_all<E, T, X>(items: Vec<E>, f: &mut impl FnMut(E) -> Result<T, X>) -> Result<Vec<T>, X> {
@@ -747,6 +782,10 @@ impl<E> LedgerOp<E> {
             Self::RevertTurn { turn_id } => LedgerOp::RevertTurn { turn_id },
             Self::SetScene { open, why } => LedgerOp::SetScene { open, why },
             Self::SetDetailLevel { level } => LedgerOp::SetDetailLevel { level },
+            Self::SetInside { place, inside } => LedgerOp::SetInside {
+                place: f(place)?,
+                inside: inside.try_map(f)?,
+            },
         })
     }
 }

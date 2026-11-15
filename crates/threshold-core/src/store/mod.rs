@@ -5,8 +5,8 @@ use std::{fmt, path::Path};
 
 use crate::domain::{
     AdventureSeed, Canon, ClaimDraft, ClockMin, ConfirmedAges, DetailLevel, Effect, EntityId,
-    EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, OtherName, SceneWhy, Slot,
-    Trigger,
+    EntityKind, EntityRef, FactSource, Handle, Inside, Knowing, LedgerOp, OtherName, SceneWhy,
+    Slot, Trigger,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -14,9 +14,11 @@ use serde::{Deserialize, Serialize};
 pub type CampaignId = u64;
 pub type TurnId = u64;
 
-/// The schema version of a Campaign file. An older file is refused, with no
-/// migration (ADR 0012).
-pub const SCHEMA_VERSION: u32 = 4;
+/// The schema version of a Campaign file. A version 4 file is migrated once
+/// on open (`migrations::MIGRATES_FROM`, Inside Links); an older one is
+/// refused (ADR 0012).
+pub const SCHEMA_VERSION: u32 = 5;
+pub use migrations::MIGRATES_FROM;
 pub type OpId = String;
 
 #[derive(Debug)]
@@ -24,7 +26,7 @@ pub enum StoreError {
     Database(String),
     Invalid(String),
     /// A Campaign file of another schema version. This build opens
-    /// `SCHEMA_VERSION` only and migrates nothing.
+    /// `SCHEMA_VERSION`, and migrates `MIGRATES_FROM` only.
     Version(u32),
 }
 impl fmt::Display for StoreError {
@@ -37,7 +39,7 @@ impl fmt::Display for StoreError {
             ),
             Self::Version(found) => write!(
                 f,
-                "this campaign file uses schema version {found}; this build opens version {SCHEMA_VERSION} only and does not migrate older files"
+                "this campaign file uses schema version {found}; this build opens version {SCHEMA_VERSION} and migrates version {MIGRATES_FROM} only"
             ),
         }
     }
@@ -159,6 +161,11 @@ pub struct Entity {
     /// The Player confirmed the age through the core (Age Confirmation).
     /// Only `mature::clearance` reads it.
     pub age_confirmed: bool,
+    /// The Inside Link of a Place (projection `entity.inside_known`,
+    /// `entity.inside_id`; `LedgerOp::SetInside`). Always `Unknown` for an
+    /// entity that is not a Place. The age gate reads it through
+    /// `world::presence`.
+    pub inside: Inside,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fact {
@@ -357,7 +364,7 @@ pub struct CampaignPeek {
 
 /// Reads the last Campaign of a file for the home screen. It opens the file
 /// read-only, runs no migration and writes nothing. Any schema version but
-/// `SCHEMA_VERSION` is refused with `StoreError::Version`.
+/// `SCHEMA_VERSION` and `MIGRATES_FROM` is refused with `StoreError::Version`.
 pub fn peek(path: &Path) -> Result<CampaignPeek, StoreError> {
     let not_ours = || {
         StoreError::Invalid(format!(
@@ -378,7 +385,7 @@ pub fn peek(path: &Path) -> Result<CampaignPeek, StoreError> {
     if version == 0 {
         return Err(not_ours());
     }
-    if version != SCHEMA_VERSION {
+    if version != SCHEMA_VERSION && version != MIGRATES_FROM {
         return Err(StoreError::Version(version));
     }
     let store = Store { db };

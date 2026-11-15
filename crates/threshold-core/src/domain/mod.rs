@@ -19,13 +19,13 @@ pub use proposal::{
 pub(crate) use proposal::{finds_definition_text, intimacy_definition_text};
 pub use types::{
     ALIAS_KEY_PREFIX, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,
-    FactDraft, FactSource, GoalStatus, Key, Knowing, LedgerOp, OPEN_KEY_PREFIX, STATE_KEYS,
+    FactDraft, FactSource, GoalStatus, Inside, Key, Knowing, LedgerOp, OPEN_KEY_PREFIX, STATE_KEYS,
     SceneWhy, Slot, Stance, Trigger, Value, alias_key, is_alias_key, is_open_key, is_state_key,
     location_sentence, outcome_key, slot_sentence, you_sentence,
 };
 pub use world_setup::{
-    AttitudeEntry, EffectEntry, EventEntry, FactEntry, GoalEntry, ObstacleEntry, VoiceCardEntry,
-    WorldSetup,
+    AttitudeEntry, EffectEntry, EventEntry, FactEntry, GoalEntry, ObstacleEntry, PlaceEntry,
+    TOP_LEVEL, VoiceCardEntry, WorldSetup,
 };
 
 /// The ages the Player confirmed in a Seed Draft with no gap (Age

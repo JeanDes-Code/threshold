@@ -19,6 +19,24 @@ pub struct WorldSetup {
     pub obstacles: Vec<ObstacleEntry>,
     #[serde(default)]
     pub events: Vec<EventEntry>,
+    /// The Inside Link of each Place (glossary). A Place with no entry
+    /// keeps no link, and the age gate counts it as doubt. A world file
+    /// written before the field has none.
+    #[serde(default)]
+    pub places: Vec<PlaceEntry>,
+}
+
+/// The value of `PlaceEntry::inside` for a top-level Place: it sits inside
+/// no other Place.
+pub const TOP_LEVEL: &str = "none";
+
+/// The Inside Link of one Place: `inside` names the one Place it sits
+/// inside, or is `TOP_LEVEL` ("none").
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlaceEntry {
+    pub place: String,
+    pub inside: String,
 }
 
 /// A fact of the hidden world.

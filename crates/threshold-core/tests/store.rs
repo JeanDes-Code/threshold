@@ -2,7 +2,7 @@ use std::path::Path;
 
 use threshold_core::{
     domain::{
-        AdventureSeed, Canon, EntityKind, EntityRef, FactSource, Handle, LedgerOp, PcSeed,
+        AdventureSeed, Canon, EntityKind, EntityRef, FactSource, Handle, Inside, LedgerOp, PcSeed,
         SeedFact, Slot, StartSeed,
     },
     store::{CommitError, Store, TurnKind, TurnRecord},
@@ -1810,7 +1810,7 @@ fn new_file_has_the_player_tables() {
     let version: u32 = sql
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     for table in ["player_note", "player_pin"] {
         let exists: bool = sql
             .query_row(
@@ -1936,8 +1936,8 @@ fn a_version_3_file_is_refused() {
 }
 
 #[test]
-fn new_file_is_version_4_with_the_new_columns() {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-4");
+fn new_file_is_version_5_with_the_new_columns() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-5");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("new.sqlite");
@@ -1950,13 +1950,15 @@ fn new_file_is_version_4_with_the_new_columns() {
     let version: u32 = sql
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 4);
-    assert_eq!(threshold_core::store::SCHEMA_VERSION, 4);
+    assert_eq!(version, 5);
+    assert_eq!(threshold_core::store::SCHEMA_VERSION, 5);
     for (table, column) in [
         ("campaign", "detail_level"),
         ("campaign", "scene_open_turn"),
         ("entity", "age_confirmed"),
         ("turn", "faded"),
+        ("entity", "inside_known"),
+        ("entity", "inside_id"),
     ] {
         let exists: bool = sql
             .query_row(
@@ -2107,4 +2109,155 @@ fn confirm_age_refuses_a_minor_a_place_and_no_age() {
     }
     // Nothing committed: no Turn row, no flag.
     assert_eq!(db.snapshot(c).unwrap(), view);
+}
+
+// --- ADR 0008, Inside Links: the version 4 to 5 migration ------------------
+
+fn seed_fact(subject: EntityRef, key: &str, value: &str, text: &str) -> LedgerOp {
+    LedgerOp::AddFact {
+        slot: Slot {
+            subject,
+            key: key.into(),
+            value: value.into(),
+        },
+        text: text.into(),
+        canon: Canon::Established,
+        source: FactSource::AdventureSeed,
+        seen_by: vec![],
+        causes: vec![],
+    }
+}
+
+fn add(local: u8, kind: EntityKind, name: &str, age: Option<u16>) -> LedgerOp {
+    LedgerOp::AddEntity {
+        local: Some(local),
+        kind,
+        name: name.into(),
+        age,
+        other_names: vec![],
+        age_confirmed: age.is_some(),
+    }
+}
+
+/// A version 4 file in the shape of the QA campaign (run 3): the PC at the
+/// ferry house, Pim (11, confirmed) at Ostley Crossing, and one fact on the
+/// ferry that says "The ferry house is in Ostley Crossing.". Ostley
+/// Crossing's own location names no place, and the Copper Kettle has no
+/// fact at all. Returns the campaign.
+fn qa_shaped_version_4_file(path: &Path) -> u64 {
+    let mut db = Store::open(path).unwrap();
+    let c = db.create_campaign(&adventure_seed(), 1).unwrap();
+    let ada = db.snapshot(c).unwrap().entity_by_name("Ada").unwrap().id;
+    let ops = vec![
+        add(1, EntityKind::Place, "Ostley Crossing", None),
+        add(2, EntityKind::Place, "the ferry house", None),
+        add(3, EntityKind::Item, "the ferry", None),
+        add(4, EntityKind::Npc, "Pim Quast", Some(11)),
+        add(5, EntityKind::Place, "the Copper Kettle", None),
+        seed_fact(
+            EntityRef::New(3),
+            "location",
+            "ostley crossing",
+            "The ferry house is in Ostley Crossing.",
+        ),
+        seed_fact(
+            EntityRef::New(1),
+            "location",
+            "the river road",
+            "Ostley Crossing lies on the river road.",
+        ),
+        seed_fact(
+            EntityRef::New(4),
+            "location",
+            "ostley crossing",
+            "Pim plays by the landing.",
+        ),
+        seed_fact(
+            EntityRef::Id(ada),
+            "location",
+            "ferry house",
+            "Ada waits in the ferry house.",
+        ),
+    ];
+    db.commit(record(c, "op-qa"), ops).unwrap();
+    drop(db);
+    let sql = rusqlite::Connection::open(path).unwrap();
+    sql.execute_batch(
+        "ALTER TABLE entity DROP COLUMN inside_id;
+         ALTER TABLE entity DROP COLUMN inside_known;
+         PRAGMA user_version=4;",
+    )
+    .unwrap();
+    c
+}
+
+fn link(view: &threshold_core::store::WorldView, name: &str) -> Inside {
+    view.entity_by_name(name).unwrap().inside
+}
+
+/// ADR 0008 (Inside Links): opening a version 4 file migrates it once to
+/// version 5. The migration infers the ferry house's link from the QA
+/// fact, stores it in the ledger, and leaves every other link unknown. The
+/// gate then counts Pim at the ferry house.
+#[test]
+fn a_version_4_file_migrates_and_infers_the_ferry_house_link() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-4-migrates");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.sqlite");
+    let c = qa_shaped_version_4_file(&path);
+    assert!(threshold_core::store::peek(&path).is_ok(), "peek reads v4");
+
+    let db = Store::open_existing(&path).unwrap();
+    let view = db.snapshot(c).unwrap();
+    let ostley = view.entity_by_name("Ostley Crossing").unwrap().id;
+    assert_eq!(link(&view, "the ferry house"), Inside::Place(ostley));
+    assert_eq!(link(&view, "Ostley Crossing"), Inside::Unknown);
+    assert_eq!(link(&view, "the Copper Kettle"), Inside::Unknown);
+    let pim = view.entity_by_name("Pim Quast").unwrap().id;
+    assert!(threshold_core::mature::checked_here(&view).contains(&pim));
+    drop(db);
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let version: u32 = sql
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 5);
+    drop(sql);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// ADR 0008 (Inside Links): a link survives a reopen and a rebuild of the
+/// projections, because it lives in the ledger.
+#[test]
+fn an_inside_link_survives_reopen_and_rebuild() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("inside-reopen");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.sqlite");
+    let c = qa_shaped_version_4_file(&path);
+    drop(Store::open(&path).unwrap());
+
+    let mut db = Store::open(&path).unwrap();
+    let view = db.snapshot(c).unwrap();
+    let ostley = view.entity_by_name("Ostley Crossing").unwrap().id;
+    let kettle = view.entity_by_name("the Copper Kettle").unwrap().id;
+    assert_eq!(link(&view, "the ferry house"), Inside::Place(ostley));
+    db.commit(
+        record(c, "op-kettle"),
+        vec![LedgerOp::SetInside {
+            place: EntityRef::Id(kettle),
+            inside: Inside::Place(EntityRef::Id(ostley)),
+        }],
+    )
+    .unwrap();
+    drop(db);
+
+    let mut db = Store::open(&path).unwrap();
+    db.rebuild_projections(c).unwrap();
+    let view = db.snapshot(c).unwrap();
+    assert_eq!(link(&view, "the ferry house"), Inside::Place(ostley));
+    assert_eq!(link(&view, "the Copper Kettle"), Inside::Place(ostley));
+    assert_eq!(link(&view, "Ostley Crossing"), Inside::Unknown);
+    drop(db);
+    std::fs::remove_dir_all(&dir).unwrap();
 }

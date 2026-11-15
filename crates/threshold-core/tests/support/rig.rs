@@ -78,6 +78,7 @@ impl Rig {
                 .map(|id| LedgerOp::ConfirmAge {
                     entity: EntityRef::Id(id),
                 })
+                .chain(gate_map(&view))
                 .collect(),
         );
         rig.engine = Some(rig.make_engine(store));
@@ -338,6 +339,10 @@ impl Rig {
             source: FactSource::Proposal,
             seen_by: vec![EntityRef::Id(ada)],
             causes: vec![],
+        }]);
+        self.edit(vec![LedgerOp::SetInside {
+            place: EntityRef::Id(id),
+            inside: Inside::Top,
         }]);
         id
     }

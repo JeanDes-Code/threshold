@@ -60,3 +60,17 @@ actor = "Orsel"
 text = "Orsel ends the morning session and summons the scribe to his bench"
 effects = [{ subject = "Wren", key = "standing", value = "summoned by the magistrate" }]
 seen_by = ["Doul", "Hessa"]
+
+# Every Place states the Place it is inside, or "none" (ADR 0008, Inside
+# Links). The town's three places stand apart.
+[[places]]
+place = "Varn town hall"
+inside = "none"
+
+[[places]]
+place = "Tithe archive"
+inside = "none"
+
+[[places]]
+place = "Varn mill"
+inside = "none"

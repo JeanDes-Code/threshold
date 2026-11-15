@@ -9,16 +9,32 @@ use threshold_core::domain::{Intimacy, Willing};
 use threshold_core::{
     domain::{
         ActionKind, AdventureSeed, Canon, CheckDraft, DecisionProposal, DetailLevel, EntityKind,
-        EntityRef, FactSource, GoalStatus, Handle, LedgerOp, NewFact, NewNpc, PcSeed, Reaction,
-        SeedEntity, SeedFact, Seen, Slot, SlotDraft, Stance, StartSeed, Trigger, Verdict,
+        EntityRef, FactSource, GoalStatus, Handle, Inside, LedgerOp, NewFact, NewNpc, PcSeed,
+        Reaction, SeedEntity, SeedFact, Seen, Slot, SlotDraft, Stance, StartSeed, Trigger, Verdict,
     },
     rules::RollResult,
     store::{Store, TurnKind, TurnRecord, WorldView},
 };
 
+/// The Inside Links of the gate world (ADR 0008, Inside Links): the Gate,
+/// the gate square and the market are top-level places, so Pip at the
+/// market is away from the gate square. The ops of the Setup Turn.
+pub fn gate_map(view: &WorldView) -> Vec<LedgerOp> {
+    ["Gate", "gate square", "Market"]
+        .into_iter()
+        .filter_map(|name| view.entity_by_name(name))
+        .filter(|e| e.kind == EntityKind::Place)
+        .map(|e| LedgerOp::SetInside {
+            place: EntityRef::Id(e.id),
+            inside: Inside::Top,
+        })
+        .collect()
+}
+
 /// The gate scene. Ada (the PC, 30), Orsel (52) and Brann (18) stand at the
 /// gate square. Pip (17, a minor) is at the market. The gate is locked and that is
-/// an open obstacle.
+/// an open obstacle. The Gate, the gate square and the market are top-level
+/// places (`gate_map`).
 pub struct World {
     pub store: Store,
     pub campaign: u64,
@@ -66,6 +82,16 @@ pub fn place(name: &str) -> SeedEntity {
     }
 }
 
+/// A place the Adventure Seed hides: the PC cannot name it, so no prompt
+/// and no screen lists it. The gate world's gate square and market are
+/// such places: they exist for the Inside Links only (`gate_map`).
+pub fn hidden_place(name: &str) -> SeedEntity {
+    SeedEntity {
+        hidden: true,
+        ..place(name)
+    }
+}
+
 pub fn npc(name: &str, age: u16) -> SeedEntity {
     SeedEntity {
         name: name.into(),
@@ -90,6 +116,8 @@ pub fn adventure_seed() -> AdventureSeed {
             npc("Brann", 18),
             npc("Pip", 17),
             place("Gate"),
+            hidden_place("gate square"),
+            hidden_place("Market"),
         ],
         boundaries: vec![],
         decided: vec![
@@ -160,7 +188,9 @@ impl World {
     /// (for example with a hidden entry).
     pub fn with_seed(seed: AdventureSeed) -> Self {
         let mut store = Store::open_in_memory().unwrap();
-        let campaign = store.create_campaign(&seed, 7).unwrap();
+        let campaign = store
+            .create_campaign_with(&seed, 7, None, gate_map)
+            .unwrap();
         let view = store.snapshot(campaign).unwrap();
         let id = |name: &str| view.entities.iter().find(|e| e.name == name).unwrap().id;
         let (ada, orsel, brann, pip, gate) =
@@ -251,8 +281,25 @@ impl World {
     }
 
     /// Adds a place entity the PC can name, for a move to go to (`move_to`,
-    /// ADR 0007): the PC holds one fact about it.
+    /// ADR 0007): the PC holds one fact about it. A place of the gate map
+    /// (`gate_map`) is reused; a new place is top-level.
     pub fn add_place(&mut self, name: &str) -> u64 {
+        let known = self
+            .view
+            .entity_by_name(name)
+            .filter(|e| e.kind == EntityKind::Place);
+        let id = match known {
+            Some(e) => e.id,
+            None => self.top_place(name),
+        };
+        let ada = self.ada;
+        self.commit(vec![add_fact(id, "kind", "square", vec![ada])]);
+        id
+    }
+
+    /// Adds a top-level place entity (Inside Link `none`) that the PC holds
+    /// no fact about.
+    pub fn top_place(&mut self, name: &str) -> u64 {
         self.commit(vec![LedgerOp::AddEntity {
             local: None,
             kind: EntityKind::Place,
@@ -262,9 +309,16 @@ impl World {
             age_confirmed: false,
         }]);
         let id = self.view.entity_by_name(name).unwrap().id;
-        let ada = self.ada;
-        self.commit(vec![add_fact(id, "kind", "square", vec![ada])]);
+        self.put_inside(id, None);
         id
+    }
+
+    /// Sets the Inside Link of `place`: inside `parent`, or top-level.
+    pub fn put_inside(&mut self, place: u64, parent: Option<u64>) {
+        self.commit(vec![LedgerOp::SetInside {
+            place: EntityRef::Id(place),
+            inside: parent.map_or(Inside::Top, |p| Inside::Place(EntityRef::Id(p))),
+        }]);
     }
 
     pub fn goal_done(&mut self) {

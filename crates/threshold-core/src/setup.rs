@@ -14,11 +14,11 @@ use std::{
 
 use crate::{
     domain::{
-        AdventureSeed, Canon, ConfirmedAges, Effect, EntityKind, EntityRef, FactSource, LedgerOp,
-        OPEN_KEY_PREFIX, Slot, Trigger, WorldSetup, is_open_key,
+        AdventureSeed, Canon, ConfirmedAges, Effect, EntityKind, EntityRef, FactSource, Inside,
+        LedgerOp, OPEN_KEY_PREFIX, PlaceEntry, Slot, TOP_LEVEL, Trigger, WorldSetup, is_open_key,
     },
     normalize,
-    store::{CampaignId, CommitError, Store, StoreError, TurnKind, TurnRecord},
+    store::{CampaignId, CommitError, Store, StoreError, TurnKind, TurnRecord, WorldView},
     turn::create_campaign,
 };
 
@@ -78,7 +78,7 @@ pub fn commit_world(
         .iter()
         .find(|e| e.kind == EntityKind::Pc)
         .map(|e| e.id);
-    let mut ops = Vec::new();
+    let mut ops = inside_ops(&view, &world.places)?;
     // ADR 0005: an open entry commits on the `pending_` key, so its outcome
     // slot stays empty. Only `open` adds that prefix: a key never carries it
     // by hand, open or settled.
@@ -231,6 +231,48 @@ pub fn commit_world(
         }
         Err(CommitError::Store(e)) => Err(e.into()),
     }
+}
+
+/// The `SetInside` ops of `places` (the World Build's Inside Links). Each
+/// entry names a Place, and either another Place or `TOP_LEVEL`. A Place
+/// named twice, a name that is no Place, and a Place inside itself are
+/// refused here; the store refuses a cycle.
+fn inside_ops(view: &WorldView, places: &[PlaceEntry]) -> Result<Vec<LedgerOp>, SetupError> {
+    let place = |name: &str| {
+        view.entities_by_name(name)
+            .filter(|e| e.kind == EntityKind::Place)
+            .min_by_key(|e| e.id)
+            .map(|e| e.id)
+            .ok_or_else(|| SetupError::Invalid(format!("{name} is no place")))
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut ops = Vec::new();
+    for entry in places {
+        let id = place(&entry.place)?;
+        if !seen.insert(id) {
+            return Err(SetupError::Invalid(format!(
+                "{} has two Inside Links",
+                entry.place
+            )));
+        }
+        let inside = if normalize::value(&entry.inside) == TOP_LEVEL {
+            Inside::Top
+        } else {
+            let parent = place(&entry.inside)?;
+            if parent == id {
+                return Err(SetupError::Invalid(format!(
+                    "{} cannot be inside itself",
+                    entry.place
+                )));
+            }
+            Inside::Place(EntityRef::Id(parent))
+        };
+        ops.push(LedgerOp::SetInside {
+            place: EntityRef::Id(id),
+            inside,
+        });
+    }
+    Ok(ops)
 }
 
 /// Writes a new Campaign file at `path`: the Setup Turn of `seed`, then the
