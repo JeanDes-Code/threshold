@@ -53,6 +53,10 @@ function TurnDebug({ turns }: { turns: StoryTurn[] }) {
           </option>
         ))}
       </select>
+      <p className="muted">
+        The list holds the Turns the story shows. A gap in the numbers is a Turn it does not show: a Setup Turn, an OOC
+        Turn (a Detail Level change, an age confirmation) or a Turn a Correction replaced.
+      </p>
       {error && <p className="error">{error}</p>}
       {view && (
         <>

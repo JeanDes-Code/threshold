@@ -5,6 +5,8 @@
 SEL is CSS; a leading 'x:' means XPath; 't:Label' means the first button/link/element whose own text is Label.
 """
 import sys, json, base64, urllib.request, os, time
+if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help', 'help'):
+    raise SystemExit(__doc__)  # no command: print the command list
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 D = os.environ.get('QA_OUT') or sys.exit('set QA_OUT to the run folder (outside the repository)')
 BASE = 'http://127.0.0.1:4455'
