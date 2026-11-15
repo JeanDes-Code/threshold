@@ -2106,3 +2106,27 @@ fn an_excluded_end_shows_under_the_last_story_turn() {
         )
     );
 }
+
+/// Review m3 (2026-11-15): `Store::turns` reads the `SetScene` ops of the
+/// campaign once instead of once per Turn. Each Turn it gives is the one
+/// `Store::turn` reads alone, `scene_closed` included.
+#[test]
+fn turns_read_at_once_match_each_turn_read_alone() {
+    let mut rig = Rig::new("turns-at-once");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let close = rig.closing();
+    let closed = rig
+        .end_scene("close-1", &close, "Brann steps back.")
+        .unwrap();
+    let q = rig.plain();
+    rig.played("t2", &q, "Dusk falls.");
+    let turns = rig.store().turns(rig.campaign).unwrap();
+    assert!(turns.len() >= 3, "{}", turns.len());
+    for turn in &turns {
+        assert_eq!(*turn, rig.turn(turn.id));
+    }
+    let closing = turns.iter().find(|t| t.id == closed.turn_id).unwrap();
+    assert_eq!(closing.scene_closed, Some(SceneWhy::EndScene));
+    assert_eq!(turns.iter().filter(|t| t.scene_closed.is_some()).count(), 1);
+}

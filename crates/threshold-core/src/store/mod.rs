@@ -929,31 +929,20 @@ impl Store {
     }
     /// Every Turn of a campaign, Setup Turns included, in `seq` order.
     pub fn turns(&self, c: CampaignId) -> Result<Vec<StoredTurn>, StoreError> {
-        let mut stmt = self
-            .db
-            .prepare("SELECT id FROM turn WHERE campaign_id=?1 ORDER BY seq")?;
-        let ids = stmt
-            .query_map([c], |r| r.get::<_, u64>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        ids.into_iter()
-            .map(|id| project::read_turn(&self.db, id))
-            .collect()
+        project::read_turns(&self.db, c)
     }
     /// The Turns of a campaign that a later Turn reverted (a Correction).
-    /// A revert inside a Turn that was itself reverted does not count.
+    /// A revert inside a Turn that was itself reverted does not count. One
+    /// read of the campaign's `RevertTurn` ops, latest Turn first (review
+    /// m3, 2026-11-15: it read the ledger once per Turn).
     pub fn reverted_turns(
         &self,
         c: CampaignId,
     ) -> Result<std::collections::BTreeSet<TurnId>, StoreError> {
         let mut reverted = std::collections::BTreeSet::new();
-        for turn in self.turns(c)?.iter().rev() {
-            if reverted.contains(&turn.id) {
-                continue;
-            }
-            for op in self.turn_ops(turn.id)? {
-                if let LedgerOp::RevertTurn { turn_id } = op {
-                    reverted.insert(turn_id);
-                }
+        for (turn, target) in project::revert_ops(&self.db, c)? {
+            if !reverted.contains(&turn) {
+                reverted.insert(target);
             }
         }
         Ok(reverted)

@@ -718,6 +718,109 @@ pub(super) fn read_turn(db: &Connection, id: u64) -> Result<StoredTurn, StoreErr
     })
 }
 
+/// Every Turn of campaign `c`, in `seq` order, as `read_turn` gives each.
+/// Two queries in all, whatever the count: the Turn rows, and the
+/// `SetScene` ops of the campaign once (`scenes_closed`). Before, each
+/// Turn read the ledger again for its own `scene_closed` (review m3,
+/// 2026-11-15).
+pub(super) fn read_turns(db: &Connection, c: u64) -> Result<Vec<StoredTurn>, StoreError> {
+    let mut closed = scenes_closed(db, c)?;
+    let mut stmt = db.prepare("SELECT id,seq,op_id,kind,intent,proposal_json,clock_before,clock_after,narration,faded,told FROM turn WHERE campaign_id=?1 ORDER BY seq")?;
+    let rows = stmt
+        .query_map([c], |r| {
+            Ok((
+                r.get::<_, u64>(0)?,
+                r.get::<_, u64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, u64>(6)?,
+                r.get::<_, u64>(7)?,
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, bool>(9)?,
+                r.get::<_, Option<String>>(10)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(
+            |(
+                id,
+                seq,
+                op_id,
+                kind,
+                intent,
+                proposal_json,
+                before,
+                after,
+                narration,
+                faded,
+                told,
+            )| {
+                Ok(StoredTurn {
+                    id,
+                    seq,
+                    record: TurnRecord {
+                        campaign_id: c,
+                        op_id,
+                        kind: enum_parse(kind)?,
+                        intent,
+                        proposal_json,
+                        clock_before: before,
+                        clock_after: after,
+                    },
+                    narration,
+                    faded,
+                    told: told_level(told)?,
+                    scene_closed: closed.remove(&id),
+                })
+            },
+        )
+        .collect()
+}
+
+/// Each `RevertTurn` op of campaign `c` as (the Turn that holds it, the
+/// Turn it reverts), latest Turn first, then in ledger order. One query.
+/// `ledger` has no index on `turn_id`: the `CROSS JOIN` keeps the ledger
+/// as the outer loop, one pass with a rowid lookup of each Turn, and the
+/// `LIKE` skips the JSON parse of every other op (review m3, 2026-11-15).
+pub(super) fn revert_ops(db: &Connection, c: u64) -> Result<Vec<(u64, u64)>, StoreError> {
+    let mut stmt = db.prepare("SELECT l.turn_id,l.op_json FROM ledger l CROSS JOIN turn t ON t.id=l.turn_id WHERE t.campaign_id=?1 AND l.op_json LIKE '%revert_turn%' AND (json_type(l.op_json,'$.op.revert_turn') IS NOT NULL OR json_type(l.op_json,'$.revert_turn') IS NOT NULL) ORDER BY t.seq DESC,l.seq")?;
+    let rows = stmt
+        .query_map([c], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut out = Vec::new();
+    for (turn, row) in rows {
+        if let (LedgerOp::RevertTurn { turn_id }, _) = decode(&row)? {
+            out.push((turn, turn_id));
+        }
+    }
+    Ok(out)
+}
+
+/// For each Turn of campaign `c` that closed an Intimate Scene, the `why`
+/// of its first `SetScene { open: false }` op, as `scene_closed` reads it
+/// for one Turn. One query.
+fn scenes_closed(
+    db: &Connection,
+    c: u64,
+) -> Result<std::collections::HashMap<u64, SceneWhy>, StoreError> {
+    let mut stmt = db.prepare(
+        "SELECT l.turn_id,l.op_json FROM ledger l CROSS JOIN turn t ON t.id=l.turn_id WHERE t.campaign_id=?1 AND l.op_json LIKE '%\"set_scene\"%' ORDER BY l.seq",
+    )?;
+    let rows = stmt
+        .query_map([c], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut closed = std::collections::HashMap::new();
+    for (turn, row) in rows {
+        if let (LedgerOp::SetScene { open: false, why }, _) = decode(&row)? {
+            closed.entry(turn).or_insert(why);
+        }
+    }
+    Ok(closed)
+}
+
 /// Why Turn `turn` closed an Intimate Scene: the `why` of its
 /// `SetScene { open: false }` op (`StoredTurn::scene_closed`).
 fn scene_closed(db: &Connection, turn: u64) -> Result<Option<SceneWhy>, StoreError> {
