@@ -122,9 +122,13 @@ export default function ActionBar(props: Props) {
   // A new draft goes into the field once, while rendering (no effect sets
   // state); the effect only moves the focus.
   const [draftSeen, setDraftSeen] = useState(0);
+  // The draft the last click put in the field: the next click replaces
+  // only that text (`intentWithDraft`). A send forgets it.
+  const [inserted, setInserted] = useState<string | null>(null);
   if (draft !== null && draft.seq !== draftSeen) {
     setDraftSeen(draft.seq);
-    setIntent((typed) => intentWithDraft(typed, draft.text));
+    setInserted(draft.text);
+    setIntent((typed) => intentWithDraft(typed, draft.text, inserted));
   }
   useEffect(() => {
     if (draft !== null) field.current?.focus();
@@ -134,6 +138,7 @@ export default function ActionBar(props: Props) {
     const text = intent.trim();
     if (!text || busy) return;
     setIntent("");
+    setInserted(null);
     setSent("intent");
     const taken = await onAct(text);
     setReturned(taken ? "" : text);

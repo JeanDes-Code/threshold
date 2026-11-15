@@ -273,10 +273,23 @@ describe("what the PC found", () => {
   it("a second click on a row sets the draft again, never twice (QA m3)", () => {
     const draft = lookCloserDraft("Lost Coin");
     const once = intentWithDraft("", draft);
-    expect(intentWithDraft(once, draft)).toBe(draft);
+    expect(intentWithDraft(once, draft, draft)).toBe(draft);
     // Another row replaces the earlier draft; typed words stay.
     const other = lookCloserDraft("Night roster");
-    expect(intentWithDraft(`I nod. ${draft}`, other)).toBe(`I nod. ${other}`);
+    const typed = intentWithDraft("I nod.", draft);
+    expect(intentWithDraft(typed, other, draft)).toBe(`I nod. ${other}`);
+  });
+
+  it("a sentence of the same form that the Player typed stays (review m4)", () => {
+    const draft = lookCloserDraft("Lost Coin");
+    const typed = 'I look closer at "the door".';
+    // No click before: nothing to replace.
+    expect(intentWithDraft(typed, draft)).toBe(`${typed} ${draft}`);
+    // A click before, but the Player typed after it: the typed text stays.
+    const other = lookCloserDraft("Night roster");
+    expect(intentWithDraft(`${draft} ${typed}`, other, draft)).toBe(`${draft} ${typed} ${other}`);
+    // The same draft typed by hand earlier in the field stays too.
+    expect(intentWithDraft(`${draft} I wait. ${draft}`, draft, draft)).toBe(`${draft} I wait. ${draft}`);
   });
 
   it("the Play fixture holds one Turn with a found card", () => {
