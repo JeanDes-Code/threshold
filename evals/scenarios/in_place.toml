@@ -4,8 +4,9 @@
 # One campaign per run plays the steps in order on the town fixture, in the
 # town hall. Each `in_place` step is a plain act inside the room: the PC
 # must stay in place, and the judge reads whether the Narration tells the
-# act as done. The last step is the unknown-place move of `play_basics`,
-# which must still be told as not arriving.
+# act as done. The last two steps are moves to places the town does not
+# have (the first is the unknown-place move of `play_basics`): each must
+# still be told as not arriving.
 fixture = "town"
 
 # The Open Item every play-basics file holds. No step here talks about it.
@@ -38,3 +39,9 @@ intent = "I cross the room and lean against the wall next to Doul."
 [[steps]]
 kind = "unknown_move"
 intent = "I cross the river and walk to the old watchtower on the far ridge."
+
+# QA run 3: "I walk to the reeve's house and knock." landed in the inn. The
+# town has no cooper's house: the PC must stay (`move_to: unknown_place`).
+[[steps]]
+kind = "unknown_move"
+intent = "I walk to the cooper's house and knock."

@@ -33,7 +33,7 @@ pub struct HandleContext {
     pub goals: Vec<domain::Handle>,
     pub new_slots: u8,
     /// The places the PC knows (`world::known_places`): the values of
-    /// `move_to` besides `null`.
+    /// `move_to` besides `domain::UNKNOWN_PLACE` and `null`.
     pub places: Vec<domain::Handle>,
     /// The Open Items the Intent names (`world::items_named_by`), as
     /// `world::open_item_ref` names them: the values of `settles.item`
@@ -153,13 +153,16 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
     } else {
         set(&mut schema, "/$defs/EventDraft/properties/goal", &goals);
     }
-    // ADR 0007: the fields the code needs are required and enum-typed.
+    // ADR 0007: the fields the code needs are required and enum-typed. QA
+    // run 3: with only the known places and `null`, "I walk to the reeve's
+    // house" had to land in a known place; `unknown_place` names a place
+    // the world does not know, as `away` does for a leave.
     let places: Vec<serde_json::Value> = ctx
         .places
         .iter()
         .filter(|h| matches!(h, Handle::Entity(_)))
         .map(|h| json!(h.to_string()))
-        .chain([serde_json::Value::Null])
+        .chain([json!(domain::UNKNOWN_PLACE), serde_json::Value::Null])
         .collect();
     schema["properties"]["move_to"] = json!({"type": ["string", "null"], "enum": places});
     require(&mut schema, "", "move_to");

@@ -1173,8 +1173,9 @@ fn proposal_rules_describe_contested_in_one_line() {
 }
 
 /// ADR 0007: the scene lists the places the PC knows, by handle, and the
-/// per-Turn schema offers exactly those for `move_to`, with `null`. The
-/// rules describe the field in one line; the old B1 move line is gone.
+/// per-Turn schema offers exactly those for `move_to`, with `unknown_place`
+/// (QA run 3) and `null`. The rules describe the field in one line; the old
+/// B1 move line is gone.
 #[test]
 fn proposal_prompt_lists_the_places_for_move_to() {
     let mut w = World::new();
@@ -1196,7 +1197,12 @@ fn proposal_prompt_lists_the_places_for_move_to() {
     let schema = threshold_core::proposal_schema_for(&ctx.handles);
     assert_eq!(
         schema.pointer("/properties/move_to/enum").unwrap(),
-        &serde_json::json!([format!("E{}", w.gate), format!("E{market}"), null])
+        &serde_json::json!([
+            format!("E{}", w.gate),
+            format!("E{market}"),
+            "unknown_place",
+            null
+        ])
     );
     let required = schema["required"].as_array().unwrap();
     assert!(required.contains(&serde_json::json!("move_to")));
@@ -1923,4 +1929,56 @@ fn a_stake_reads_as_a_plain_sentence() {
         })
         .unwrap();
     assert_eq!(text, "Brann is now loyal to Ada.");
+}
+
+/// QA run 3: "I walk to the reeve's house and knock." landed in the inn.
+/// The per-Turn schema offered the known places and `null` only, so a
+/// model that read a destination had to pick a known place. It now also
+/// offers `unknown_place`, and the rule line says when to use it.
+#[test]
+fn the_move_to_enum_offers_a_place_the_world_does_not_know() {
+    let mut w = World::new();
+    let market = w.add_place("Market");
+    let ctx = threshold_core::context::proposal_context(
+        &w.view,
+        &[],
+        "I walk to the reeve's house.",
+        None,
+    );
+    let schema = threshold_core::proposal_schema_for(&ctx.handles);
+    assert_eq!(
+        schema.pointer("/properties/move_to/enum").unwrap(),
+        &serde_json::json!([
+            format!("E{}", w.gate),
+            format!("E{market}"),
+            threshold_core::domain::UNKNOWN_PLACE,
+            null
+        ])
+    );
+    let line = ctx
+        .prompt
+        .system
+        .lines()
+        .find(|l| l.starts_with("- move_to:"))
+        .unwrap();
+    assert!(
+        line.contains(threshold_core::domain::UNKNOWN_PLACE),
+        "{line}"
+    );
+    assert!(line.contains("never another place"), "{line}");
+}
+
+/// QA run 3: "I give Pim a penny…" was a Turn that moved nobody, and its
+/// Narration walked the PC to the ferry house. The narrator's presence rule
+/// now covers the PC too.
+#[test]
+fn the_narrator_moves_the_pc_only_where_the_outcome_says() {
+    let line = NARRATION_RULES
+        .lines()
+        .find(|l| l.starts_with("Only the people the outcome lists"))
+        .unwrap();
+    assert!(
+        line.contains("the PC goes to no place the outcome does not name"),
+        "{line}"
+    );
 }

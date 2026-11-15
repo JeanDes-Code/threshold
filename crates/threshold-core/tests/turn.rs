@@ -2732,3 +2732,89 @@ fn a_raw_proposal_with_only_the_old_flag_is_a_schema_error() {
         .collect();
     assert!(validate[0].contains("intimacy"), "{validate:?}");
 }
+
+// --- QA run 3: a move to a place the world does not know -------------------
+
+/// The PC's sight of the Turns of `engine`'s Campaign.
+fn sight_of(engine: &Engine, w: &World) -> threshold_core::world::PcSight {
+    let store = engine.store();
+    let turns = store.turns(w.campaign).unwrap();
+    let reverted = store
+        .reverted_turns(w.campaign)
+        .unwrap()
+        .into_iter()
+        .collect();
+    threshold_core::world::pc_sight(&snapshot(engine, w), &turns, &reverted).unwrap()
+}
+
+/// QA run 3: "I walk to the reeve's house and knock." put the PC in the
+/// Copper Kettle, with no word that the reeve's house is no known place.
+/// The schema offered only the known places and `null`. The model now
+/// says `unknown_place`: the PC stays, the narrator is told the PC does not
+/// find the place, and the Player reads why under the Turn.
+#[test]
+fn a_move_to_a_place_the_world_does_not_know_stays_and_says_why() {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.minutes = 15;
+    let mut raw = serde_json::to_value(&p).unwrap();
+    raw["move_to"] = serde_json::json!(threshold_core::domain::UNKNOWN_PLACE);
+    let (mut engine, w, gm) = setup(vec![raw.to_string()], vec!["The lane ends at the river."]);
+    let before = snapshot(&engine, &w)
+        .live_fact(w.ada, "location")
+        .unwrap()
+        .id;
+    engine
+        .play_turn(
+            "t1".into(),
+            "I walk to the reeve's house and knock.",
+            &mut no_chunks(),
+        )
+        .expect("the Turn commits");
+    assert_eq!(kinds(&gm), [CallKind::Propose, CallKind::Narrate]);
+    let view = snapshot(&engine, &w);
+    assert_eq!(view.live_fact(w.ada, "location").unwrap().id, before);
+    let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    for line in [
+        threshold_core::context::UNKNOWN_PLACE_LINE.to_owned(),
+        format!("{}gate square.", threshold_core::context::NOT_MOVED_LINE),
+    ] {
+        assert!(narration.recent.contains(&line), "{}", narration.recent);
+    }
+    let play = threshold_core::view::play_view(&sight_of(&engine, &w), &Default::default());
+    let story = serde_json::to_value(&play).unwrap()["story"].clone();
+    let last = story.as_array().unwrap().last().unwrap().clone();
+    assert_eq!(
+        last["move_note"],
+        serde_json::json!(threshold_core::view::UNKNOWN_PLACE_NOTE),
+        "{last}"
+    );
+}
+
+/// A move to a known place, or a plain Turn, shows no such line.
+#[test]
+fn a_known_move_shows_no_unknown_place_line() {
+    let w0 = World::new();
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.move_to = Some(e(w0.gate));
+    let (mut engine, w, gm) = setup(vec![json(&p)], vec!["You walk to the gate."]);
+    engine
+        .play_turn("t1".into(), "I walk to the gate.", &mut no_chunks())
+        .unwrap();
+    let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(
+        !narration
+            .recent
+            .contains(threshold_core::context::UNKNOWN_PLACE_LINE)
+    );
+    let play = threshold_core::view::play_view(&sight_of(&engine, &w), &Default::default());
+    let story = serde_json::to_value(&play).unwrap()["story"].clone();
+    assert!(
+        story
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["move_note"].is_null())
+    );
+}

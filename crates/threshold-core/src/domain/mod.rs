@@ -14,7 +14,7 @@ pub use proposal::{
     FIND_LINE_MAX_CHARS, FIND_MAX_ITEMS, FIND_SOURCE_MAX_CHARS, FIND_TITLE_MAX_CHARS,
     FINDS_DEFINITION, Factor, Finds, FoundItem, INTIMACY_DEFINITION, Intimacy, ItemStatus, Leave,
     NO_ITEM, NewFact, NewNpc, PLAN_MAX_CHARS, Reaction, SCENE_PLAN_MAX_CHARS, Seen, Settle,
-    SlotDraft, SourceKind, Verdict, WILLING_DEFINITION, Willing,
+    SlotDraft, SourceKind, UNKNOWN_PLACE, Verdict, WILLING_DEFINITION, Willing,
 };
 pub(crate) use proposal::{finds_definition_text, intimacy_definition_text};
 pub use types::{

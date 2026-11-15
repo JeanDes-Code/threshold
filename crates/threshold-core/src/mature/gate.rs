@@ -629,6 +629,8 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         contested: _,
         verdict: _,
         move_to,
+        // No handle: the PC stays where it is.
+        unknown_place: _,
         leaves,
         settles,
         // Free text, never a handle, so this collector cannot read it: a

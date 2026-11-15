@@ -1238,6 +1238,7 @@ fn play_view_json_matches_the_ui_types() {
             "found",
             "intent",
             "kind",
+            "move_note",
             "reverted",
             "roll",
             "scene_end",

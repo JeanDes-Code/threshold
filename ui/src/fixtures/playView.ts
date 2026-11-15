@@ -47,6 +47,7 @@ export const playView: PlayView = {
       roll: null,
       reverted: false,
       scene_end: null,
+      move_note: null,
       found: null,
       body: {
         kind: "narration",
@@ -81,6 +82,7 @@ export const playView: PlayView = {
       roll: null,
       reverted: false,
       scene_end: "The scene ends: you left.",
+      move_note: null,
       found: null,
       body: {
         kind: "narration",
@@ -120,6 +122,7 @@ export const playView: PlayView = {
       roll: null,
       reverted: false,
       scene_end: null,
+      move_note: null,
       found: null,
       body: { kind: "missing" },
     },
@@ -130,6 +133,7 @@ export const playView: PlayView = {
       roll: { seed: 41, difficulty: 14, value: 6, success: false },
       reverted: true,
       scene_end: null,
+      move_note: null,
       found: null,
       body: {
         kind: "narration",
@@ -152,6 +156,7 @@ export const playView: PlayView = {
       roll: { seed: 77, difficulty: 12, value: 15, success: true },
       reverted: false,
       scene_end: null,
+      move_note: null,
       found: {
         source: "the harbour ledger",
         items: [

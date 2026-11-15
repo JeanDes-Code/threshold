@@ -21,8 +21,8 @@ use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     closing_schema_for,
     context::{
-        ADVANCE_LINE, QUIET_EVENT_LINE, adventure_block, closing_context, found_lines,
-        guard_events, guard_plans, narration_prompt_with, one_line, opening_prompt,
+        ADVANCE_LINE, QUIET_EVENT_LINE, UNKNOWN_PLACE_LINE, adventure_block, closing_context,
+        found_lines, guard_events, guard_plans, narration_prompt_with, one_line, opening_prompt,
         perceived_by_pc, proposal_context, seen_present,
     },
     domain::{
@@ -259,7 +259,8 @@ struct Committed<'a> {
     /// happen. Never the blockers (GM-only text).
     turn: Option<(ActionKind, Verdict)>,
     /// Outcome lines the engine adds: a wait cut short (`wait_cut_line`),
-    /// the found lines, the line of an advance (`advance_line`).
+    /// the found lines, the line of an advance (`advance_line`), the line of
+    /// a move to a place the world does not know (`unknown_place_line`).
     extra: Vec<String>,
     /// The Turn was committed with `intimate`: G4 (`mature::told`) reads it.
     intimate: bool,
@@ -810,6 +811,7 @@ impl Engine {
                 .chain(advance_line(mature::stored_intimacy(
                     &stored.record.proposal_json,
                 )))
+                .chain(unknown_place_line(&stored.record.proposal_json))
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
             closing: stored.record.kind == TurnKind::Closing,
@@ -1091,6 +1093,7 @@ impl Engine {
                 .into_iter()
                 .chain(planned.found.as_ref().map(found_lines))
                 .chain(advance_line(planned.intimacy))
+                .chain(unknown_place_line(&planned.proposal_json))
                 .collect(),
             intimate: planned.intimacy.intimate(),
             closing,
@@ -1702,9 +1705,21 @@ fn schema_error(reason: String) -> Vec<Rejection> {
 /// A Closing Turn's schema has no `finds` (`needs_finds` false).
 fn parse(raw: &str, needs_finds: bool) -> Result<DecisionProposal, Vec<Rejection>> {
     let raw = raw.trim();
-    let p: DecisionProposal =
-        serde_json::from_str(raw).map_err(|e| schema_error(format!("invalid JSON: {e}")))?;
     let value = serde_json::from_str::<serde_json::Value>(raw).ok();
+    // `move_to: "unknown_place"` is no handle (QA run 3): the PC stays, and
+    // the proposal keeps `unknown_place`.
+    let unknown_place = value.as_ref().and_then(|v| v.get("move_to"))
+        == Some(&serde_json::json!(crate::domain::UNKNOWN_PLACE));
+    let mut p: DecisionProposal = match (&value, unknown_place) {
+        (Some(v), true) => {
+            let mut v = v.clone();
+            v["move_to"] = serde_json::Value::Null;
+            serde_json::from_value(v)
+        }
+        _ => serde_json::from_str(raw),
+    }
+    .map_err(|e| schema_error(format!("invalid JSON: {e}")))?;
+    p.unknown_place = unknown_place;
     let tagged = value
         .as_ref()
         .and_then(|v| v.get("intimacy").cloned())
@@ -1808,6 +1823,8 @@ fn engine_time(
     if p.action == ActionKind::Move && p.contested && p.move_to.is_none() {
         p.action = ActionKind::Act;
     }
+    // Only a move can name a place the world does not know (QA run 3).
+    p.unknown_place &= p.action == ActionKind::Move;
     let mut asked = None;
     if p.action == ActionKind::Wait {
         let requested = stated.unwrap_or(p.minutes);
@@ -1863,6 +1880,22 @@ pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)> {
 pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
     let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
     serde_json::from_value(record.get("wait_asked")?.clone()).ok()?
+}
+
+/// The narrator's outcome line of a move to a place the world does not
+/// know (`context::UNKNOWN_PLACE_LINE`, QA run 3), from the Turn's record.
+fn unknown_place_line(proposal_json: &str) -> Option<String> {
+    stored_unknown_place(proposal_json).then(|| UNKNOWN_PLACE_LINE.to_owned())
+}
+
+/// True when the Turn's stored proposal moved to a place the world does not
+/// know (`DecisionProposal::unknown_place`). A record without the key reads
+/// false. The narrator and `world::pc_sight` read it.
+pub fn stored_unknown_place(proposal_json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(proposal_json)
+        .ok()
+        .and_then(|record| record.pointer("/proposal/unknown_place")?.as_bool())
+        .unwrap_or(false)
 }
 
 /// The `settles` stored in a Turn's `proposal_json`, if its proposal had

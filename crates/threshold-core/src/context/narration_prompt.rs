@@ -50,7 +50,7 @@ Narrate only the outcome given under THIS TURN. Never add a fact that changes th
 Never decide the PC's actions, words, or feelings beyond the player's intent.
 NPC intentions tell you how to portray an NPC. Show them through words and manner; never state them as fact.
 Give each NPC the voice of their Voice Card.
-Only the people the outcome lists as here are present. Nobody comes or goes unless the outcome says so.
+Only the people the outcome lists as here are present. Nobody comes or goes unless the outcome says so, and the PC goes to no place the outcome does not name.
 Never say that more time passed than the time line of THIS TURN states. Do not open with the time; tell it only when it matters.
 Write two short paragraphs at most. Plain prose, no headings, no lists.
 ",
@@ -546,6 +546,11 @@ pub const PC_PLACE_LINE: &str = "- After this Turn the PC is at ";
 /// other place.
 pub const NOT_MOVED_LINE: &str =
     "- The PC reaches no other place this Turn: after this Turn the PC is still at ";
+
+/// The outcome line of a move to a place the world does not know
+/// (`DecisionProposal::unknown_place`, ADR 0007): the PC does not go there.
+/// `NOT_MOVED_LINE` follows it with the place where the PC still is.
+pub const UNKNOWN_PLACE_LINE: &str = "- The place the player names is not a place of this world: the PC does not find it and does not go there.\n";
 
 /// The words after a lost Check's result line.
 pub const FAILED_CHECK_LINE: &str =

@@ -47,6 +47,13 @@ pub const NOT_CONFIRMED_HEAD: &str = "Not confirmed as an adult:";
 /// know, and anything that is no character: it says neither which nor why.
 pub const CANNOT_CONFIRM: &str = "This character cannot be confirmed as an adult.";
 
+/// The line under a Turn whose move named a place the world does not know
+/// (`DecisionProposal::unknown_place`, QA run 3): the PC stayed, and the
+/// Player reads why. ADR 0007: a place created in play needs its own
+/// decision, so the core creates none.
+pub const UNKNOWN_PLACE_NOTE: &str =
+    "You stay where you are: the place you named is not one this world knows.";
+
 /// The line under the Turn that ended an Intimate Scene (QA M3,
 /// 2026-11-15): a short, neutral cause. It names nobody and tells nothing
 /// of the scene. `Gate` says no cause: its cause may be a character the PC
@@ -239,6 +246,10 @@ pub struct StoryTurn {
     /// The Intimate Scene ended with this Turn: one neutral line, shown
     /// under it (`scene_end_line`).
     pub scene_end: Option<String>,
+    /// The Turn's move named a place the world does not know: one line
+    /// that says the PC stayed and why (`UNKNOWN_PLACE_NOTE`), shown under
+    /// it.
+    pub move_note: Option<String>,
 }
 
 /// What the PC found in one Turn, as a screen shows it: the source, and one
@@ -1123,6 +1134,7 @@ fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {
         body,
         found: turn.found.as_ref().map(found_card),
         scene_end: turn.scene_end.and_then(scene_end_line).map(str::to_owned),
+        move_note: turn.unknown_place.then(|| UNKNOWN_PLACE_NOTE.to_owned()),
     }
 }
 

@@ -37,6 +37,15 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
             p.action
         ));
     }
+    // A place the world does not know is a move's destination only (QA
+    // run 3).
+    if p.unknown_place && (p.action != ActionKind::Move || p.move_to.is_some()) {
+        p.unknown_place = false;
+        notes.push(format!(
+            "removed move_to unknown_place: the action is {:?}, not a move with no place",
+            p.action
+        ));
+    }
     settle_closes(&mut p, view, &mut notes);
     settle_leaves(&mut p, view, &mut notes);
     settle_finds(&mut p, view, &mut notes);

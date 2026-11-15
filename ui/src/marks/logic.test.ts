@@ -79,6 +79,7 @@ describe("currentScene", () => {
     body: { kind: "missing" },
     found: null,
     scene_end: null,
+    move_note: null,
     ...extra,
   });
 

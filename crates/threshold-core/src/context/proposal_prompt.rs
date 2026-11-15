@@ -93,7 +93,7 @@ LATER ACTIONS
 - facts: only named or significant new details, each with seen = pc, present or gm. Reuse the keys listed for each entity.
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
-- move_to: when the player moves the PC to a place listed under PLACES, that place's handle; else null, and the PC stays. Never write the PC's location in facts or stakes.
+- move_to: when the player moves the PC to a place listed under PLACES, that place's handle; unknown_place when the player names a place that is not listed there, never another place in its stead; else null, and the PC stays. Never write the PC's location in facts or stakes.
 - leaves: each NPC who walks out of the PC's place in this Turn, with to = the handle of the place under ALL PLACES they go to, or away. Empty when nobody leaves. An NPC not listed stays here, whatever their plan says.
 - settles: what the player's intent of THIS Turn does to one item under OPEN ITEMS. item none when the intent settles none of them. Else that item, with outcome accepted, refused, done, failed or dropped when this intent accepts, refuses, does, fails or gives it up; outcome open when it only asks about it, talks about it or asks for more time. An item settled in an earlier Turn is not listed.
 ",

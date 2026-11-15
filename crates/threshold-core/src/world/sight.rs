@@ -21,7 +21,7 @@ use crate::{
     rules::RollResult,
     speech::{self, Line},
     store::{Entity, Fact, Knowledge, StoredTurn, TurnId, TurnKind, WorldView},
-    turn::{stored_found, stored_roll, stored_settles},
+    turn::{stored_found, stored_roll, stored_settles, stored_unknown_place},
 };
 
 /// A Turn that moves the World Clock by more than this starts a new Scene.
@@ -105,6 +105,10 @@ pub struct SightTurn {
     /// right after it (a Detail Level change to `excluded`). `None` on a
     /// reverted Turn.
     pub scene_end: Option<SceneWhy>,
+    /// The Turn's move named a place the world does not know, so the PC
+    /// stayed (`turn::stored_unknown_place`, QA run 3). False on a reverted
+    /// Turn.
+    pub unknown_place: bool,
 }
 
 /// One line of a Narration, as the PC can read it.
@@ -447,6 +451,7 @@ pub fn pc_sight(
                 faded: t.faded,
                 found,
                 scene_end: scene_ends.get(&t.id).copied(),
+                unknown_place: !reverted && stored_unknown_place(&t.record.proposal_json),
             }
         })
         .collect();

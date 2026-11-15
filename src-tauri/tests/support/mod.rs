@@ -26,6 +26,7 @@ pub fn base() -> DecisionProposal {
         verdict: Verdict::Allowed,
         contested: false,
         move_to: None,
+        unknown_place: false,
         leaves: vec![],
         settles: None,
         finds: Default::default(),

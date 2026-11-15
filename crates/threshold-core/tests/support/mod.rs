@@ -295,6 +295,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         verdict,
         contested: false,
         move_to: None,
+        unknown_place: false,
         leaves: vec![],
         settles: None,
         finds: Default::default(),

@@ -18,6 +18,16 @@ pub struct DecisionProposal {
     /// schema makes it required, with the known places' handles and `null`.
     #[serde(default)]
     pub move_to: Option<Handle>,
+    /// The model sent `move_to: "unknown_place"` (`UNKNOWN_PLACE`, QA run
+    /// 3): the Intent moves the PC to a place the PC does not know or the
+    /// world does not have. `turn::parse` reads it, and `move_to` is then
+    /// `None`: the PC stays. The narrator is told the PC does not find the
+    /// place, and the Play story shows `view::UNKNOWN_PLACE_NOTE`. Only a
+    /// move keeps it (`checks::settle`, `turn::engine_time`). Stored with
+    /// the Turn when true; not in the base schema.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(skip)]
+    pub unknown_place: bool,
     /// The NPCs who walk out of the PC's place in this Turn, and where to
     /// (bug pass 5, M1). The core writes each one's `location`. The per-Turn
     /// schema makes it required, with the present NPCs the PC perceives and
@@ -164,6 +174,12 @@ where
 /// The `to` of a `Leave`, or the `moves_actor_to` of an event, that names
 /// no place: the NPC goes somewhere the world has no place for.
 pub const AWAY: &str = "away";
+
+/// The value of `move_to` for a move to a place the PC does not know, or
+/// that the world does not have (QA run 3): the PC stays, and the Turn
+/// keeps `unknown_place`. Without it the schema offered only the known
+/// places and `null`, and "I walk to the reeve's house" landed in the inn.
+pub const UNKNOWN_PLACE: &str = "unknown_place";
 
 /// One NPC who walks out of the PC's place in this Turn (bug pass 5, M1).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

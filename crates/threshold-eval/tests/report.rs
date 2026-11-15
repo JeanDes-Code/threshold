@@ -99,10 +99,10 @@ fn report_has_every_metric() {
     }
     assert!(report.contains("Runs: 2"), "{report}");
     // Per run: latency 10, memory 40, voices 9, shortcuts 4 traps x 2,
-    // agency_leaks 12, offscreen 4, speech 10, play_basics 8, in_place 6,
-    // open_items 9, departures 5, finds 7 = 128 Turns. The OOC scenario
+    // agency_leaks 12, offscreen 4, speech 10, play_basics 8, in_place 7,
+    // open_items 9, departures 5, finds 7 = 129 Turns. The OOC scenario
     // plays no Turn.
-    assert!(report.contains("- Turns played: 256 (0 failed"), "{report}");
+    assert!(report.contains("- Turns played: 258 (0 failed"), "{report}");
     // The recorded GM never stores the detail; the judge here always says
     // "correct", so correct comes from the judge alone.
     assert!(
