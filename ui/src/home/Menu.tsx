@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { DetailLevel, PackLine } from "../api";
 import { DETAIL_LEVELS, detailOf } from "../newCampaign";
-import { detailSetText, modelState, modelText, packLineText } from "./logic";
+import { DETAIL_NAMES, detailSetText, modelState, modelText, packLineText } from "./logic";
 
 interface Props {
   /** "Campaign" in a Campaign, "Menu" elsewhere. */
@@ -146,9 +146,9 @@ export default function Menu(props: Props) {
                   disabled={props.detailLocked}
                   onChange={(e) => void changeDetail(detailOf(e.target.value))}
                 >
-                  {DETAIL_LEVELS.map(([level, label]) => (
+                  {DETAIL_LEVELS.map(([level]) => (
                     <option key={level} value={level}>
-                      {label}
+                      {DETAIL_NAMES[level]}
                     </option>
                   ))}
                 </select>

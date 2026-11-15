@@ -819,7 +819,7 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
 .review input.number { width: 5.5em; }
 .review-lead { color: var(--muted); font-size: var(--text-sm); }
 .review-hint { margin-top: var(--space-1); font-size: var(--text-xs); color: var(--faint); }
-.field-problem { flex-basis: 100%; font-size: var(--text-xs); color: var(--danger); }
+.field-problem { flex-basis: 100%; margin-left: var(--space-2); font-size: var(--text-xs); color: var(--danger); }
 .review-empty { color: var(--faint); font-size: var(--text-sm); }
 .review-gap {
   margin-top: var(--space-2); padding: var(--space-2) var(--space-3);
