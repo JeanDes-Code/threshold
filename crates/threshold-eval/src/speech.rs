@@ -269,6 +269,7 @@ struct RunStats {
     failed: usize,
     tally: Tally,
     echo: super::echo::EchoCount,
+    repeats: super::echo::Repeats,
 }
 
 fn rate_text(tally: &Tally) -> String {
@@ -298,6 +299,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                 Ok(o) => {
                     stats.total_ms.push(o.timings.total_ms);
                     stats.echo.add(intent, &o.narration, &pc);
+                    stats.repeats.add(&o.narration);
                     o.turn_id
                 }
                 Err(_) => {
@@ -330,6 +332,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
 
     let mut total = Tally::default();
     let mut echo = super::echo::EchoCount::default();
+    let mut repeats = super::echo::Repeats::default();
     let mut times: Vec<u64> = Vec::new();
     let mut failed = 0;
     for r in &runs {
@@ -337,6 +340,8 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         echo.narrations += r.echo.narrations;
         echo.echoes += r.echo.echoes;
         echo.feelings += r.echo.feelings;
+        repeats.narrations += r.repeats.narrations;
+        repeats.repeats += r.repeats.repeats;
         times.extend(&r.total_ms);
         failed += r.failed;
     }
@@ -378,6 +383,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
     );
     let _ = writeln!(out, "- Marked lines without quotes: {}", total.unquoted);
     out.push_str(&echo.lines());
+    out.push_str(&repeats.line());
     let _ = writeln!(
         out,
         "- Wrong marks (judge): {wrong} / {judged} judged bubbles ({}); judge could not tell: {cannot_tell}; judge errors: {judge_errors}",

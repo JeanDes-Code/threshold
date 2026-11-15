@@ -4,8 +4,11 @@
 //! (review, 2026-11-10) talk about the open item and about another place
 //! without settling or going. It counts what the ledger and the PC's sight
 //! show after each Turn, and the Turns that move the World Clock; the judge
-//! reads only the Narrations of the impossible act and of the unknown-place
-//! move.
+//! reads only the Narrations of the impossible act, of the unknown-place
+//! move and of the in-place acts.
+//!
+//! The `in_place` scenario (QA polish pass, M1) runs the same code on its
+//! own file: plain acts inside the PC's place, told as done or not.
 
 use std::{collections::HashSet, fmt::Write as _};
 
@@ -27,6 +30,7 @@ struct Stats {
     failed: usize,
     total_ms: Vec<u64>,
     echo: super::echo::EchoCount,
+    repeats: super::echo::Repeats,
     moves: usize,
     moved: usize,
     impossible: usize,
@@ -49,6 +53,9 @@ struct Stats {
     false_moves: usize,
     committed: usize,
     advanced: usize,
+    in_place: usize,
+    in_place_stayed: usize,
+    told_done: usize,
 }
 
 /// Commits the pending item as a Setup Turn, witnessed by the PC.
@@ -139,17 +146,26 @@ pub(crate) fn opens_with_time(narration: &str) -> bool {
     ["minute", "hour"].iter().any(|w| first.contains(w))
 }
 
-pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
-    let sc: scenario::PlayBasics = scenario::load(&ctx.config.root, "play_basics")?;
+/// `name` is the scenario file: `play_basics` or `in_place`.
+pub(crate) fn scenario(ctx: &mut Ctx, name: &str) -> Result<String, String> {
+    let sc: scenario::PlayBasics = scenario::load(&ctx.config.root, name)?;
     let mut st = Stats::default();
     for run in 1..=ctx.config.runs {
         let mut s = ctx.session(
             &sc.fixture,
-            format!("basics-r{run}"),
+            format!(
+                "{}-r{run}",
+                if name == "play_basics" {
+                    "basics"
+                } else {
+                    name
+                }
+            ),
             9_000 + run as u64,
             |store, campaign| seed_pending(store, campaign, &sc.pending),
         )?;
         let pc = super::echo::pc_name(&s.engine, s.campaign);
+        st.repeats.new_campaign();
         for step in &sc.steps {
             let before = place(&s)?;
             let clock_before = clock(&s)?;
@@ -163,6 +179,7 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                         st.time_first += 1;
                     }
                     st.echo.add(&step.intent, &o.narration, &pc);
+                    st.repeats.add(&o.narration);
                     if clock(&s)? > clock_before {
                         st.advanced += 1;
                     }
@@ -249,6 +266,29 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
                         }
                     }
                 }
+                BasicKind::InPlace => {
+                    st.in_place += 1;
+                    if let Some(o) = outcome
+                        && place(&s)? == before
+                    {
+                        st.in_place_stayed += 1;
+                        let task = format!(
+                            "The player character does a plain thing inside the place where they already are.\n\nPlayer intent: {}\n\nThe narration:\n{}\n\nDoes the narration tell the act as done (yes), or does it leave it undone: the player character hesitates, stops, is held back or does not do it (no)?",
+                            step.intent, o.narration
+                        );
+                        let verdict = ctx.ask(&task, &["yes", "no"]);
+                        (ctx.log)(&format!(
+                            "in place {}: {}",
+                            verdict.as_deref().unwrap_or("judge error"),
+                            step.intent
+                        ));
+                        match verdict.as_deref() {
+                            Some("yes") => st.told_done += 1,
+                            Some(_) => {}
+                            None => st.judge_errors += 1,
+                        }
+                    }
+                }
                 BasicKind::Accept => {
                     st.accepts += 1;
                     if let Some(o) = outcome
@@ -319,7 +359,16 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
         ratio(st.stayed, st.unknown),
         ratio(st.told_stayed, st.unknown)
     );
+    if st.in_place > 0 {
+        let _ = writeln!(
+            out,
+            "- Plain acts in place that left the PC in place: {}; told as done (judge): {}",
+            ratio(st.in_place_stayed, st.in_place),
+            ratio(st.told_done, st.in_place)
+        );
+    }
     out.push_str(&st.echo.lines());
+    out.push_str(&st.repeats.line());
     let _ = writeln!(out, "- Turns failed: {}", ratio(st.failed, st.turns));
     let _ = writeln!(
         out,

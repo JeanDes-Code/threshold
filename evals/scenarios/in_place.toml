@@ -1,0 +1,40 @@
+# Plain acts in place (QA polish pass, M1). QA typed "I sit by the fire"
+# and "I walk over to the traveler by the window": the model sent `move`
+# with no place, and the Narration told the PC hesitating, not doing it.
+# One campaign per run plays the steps in order on the town fixture, in the
+# town hall. Each `in_place` step is a plain act inside the room: the PC
+# must stay in place, and the judge reads whether the Narration tells the
+# act as done. The last step is the unknown-place move of `play_basics`,
+# which must still be told as not arriving.
+fixture = "town"
+
+# The Open Item every play-basics file holds. No step here talks about it.
+[pending]
+subject = "Wren"
+key = "pending_copy_tithe_roll"
+value = "orsel asked, no answer yet"
+text = "Orsel asked Wren to copy the tithe roll before dusk. Wren has not answered yet."
+
+[[steps]]
+kind = "in_place"
+intent = "I sit down on the bench by the window and rest my feet."
+
+[[steps]]
+kind = "in_place"
+intent = "I walk over to Hessa's desk and stand beside her."
+
+[[steps]]
+kind = "in_place"
+intent = "I take off my wet cloak and hang it on a peg by the door."
+
+[[steps]]
+kind = "in_place"
+intent = "I go over to the window and look out at the square."
+
+[[steps]]
+kind = "in_place"
+intent = "I cross the room and lean against the wall next to Doul."
+
+[[steps]]
+kind = "unknown_move"
+intent = "I cross the river and walk to the old watchtower on the far ridge."

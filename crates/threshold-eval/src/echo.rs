@@ -232,6 +232,52 @@ pub(crate) fn pc_name(
         .unwrap_or_default()
 }
 
+/// The shortest run of words of a quoted line that counts as a repeat of an
+/// earlier line (QA polish pass, M5).
+pub const REPEAT_MIN_WORDS: usize = 8;
+
+/// Narrations that repeat a line of speech word for word (QA polish pass,
+/// M5): a quoted span holds `REPEAT_MIN_WORDS` or more words in a row of a
+/// quoted span of an earlier Narration of the same Campaign. Case and
+/// punctuation do not count. Call `new_campaign` before each Campaign.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Repeats {
+    said: Vec<Vec<String>>,
+    pub narrations: usize,
+    pub repeats: usize,
+}
+
+impl Repeats {
+    /// Forgets the lines of the Campaign before; the counts stay.
+    pub fn new_campaign(&mut self) {
+        self.said.clear();
+    }
+
+    pub fn add(&mut self, narration: &str) {
+        let spans: Vec<Vec<String>> = quoted(narration).iter().map(|s| words(s)).collect();
+        let hit = spans.iter().any(|run| {
+            run.windows(REPEAT_MIN_WORDS).any(|gram| {
+                self.said
+                    .iter()
+                    .any(|old| old.windows(REPEAT_MIN_WORDS).any(|o| o == gram))
+            })
+        });
+        self.narrations += 1;
+        self.repeats += usize::from(hit);
+        self.said.extend(spans);
+    }
+
+    /// The report line.
+    pub fn line(&self) -> String {
+        format!(
+            "- Narrations with a line of speech that repeats {REPEAT_MIN_WORDS} or more words in a row of an earlier Narration's speech: {} of {} ({})\n",
+            self.repeats,
+            self.narrations,
+            super::pct(self.repeats, self.narrations)
+        )
+    }
+}
+
 /// The two counts over some Narrations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct EchoCount {
@@ -264,6 +310,23 @@ impl EchoCount {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_line_said_again_word_for_word_counts_once_per_narration() {
+        let mut r = Repeats::default();
+        r.add("Hessa: \"Drink up, love, the river has been unkind today.\"");
+        r.add("Hessa looks up.\n\nHessa: \"Drink up, love! The river has been unkind today, so sit.\"");
+        r.add("Hessa: \"The roll is on the shelf by the door, behind the ledgers.\"");
+        assert_eq!((r.repeats, r.narrations), (1, 3));
+        // Seven words in a row ("the roll is on the shelf by") are not a
+        // repeat.
+        r.add("Doul: \"The roll is on the shelf by a window.\"");
+        assert_eq!(r.repeats, 1);
+        // A new Campaign forgets the lines before.
+        r.new_campaign();
+        r.add("Hessa: \"Drink up, love, the river has been unkind today.\"");
+        assert_eq!((r.repeats, r.narrations), (1, 5));
+    }
 
     #[test]
     fn an_echo_of_quoted_speech_counts() {

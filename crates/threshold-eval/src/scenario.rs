@@ -173,6 +173,10 @@ pub enum BasicKind {
     /// Turn commits, the scene place stays, and the Narration must tell
     /// that the PC does not arrive.
     UnknownMove,
+    /// A plain act inside the PC's place ("I sit down by the fire"): the
+    /// scene place must stay, and the Narration must tell the act as done
+    /// (QA polish pass, M1).
+    InPlace,
 }
 
 /// Open Items at scale (bug pass 3, 2026-11-11): the PC holds many Open

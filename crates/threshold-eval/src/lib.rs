@@ -45,7 +45,7 @@ use threshold_core::{
 use scan::{first_quote, forbidden_tokens, leaks, mentions_any, percentile, without_names};
 
 /// Every scenario, in report order.
-pub const SCENARIOS: [&str; 19] = [
+pub const SCENARIOS: [&str; 20] = [
     "latency",
     "memory",
     "voices",
@@ -55,6 +55,7 @@ pub const SCENARIOS: [&str; 19] = [
     "world_build",
     "speech",
     "play_basics",
+    "in_place",
     "open_items",
     "ooc",
     "departures",
@@ -341,7 +342,7 @@ pub fn run(
             "offscreen" => offscreen(&mut ctx)?,
             "world_build" => world_build::scenario(&mut ctx)?,
             "speech" => speech::scenario(&mut ctx)?,
-            "play_basics" => play_basics::scenario(&mut ctx)?,
+            "play_basics" | "in_place" => play_basics::scenario(&mut ctx, name)?,
             "open_items" => open_items::scenario(&mut ctx)?,
             "ooc" => ooc::scenario(&mut ctx)?,
             "departures" => departures::scenario(&mut ctx)?,
