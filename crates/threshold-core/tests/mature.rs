@@ -2340,7 +2340,7 @@ fn sleeper_away() -> (World, u64) {
 /// and the PC does not know where he is. The sentence leaves WHAT YOU KNOW
 /// for the block of the people who are not here.
 #[test]
-fn the_ooc_answer_reads_where_a_named_character_is_from_the_world() {
+fn the_ooc_answer_reads_where_a_named_character_is_from_the_pc_s_sight() {
     let (mut w, _) = sleeper_away();
     // Brann comes into the Copper Kettle, and the PC sees him.
     let old = w.view.live_fact(w.brann, "location").unwrap().id;

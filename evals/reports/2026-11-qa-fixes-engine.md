@@ -23,9 +23,9 @@
 
 **Cause.** The Ask the GM prompt put a character's status sentence in WHAT YOU KNOW with no place. A status the PC learned at the start ("asleep on the bench by the hearth") stayed true in the prompt after the character was elsewhere. The model then decided from that sentence that the character was present. The gate reads the world's `location` and refused, so the two truths disagreed. Code at 5cf9cad: `turn::ooc_prompt` and `view::ooc_sheet` (`crates/threshold-core/src/turn.rs`, `crates/threshold-core/src/view/mod.rs`).
 
-**Fix.** `view::ooc_named` writes, for each character the question names, where the world puts that character: here, at a named place, or "not known". OOC_RULES say that this block decides presence. The People card shows the unknown whereabouts text for a character the PC cannot place. The gate is unchanged.
+**Fix.** `view::ooc_named` writes, for each character the question names, where the PC sees or believes that character is: here with the PC, at the place of the PC's `location` Belief, or "you do not know" (`view::away_place`, from `PcSight`, never the world's truth). The block sits just before the question; OOC_RULES do not name it, and the "after" run below was measured without such a line. *Corrected after review (2026-11-15):* this paragraph first said the block reads "where the world puts" the character and that OOC_RULES name it; both were wrong. The People card shows the unknown whereabouts text for a character the PC cannot place. The gate is unchanged.
 
-**Tests.** `the_ooc_answer_reads_where_a_named_character_is_from_the_world` (red without the fix). `the_gate_refuses_only_when_the_child_is_at_the_pc_s_place` (its card part is red without the fix; its gate part pins old behavior). `the_narration_prompt_holds_no_status_of_a_character_who_is_not_here` (pins behavior).
+**Tests.** `the_ooc_answer_reads_where_a_named_character_is_from_the_pc_s_sight` (red without the fix). `the_gate_refuses_only_when_the_child_is_at_the_pc_s_place` (its card part is red without the fix; its gate part pins old behavior). `the_narration_prompt_holds_no_status_of_a_character_who_is_not_here` (pins behavior).
 
 **Live.** `ooc`, 2 runs per set: two sets before, one after. The scenario gained a status fact and 6 phrasings of "is Tobin here".
 

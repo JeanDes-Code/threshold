@@ -78,7 +78,7 @@ WorldView { pub detail: DetailLevel }                                  // projec
 - A seed with no `detail` has `excluded`. The module is off until the Player sets a level.
 - The Player sets it in two places: the Seed review, through `save_draft`, and in play, through `set_detail_level`.
 - The draft stages never set it. The model's seed output has its own struct (`build/draft_stages.rs:220`) and that struct gets no `detail` field. A Source Text cannot turn the module on.
-- In play, only the command changes it. The OOC model call cannot. The design says "in the OOC channel": the control sits in the OOC panel of the action bar, and no model reads it.
+- In play, only the command changes it. The OOC model call cannot. The design says "in the OOC channel": the control sits in the Campaign menu (moved there from the OOC panel of the action bar, QA m1, 2026-11-15), and no model reads it.
 - `mature::effective` gives `explicit` only when the stored level is `explicit` and a loaded pack declares the capability (3.8). In any other case it gives `implied` for a stored `explicit`. The stored level does not change.
 - Only `store` reads `AdventureSeed.detail`, at creation and at a rebuild. Every other reader uses `WorldView.detail`.
 
@@ -648,7 +648,7 @@ The scan does not catch model prose pasted without its prompt. Nothing in the re
 - No migration of version 3 files.
 - No change of an age in play. A wrong model-stated age under 18 keeps that character out of every scene.
 - No pack choice per Campaign, no reload without a restart, no pack hash in the ledger.
-- No settings screen. One select in the Seed review, one in the OOC panel, one list in the home menu.
+- No settings screen. One select in the Seed review, one in the Campaign menu (until QA m1, 2026-11-15: in the OOC panel), one list in the home menu.
 - No list of actions from the core for the action bar.
 - No fade of the Opening Narration.
 - No dynamic token cap from the time left in the Turn. If the p90 of scene Turns fails, that is the next step.
@@ -690,7 +690,7 @@ Structure first inside each slice, behaviour second, one commit each. Every slic
 3. **End scene.** `TurnKind::tells` and `has_intent`, then `Closing`, `end_scene`, `default_close`, the command and the button.
 4. **Fade to Black.** `turn.faded` in use, `TurnControl`, the fade flag, `Engine::fade`, `TurnBody::Faded`, the Journal line, the `renarrate` refusal, the debug row, the button.
 5. **Packs.** Format 2, `load_all`, the sample pack, the shell loads `<data_dir>/packs/`, `list_packs`, fragments by prompt, `effective`, `Told::Explicit(Cleared)`, the fallback notice.
-6. **Settings in play.** The OOC Turn, `ConfirmAge`, `SetDetailLevel`, their commands, `RefusalView` with "Confirm", the select in the OOC panel.
+6. **Settings in play.** The OOC Turn, `ConfirmAge`, `SetDetailLevel`, their commands, `RefusalView` with "Confirm", the select in the OOC panel (moved to the Campaign menu by QA m1, 2026-11-15).
 7. **Evaluations and guards.** The scenarios `intimate_tag`, `scene_agency`, `npc_will` and `scene_latency`, at `implied`. `--packs`, `--scenarios-dir` and the outside-path rule. The scan script, the `.gitignore` lines, the repository tests of section 9.
 8. **The owner's pass.** The private pack, his Campaign, both buttons, and the same four metrics outside the repository.
 

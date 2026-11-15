@@ -24,8 +24,8 @@ use crate::{
 pub const PLAY_VIEW_MAX_MS: u64 = 50;
 
 /// The Player's sentence for a Refusal at Detail Level `excluded`. It says
-/// where the Player changes the level in play: the select of the "Ask the
-/// GM" panel (Task 8).
+/// where the Player changes the level in play: the select in the Campaign
+/// menu (QA m1, 2026-11-15; before, the "Ask the GM" panel, Task 8).
 pub const REFUSAL_EXCLUDED: &str =
     "This Campaign excludes Intimate Scenes. You can change the Detail Level in the Campaign menu.";
 
