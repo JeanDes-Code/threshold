@@ -2583,3 +2583,162 @@ fn peek_keeps_the_intent_of_an_advance() {
     let peek = threshold_core::store::peek(&rig.path).unwrap();
     assert_eq!(peek.last_intent.as_deref(), Some("I stay with Brann."));
 }
+
+// --- QA run 3, B1: a minor somewhere in the place that holds the PC's ------
+
+/// The shape of the QA campaign (run 3), with neutral names. Ada and Brann
+/// stand in "the mill house". Wren (11, confirmed) is at "Millbrook", the
+/// village. One live `location` fact, on an item, says "The mill house is
+/// in Millbrook." (the QA file holds "The ferry house is in Ostley
+/// Crossing." on the ferry). Wren's Persistent status, which the PC saw,
+/// is "Wren is asleep on the bench by the hearth.". The PC holds no
+/// `location` Belief for Wren.
+fn child_in_the_village() -> (World, u64) {
+    let mut w = confirmed_gate();
+    let (ada, brann) = (w.ada, w.brann);
+    w.add_place("Millbrook");
+    w.add_place("the mill house");
+    bring(&mut w, ada, "mill house");
+    bring(&mut w, brann, "mill house");
+    let wren = add_character(&mut w, "Wren", 11, true, "millbrook");
+    w.commit(vec![
+        LedgerOp::AddEntity {
+            local: Some(1),
+            kind: EntityKind::Item,
+            name: "the mill wheel".into(),
+            age: None,
+            other_names: vec![],
+            age_confirmed: false,
+        },
+        LedgerOp::AddFact {
+            slot: Slot {
+                subject: EntityRef::New(1),
+                key: "location".into(),
+                value: "millbrook".into(),
+            },
+            text: "The mill house is in Millbrook.".into(),
+            canon: Canon::Established,
+            source: FactSource::AdventureSeed,
+            seen_by: vec![ada.into()],
+            causes: vec![],
+        },
+        LedgerOp::AddFact {
+            slot: Slot {
+                subject: wren.into(),
+                key: "status".into(),
+                value: "asleep".into(),
+            },
+            text: "Wren is asleep on the bench by the hearth.".into(),
+            canon: Canon::Persistent,
+            source: FactSource::AdventureSeed,
+            seen_by: vec![ada.into()],
+            causes: vec![],
+        },
+    ]);
+    (w, wren)
+}
+
+/// B1 (run 3): the world puts Wren in the village that holds the PC's
+/// house, so it cannot say he is not in the room. The gate fails closed:
+/// an intimate Turn and an advance are refused for him. No Narration and
+/// no NPC line takes part: only the world state.
+#[test]
+fn a_minor_in_the_place_that_holds_the_pc_s_place_refuses() {
+    let (w, wren) = child_in_the_village();
+    // One room: HERE (the PC's sight) does not list Wren, and the gate
+    // checks him as unsure. HERE is the room's `seen` set.
+    let room = threshold_core::world::room(&w.view);
+    assert!(room.unsure.contains(&wren) && !room.seen.contains(&wren));
+    let turns = w.store.turns(w.campaign).unwrap();
+    let sight = threshold_core::world::pc_sight(&w.view, &turns, &Default::default()).unwrap();
+    assert_eq!(sight.present, room.seen.iter().copied().collect::<Vec<_>>());
+    assert_eq!(checked_here(&w.view), room.checked());
+    assert!(
+        checked_here(&w.view).contains(&wren),
+        "the gate checks Wren"
+    );
+    assert_eq!(
+        clearance(&w.view, &[]).unwrap_err(),
+        Blocked { who: vec![wren] }
+    );
+    let errs = validate(&intimate(&w, Stance::Comply), &w.view).expect_err("Wren");
+    assert_eq!(adults_only(&errs), [Some(e(wren))]);
+    let mut advance = intimate(&w, Stance::Comply);
+    advance.intimacy = Intimacy::Advance;
+    let errs = validate(&advance, &w.view).expect_err("an advance");
+    assert_eq!(adults_only(&errs), [Some(e(wren))]);
+}
+
+/// B1 (run 3), the other way round: the PC in the village street, the
+/// child in the house the village holds.
+#[test]
+fn a_minor_in_a_place_the_pc_s_place_holds_refuses() {
+    let (mut w, wren) = child_in_the_village();
+    let ada = w.ada;
+    bring(&mut w, ada, "Millbrook");
+    bring(&mut w, wren, "the mill house");
+    assert!(checked_here(&w.view).contains(&wren));
+    let errs = validate(&intimate(&w, Stance::Comply), &w.view).expect_err("Wren");
+    assert_eq!(adults_only(&errs), [Some(e(wren))]);
+}
+
+/// The fix keeps the earlier one (bc07667): a place that no fact puts in
+/// the village does not block, so the child does not follow the PC.
+#[test]
+fn a_minor_in_the_village_does_not_block_a_place_outside_it() {
+    let (mut w, wren) = child_in_the_village();
+    let (ada, brann) = (w.ada, w.brann);
+    bring(&mut w, ada, "copper kettle");
+    bring(&mut w, brann, "copper kettle");
+    assert!(!checked_here(&w.view).contains(&wren));
+    assert!(validate(&intimate(&w, Stance::Comply), &w.view).is_ok());
+}
+
+/// B1 (run 3) through the Engine: an open Intimate Scene in the gate
+/// square, then the world puts a child (11) in the old town, which holds
+/// the gate square. The scene no longer clears (G1), and the next intimate
+/// Turn ("we make love again") is refused for the child. HERE does not list
+/// him: the PC does not know where he is.
+#[test]
+fn an_open_scene_ends_when_a_minor_may_be_in_the_room() {
+    let mut rig = Rig::new("b1-nested");
+    let p = rig.intimate();
+    let t1 = rig.played("t1", &p, "Brann nods.");
+    assert_eq!(rig.scene(), Some(t1));
+    rig.place("Old Town");
+    let wren = rig.add_npc("Wren", 11, true, "old town");
+    let gate = rig.view().entity_by_name("Gate").unwrap().id;
+    let ada = rig.ada;
+    rig.edit(vec![LedgerOp::AddFact {
+        slot: Slot {
+            subject: EntityRef::Id(gate),
+            key: "location".into(),
+            value: "old town".into(),
+        },
+        text: "The gate square is in Old Town.".into(),
+        canon: Canon::Established,
+        source: FactSource::AdventureSeed,
+        seen_by: vec![EntityRef::Id(ada)],
+        causes: vec![],
+    }]);
+    let view = rig.view();
+    assert!(
+        !seen_present(&view).contains(&wren),
+        "HERE: the PC's sight only"
+    );
+    assert!(checked_here(&view).contains(&wren), "the gate checks Wren");
+    assert_eq!(threshold_core::mature::open_scene(&view), None);
+    let err = rig
+        .play("t2", &p, "Brann nods.")
+        .expect_err("refused for Wren");
+    assert!(
+        matches!(
+            err,
+            TurnError::Refused {
+                kind: RefusalKind::AdultsOnly,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+}

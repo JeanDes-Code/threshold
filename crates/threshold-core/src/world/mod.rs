@@ -8,6 +8,7 @@ mod arrival;
 mod beliefs;
 mod clock;
 mod items;
+pub mod presence;
 mod sight;
 mod wait;
 
@@ -20,6 +21,7 @@ pub use beliefs::{
 };
 pub use clock::{MAX_EVENTS_PER_TURN, advance, written_slots};
 pub use items::items_named_by;
+pub use presence::{Room, room};
 pub use sight::{
     Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, SightTurn, name_parts, pc_can_name,
     pc_sight, story_names, tagged, unnameable_names,

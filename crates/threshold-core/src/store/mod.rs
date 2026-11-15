@@ -267,29 +267,10 @@ impl WorldView {
         self.voice_cards.iter().find(|card| card.npc == npc)
     }
 
+    /// World truth at the PC's place, hidden characters included
+    /// (`world::room`, the one home of presence).
     pub fn present(&self) -> Vec<EntityId> {
-        let Some(pc) = self
-            .entities
-            .iter()
-            .find(|entity| entity.kind == EntityKind::Pc)
-        else {
-            return Vec::new();
-        };
-        let location = self
-            .live_fact(pc.id, "location")
-            .map(|fact| crate::normalize::value(&fact.slot.value));
-        self.entities
-            .iter()
-            .filter(|entity| {
-                entity.id == pc.id
-                    || location.as_ref().is_some_and(|location| {
-                        self.live_fact(entity.id, "location").is_some_and(|fact| {
-                            crate::normalize::value(&fact.slot.value) == *location
-                        })
-                    })
-            })
-            .map(|entity| entity.id)
-            .collect()
+        crate::world::presence::truth(self)
     }
 
     /// The entity that `name` names: its main name or one of its other

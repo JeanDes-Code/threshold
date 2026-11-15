@@ -133,7 +133,7 @@ use crate::{
     normalize,
     pack::{ContentPack, InsertPoint, Target, rule_fragments},
     store::{Entity, Fact, Goal, StoredTurn, TurnId, VoiceCard, WorldEvent, WorldView},
-    world::{hidden, holders_of, pc_can_name, pc_knowledge},
+    world::{hidden, holders_of, pc_can_name},
 };
 
 /// The fewest past Turns a prompt holds, when that many exist (ADR 0001,
@@ -347,29 +347,14 @@ impl<'a> Retrieval<'a> {
     }
 }
 
-/// The entities the PC knows are here: the PC, plus each entity whose
-/// `location`, as the PC believes it (`pc_knowledge`), equals the PC's live
-/// location. A location fact the PC never witnessed or heard of does not
-/// count, so a hidden watcher stays hidden. `WorldView::present` is world
-/// truth and stays the rule for the Commit checks.
+/// The entities the PC knows are here (`world::presence::seen`, the one
+/// home of presence): the PC, plus each entity whose `location`, as the PC
+/// believes it, is the PC's live location. A location fact the PC never
+/// witnessed or heard of does not count, so a hidden watcher stays hidden.
+/// `WorldView::present` is world truth and stays the rule for the Commit
+/// checks.
 pub fn seen_present(view: &WorldView) -> Vec<EntityId> {
-    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
-        return Vec::new();
-    };
-    let Some(location) = view
-        .live_fact(pc.id, "location")
-        .map(|f| normalize::value(&f.slot.value))
-    else {
-        return vec![pc.id];
-    };
-    let mut seen: BTreeSet<EntityId> = pc_knowledge(view)
-        .into_iter()
-        .filter(|b| b.key == "location" && normalize::value(&b.value) == location)
-        .map(|b| b.subject)
-        .filter(|id| view.entities.iter().any(|e| e.id == *id))
-        .collect();
-    seen.insert(pc.id);
-    seen.into_iter().collect()
+    crate::world::presence::seen(view)
 }
 
 /// False for a Possible fact whose slot an Established or Persistent fact

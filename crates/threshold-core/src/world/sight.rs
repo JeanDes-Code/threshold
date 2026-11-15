@@ -751,21 +751,21 @@ fn location_at(
         .map(|f| f.slot.value.clone())
 }
 
-/// The `seen_present` rule on the Beliefs the PC held then: the PC, and each
-/// entity the PC believes stands at `place`.
+/// The `seen_present` rule (`world::presence::seen`) on the Beliefs the PC
+/// held then: the PC, and each entity the PC believes stands at `place`.
 fn present_at(
     view: &WorldView,
     pc: EntityId,
     place: Option<&str>,
     then: &[(Belief, &Knowledge)],
 ) -> Vec<EntityId> {
-    let Some(place) = place.map(normalize::value) else {
+    let Some(place) = place else {
         return vec![pc];
     };
     let mut seen: BTreeSet<EntityId> = then
         .iter()
         .map(|(b, _)| b)
-        .filter(|b| b.key == "location" && normalize::value(&b.value) == place)
+        .filter(|b| b.key == "location" && super::presence::at_place(&b.value, place))
         .map(|b| b.subject)
         .filter(|id| view.entities.iter().any(|e| e.id == *id))
         .collect();
