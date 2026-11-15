@@ -783,8 +783,65 @@ fn rename_of_a_duplicate_name_changes_only_its_own_row() {
     assert_eq!(draft.knowledge[2].subject, "Mira Vance");
 }
 
+/// Review M2 (2026-11-15): a reference resolves to the first entry of its
+/// name on a tie. Renaming the FIRST of two "Mira Holt" rows moves her
+/// references with her; the new, blank row gets none of them, and the
+/// duplicate gap goes away with the references still on the right row.
+#[test]
+fn rename_of_the_first_of_two_names_takes_its_references_with_it() {
+    let mut draft = mira_draft();
+    draft
+        .seed
+        .entities
+        .push(entity("Mira Holt", EntityKind::Npc, None));
+    let first = EntryRef::entity(2, "Mira Holt", EntityKind::Npc);
+    assert_eq!(rename(&mut draft, &first, "Mira Vance"), Ok(()));
+
+    let seed = &draft.seed;
+    assert_eq!(seed.entities[2].name, "Mira Vance");
+    assert_eq!(seed.entities[4].name, "Mira Holt");
+    assert_eq!(seed.start.present, ["Jean", "Mira Vance"]);
+    assert_eq!(seed.pc.other_names[0].known_to, ["Wren", "Mira Vance"]);
+    assert_eq!(seed.decided[0].subject, "Mira Vance");
+    assert_eq!(seed.proposed[0].subject, "Mira Vance");
+    assert_eq!(
+        seed.start.situation,
+        "Mira Vance waits at the Old Mill; Mira Vance's dog sleeps."
+    );
+    assert_eq!(draft.knowledge[2].subject, "Mira Vance");
+    assert_eq!(
+        draft.knowledge[2].text,
+        "Mira Vance grinds grain at the Old Mill."
+    );
+    // No reference names the blank row's name any more.
+    let holt = |s: &str| s.eq_ignore_ascii_case("Mira Holt");
+    assert!(!seed.start.present.iter().any(|n| holt(n)));
+    assert!(!draft.knowledge.iter().any(|k| holt(&k.subject)));
+    assert!(!seed.decided.iter().any(|f| holt(&f.subject)));
+}
+
+/// Review M2 (2026-11-15): renaming the SECOND of two rows of one name
+/// leaves every reference with the first one, which still answers to it.
+#[test]
+fn rename_of_the_second_of_two_names_leaves_the_references() {
+    let mut draft = mira_draft();
+    draft
+        .seed
+        .entities
+        .push(entity("Mira Holt", EntityKind::Npc, None));
+    let before = draft.clone();
+    let second = EntryRef::entity(4, "Mira Holt", EntityKind::Npc);
+    assert_eq!(rename(&mut draft, &second, "Sefa Lind"), Ok(()));
+    let mut expected = before.seed.clone();
+    expected.entities[4].name = "Sefa Lind".into();
+    assert_eq!(draft.seed, expected);
+    assert_eq!(draft.knowledge, before.knowledge);
+}
+
 /// A place and a character share a name: the start place follows the
-/// place, "who is present" stays with the character.
+/// place, "who is present" stays with the character. A fact or a sentence
+/// names the first entry of the name, here the place, so it follows the
+/// place (review M2, 2026-11-15).
 #[test]
 fn rename_of_a_shared_name_follows_the_references_of_its_kind() {
     let mut draft = mira_draft();
@@ -793,11 +850,25 @@ fn rename_of_a_shared_name_follows_the_references_of_its_kind() {
         .entities
         .push(entity("Old Mill", EntityKind::Npc, Some(40)));
     draft.seed.start.present.push("Old Mill".into());
+    let both = draft.clone();
     let place = EntryRef::entity(3, "Old Mill", EntityKind::Place);
     assert_eq!(rename(&mut draft, &place, "Grey Mill"), Ok(()));
     assert_eq!(draft.seed.start.place, "Grey Mill");
     assert_eq!(draft.seed.start.present, ["Jean", "mira holt", "Old Mill"]);
-    // A sentence could name either: it stays.
+    // A sentence names the first "Old Mill", the place: it follows.
+    assert_eq!(
+        draft.knowledge[2].text,
+        "Mira Holt grinds grain at the Grey Mill."
+    );
+
+    // The character is the second "Old Mill" of any kind, but the first
+    // character: "who is present" follows it, the start place and the
+    // sentence stay with the place.
+    let mut draft = both;
+    let npc = EntryRef::entity(4, "Old Mill", EntityKind::Npc);
+    assert_eq!(rename(&mut draft, &npc, "Tam Reed"), Ok(()));
+    assert_eq!(draft.seed.start.place, "Old Mill");
+    assert_eq!(draft.seed.start.present, ["Jean", "mira holt", "Tam Reed"]);
     assert_eq!(
         draft.knowledge[2].text,
         "Mira Holt grinds grain at the Old Mill."
