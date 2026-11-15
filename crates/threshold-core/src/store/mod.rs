@@ -366,8 +366,11 @@ pub struct CampaignPeek {
     /// The Detail Level now.
     pub detail: DetailLevel,
     /// The Intent of the latest Play or Correction Turn that stands. A
-    /// faded Turn, or one told as an Intimate Scene, gives none: the home
-    /// screen shows no intimate text (QA m6, 2026-11-15).
+    /// faded Turn, a Turn committed with the tag `intimate` (told or not:
+    /// its Narration may have failed), or a Turn that closed an Intimate
+    /// Scene gives none: the home screen shows no intimate text (QA m6,
+    /// review M1, 2026-11-15). An `advance` is told plain and gives its
+    /// Intent.
     pub last_intent: Option<String>,
 }
 
@@ -421,7 +424,14 @@ pub fn peek(path: &Path) -> Result<CampaignPeek, StoreError> {
         .iter()
         .filter(|t| t.record.kind.has_intent() && !reverted.contains(&t.id))
         .max_by_key(|t| t.seq)
-        .filter(|t| !t.faded && t.told.is_none() && t.scene_closed.is_none())
+        // The tag the Turn was committed with, not `told`: `told` is
+        // written only after a good Narration, so a failed one leaves it
+        // empty on an intimate Turn. An `advance` is told plain and stays.
+        .filter(|t| {
+            !t.faded
+                && !crate::mature::stored_intimate(&t.record.proposal_json)
+                && t.scene_closed.is_none()
+        })
         .map(|t| t.record.intent.trim().to_string())
         .filter(|intent| !intent.is_empty());
     let (clock_min, detail): (ClockMin, String) = store.db.query_row(

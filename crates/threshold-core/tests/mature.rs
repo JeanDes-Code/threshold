@@ -2548,3 +2548,38 @@ fn peek_shows_the_last_plain_intent_and_never_an_intimate_one() {
     let peek = threshold_core::store::peek(&rig.path).unwrap();
     assert_eq!(peek.last_intent, None);
 }
+
+/// Review M1 (2026-11-15): `told` is written only after a good Narration.
+/// An intimate Turn whose Narration fails stays committed with `told`
+/// empty; the home card still gives no Intent for it, because it reads the
+/// tag the Turn was committed with.
+#[test]
+fn peek_hides_an_intimate_intent_whose_narration_failed() {
+    let mut rig = Rig::new("peek-failed");
+    let p = rig.plain();
+    rig.played("t1", &p, "Dusk falls.");
+    let q = rig.intimate();
+    // t2: committed, its Narration fails (no narration is queued).
+    rig.gm.push_proposal(serde_json::to_string(&q).unwrap());
+    let failed = rig
+        .engine()
+        .play_turn("t2".into(), "I stay with Brann.", &mut |_| {});
+    let Err(TurnError::NarrationFailed { turn_id, .. }) = failed else {
+        panic!("{failed:?}");
+    };
+    assert_eq!(rig.turn(turn_id).told, None);
+    let peek = threshold_core::store::peek(&rig.path).unwrap();
+    assert_eq!(peek.last_intent, None);
+}
+
+/// Review M1 (2026-11-15): an `advance` is told as a plain Turn and opens
+/// no Intimate Scene, so the home card keeps its Intent.
+#[test]
+fn peek_keeps_the_intent_of_an_advance() {
+    let mut rig = Rig::new("peek-advance");
+    let mut p = rig.plain();
+    p.intimacy = Intimacy::Advance;
+    rig.played("t1", &p, "Brann smiles.");
+    let peek = threshold_core::store::peek(&rig.path).unwrap();
+    assert_eq!(peek.last_intent.as_deref(), Some("I stay with Brann."));
+}
