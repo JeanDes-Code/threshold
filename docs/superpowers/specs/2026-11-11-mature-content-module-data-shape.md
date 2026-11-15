@@ -536,7 +536,7 @@ About 12 s. The rates are the ones of `evals/reports/2026-11-turn-time.md`: 43 t
 
 | Gate | Where enforced | What the Player reads when it refuses | Test |
 |---|---|---|---|
-| Module off by default | `DetailLevel::default`; `mature::check` | "This Campaign excludes Intimate Scenes. You can change the Detail Level under Ask the GM." | `a_seed_without_detail_excludes`; `an_intimate_proposal_is_refused_at_excluded` |
+| Module off by default | `DetailLevel::default`; `mature::check` | "This Campaign excludes Intimate Scenes. You can change the Detail Level in the Campaign menu." (QA m1, 2026-11-15: was "under Ask the GM") | `a_seed_without_detail_excludes`; `an_intimate_proposal_is_refused_at_excluded` |
 | Explicit needs a capable pack | `mature::effective`; `mature::told` | once: "No loaded Content Pack gives explicit description. Scenes are told by implication." | `explicit_without_a_capable_pack_is_told_implied` |
 | Every character the gate checks at the PC's place (`checked_here`: world truth, the PC's Beliefs, the gate's place rule, no known location), and every character the proposal names, is a confirmed adult, before the Turn | G2, `mature::check` | "An Intimate Scene cannot happen here." and, when a perceived adult is unconfirmed, "Not confirmed as an adult:" with the names | `a_minor_in_the_place_refuses`; `an_unconfirmed_adult_refuses`; `a_hidden_minor_refuses_and_names_nobody`; `a_new_npc_in_an_intimate_turn_refuses` |
 | The same, after the World Events of the Turn | G3, `mature::check_after` | the same sentence | `an_event_that_brings_a_minor_refuses_the_turn` |

@@ -313,8 +313,8 @@ async fn confirm_age_in_play(
     blocking(&state, move |s| s.confirm_age_in_play(entity_id, op_id)).await
 }
 
-/// The Detail Level in play (Task 8), from the select of the "Ask the GM"
-/// panel. Returns the Play view.
+/// The Detail Level in play (Task 8), from the select of the Campaign menu.
+/// Returns the Play view.
 #[tauri::command(rename_all = "snake_case")]
 async fn set_detail_level(
     state: State<'_, Shared>,

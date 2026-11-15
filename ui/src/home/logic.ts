@@ -1,7 +1,7 @@
 // Pure rules of the home screen and of the app's screens. The core reads
 // each Campaign file; these only word and order what it sends.
 
-import type { CampaignCard, DraftLine, PackLine } from "../api";
+import type { CampaignCard, DetailLevel, DraftLine, PackLine } from "../api";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -160,4 +160,16 @@ export function packLineText(line: PackLine): { title: string; detail: string; r
   const parts = [`explicit description: ${line.explicit ? "yes" : "no"}`];
   if (line.recommended_model !== null) parts.push(`recommended model: ${line.recommended_model}`);
   return { title: line.name ?? line.folder, detail: parts.join(" · "), refused: false };
+}
+
+/** The short name of each Detail Level in the Campaign menu. */
+export const DETAIL_NAMES: Readonly<Record<DetailLevel, string>> = {
+  excluded: "Left out",
+  implied: "Implied",
+  explicit: "Explicit",
+};
+
+/** The line the Campaign menu shows after the core wrote a new Detail Level (QA m1). */
+export function detailSetText(level: DetailLevel): string {
+  return `Detail Level set to ${DETAIL_NAMES[level]}.`;
 }

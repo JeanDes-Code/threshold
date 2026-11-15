@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BEGIN_OP_ID, errorText, renarrateOpId, type DetailLevel, type PlayView, type Target } from "../api";
+import { BEGIN_OP_ID, errorText, renarrateOpId, type PlayView, type Target } from "../api";
 import { api, play, turns } from "../tauri";
 import { fadeable } from "./logic";
 import PlayScreen from "./PlayScreen";
@@ -54,8 +54,8 @@ export default function LivePlay(props: Props) {
 
   const ask = (text: string) => store.ask(() => api.askOoc(text));
 
-  // "Confirm" from a Refusal, and the Detail Level select: core commands
-  // that answer with the new Play view. Never while a Turn runs.
+  // "Confirm" from a Refusal: a core command that answers with the new
+  // Play view. Never while a Turn runs.
   const confirm = async (entityId: number) => {
     if (turn.busy) return;
     try {
@@ -63,15 +63,6 @@ export default function LivePlay(props: Props) {
       store.confirmed(entityId);
     } catch (e) {
       store.notify(errorText(e));
-    }
-  };
-
-  const setDetail = async (level: DetailLevel) => {
-    if (turn.busy) return;
-    try {
-      onView(await api.setDetailLevel(level, crypto.randomUUID()));
-    } catch (e) {
-      store.notify(`Could not change the Detail Level: ${errorText(e)}`);
     }
   };
 
@@ -115,7 +106,6 @@ export default function LivePlay(props: Props) {
       refusal={turn.refusal}
       toConfirm={turn.toConfirm}
       onConfirm={(entityId) => void confirm(entityId)}
-      onDetail={(level) => void setDetail(level)}
       notice={turn.notice}
       levelNotice={props.levelNotice}
       onCloseLevelNotice={props.onCloseLevelNotice}

@@ -733,7 +733,7 @@ impl Session {
         self.get_play_view()
     }
 
-    /// The Detail Level select of the "Ask the GM" panel (Task 8): the core
+    /// The Detail Level select of the Campaign menu (Task 8): the core
     /// writes the level in an OOC Turn, and closes an open Intimate Scene
     /// at `excluded`. No model reads it. Then the Play view.
     pub fn set_detail_level(

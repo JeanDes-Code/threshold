@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CampaignCard } from "../api";
 import {
   cardLine,
+  detailSetText,
   fileName,
   createdMs,
   startedText,
@@ -156,5 +157,13 @@ describe("content packs", () => {
       detail: problem,
       refused: true,
     });
+  });
+});
+
+describe("the Detail Level in the Campaign menu", () => {
+  it("says the level the core wrote (QA m1)", () => {
+    expect(detailSetText("excluded")).toBe("Detail Level set to Left out.");
+    expect(detailSetText("implied")).toBe("Detail Level set to Implied.");
+    expect(detailSetText("explicit")).toBe("Detail Level set to Explicit.");
   });
 });

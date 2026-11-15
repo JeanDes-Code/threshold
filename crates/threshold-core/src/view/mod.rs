@@ -27,7 +27,7 @@ pub const PLAY_VIEW_MAX_MS: u64 = 50;
 /// where the Player changes the level in play: the select of the "Ask the
 /// GM" panel (Task 8).
 pub const REFUSAL_EXCLUDED: &str =
-    "This Campaign excludes Intimate Scenes. You can change the Detail Level under Ask the GM.";
+    "This Campaign excludes Intimate Scenes. You can change the Detail Level in the Campaign menu.";
 
 /// The Player's sentence for a Refusal by the age rule. It names nobody: a
 /// hidden character or a minor may be the one who blocks, and the sentence
