@@ -5,7 +5,8 @@ use std::{fmt, path::Path};
 
 use crate::domain::{
     AdventureSeed, Canon, ClaimDraft, ClockMin, ConfirmedAges, DetailLevel, Effect, EntityId,
-    EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, OtherName, Slot, Trigger,
+    EntityKind, EntityRef, FactSource, Handle, Knowing, LedgerOp, OtherName, SceneWhy, Slot,
+    Trigger,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -141,6 +142,10 @@ pub struct StoredTurn {
     /// only at that level or above (`mature::turn_text`, final review M3,
     /// 2026-11-12). Not a projection.
     pub told: Option<DetailLevel>,
+    /// Why this Turn closed an Intimate Scene: the `why` of its
+    /// `SetScene { open: false }` op, if it has one (QA M3, 2026-11-15).
+    /// Read from the ledger; not a column.
+    pub scene_closed: Option<SceneWhy>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entity {

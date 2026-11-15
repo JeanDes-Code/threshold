@@ -477,6 +477,8 @@ pub fn refusal(sight: &PcSight, kind: RefusalKind, confirm: &[EntityId]) -> Refu
 
 `to_confirm` reads what the PC perceives now, never who blocked the Turn (corrected after the final review, 2026-11-12, to match Task 8): it lists each character the PC perceives here and can name, for whom `mature::confirmable` holds and who has no Age Confirmation yet (`mature::to_confirm`, `Engine::refusal_view`). So the list is the same whatever hides behind a Refusal. A character who is hidden or under 18 is in no list. With an empty list, the Player reads the one fixed sentence of `adults_only` and no name.
 
+*Changed after QA (2026-11-15, M3):* every way a scene ends shows one line under the Turn that closed it. Before, only Fade to Black printed one; the other ends showed only that the buttons went away. `StoredTurn.scene_closed` reads the `why` of the Turn's `SetScene { open: false }` from the ledger; `SightTurn.scene_end` carries it, and `StoryTurn.scene_end` holds the line (`view::scene_end_line`). An OOC Turn tells nothing, so the `Excluded` end goes under the last standing story Turn before it. The lines name nobody and tell nothing of the scene: "The scene ends." (`EndScene`, and `Gate`, whose cause may be a character the PC does not see), "The scene ends: the moment has passed." (`NotIntimate`), "The scene ends: you left." (`Moved`), "The scene ends: someone arrived." (`Arrival`, a character the PC sees), "The scene ends: Intimate Scenes are now left out." (`Excluded`). `FadeToBlack` has none: its Closing Turn already shows its Neutral Line.
+
 ### 3.12 Commands and the two buttons
 
 | Command | Arguments | Returns | Lock |

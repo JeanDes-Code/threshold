@@ -207,6 +207,12 @@ fieldset.plain { border: none; margin: 0; padding: 0; min-width: 0; }
   border-left: 2px solid var(--rule);
 }
 
+/* The line under the Turn that ended an Intimate Scene. */
+.play-scene-end {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm); font-style: italic; color: var(--muted);
+}
+
 /* What the PC found in a Turn: a quiet card under the Narration. */
 .play-found {
   margin: 0 0 var(--space-4);

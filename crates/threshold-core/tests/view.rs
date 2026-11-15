@@ -1234,7 +1234,14 @@ fn play_view_json_matches_the_ui_types() {
     assert_eq!(
         keys(&story[0]),
         [
-            "body", "found", "intent", "kind", "reverted", "roll", "turn_id"
+            "body",
+            "found",
+            "intent",
+            "kind",
+            "reverted",
+            "roll",
+            "scene_end",
+            "turn_id"
         ]
     );
     let card = &story.iter().find(|t| t["turn_id"] == read).unwrap()["found"];

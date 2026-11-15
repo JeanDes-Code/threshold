@@ -133,6 +133,7 @@ function Turn({ turn, onName, onRenarrate, onDraft, busy, tabbable }: TurnProps)
           {rollText(turn.roll)}
         </p>
       )}
+      {turn.scene_end && <p className="play-scene-end">{turn.scene_end}</p>}
     </article>
   );
 }

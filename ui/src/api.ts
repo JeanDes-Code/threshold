@@ -146,6 +146,8 @@ export interface StoryTurn {
   body: TurnBody;
   /** What the PC found in this Turn: a small card list under the Narration. */
   found: FoundCard | null;
+  /** The Intimate Scene ended with this Turn: one neutral line from the core, shown under it. */
+  scene_end: string | null;
 }
 
 /** What the PC found in one Turn: where it comes from, and one row per item. */

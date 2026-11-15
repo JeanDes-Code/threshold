@@ -7,8 +7,8 @@ use serde::Serialize;
 
 use crate::{
     domain::{
-        ClockMin, CloseOutcome, DetailLevel, EntityId, EntityKind, Finds, STATE_KEYS, is_open_key,
-        is_state_key, outcome_key, slot_sentence, you_sentence,
+        ClockMin, CloseOutcome, DetailLevel, EntityId, EntityKind, Finds, STATE_KEYS, SceneWhy,
+        is_open_key, is_state_key, outcome_key, slot_sentence, you_sentence,
     },
     mature::effective,
     normalize,
@@ -46,6 +46,22 @@ pub const NOT_CONFIRMED_HEAD: &str = "Not confirmed as an adult:";
 /// (data shape 5). The same for a character under 18, one the PC does not
 /// know, and anything that is no character: it says neither which nor why.
 pub const CANNOT_CONFIRM: &str = "This character cannot be confirmed as an adult.";
+
+/// The line under the Turn that ended an Intimate Scene (QA M3,
+/// 2026-11-15): a short, neutral cause. It names nobody and tells nothing
+/// of the scene. `Gate` says no cause: its cause may be a character the PC
+/// does not see. `FadeToBlack` has none: its Closing Turn already shows the
+/// Neutral Line "The intimate scene ends (...)". `Opened` is no end.
+pub fn scene_end_line(why: SceneWhy) -> Option<&'static str> {
+    Some(match why {
+        SceneWhy::Opened | SceneWhy::FadeToBlack => return None,
+        SceneWhy::EndScene | SceneWhy::Gate => "The scene ends.",
+        SceneWhy::NotIntimate => "The scene ends: the moment has passed.",
+        SceneWhy::Moved => "The scene ends: you left.",
+        SceneWhy::Arrival => "The scene ends: someone arrived.",
+        SceneWhy::Excluded => "The scene ends: Intimate Scenes are now left out.",
+    })
+}
 
 /// A Refusal as the Play screen shows it (data shape 3.11): its kind, its
 /// one fixed sentence, and the characters the Player may confirm as adults
@@ -220,6 +236,9 @@ pub struct StoryTurn {
     /// What the PC found in this Turn (`SightTurn::found`), shown under the
     /// Narration as a small card list (ADR 0007, 2026-11-12).
     pub found: Option<FoundCard>,
+    /// The Intimate Scene ended with this Turn: one neutral line, shown
+    /// under it (`scene_end_line`).
+    pub scene_end: Option<String>,
 }
 
 /// What the PC found in one Turn, as a screen shows it: the source, and one
@@ -1080,6 +1099,7 @@ fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {
         reverted: turn.reverted,
         body,
         found: turn.found.as_ref().map(found_card),
+        scene_end: turn.scene_end.and_then(scene_end_line).map(str::to_owned),
     }
 }
 

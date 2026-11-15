@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    domain::{Canon, EntityKind, FactSource, Knowing, LedgerOp, Trigger},
+    domain::{Canon, EntityKind, FactSource, Knowing, LedgerOp, SceneWhy, Trigger},
     normalize,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -714,7 +714,25 @@ pub(super) fn read_turn(db: &Connection, id: u64) -> Result<StoredTurn, StoreErr
         narration: row.8,
         faded: row.9,
         told: told_level(row.10)?,
+        scene_closed: scene_closed(db, id)?,
     })
+}
+
+/// Why Turn `turn` closed an Intimate Scene: the `why` of its
+/// `SetScene { open: false }` op (`StoredTurn::scene_closed`).
+fn scene_closed(db: &Connection, turn: u64) -> Result<Option<SceneWhy>, StoreError> {
+    let mut stmt = db.prepare(
+        "SELECT op_json FROM ledger WHERE turn_id=?1 AND op_json LIKE '%\"set_scene\"%' ORDER BY seq",
+    )?;
+    let rows = stmt
+        .query_map([turn], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for row in rows {
+        if let (LedgerOp::SetScene { open: false, why }, _) = decode(&row)? {
+            return Ok(Some(why));
+        }
+    }
+    Ok(None)
 }
 
 /// The `turn.told` column as a level (`StoredTurn::told`).
@@ -1019,6 +1037,7 @@ pub(super) fn snapshot(db: &Connection, c: u64) -> Result<WorldView, StoreError>
                 narration,
                 faded,
                 told: told_level(told)?,
+                scene_closed: scene_closed(db, id)?,
             });
         }
     }
