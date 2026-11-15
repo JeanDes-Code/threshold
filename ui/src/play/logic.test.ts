@@ -270,6 +270,15 @@ describe("what the PC found", () => {
     expect(intentWithDraft("I nod to Maren.\n", draft)).toBe(`I nod to Maren. ${draft}`);
   });
 
+  it("a second click on a row sets the draft again, never twice (QA m3)", () => {
+    const draft = lookCloserDraft("Lost Coin");
+    const once = intentWithDraft("", draft);
+    expect(intentWithDraft(once, draft)).toBe(draft);
+    // Another row replaces the earlier draft; typed words stay.
+    const other = lookCloserDraft("Night roster");
+    expect(intentWithDraft(`I nod. ${draft}`, other)).toBe(`I nod. ${other}`);
+  });
+
   it("the Play fixture holds one Turn with a found card", () => {
     const cards = playView.story.filter((turn) => turn.found !== null);
     expect(cards.length).toBe(1);
