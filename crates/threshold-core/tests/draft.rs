@@ -751,6 +751,59 @@ fn rename_updates_every_reference_and_adds_no_gap() {
     assert_eq!(gaps(&draft), before);
 }
 
+/// M7 (QA, 2026-11-15): the Player added a second "Mira Holt" and renamed
+/// the new row. Every fact, sentence, "who is present" and "who knows" of
+/// the first Mira Holt moved to the new name. The rename now changes only
+/// the row it renames: the first entry keeps her name and her references.
+#[test]
+fn rename_of_a_duplicate_name_changes_only_its_own_row() {
+    let mut draft = mira_draft();
+    draft
+        .seed
+        .entities
+        .push(entity("Mira Holt", EntityKind::Npc, None));
+    let first = draft.clone();
+    let added = EntryRef::entity(4, "Mira Holt", EntityKind::Npc);
+    assert_eq!(rename(&mut draft, &added, "Sefa Lind"), Ok(()));
+
+    assert_eq!(draft.seed.entities[4].name, "Sefa Lind");
+    assert_eq!(draft.seed.entities[2].name, "Mira Holt");
+    let mut expected = first.seed.clone();
+    expected.entities[4].name = "Sefa Lind".into();
+    assert_eq!(draft.seed, expected);
+    assert_eq!(draft.knowledge, first.knowledge);
+    assert_eq!(draft.age_marks.entities[2], first.age_marks.entities[2]);
+
+    // Then the first one: she is the only Mira Holt now, so her
+    // references follow her.
+    let older = EntryRef::entity(2, "Mira Holt", EntityKind::Npc);
+    assert_eq!(rename(&mut draft, &older, "Mira Vance"), Ok(()));
+    assert_eq!(draft.seed.start.present, ["Jean", "Mira Vance"]);
+    assert_eq!(draft.seed.decided[0].subject, "Mira Vance");
+    assert_eq!(draft.knowledge[2].subject, "Mira Vance");
+}
+
+/// A place and a character share a name: the start place follows the
+/// place, "who is present" stays with the character.
+#[test]
+fn rename_of_a_shared_name_follows_the_references_of_its_kind() {
+    let mut draft = mira_draft();
+    draft
+        .seed
+        .entities
+        .push(entity("Old Mill", EntityKind::Npc, Some(40)));
+    draft.seed.start.present.push("Old Mill".into());
+    let place = EntryRef::entity(3, "Old Mill", EntityKind::Place);
+    assert_eq!(rename(&mut draft, &place, "Grey Mill"), Ok(()));
+    assert_eq!(draft.seed.start.place, "Grey Mill");
+    assert_eq!(draft.seed.start.present, ["Jean", "mira holt", "Old Mill"]);
+    // A sentence could name either: it stays.
+    assert_eq!(
+        draft.knowledge[2].text,
+        "Mira Holt grinds grain at the Old Mill."
+    );
+}
+
 #[test]
 fn rename_returns_an_approved_draft_to_draft() {
     let mut draft = valid_draft();

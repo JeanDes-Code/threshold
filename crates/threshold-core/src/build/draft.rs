@@ -691,6 +691,13 @@ pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), Review
 /// main or other, is refused, and the draft does not change. A change of
 /// case or accent of the same name is allowed. Only the mark of this very
 /// row moves to the new name.
+///
+/// References hold names, not rows. So a reference follows only when this
+/// entry is the one entry it can name (QA, 2026-11-15): while another entry
+/// keeps the old name, the references of that kind stay with it, and the
+/// rename changes this row only. `start.place` names a place;
+/// `start.present` and `known_to` name a character; a fact or a sentence
+/// names any entry.
 pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), ReviewError> {
     let to = to.trim();
     let owner = resolve(&draft.seed, entry)?;
@@ -717,6 +724,20 @@ pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), R
         return Err(ReviewError::NameInUse);
     }
 
+    // Another entry that answers to the old name, of a kind a reference
+    // of that field can name, keeps the references.
+    let roster = Roster::of(seed);
+    let me = owner.map_or(0, |i| i + 1);
+    let shared = |kind: fn(EntityKind) -> bool| {
+        roster
+            .0
+            .iter()
+            .any(|(n, k, o)| *o != me && *n == from_key && kind(*k))
+    };
+    let any_shared = shared(|_| true);
+    let place_shared = shared(|k| k == EntityKind::Place);
+    let character_shared = shared(is_character);
+
     let old = match owner {
         None => std::mem::replace(&mut draft.seed.pc.name, to.to_owned()),
         Some(i) => std::mem::replace(&mut draft.seed.entities[i].name, to.to_owned()),
@@ -727,20 +748,26 @@ pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), R
         }
     };
     let seed = &mut draft.seed;
-    let others = seed.pc.other_names.iter_mut().chain(
-        seed.entities
-            .iter_mut()
-            .flat_map(|e| e.other_names.iter_mut()),
-    );
-    others.flat_map(|o| o.known_to.iter_mut()).for_each(follow);
-    follow(&mut seed.start.place);
-    seed.start.present.iter_mut().for_each(follow);
-    let facts = seed.decided.iter_mut().chain(seed.proposed.iter_mut());
-    facts.for_each(|f| follow(&mut f.subject));
-    seed.start.situation = replace_words(&seed.start.situation, &old, to);
-    for fact in &mut draft.knowledge {
-        follow(&mut fact.subject);
-        fact.text = replace_words(&fact.text, &old, to);
+    if !character_shared {
+        let others = seed.pc.other_names.iter_mut().chain(
+            seed.entities
+                .iter_mut()
+                .flat_map(|e| e.other_names.iter_mut()),
+        );
+        others.flat_map(|o| o.known_to.iter_mut()).for_each(follow);
+        seed.start.present.iter_mut().for_each(follow);
+    }
+    if !place_shared {
+        follow(&mut seed.start.place);
+    }
+    if !any_shared {
+        let facts = seed.decided.iter_mut().chain(seed.proposed.iter_mut());
+        facts.for_each(|f| follow(&mut f.subject));
+        seed.start.situation = replace_words(&seed.start.situation, &old, to);
+        for fact in &mut draft.knowledge {
+            follow(&mut fact.subject);
+            fact.text = replace_words(&fact.text, &old, to);
+        }
     }
     if draft
         .age_marks
