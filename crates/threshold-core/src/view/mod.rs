@@ -736,7 +736,9 @@ pub struct EntityCard {
     pub people_here: Vec<NameRef>,
     /// A character the PC saw leave for a place the PC cannot name: "Left;
     /// you do not know where." (`DEPARTED_TEXT`). The departure is not
-    /// among `facts` (review of bug pass 4, m4). `None` otherwise.
+    /// among `facts` (review of bug pass 4, m4). A named character who is
+    /// not here and whose place the PC does not know: "Not here; you do not
+    /// know where." (`UNKNOWN_WHERE_TEXT`, QA B1). `None` otherwise.
     pub whereabouts: Option<String>,
     /// The Player's Notes about it.
     pub notes: Vec<Note>,
@@ -1096,6 +1098,10 @@ fn name_ref(sight: &PcSight, id: EntityId) -> Option<NameRef> {
 /// cannot name (review of bug pass 4, m4).
 pub const DEPARTED_TEXT: &str = "Left; you do not know where.";
 
+/// The card's `whereabouts` of a character who is not here and whose place
+/// the PC does not know (QA polish pass, B1).
+pub const UNKNOWN_WHERE_TEXT: &str = "Not here; you do not know where.";
+
 /// True when `belief` is a departure record (`world::with_witnessed_events`):
 /// the `location` of another character, with no place.
 fn departure(sight: &PcSight, belief: &Belief) -> bool {
@@ -1153,11 +1159,19 @@ fn pc_state_text(sight: &PcSight, belief: &Belief) -> Option<String> {
 /// Where a character is, as a card's "Where" line: "At The Copper Kettle."
 /// from the PC's `location` Belief, or the departure text. QA (bug pass 5)
 /// read "Sefa Lind is at The Copper Kettle." among the card's facts.
+///
+/// QA polish pass, B1: a character with no `location` Belief who is not
+/// here reads `UNKNOWN_WHERE_TEXT`, so a card whose facts hold a sentence
+/// with no place ("Pim Quast is asleep on the bench by the hearth.") does
+/// not read as here.
 fn whereabouts(sight: &PcSight, entity: EntityId) -> Option<String> {
-    let belief = sight
+    let Some(belief) = sight
         .beliefs
         .iter()
-        .find(|b| b.subject == entity && b.key == "location")?;
+        .find(|b| b.subject == entity && b.key == "location")
+    else {
+        return (!sight.present.contains(&entity)).then(|| UNKNOWN_WHERE_TEXT.to_owned());
+    };
     if departure(sight, belief) {
         return Some(DEPARTED_TEXT.to_owned());
     }
@@ -1330,7 +1344,8 @@ pub const OOC_ANSWERED_HEADING: &str = "REQUESTS, OFFERS, PLANS AND PROMISES ALR
 /// the items still open (`open_lines`), the items already answered (each
 /// with its outcome as a sentence about "you"), RECENT TURNS (the Intent and
 /// the Narration as the Player read it), then WHAT YOU KNOW (the other
-/// Beliefs).
+/// Beliefs about the PC, the people here, places and things), then one
+/// entry per person the PC can name who is not here (`OOC_AWAY_HEADING`).
 ///
 /// Bug pass 5 (M2): after two refusals QA asked "Which requests have I
 /// answered and how?" and got "You have not answered any requests.": the
@@ -1364,21 +1379,16 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
     } else {
         out.push_str(&format!("Here with you: {}\n", here.join(", ")));
     }
-    // Every person the PC can name, so a question about one who is away
-    // finds them (bug pass 5, M2: "What do I know about Tobin?" got "You do
-    // not know anything about Tobin" while an open request named him).
-    let away: Vec<String> = sight
+    // Every person the PC can name who is not here gets a block of their
+    // own at the end (`OOC_AWAY_HEADING`), so a question about one who is
+    // away finds them (bug pass 5, M2).
+    let away: Vec<EntityId> = sight
         .known
         .iter()
         .filter(|k| k.kind == EntityKind::Npc && !sight.present.contains(&k.id))
-        .filter_map(|k| k.name.clone())
+        .filter(|k| k.name.is_some())
+        .map(|k| k.id)
         .collect();
-    if !away.is_empty() {
-        out.push_str(&format!(
-            "People you know of who are not here: {}\n",
-            away.join(", ")
-        ));
-    }
 
     let open = open_lines(sight);
     out.push_str(OOC_OPEN_HEADING);
@@ -1474,30 +1484,126 @@ pub fn ooc_sheet(sight: &PcSight) -> String {
         .iter()
         .map(|item| (item.subject, item.key.clone()))
         .collect();
+    let known_line = |b: &Belief| -> Option<String> {
+        if item_keys.contains(&(b.subject, b.key.clone())) || closed_by(sight, b).is_some() {
+            return None;
+        }
+        let line = fact_line(sight, b)?;
+        // A departure says that the PC does not know where (m4).
+        Some(if departure(sight, b) {
+            format!(
+                "{}; you do not know where.",
+                line.text.trim_end_matches('.')
+            )
+        } else {
+            ooc_line(&line)
+        })
+    };
+    // QA polish pass, B1: a person who is not here is never told as here.
+    // Their lines leave WHAT YOU KNOW for a block that opens with where the
+    // PC believes they are: "Pim Quast is asleep on the bench by the
+    // hearth." holds no place, and among the lines about the people here
+    // the model answered "Yes, Pim Quast is at the ferry house".
     let known: Vec<String> = sight
         .beliefs
         .iter()
-        .filter(|b| !item_keys.contains(&(b.subject, b.key.clone())))
-        .filter(|b| closed_by(sight, b).is_none())
-        .filter_map(|b| {
-            let line = fact_line(sight, b)?;
-            // A departure says that the PC does not know where (m4).
-            Some(if departure(sight, b) {
-                format!(
-                    "- {}; you do not know where.\n",
-                    line.text.trim_end_matches('.')
-                )
-            } else {
-                format!("- {}\n", ooc_line(&line))
-            })
-        })
+        .filter(|b| !away.contains(&b.subject))
+        .filter_map(|b| Some(format!("- {}\n", known_line(b)?)))
         .collect();
     if !known.is_empty() {
         out.push_str("WHAT YOU KNOW\n");
         out.push_str(&known.concat());
     }
+    if !away.is_empty() {
+        out.push_str(OOC_AWAY_HEADING);
+        out.push('\n');
+    }
+    for id in &away {
+        let Some(name) = name_ref(sight, *id).and_then(|who| who.name) else {
+            continue;
+        };
+        out.push_str(&format!(
+            "{}: not here with you; where now: {}.\n",
+            one_line(&name),
+            one_line(&away_place(sight, *id))
+        ));
+        for b in sight.beliefs.iter().filter(|b| b.subject == *id) {
+            if let Some(line) = known_line(b) {
+                out.push_str(&format!("  - {line}\n"));
+            }
+        }
+    }
     out
 }
+
+/// The heading of the block the OOC prompt puts just before the question:
+/// where each character the question names is (QA polish pass, B1).
+pub const OOC_NAMED_HEADING: &str = "NAMED IN THE QUESTION";
+
+/// One line per character the PC can name whose name the question holds,
+/// from the PC's sight, in id order: "Maren: here with you." or "Pim
+/// Quast: not here with you; where now: you do not know." A name matches
+/// when one of its words of three letters or more is a word of the
+/// question ("Pim" finds Pim Quast). Empty when the question names nobody.
+///
+/// QA polish pass, B1: with "Pim Quast is asleep on the bench by the
+/// hearth." among what the PC knows, "Is Pim Quast here?" got "Yes" 8 times
+/// in 8 at the Copper Kettle, whatever the sheet said lower down. With this
+/// line next to the question: "No" 8 in 8 (replay of the stored prompt).
+pub fn ooc_named(sight: &PcSight, question: &str) -> String {
+    let asked = crate::normalize::name_words(question);
+    let mut out = String::new();
+    for k in &sight.known {
+        if k.id == sight.pc || !matches!(k.kind, EntityKind::Npc) {
+            continue;
+        }
+        let Some(name) = &k.name else { continue };
+        let named = std::iter::once(name)
+            .chain(&k.other_names)
+            .flat_map(|n| crate::normalize::name_words(n))
+            .any(|w| w.chars().count() >= 3 && asked.contains(&w));
+        if !named {
+            continue;
+        }
+        if sight.present.contains(&k.id) {
+            out.push_str(&format!("{}: here with you.\n", one_line(name)));
+        } else {
+            out.push_str(&format!(
+                "{}: not here with you; where now: {}.\n",
+                one_line(name),
+                one_line(&away_place(sight, k.id))
+            ));
+        }
+    }
+    if out.is_empty() {
+        out
+    } else {
+        format!("{OOC_NAMED_HEADING}\n{out}")
+    }
+}
+
+/// Where a character who is not here is, as the PC believes it: the place
+/// of its `location` Belief, or `OOC_WHERE_UNKNOWN`.
+fn away_place(sight: &PcSight, id: EntityId) -> String {
+    sight
+        .beliefs
+        .iter()
+        .find(|b| b.subject == id && b.key == "location" && !departure(sight, b))
+        .map_or_else(
+            || OOC_WHERE_UNKNOWN.to_owned(),
+            |b| place_name(sight, &b.value),
+        )
+}
+
+/// The heading of the OOC sheet's last block: each person the PC can name
+/// who is not here, where the PC believes they are now, and what the PC
+/// knows about them (QA polish pass, B1).
+pub const OOC_AWAY_HEADING: &str =
+    "PEOPLE WHO ARE NOT HERE WITH YOU (what you know about each; where they are now)";
+
+/// Where a person who is not here is, when the PC holds no `location` for
+/// them.
+pub const OOC_WHERE_UNKNOWN: &str = "you do not know";
 
 /// One fact line of the OOC sheet: its text, and who told it.
 fn ooc_line(line: &FactLine) -> String {

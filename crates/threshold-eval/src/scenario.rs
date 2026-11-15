@@ -231,6 +231,11 @@ pub struct Ooc {
     #[serde(default = "default_fixture")]
     pub fixture: String,
     pub items: Vec<AnsweredPending>,
+    /// Plain facts the PC holds before play, with no open key and no
+    /// outcome (QA polish pass, B1: a place-free status sentence about a
+    /// person who is not here).
+    #[serde(default)]
+    pub facts: Vec<AnsweredPending>,
     pub questions: Vec<OocQuestion>,
 }
 

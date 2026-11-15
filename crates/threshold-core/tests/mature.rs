@@ -2307,3 +2307,154 @@ fn the_core_raises_the_tag_before_the_gate() {
     result.unwrap();
     assert_eq!(stored, Some(Intimacy::None));
 }
+
+// --- QA polish pass, B1: every Player-facing truth agrees with the gate -----
+
+/// The QA Campaign c3 in small: Tam (11, confirmed) lives in the village,
+/// and the PC does not know that. The PC holds a seed sentence with no
+/// place in it: "Tam is asleep on the bench by the hearth." The PC stands
+/// at the Copper Kettle.
+fn sleeper_away() -> (World, u64) {
+    let mut w = confirmed_gate();
+    let ada = w.ada;
+    bring(&mut w, ada, "copper kettle");
+    let tam = add_character(&mut w, "Tam", 11, true, "village");
+    w.commit(vec![LedgerOp::AddFact {
+        slot: Slot {
+            subject: tam.into(),
+            key: "status".into(),
+            value: "asleep".into(),
+        },
+        text: "Tam is asleep on the bench by the hearth.".into(),
+        canon: Canon::Established,
+        source: FactSource::AdventureSeed,
+        seen_by: vec![ada.into()],
+        causes: vec![],
+    }]);
+    (w, tam)
+}
+
+/// B1 (1): "Ask the GM" placed the child at the PC's place from the
+/// place-free sentence. The OOC prompt now says, next to the question,
+/// where each character it names is, from the PC's sight: Tam is not here
+/// and the PC does not know where he is. The sentence leaves WHAT YOU KNOW
+/// for the block of the people who are not here.
+#[test]
+fn the_ooc_answer_reads_where_a_named_character_is_from_the_world() {
+    let (mut w, _) = sleeper_away();
+    // Brann comes into the Copper Kettle, and the PC sees him.
+    let old = w.view.live_fact(w.brann, "location").unwrap().id;
+    let (brann, ada) = (w.brann, w.ada);
+    w.commit(vec![LedgerOp::SupersedeFact {
+        old,
+        new: FactDraft {
+            slot: Slot {
+                subject: brann.into(),
+                key: "location".into(),
+                value: "copper kettle".into(),
+            },
+            text: "Brann comes in.".into(),
+            canon: Canon::Established,
+            source: FactSource::Proposal,
+            seen_by: vec![ada.into()],
+            causes: vec![],
+        },
+    }]);
+    let gm = RecordedGm::new(vec![], vec!["No.".into(), "Yes.".into()]);
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    engine.ooc("q1".into(), "Is Tam here with me?").unwrap();
+    let prompt = &gm.calls()[0].prompt;
+    assert!(
+        prompt.recent.starts_with(
+            "NAMED IN THE QUESTION\nTam: not here with you; where now: you do not know.\nQUESTION\n"
+        ),
+        "{}",
+        prompt.recent
+    );
+    let sheet = &prompt.scene;
+    let here = sheet
+        .lines()
+        .find(|l| l.starts_with("Here with you:"))
+        .unwrap();
+    assert!(!here.contains("Tam"), "{here}");
+    let away_at = sheet.find("PEOPLE WHO ARE NOT HERE").unwrap();
+    // Not among what the PC knows about the people here.
+    assert!(!sheet[..away_at].contains("hearth"), "{sheet}");
+    assert!(
+        sheet[away_at..].contains(
+            "Tam: not here with you; where now: you do not know.\n  - Tam is asleep on the bench by the hearth.\n"
+        ),
+        "{sheet}"
+    );
+    // A character the PC sees here reads as here.
+    engine.ooc("q2".into(), "Is Brann here with me?").unwrap();
+    let recent = &gm.calls()[1].prompt.recent;
+    assert!(recent.contains("Brann: here with you.\n"), "{recent}");
+}
+
+/// B1: the gate does not place Tam at the Copper Kettle, so an intimate
+/// Turn there is not refused for him. With his location at the Copper
+/// Kettle (the source document's truth), the same Turn is refused for him.
+#[test]
+fn the_gate_refuses_only_when_the_child_is_at_the_pc_s_place() {
+    let (mut w, tam) = sleeper_away();
+    let ada = w.ada;
+    // Tam's card says he is not here and that the PC does not know where.
+    let turns = w.store.turns(w.campaign).unwrap();
+    let sight = threshold_core::world::pc_sight(&w.view, &turns, &Default::default()).unwrap();
+    let card = threshold_core::view::entity_card(&sight, &Default::default(), tam).unwrap();
+    assert_eq!(
+        card.whereabouts.as_deref(),
+        Some(threshold_core::view::UNKNOWN_WHERE_TEXT)
+    );
+    assert!(!card.here);
+    assert!(!checked_here(&w.view).contains(&tam));
+    assert!(validate(&intimate(&w, Stance::Comply), &w.view).is_ok());
+    bring(&mut w, tam, "copper kettle");
+    assert!(checked_here(&w.view).contains(&tam));
+    let errs = validate(&intimate(&w, Stance::Comply), &w.view).unwrap_err();
+    assert_eq!(adults_only(&errs), vec![Some(e(tam))], "{errs:?}");
+    // The PC's place written with an article and capitals is the same place.
+    bring(&mut w, ada, "The Copper Kettle");
+    let errs = validate(&intimate(&w, Stance::Comply), &w.view).unwrap_err();
+    assert_eq!(adults_only(&errs), vec![Some(e(tam))], "{errs:?}");
+}
+
+/// B1 (2): the narrator does not read the place-free status sentence of a
+/// character who is not here. "I wake Tam" at the Copper Kettle is
+/// impossible, and no part of the Narration prompt holds the hearth.
+#[test]
+fn the_narration_prompt_holds_no_status_of_a_character_who_is_not_here() {
+    let (mut w, _) = sleeper_away();
+    let gm = RecordedGm::new(
+        vec![serde_json::to_string(&proposal(Verdict::Impossible)).unwrap()],
+        vec!["Tam is not here.".into()],
+    );
+    let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+    let mut engine = Engine::new(
+        store,
+        Box::new(gm.clone()),
+        Box::new(D10),
+        vec![],
+        w.campaign,
+    );
+    engine
+        .play_turn("t1".into(), "I wake Tam.", &mut |_| {})
+        .unwrap();
+    let narrate = gm
+        .calls()
+        .into_iter()
+        .find(|c| c.kind == CallKind::Narrate)
+        .unwrap();
+    let p = &narrate.prompt;
+    for part in [&p.system, &p.stable, &p.scene, &p.recent] {
+        assert!(!part.contains("hearth"), "{part}");
+    }
+}

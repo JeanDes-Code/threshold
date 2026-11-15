@@ -19,6 +19,7 @@ fn seed(
     store: &mut Store,
     campaign: CampaignId,
     items: &[scenario::AnsweredPending],
+    tag: &str,
 ) -> Result<(), String> {
     let view = store.snapshot(campaign).map_err(|e| e.to_string())?;
     let pc = view
@@ -60,10 +61,13 @@ fn seed(
         }
     }
     for (n, ops) in [open, answers].into_iter().enumerate() {
+        if ops.is_empty() {
+            continue;
+        }
         let now = store.snapshot(campaign).map_err(|e| e.to_string())?;
         let record = TurnRecord {
             campaign_id: campaign,
-            op_id: format!("__ooc_items_{n}__"),
+            op_id: format!("__ooc_{tag}_{n}__"),
             kind: TurnKind::Setup,
             intent: String::new(),
             proposal_json: "{}".into(),
@@ -93,7 +97,10 @@ pub(crate) fn scenario(ctx: &mut Ctx) -> Result<String, String> {
             &sc.fixture,
             format!("ooc-r{run}"),
             13_000 + run as u64,
-            |store, campaign| seed(store, campaign, &sc.items),
+            |store, campaign| {
+                seed(store, campaign, &sc.items, "items")?;
+                seed(store, campaign, &sc.facts, "facts")
+            },
         )?;
         for (q, question) in sc.questions.iter().enumerate() {
             for (n, phrasing) in question.phrasings.iter().enumerate() {

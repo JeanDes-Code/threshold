@@ -345,7 +345,7 @@ pub const OOC_RULES: &str = concat!(
     "\
 You answer the player's out-of-character question about a single-player tabletop role-playing game. The player plays the player character (PC): answer the player as \"you\".
 Answer only from the adventure and the blocks below. Together they hold everything the PC knows, and every block counts: a request, an offer, a plan or a promise also tells what you know about each person it names. Say that you do not know only when no block holds the answer.
-NOW: where you are, the time, and who is here with you. STILL OPEN: the requests, offers, plans and promises not answered or not done yet. ALREADY ANSWERED: each one you accepted, refused, did, failed or gave up, and how. RECENT TURNS: what the player last did and read. WHAT YOU KNOW: the other things you know about people, places and things.
+NOW: where you are, the time, and who is here with you. STILL OPEN: the requests, offers, plans and promises not answered or not done yet. ALREADY ANSWERED: each one you accepted, refused, did, failed or gave up, and how. RECENT TURNS: what the player last did and read. WHAT YOU KNOW: the other things you know about you, the people here, places and things. PEOPLE WHO ARE NOT HERE: each person who is not with you now, where you believe they are, and what you know about them.
 Never invent facts about the world, and never continue the story.
 Answer briefly, in plain prose.
 ",
@@ -1888,7 +1888,8 @@ fn stored_events(proposal_json: &str) -> Vec<String> {
 
 /// The OOC prompt: rules, the narration prompt's stable block, then the
 /// OOC sheet (`view::ooc_sheet`): what the Play screen shows, made from
-/// `PcSight` only (bug pass 4, MB), then the question.
+/// `PcSight` only (bug pass 4, MB), then where each character the question
+/// names is (`view::ooc_named`, QA polish pass B1), then the question.
 fn ooc_prompt(view: &WorldView, sight: Option<&PcSight>, question: &str) -> Prompt {
     let stable = adventure_block(view, None);
     let scene = sight.map_or_else(
@@ -1899,7 +1900,11 @@ fn ooc_prompt(view: &WorldView, sight: Option<&PcSight>, question: &str) -> Prom
         system: OOC_RULES.to_owned(),
         stable,
         scene,
-        recent: format!("QUESTION\n{}\n", one_line(question)),
+        recent: format!(
+            "{}QUESTION\n{}\n",
+            sight.map_or_else(String::new, |s| crate::view::ooc_named(s, question)),
+            one_line(question)
+        ),
     }
 }
 

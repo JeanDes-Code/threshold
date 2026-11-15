@@ -70,3 +70,25 @@ phrasings = [
 ]
 all_of = [["flour"], ["sack", "pay", "owe"]]
 none_of = ["do not know anything", "don't know anything"]
+
+# QA polish pass, B1: "Ask the GM" placed a child at the PC's place from a
+# place-free status sentence the PC knew ("asleep on the bench by the
+# hearth"). Tobin is at the mill, not with the PC in the town hall.
+[[facts]]
+subject = "Tobin"
+key = "status"
+value = "asleep"
+text = "Tobin is asleep on the bench by the hearth."
+
+[[questions]]
+topic = "is Tobin here"
+phrasings = [
+    "Is Tobin here with me right now?",
+    "Is Tobin in the room with me?",
+    "Can I see Tobin here?",
+    "Where is Tobin right now? Is he with me?",
+    "Is Tobin around, here in this room?",
+    "Quick check: is Tobin present?",
+]
+all_of = [["not here", "isn't here", "is not here", "not with you", "not in the", "not present", "isn't present", "is not present"]]
+none_of = ["Tobin is here", "he is here", "Yes,", "Yes."]
