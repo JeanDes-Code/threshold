@@ -54,6 +54,15 @@ A review of Tasks 1 and 2 found ways around the gate. Each change below makes th
 
 What stays open: a wrong tag (`intimate: false` on an intimate Intent) still runs no age rule. The wider tag wording and the raw-text sticky tag lower that risk; the evaluation measures it.
 
+## Changed after QA run 3 (2026-11-15): one room, and doubt is not cleared
+
+QA run 3 (B1) played a Campaign where an 11-year-old's live `location` was "ostley crossing", the village, while the PC stood in "the ferry house". One live fact says "The ferry house is in Ostley Crossing.". The place rule saw two places, so the gate checked nobody but the adult NPC, and an Intimate Scene opened and went on. The story kept the child asleep by the hearth of that house.
+
+- **One home of presence.** `world::presence` holds who is at the PC's place. `room(view)` gives three sets: `truth` (world truth, hidden characters included; `WorldView::present`), `seen` (what the PC knows is here; `context::seen_present`, which HERE, Ask the GM, the character card and the narration context read) and `unsure`. `mature::checked_here` is `Room::checked`: the union of the three, and the PC.
+- **Doubt is not cleared.** `unsure` holds each character the world state does not place away from the PC's place: no live location; the PC's place unknown; a location that names the PC's place another way (the M1 rule); or a location that names a place which holds the PC's place, or which the PC's place holds. A place holds another when a live `location` fact has the outer place as its value, and its subject is the inner place or its text names the inner place as whole words. The rule reads the world state only: a Narration or an NPC line is not needed and is not read.
+- **The Player never reads `unsure`.** It is world truth. HERE and the screens keep the PC's sight, so a Refusal can come from a child the PC does not know is near. The Refusal names nobody, as before.
+- **The rule reads free text** to find a place inside another, so it can see one where there is none. That only makes the gate check one more character.
+
 ## Changed in Task 8 (2026-11-12): settings in play
 
 - **Age Confirmation in play.** `Engine::confirm_age` writes `ConfirmAge` in an OOC Turn when `mature::confirmable` holds: a PC or an NPC, a stored age of 18 or more, and the PC perceives it here now or can name it. Any other entity, a hidden one or a minor included, gets `TurnError::NotConfirmable` and one fixed sentence (`view::CANNOT_CONFIRM`) that says neither which nor why. No Turn row, no model call. The screen says "adult" and never shows a number.
