@@ -110,43 +110,45 @@ pub const TO_BED_VERBS: &[&str] = &[
 /// The pronouns that can stand for the person taken to bed.
 const TO_BED_PRONOUNS: &[&str] = &["her", "him", "them", "me"];
 
+/// The possessives that may stand between "to" and "bed": "lead her to my
+/// bed", "Maren takes me to her bed" (QA B1).
+const TO_BED_POSSESSIVES: &[&str] = &["my", "her", "his", "their", "your", "our"];
+
 /// True when `intent` takes or leads a person to bed or into bed: a
 /// `TO_BED_VERBS` verb, then a pronoun of `TO_BED_PRONOUNS` or one or two
-/// words that start with a capital (a name), then "to bed" or "into bed".
-/// "I take Maren to bed" and "I lead her into bed" hold it; "I go to bed",
-/// "I take my book to bed" and "I take the lamp to bed" do not. The capital
-/// is read from the Player's own words (`normalize::cased_words`). Cost:
-/// "I take Pim to bed" holds it too, so the age rule refuses it when Pim is
-/// a child; the net over-blocks by design.
-fn takes_to_bed(intent: &str) -> bool {
+/// name words, then "to bed" or "into bed", with one possessive of
+/// `TO_BED_POSSESSIVES` allowed before "bed". A name word starts with a
+/// capital in the Player's own words (`normalize::cased_words`), or is a
+/// word of a character's name in `names`, so "i take maren to bed" holds it
+/// (QA B1). "I take Maren to bed", "I lead her to my bed" and "Maren takes
+/// me to her bed" hold it; "I go to bed", "I take my book to bed" and "i
+/// take tea to bed" do not. Cost: "I take Pim to bed" holds it too, so the
+/// age rule refuses it when Pim is a child; the net over-blocks by design.
+/// `names` holds only the characters the PC can name (`turn::plan`): a
+/// lower-case name of a hidden character would tell the Player it exists.
+fn takes_to_bed(intent: &str, names: &[&str]) -> bool {
     let cased = normalize::cased_words(intent);
     let lower: Vec<String> = cased.iter().map(|w| w.to_lowercase()).collect();
-    let ends_in_bed = |at: usize| {
-        matches!(
-            (
-                lower.get(at).map(String::as_str),
-                lower.get(at + 1).map(String::as_str)
-            ),
-            (Some("to" | "into"), Some("bed"))
-        )
+    let name_words: Vec<String> = names.iter().flat_map(|n| folded(n)).collect();
+    let word = |at: usize| lower.get(at).map(String::as_str);
+    let ends_in_bed = |at: usize| match (word(at), word(at + 1), word(at + 2)) {
+        (Some("to" | "into"), Some("bed"), _) => true,
+        (Some("to" | "into"), Some(owner), Some("bed")) => TO_BED_POSSESSIVES.contains(&owner),
+        _ => false,
     };
     let named = |at: usize| {
-        cased
-            .get(at)
-            .is_some_and(|w| w.chars().next().is_some_and(char::is_uppercase))
-            && !matches!(
-                lower[at].as_str(),
-                "the" | "a" | "an" | "my" | "your" | "our" | "i"
-            )
+        let Some(w) = word(at) else {
+            return false;
+        };
+        let capital = cased[at].chars().next().is_some_and(char::is_uppercase);
+        (capital || name_words.iter().any(|n| n == w))
+            && !matches!(w, "the" | "a" | "an" | "my" | "your" | "our" | "i")
     };
     (0..lower.len())
         .filter(|&i| TO_BED_VERBS.contains(&lower[i].as_str()))
         .any(|i| {
             let person = i + 1;
-            if lower
-                .get(person)
-                .is_some_and(|w| TO_BED_PRONOUNS.contains(&w.as_str()))
-            {
+            if word(person).is_some_and(|w| TO_BED_PRONOUNS.contains(&w)) {
                 return ends_in_bed(person + 1);
             }
             named(person)
@@ -184,16 +186,18 @@ pub fn romance_floor(intent: &str) -> Intimacy {
 /// The tag the Intent's words give, and where it comes from (ADR 0008):
 /// `intimate` when the Intent holds a term of a loaded pack's word list
 /// (`ContentPack::intimate_words`), else `intimate` when it holds an Act
-/// Word (`ACT_WORDS`) or takes a person to bed (`takes_to_bed`), else `advance` when it holds a Romance Word, else
-/// `none`. The Turn's tag is the stronger of this and the model's
-/// (`turn::plan`); the core never lowers a model value.
-pub fn intimacy_floor(intent: &str, packs: &[ContentPack]) -> (Intimacy, Floor) {
+/// Word (`ACT_WORDS`) or takes a person to bed (`takes_to_bed`, which
+/// reads `names`, the characters the PC can name), else `advance` when
+/// it holds a Romance Word, else `none`. The Turn's tag is the stronger of
+/// this and the model's (`turn::plan`); the core never lowers a model value.
+pub fn intimacy_floor(intent: &str, packs: &[ContentPack], names: &[&str]) -> (Intimacy, Floor) {
     let words = folded(intent);
     let pack_hit = packs
         .iter()
         .flat_map(|p| p.intimate_words.terms())
         .any(|term| holds(&words, term));
-    let act_hit = ACT_WORDS.iter().any(|term| holds(&words, &folded(term))) || takes_to_bed(intent);
+    let act_hit =
+        ACT_WORDS.iter().any(|term| holds(&words, &folded(term))) || takes_to_bed(intent, names);
     if pack_hit {
         (Intimacy::Intimate, Floor::PackWords)
     } else if act_hit {

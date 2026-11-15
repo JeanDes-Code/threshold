@@ -2502,20 +2502,20 @@ fn act_words_raise_an_intent_to_intimate() {
         "I MAKE LOVE with Brann.",
     ] {
         assert_eq!(
-            intimacy_floor(intent, &[]),
+            intimacy_floor(intent, &[], &[]),
             (Intimacy::Intimate, Floor::ActWords),
             "{intent}"
         );
     }
     for intent in ["I kiss Maren.", "I ask Maren to share my bed tonight."] {
         assert_eq!(
-            intimacy_floor(intent, &[]),
+            intimacy_floor(intent, &[], &[]),
             (Intimacy::Advance, Floor::RomanceWords),
             "{intent}"
         );
     }
     assert_eq!(
-        intimacy_floor("I make the bed and love the view.", &[]).0,
+        intimacy_floor("I make the bed and love the view.", &[], &[]).0,
         Intimacy::None
     );
 }
@@ -2890,9 +2890,15 @@ fn taking_someone_to_bed_is_an_act() {
         "She takes me to bed.",
         "I lead Maren Brandt into bed.",
         "I TOOK Maren to bed.",
+        "I take Pim to bed.",
+        "i take maren to bed",
+        "i lead maren brandt into bed",
+        "I lead her to my bed.",
+        "Maren takes me to her bed.",
+        "maren takes me to her bed",
     ] {
         assert_eq!(
-            intimacy_floor(intent, &[]),
+            intimacy_floor(intent, &[], NAMES),
             (Intimacy::Intimate, Floor::ActWords),
             "{intent}"
         );
@@ -2902,7 +2908,18 @@ fn taking_someone_to_bed_is_an_act() {
         "I take my book to bed.",
         "I take the lamp to bed.",
         "Maren takes the dog out before bed.",
+        "i take tea to bed",
+        "I take her book to bed.",
+        "I take my book to my bed.",
     ] {
-        assert_eq!(intimacy_floor(intent, &[]).0, Intimacy::None, "{intent}");
+        assert_eq!(
+            intimacy_floor(intent, &[], NAMES).0,
+            Intimacy::None,
+            "{intent}"
+        );
     }
 }
+
+/// The character names `taking_someone_to_bed_is_an_act` reads: a typed
+/// name may be lower case when it is the name of a character (QA B1).
+const NAMES: &[&str] = &["Maren Brandt", "Ada"];

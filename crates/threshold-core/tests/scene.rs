@@ -2140,7 +2140,12 @@ fn turns_read_at_once_match_each_turn_read_alone() {
 /// Words make it `intimate` whatever the model tags, and the scene opens.
 #[test]
 fn taking_someone_to_bed_opens_the_scene_whatever_the_model_tags() {
-    for intent in ["I take Brann to bed.", "I lead him to bed."] {
+    for intent in [
+        "I take Brann to bed.",
+        "I lead him to bed.",
+        "i take brann to bed",
+        "Brann takes me to his bed.",
+    ] {
         let mut rig = Rig::new("take-to-bed");
         let mut p = rig.intimate();
         p.intimacy = Intimacy::Advance;
@@ -2184,4 +2189,21 @@ fn an_advance_tells_the_narrator_that_no_scene_begins() {
     rig.played("t2", &p, "Dusk falls.");
     let narrate = rig.last_call(CallKind::Narrate);
     assert!(!narrate.prompt.recent.contains(ADVANCE_LINE));
+}
+
+/// QA B1: a lower-case name counts only for a character the PC can name.
+/// "i take vale to bed" names the hidden Vale: it must act as "i take tea
+/// to bed" does, or the Player would learn that Vale exists.
+#[test]
+fn a_lower_case_hidden_name_raises_nothing() {
+    let mut rig = Rig::new("take-hidden-to-bed");
+    let mut p = rig.intimate();
+    p.intimacy = Intimacy::None;
+    p.action = ActionKind::Talk;
+    rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    rig.gm.push_narration("The room is quiet.".into());
+    rig.engine()
+        .play_turn("t1".into(), "i take vale to bed", &mut |_| {})
+        .unwrap();
+    assert_eq!(rig.scene(), None);
 }

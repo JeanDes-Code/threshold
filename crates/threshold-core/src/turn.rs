@@ -1341,7 +1341,19 @@ impl Engine {
         // the tag before the gate, never lower it. A Closing Turn has no
         // Intent.
         let (floor, source) = match ask {
-            Ask::Play { intent } => mature::intimacy_floor(intent, &self.packs),
+            Ask::Play { intent } => {
+                // Only names the PC can name: a lower-case name of a hidden
+                // character would tell the Player it exists (QA B1).
+                let known = crate::world::pc_can_name(view);
+                let names: Vec<&str> = view
+                    .entities
+                    .iter()
+                    .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+                    .filter(|e| known.contains(&e.id))
+                    .map(|e| e.name.as_str())
+                    .collect();
+                mature::intimacy_floor(intent, &self.packs, &names)
+            }
             Ask::Closing { .. } => (Intimacy::None, mature::Floor::Nothing),
         };
         for attempt in ["propose", "propose_retry"] {
