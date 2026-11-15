@@ -2819,3 +2819,18 @@ fn a_known_move_shows_no_unknown_place_line() {
             .all(|t| t["move_note"].is_null())
     );
 }
+
+/// The two lines of a move to an unknown place say the PC does not know
+/// such a place, never that it does not exist (QA B1): a hidden place may
+/// exist, and the story must not tell the Player it does not.
+#[test]
+fn the_unknown_place_lines_say_the_pc_does_not_know_it() {
+    let line = threshold_core::context::UNKNOWN_PLACE_LINE;
+    let note = threshold_core::view::UNKNOWN_PLACE_NOTE;
+    assert!(line.contains("The PC does not know"), "{line}");
+    assert!(note.contains("you do not know"), "{note}");
+    for text in [line, note] {
+        assert!(!text.contains("this world"), "{text}");
+        assert!(!text.contains("not a place"), "{text}");
+    }
+}

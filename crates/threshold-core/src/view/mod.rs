@@ -54,12 +54,12 @@ pub const NOT_CONFIRMED_HEAD: &str = "Not confirmed as an adult:";
 /// know, and anything that is no character: it says neither which nor why.
 pub const CANNOT_CONFIRM: &str = "This character cannot be confirmed as an adult.";
 
-/// The line under a Turn whose move named a place the world does not know
+/// The line under a Turn whose move named a place the PC does not know
 /// (`DecisionProposal::unknown_place`, QA run 3): the PC stayed, and the
-/// Player reads why. ADR 0007: a place created in play needs its own
-/// decision, so the core creates none.
-pub const UNKNOWN_PLACE_NOTE: &str =
-    "You stay where you are: the place you named is not one this world knows.";
+/// Player reads why. It says the PC does not know the place, never that the
+/// place does not exist (QA B1). ADR 0007: a place created in play needs
+/// its own decision, so the core creates none.
+pub const UNKNOWN_PLACE_NOTE: &str = "You stay where you are: you do not know the place you named.";
 
 /// The line under the Turn that ended an Intimate Scene (QA M3,
 /// 2026-11-15): a short, neutral cause. It names nobody and tells nothing

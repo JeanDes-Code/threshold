@@ -547,10 +547,12 @@ pub const PC_PLACE_LINE: &str = "- After this Turn the PC is at ";
 pub const NOT_MOVED_LINE: &str =
     "- The PC reaches no other place this Turn: after this Turn the PC is still at ";
 
-/// The outcome line of a move to a place the world does not know
+/// The outcome line of a move to a place the PC does not know
 /// (`DecisionProposal::unknown_place`, ADR 0007): the PC does not go there.
-/// `NOT_MOVED_LINE` follows it with the place where the PC still is.
-pub const UNKNOWN_PLACE_LINE: &str = "- The place the player names is not a place of this world: the PC does not find it and does not go there.\n";
+/// It never says the place does not exist: a place the PC does not know may
+/// still be in the world (QA B1). `NOT_MOVED_LINE` follows it with the
+/// place where the PC still is.
+pub const UNKNOWN_PLACE_LINE: &str = "- The PC does not know the place the player names: the PC does not find it and does not go there. Do not say whether such a place exists.\n";
 
 /// The words after a lost Check's result line.
 pub const FAILED_CHECK_LINE: &str =
