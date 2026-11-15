@@ -115,7 +115,12 @@ export function aboutText(view: JournalView, about: Target | null): string {
   }
 }
 
-/** What the Journal shows for an act: its Intent, or the neutral line of a faded Turn. */
+/** What "What you did" shows for a faded Turn: the Player did skip it, but
+ * its neutral line ("This part of the story is skipped (10 minutes).") read
+ * as an act (QA m5, 2026-11-15). */
+export const SKIPPED_ACT = "(skipped)";
+
+/** What the Journal shows for an act: its Intent, or "(skipped)" for a faded Turn. */
 export function actText(act: Act): string {
-  return act.faded ?? act.intent;
+  return act.faded !== null ? SKIPPED_ACT : act.intent;
 }

@@ -626,22 +626,43 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
             .filter(|b| learned_line(sight, b))
             .filter_map(|b| fact_line(sight, b))
             .collect(),
-        found: scene
-            .iter()
-            .filter_map(|m| {
-                let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
-                let card = found_card(turn.found.as_ref()?);
-                Some(FoundEntry {
-                    turn_id: m.turn,
-                    source: card.source,
-                    items: card.items,
-                })
-            })
-            .collect(),
+        found: scene_found(sight, scene),
     })
 }
 
 /// True when `belief` belongs under "What you learned" (bug pass 4): not
+/// What the PC found in a Scene's Turns, oldest first, for the Journal. A
+/// title the Scene already listed is left out, and an entry left with no
+/// item is dropped (QA m5, 2026-11-15: a notice and the slip it pointed
+/// to listed "Lost Coin" twice). Titles match through `normalize::name`.
+fn scene_found(sight: &PcSight, scene: &[Moment]) -> Vec<FoundEntry> {
+    let mut seen: Vec<String> = Vec::new();
+    scene
+        .iter()
+        .filter_map(|m| {
+            let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
+            let card = found_card(turn.found.as_ref()?);
+            let items: Vec<FoundRow> = card
+                .items
+                .into_iter()
+                .filter(|row| {
+                    let key = normalize::name(&row.title);
+                    let new = !seen.contains(&key);
+                    if new {
+                        seen.push(key);
+                    }
+                    new
+                })
+                .collect();
+            (!items.is_empty()).then_some(FoundEntry {
+                turn_id: m.turn,
+                source: card.source,
+                items,
+            })
+        })
+        .collect()
+}
+
 /// the PC's own place, which the Scene's title already gives, and not the
 /// outcome line the core built for a `settles` ("Refused: …"), which the
 /// Decisions and the closed list show as "Refused · …". Anything else on
