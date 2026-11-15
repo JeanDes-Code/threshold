@@ -361,6 +361,14 @@ pub struct CampaignPeek {
     pub turn_count: u32,
     /// No Opening Turn and no Play Turn yet.
     pub needs_begin: bool,
+    /// The story clock now.
+    pub clock_min: ClockMin,
+    /// The Detail Level now.
+    pub detail: DetailLevel,
+    /// The Intent of the latest Play or Correction Turn that stands. A
+    /// faded Turn, or one told as an Intimate Scene, gives none: the home
+    /// screen shows no intimate text (QA m6, 2026-11-15).
+    pub last_intent: Option<String>,
 }
 
 /// Reads the last Campaign of a file for the home screen. It opens the file
@@ -409,11 +417,27 @@ pub fn peek(path: &Path) -> Result<CampaignPeek, StoreError> {
         .filter(|t| !reverted.contains(&t.id))
         .count() as u32;
     let needs_begin = !turns.iter().any(|t| t.record.kind.tells());
+    let last_intent = turns
+        .iter()
+        .filter(|t| t.record.kind.has_intent() && !reverted.contains(&t.id))
+        .max_by_key(|t| t.seq)
+        .filter(|t| !t.faded && t.told.is_none() && t.scene_closed.is_none())
+        .map(|t| t.record.intent.trim().to_string())
+        .filter(|intent| !intent.is_empty());
+    let (clock_min, detail): (ClockMin, String) = store.db.query_row(
+        "SELECT clock_min,detail_level FROM campaign WHERE id=?1",
+        [campaign],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let detail: DetailLevel = serde_json::from_value(serde_json::Value::String(detail))?;
     Ok(CampaignPeek {
         pc_name: seed.pc.name,
         premise: seed.premise,
         turn_count,
         needs_begin,
+        clock_min,
+        detail,
+        last_intent,
     })
 }
 

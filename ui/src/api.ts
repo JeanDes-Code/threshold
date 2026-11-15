@@ -46,6 +46,12 @@ export interface CampaignCard {
   /** The Play and Correction Turns that stand. */
   turn_count: number;
   needs_begin: boolean;
+  /** The story clock now. */
+  clock_min: number;
+  /** The Detail Level now. */
+  detail: DetailLevel;
+  /** The Intent of the latest Play Turn that stands; null for a faded or intimate Turn. */
+  last_intent: string | null;
   problem: string | null;
 }
 

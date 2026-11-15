@@ -172,6 +172,14 @@ pub struct CampaignCard {
     /// The Play and Correction Turns that stand.
     pub turn_count: u32,
     pub needs_begin: bool,
+    /// The story clock now: with `last_intent`, it tells two cards of one
+    /// Source Text apart (QA m6, 2026-11-15).
+    pub clock_min: u64,
+    /// The Detail Level now.
+    pub detail: DetailLevel,
+    /// The Intent of the latest Play Turn that stands; none for a faded
+    /// or intimate Turn (`store::CampaignPeek::last_intent`).
+    pub last_intent: Option<String>,
     pub problem: Option<String>,
 }
 
@@ -933,6 +941,9 @@ fn campaign_card(path: &Path) -> CampaignCard {
         last_played_ms,
         turn_count: 0,
         needs_begin: false,
+        clock_min: 0,
+        detail: DetailLevel::default(),
+        last_intent: None,
         problem: None,
     };
     match store::peek(path) {
@@ -941,6 +952,9 @@ fn campaign_card(path: &Path) -> CampaignCard {
             card.premise = peek.premise;
             card.turn_count = peek.turn_count;
             card.needs_begin = peek.needs_begin;
+            card.clock_min = peek.clock_min;
+            card.detail = peek.detail;
+            card.last_intent = peek.last_intent;
         }
         Err(StoreError::Version(found)) if found < store::SCHEMA_VERSION => {
             card.problem = Some(OLD_FILE.into())

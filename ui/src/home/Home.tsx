@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { CampaignCard, DraftLine, DraftState } from "../api";
-import { cardLine, lastPlayedText, problemTitle, startedText, unfinishedDrafts } from "./logic";
+import { cardLine, cardState, lastPlayedText, problemTitle, startedText, unfinishedDrafts } from "./logic";
 
 interface Props {
   /** null while the cards load. */
@@ -129,6 +129,7 @@ function Card({ card, now, opening, disabled, onOpen, onRemove }: CardProps) {
     return <ProblemCard card={card} disabled={disabled} onRemove={onRemove} />;
   }
   const started = startedText(card.db_path);
+  const state = cardState(card);
   return (
     <button
       type="button"
@@ -145,6 +146,8 @@ function Card({ card, now, opening, disabled, onOpen, onRemove }: CardProps) {
       </span>
       {started !== null && <span className="home-card__started">{started}</span>}
       <span className="home-card__premise">{card.premise}</span>
+      {card.last_intent !== null && <span className="home-card__intent">Last: {card.last_intent}</span>}
+      {state !== null && <span className="home-card__state">{state}</span>}
       <span className="home-card__foot">
         <span className={card.needs_begin ? "home-card__count home-card__count--new" : "home-card__count"}>
           {cardLine(card)}

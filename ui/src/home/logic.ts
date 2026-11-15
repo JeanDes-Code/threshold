@@ -1,7 +1,7 @@
 // Pure rules of the home screen and of the app's screens. The core reads
 // each Campaign file; these only word and order what it sends.
 
-import type { CampaignCard, DetailLevel, DraftLine, PackLine } from "../api";
+import { clockText, type CampaignCard, type DetailLevel, type DraftLine, type PackLine } from "../api";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -31,6 +31,16 @@ export function cardLine(card: CampaignCard): string {
   if (card.problem !== null) return card.problem;
   if (card.needs_begin) return "Not begun yet";
   return `${card.turn_count} Turn${card.turn_count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Where a begun Campaign stands: its story clock and Detail Level. With the
+ * last Intent, it tells apart two cards of one Source Text, which share the
+ * name and the premise (QA m6, 2026-11-15). Null before the Opening.
+ */
+export function cardState(card: CampaignCard): string | null {
+  if (card.problem !== null || card.needs_begin) return null;
+  return `${clockText(card.clock_min)} · Intimate scenes: ${DETAIL_NAMES[card.detail]}`;
 }
 
 /** The file name of a card's path, for a card the core could not read. */

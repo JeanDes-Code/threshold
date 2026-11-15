@@ -45,6 +45,10 @@ fn campaign_card_reads_the_seed_and_counts_turns_only() {
     assert!(!card.needs_begin);
     assert_eq!(card.problem, None);
     assert!(card.last_played_ms > 0);
+    // QA m6: what tells two cards of one Source Text apart.
+    assert_eq!(card.last_intent.as_deref(), Some("I copy it slowly."));
+    assert_eq!(card.detail, threshold_core::domain::DetailLevel::Excluded);
+    assert!(card.clock_min > 0, "the clock moved: {}", card.clock_min);
 }
 
 #[test]
