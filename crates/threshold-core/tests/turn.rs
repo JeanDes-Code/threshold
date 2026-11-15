@@ -2864,3 +2864,89 @@ fn the_unknown_place_lines_say_the_pc_does_not_know_it() {
         assert!(!text.contains("not a place"), "{text}");
     }
 }
+
+/// The proposal of a move to a place the PC does not know.
+fn unknown_move() -> String {
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.minutes = 15;
+    let mut raw = serde_json::to_value(&p).unwrap();
+    raw["move_to"] = serde_json::json!(threshold_core::domain::UNKNOWN_PLACE);
+    raw.to_string()
+}
+
+/// QA B1: Narrate again of a move to an unknown place reads the stored
+/// record, so the narrator is told again that the PC did not find it.
+#[test]
+fn narrate_again_keeps_the_unknown_place_line() {
+    let (mut engine, _w, gm) = setup(
+        vec![unknown_move()],
+        vec!["The lane ends at the river.", "The lane ends again."],
+    );
+    let outcome = engine
+        .play_turn(
+            "t1".into(),
+            "I walk to the reeve's house.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    engine.renarrate(outcome.turn_id, &mut no_chunks()).unwrap();
+    let narrations = prompts(&gm, CallKind::Narrate);
+    assert_eq!(narrations.len(), 2);
+    for prompt in &narrations {
+        assert!(
+            prompt
+                .recent
+                .contains(threshold_core::context::UNKNOWN_PLACE_LINE),
+            "{}",
+            prompt.recent
+        );
+    }
+}
+
+/// QA B1: a Correction reverts the move to an unknown place. The reverted
+/// Turn shows no note, and the Correction, a plain act, shows none either.
+#[test]
+fn a_reverted_unknown_move_shows_no_note() {
+    let (mut engine, w, _gm) = setup(
+        vec![unknown_move(), json(&proposal(Verdict::Allowed))],
+        vec!["The lane ends at the river.", "You wait by the gate."],
+    );
+    engine
+        .play_turn(
+            "t1".into(),
+            "I walk to the reeve's house.",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let story = |engine: &Engine| {
+        let play = threshold_core::view::play_view(&sight_of(engine, &w), &Default::default());
+        serde_json::to_value(&play).unwrap()["story"].clone()
+    };
+    let before = story(&engine);
+    assert!(
+        before
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| !t["move_note"].is_null()),
+        "{before}"
+    );
+    engine
+        .correct_last(
+            "t2".into(),
+            "I wait by the gate.",
+            "misread",
+            &mut no_chunks(),
+        )
+        .unwrap();
+    let after = story(&engine);
+    assert!(
+        after
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["move_note"].is_null()),
+        "{after}"
+    );
+}

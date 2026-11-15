@@ -2022,3 +2022,31 @@ fn oppose_takes_the_named_npc_then_the_only_hostile_one() {
     assert!(oppose(&mut p, &view, "I arm-wrestle Pip.").is_none());
     assert_eq!(against(&p), None);
 }
+
+/// QA B1: `unknown_place` belongs to a move with no place. `settle` clears
+/// it, with one note, on any other action, and on a move that also names a
+/// known place. A move with no place keeps it.
+#[test]
+fn settle_clears_unknown_place_on_a_non_move() {
+    use threshold_core::domain::ActionKind;
+    let w = World::new();
+    for (action, move_to, kept) in [
+        (ActionKind::Act, None, false),
+        (ActionKind::Talk, None, false),
+        (ActionKind::Wait, None, false),
+        (ActionKind::Move, Some(e(w.gate)), false),
+        (ActionKind::Move, None, true),
+    ] {
+        let mut p = proposal(Verdict::Allowed);
+        p.action = action;
+        p.move_to = move_to;
+        p.unknown_place = true;
+        let (settled, notes) = settle(p, &w.view);
+        assert_eq!(settled.unknown_place, kept, "{action:?}");
+        assert_eq!(
+            notes.iter().any(|n| n.contains("unknown_place")),
+            !kept,
+            "{action:?}: {notes:?}"
+        );
+    }
+}
