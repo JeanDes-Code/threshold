@@ -386,6 +386,32 @@ fn summary_marks_reverted_turns() {
     assert!(!line(corrected.turn_id).reverted);
 }
 
+/// QA M6 (2026-11-15): the header of a corrected Turn read "I ask Maren".
+/// The core, the shell and the view keep the whole Intent of a Correction;
+/// the cut was in the input of the QA run, not in the code.
+#[test]
+fn a_correction_keeps_its_whole_intent() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = RecordedGm::new(
+        vec![allowed(), allowed()],
+        vec!["You look.".into(), "You ask.".into()],
+    );
+    let mut s = session(dir.path(), &gm);
+    town(&mut s);
+    s.submit_intent("op-1".into(), "I ask Maren", &mut |_| {})
+        .unwrap();
+    let intent = "I ask Maren if she is warm enough.";
+    let corrected = s
+        .correct_last("op-2".into(), intent, "cut short", &mut |_| {})
+        .unwrap();
+    let story = s.get_play_view().unwrap().story;
+    let line = story
+        .iter()
+        .find(|l| l.turn_id == corrected.turn_id)
+        .unwrap();
+    assert_eq!(line.intent, intent);
+}
+
 /// The opening Narration lives on its Opening Turn, so the Play view of a
 /// reopened file shows it again.
 #[test]
