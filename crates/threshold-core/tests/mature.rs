@@ -2458,3 +2458,75 @@ fn the_narration_prompt_holds_no_status_of_a_character_who_is_not_here() {
         assert!(!part.contains("hearth"), "{part}");
     }
 }
+
+// --- QA polish pass, M4: the act is refused at `excluded` every time --------
+
+/// An Act Word makes the Intent `intimate`; a kiss and an invitation stay
+/// `advance`; a plain Intent stays `none`.
+#[test]
+fn act_words_raise_an_intent_to_intimate() {
+    use threshold_core::mature::{Floor, intimacy_floor};
+    for intent in [
+        "I make love with Maren.",
+        "Brann and I make love by the fire.",
+        "We keep making love.",
+        "I MAKE LOVE with Brann.",
+    ] {
+        assert_eq!(
+            intimacy_floor(intent, &[]),
+            (Intimacy::Intimate, Floor::ActWords),
+            "{intent}"
+        );
+    }
+    for intent in ["I kiss Maren.", "I ask Maren to share my bed tonight."] {
+        assert_eq!(
+            intimacy_floor(intent, &[]),
+            (Intimacy::Advance, Floor::RomanceWords),
+            "{intent}"
+        );
+    }
+    assert_eq!(
+        intimacy_floor("I make the bed and love the view.", &[]).0,
+        Intimacy::None
+    );
+}
+
+/// QA: at `excluded`, "I make love with Maren." passed when the model
+/// tagged it `advance`. The core's Act Words make it `intimate`, and the
+/// level refuses it with the Excluded notice, whatever the model says. A
+/// kiss and an invitation the model tags `advance` still commit.
+#[test]
+fn the_act_is_refused_at_excluded_whatever_the_model_tags() {
+    let play = |model: Intimacy, intent: &str| {
+        let mut w = World::with_detail(DetailLevel::Excluded);
+        let ids = [w.ada, w.orsel, w.brann];
+        w.confirm(&ids);
+        let mut p = proposal(Verdict::Allowed);
+        p.action = ActionKind::Act;
+        p.intimacy = model;
+        p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
+        let gm = RecordedGm::new(
+            vec![serde_json::to_string(&p).unwrap(); 2],
+            vec!["Brann smiles.".into()],
+        );
+        let store = std::mem::replace(&mut w.store, Store::open_in_memory().unwrap());
+        let mut engine = Engine::new(store, Box::new(gm), Box::new(D10), vec![], w.campaign);
+        engine.play_turn("t1".into(), intent, &mut |_| {})
+    };
+    for model in [Intimacy::None, Intimacy::Advance] {
+        let err = play(model, "I make love with Brann.").expect_err("excluded");
+        assert!(
+            matches!(
+                err,
+                TurnError::Refused {
+                    kind: RefusalKind::Excluded,
+                    ..
+                }
+            ),
+            "{model:?}: {err:?}"
+        );
+    }
+    for intent in ["I kiss Brann.", "I ask Brann to share my bed tonight."] {
+        play(Intimacy::Advance, intent).expect(intent);
+    }
+}

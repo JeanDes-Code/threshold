@@ -88,6 +88,15 @@ pub const ROMANCE_WORDS: &[&str] = &[
     "intimacy",
 ];
 
+/// The Act Words (glossary; QA polish pass, M4): neutral phrases that name
+/// the intimate act itself, not an advance or an invitation. An Intent that
+/// holds one is `intimate` whatever the model says, as a pack word list
+/// makes it (ADR 0008). QA typed "I make love with Maren." at `excluded`:
+/// the model tagged it `advance` in one run of two, and the Turn passed.
+/// "I ask Maren to make love" is `intimate` too: the net over-blocks by
+/// design. A kiss and an invitation ("share my bed") stay Romance Words.
+pub const ACT_WORDS: &[&str] = &["make love", "makes love", "made love", "making love"];
+
 /// The words of `text` as the net reads them: lower case, accents dropped,
 /// split on every character that is not a letter or a digit.
 pub fn folded(text: &str) -> Vec<String> {
@@ -117,17 +126,21 @@ pub fn romance_floor(intent: &str) -> Intimacy {
 
 /// The tag the Intent's words give, and where it comes from (ADR 0008):
 /// `intimate` when the Intent holds a term of a loaded pack's word list
-/// (`ContentPack::intimate_words`), else `advance` when it holds a Romance
-/// Word, else `none`. The Turn's tag is the stronger of this and the
-/// model's (`turn::plan`); the core never lowers a model value.
+/// (`ContentPack::intimate_words`), else `intimate` when it holds an Act
+/// Word (`ACT_WORDS`), else `advance` when it holds a Romance Word, else
+/// `none`. The Turn's tag is the stronger of this and the model's
+/// (`turn::plan`); the core never lowers a model value.
 pub fn intimacy_floor(intent: &str, packs: &[ContentPack]) -> (Intimacy, Floor) {
     let words = folded(intent);
     let pack_hit = packs
         .iter()
         .flat_map(|p| p.intimate_words.terms())
         .any(|term| holds(&words, term));
+    let act_hit = ACT_WORDS.iter().any(|term| holds(&words, &folded(term)));
     if pack_hit {
         (Intimacy::Intimate, Floor::PackWords)
+    } else if act_hit {
+        (Intimacy::Intimate, Floor::ActWords)
     } else if romance_floor(intent) == Intimacy::Advance {
         (Intimacy::Advance, Floor::RomanceWords)
     } else {
@@ -141,6 +154,8 @@ pub enum Floor {
     Nothing,
     /// The core's Romance Words: at least `advance`.
     RomanceWords,
+    /// The core's Act Words: at least `intimate`.
+    ActWords,
     /// A loaded Content Pack's word list: at least `intimate`.
     PackWords,
 }
@@ -152,6 +167,7 @@ impl Floor {
         match self {
             Self::PackWords => "the core raised the tag to intimate from a Content Pack word list",
             Self::RomanceWords => "the core raised the tag to advance from its Romance Words",
+            Self::ActWords => "the core raised the tag to intimate from its Act Words",
             Self::Nothing => "",
         }
     }

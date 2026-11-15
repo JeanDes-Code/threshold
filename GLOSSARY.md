@@ -77,7 +77,7 @@ A Scene of sexual or erotic content between adults, from the first Turn tagged i
 _Avoid_: Sex scene, NSFW scene, adult scene
 
 **Intimacy Tag**:
-The value each Decision Proposal gives its Turn, in the field `intimacy`: "intimate" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches, even in mild words such as going to bed together or making love; "advance" when it is only a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, with no such content in this Turn, whatever the answer; else "none". Judge THIS Turn's intent alone: a plain intent after an advance is "none". The core can raise it from the Intent's words (a Romance Word, or a term of a Content Pack's word list), never lower it. The age rule runs for "advance" and "intimate"; only "intimate" opens an Intimate Scene.
+The value each Decision Proposal gives its Turn, in the field `intimacy`: "intimate" when THIS Turn's intent or its outcome involves sexual or erotic content between any characters, whether the PC takes part or only watches, even in mild words such as going to bed together or making love; "advance" when it is only a romantic or sexual advance or invitation between characters, such as a kiss or asking someone to spend the night, with no such content in this Turn, whatever the answer; else "none". Judge THIS Turn's intent alone: a plain intent after an advance is "none". The core can raise it from the Intent's words (a Romance Word, an Act Word, or a term of a Content Pack's word list), never lower it. The age rule runs for "advance" and "intimate"; only "intimate" opens an Intimate Scene.
 _Avoid_: Flag, rating, NSFW tag
 
 **Advance**:
@@ -90,6 +90,10 @@ _Avoid_: Consent flag, mood, stance (the stance rule does not read the stance)
 
 **Romance Word**:
 A neutral word or phrase of the core's short list (`mature::ROMANCE_WORDS`), such as "kiss" or "spend the night with". When the Player's Intent holds one, the Turn is at least an Advance, whatever the model says. A Content Pack may ship its own word list; an Intent that holds one of those terms is at least intimate.
+_Avoid_: Bad word, filter list, blacklist
+
+**Act Word**:
+A neutral phrase of the core's shorter list (`mature::ACT_WORDS`) that names the intimate act itself, such as "make love". When the Player's Intent holds one, the Turn is intimate, whatever the model says: at `excluded` it is refused. A kiss or an invitation is a Romance Word, not an Act Word.
 _Avoid_: Bad word, filter list, blacklist
 
 **Fade to Black**:
