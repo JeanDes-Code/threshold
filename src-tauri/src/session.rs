@@ -1054,11 +1054,7 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
         // name, no id, no age (mature content module, Task 1). It is its
         // own result kind, not a failure (review M3).
         TurnError::Refused { kind, .. } => {
-            return AppError::Refused(RefusalView {
-                kind: *kind,
-                text: view::refusal_text(*kind).to_owned(),
-                to_confirm: Vec::new(),
-            });
+            return AppError::Refused(RefusalView::new(*kind, Vec::new()));
         }
     };
     AppError::Failed(text)

@@ -34,6 +34,13 @@ pub const REFUSAL_EXCLUDED: &str =
 /// is the same in every case.
 pub const REFUSAL_ADULTS_ONLY: &str = "An Intimate Scene cannot happen here.";
 
+/// The reason an `adults_only` Refusal adds when it offers nobody to
+/// confirm (QA B1, 2026-11-15): without it the Player meets a dead end. It
+/// names no one and no place. The list is empty for a hidden cause, a known
+/// minor, or a character the PC cannot name, and the sentence is the same
+/// for each, so it tells nothing the list does not (ADR 0008).
+pub const REFUSAL_NOBODY_TO_CONFIRM: &str = "Someone nearby may not be a confirmed adult.";
+
 /// The Player's sentence for a Refusal by the stance rule.
 pub const REFUSAL_UNWILLING: &str = "Nobody here goes along with this.";
 
@@ -102,10 +109,25 @@ pub fn refusal(
     } else {
         Vec::new()
     };
-    RefusalView {
-        kind,
-        text: refusal_text(kind).to_owned(),
-        to_confirm,
+    RefusalView::new(kind, to_confirm)
+}
+
+impl RefusalView {
+    /// The Refusal of `kind` with the characters it offers to confirm. Its
+    /// text is the fixed sentence of the kind; an `adults_only` Refusal
+    /// with nobody to confirm adds `REFUSAL_NOBODY_TO_CONFIRM`.
+    pub fn new(kind: crate::mature::RefusalKind, to_confirm: Vec<NameRef>) -> Self {
+        let base = refusal_text(kind);
+        let text = if kind == crate::mature::RefusalKind::AdultsOnly && to_confirm.is_empty() {
+            format!("{base} {REFUSAL_NOBODY_TO_CONFIRM}")
+        } else {
+            base.to_owned()
+        };
+        Self {
+            kind,
+            text,
+            to_confirm,
+        }
     }
 }
 

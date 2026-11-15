@@ -2336,3 +2336,37 @@ fn a_refusal_names_only_perceived_characters() {
         assert!(!shown.text.contains(&age));
     }
 }
+
+/// An `adults_only` Refusal with nobody to confirm is no dead end: it says
+/// why with one fixed sentence (`REFUSAL_NOBODY_TO_CONFIRM`). The sentence
+/// names no one and no place, so a hidden cause stays hidden (ADR 0008).
+/// With a list, the sentence is the plain one: the list says why.
+#[test]
+fn a_refusal_with_nobody_to_confirm_says_why() {
+    use threshold_core::{
+        mature::{RefusalKind, to_confirm},
+        view::{REFUSAL_ADULTS_ONLY, REFUSAL_NOBODY_TO_CONFIRM, refusal},
+    };
+    let w = HiddenWorld::new();
+    let sight = w.sight();
+    let shown = refusal(&sight, RefusalKind::AdultsOnly, &[]);
+    assert!(shown.to_confirm.is_empty());
+    assert_eq!(
+        shown.text,
+        format!("{REFUSAL_ADULTS_ONLY} {REFUSAL_NOBODY_TO_CONFIRM}")
+    );
+    let json = serde_json::to_string(&shown).unwrap();
+    for hidden in HIDDEN {
+        assert!(!json.contains(hidden), "{hidden} leaks: {json}");
+    }
+    let listed = refusal(&sight, RefusalKind::AdultsOnly, &to_confirm(&w.view()));
+    assert!(!listed.to_confirm.is_empty());
+    assert_eq!(listed.text, REFUSAL_ADULTS_ONLY);
+    for kind in [RefusalKind::Excluded, RefusalKind::Unwilling] {
+        assert!(
+            !refusal(&sight, kind, &[])
+                .text
+                .contains(REFUSAL_NOBODY_TO_CONFIRM)
+        );
+    }
+}

@@ -903,11 +903,7 @@ impl Engine {
         let confirm = mature::to_confirm(&view);
         Ok(match crate::world::pc_sight(&view, &turns, &reverted) {
             Some(sight) => crate::view::refusal(&sight, kind, &confirm),
-            None => RefusalView {
-                kind,
-                text: crate::view::refusal_text(kind).to_owned(),
-                to_confirm: Vec::new(),
-            },
+            None => RefusalView::new(kind, Vec::new()),
         })
     }
 
