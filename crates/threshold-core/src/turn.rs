@@ -1815,6 +1815,11 @@ fn engine_time(
         p.move_to = None;
         p.action = ActionKind::Act;
     }
+    // Only a move can name a place the world does not know (QA run 3). It
+    // is the model's move that counts: a contested move with no
+    // destination becomes an act below, and the PC still did not find the
+    // place (QA B1).
+    p.unknown_place &= p.action == ActionKind::Move;
     let asks_to_wait = !p.contested && world::asks_to_wait(intent);
     let stated = if asks_to_wait {
         world::intent_minutes(intent, view.clock_min)
@@ -1831,8 +1836,6 @@ fn engine_time(
     if p.action == ActionKind::Move && p.contested && p.move_to.is_none() {
         p.action = ActionKind::Act;
     }
-    // Only a move can name a place the world does not know (QA run 3).
-    p.unknown_place &= p.action == ActionKind::Move;
     let mut asked = None;
     if p.action == ActionKind::Wait {
         let requested = stated.unwrap_or(p.minutes);

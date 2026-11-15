@@ -2755,7 +2755,30 @@ fn sight_of(engine: &Engine, w: &World) -> threshold_core::world::PcSight {
 /// find the place, and the Player reads why under the Turn.
 #[test]
 fn a_move_to_a_place_the_world_does_not_know_stays_and_says_why() {
+    move_to_an_unknown_place(false);
+}
+
+/// QA B1: a contested move with no destination became an act, and the act
+/// lost `unknown_place`: no line for the narrator, no note for the Player.
+/// The move to a place the PC does not know keeps both.
+#[test]
+fn a_contested_move_to_an_unknown_place_still_says_why() {
+    move_to_an_unknown_place(true);
+}
+
+fn move_to_an_unknown_place(contested: bool) {
     let mut p = proposal(Verdict::Allowed);
+    if contested {
+        let ada = World::new().ada;
+        p.verdict = Verdict::Check;
+        p.contested = true;
+        p.check = Some(threshold_core::domain::CheckDraft {
+            against: None,
+            win: Some(slot(e(ada), "mood", "sure")),
+            lose: Some(slot(e(ada), "mood", "lost")),
+            factors: vec![],
+        });
+    }
     p.action = ActionKind::Move;
     p.minutes = 15;
     let mut raw = serde_json::to_value(&p).unwrap();
@@ -2776,9 +2799,16 @@ fn a_move_to_a_place_the_world_does_not_know_stays_and_says_why() {
     let view = snapshot(&engine, &w);
     assert_eq!(view.live_fact(w.ada, "location").unwrap().id, before);
     let narration = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    // A contested move with no place is told as an act: its place line is
+    // the act's ("After this Turn the PC is at"), not `NOT_MOVED_LINE`.
+    let stays = if contested {
+        "- After this Turn the PC is at gate square.".to_owned()
+    } else {
+        format!("{}gate square.", threshold_core::context::NOT_MOVED_LINE)
+    };
     for line in [
         threshold_core::context::UNKNOWN_PLACE_LINE.to_owned(),
-        format!("{}gate square.", threshold_core::context::NOT_MOVED_LINE),
+        stays,
     ] {
         assert!(narration.recent.contains(&line), "{}", narration.recent);
     }
