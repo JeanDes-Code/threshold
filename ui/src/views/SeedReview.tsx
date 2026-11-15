@@ -30,6 +30,7 @@ import {
   createSaver,
   cutSections,
   cutSentence,
+  detailHelp,
   detailOf,
   dropTyped,
   factEditFields,
@@ -73,6 +74,8 @@ interface Props {
   /** Debug mode shows the internal fields of each fact. */
   debug?: boolean;
   client?: ReviewClient;
+  /** A loaded Content Pack gives explicit description; null until the shell answers. */
+  explicitPack?: boolean | null;
 }
 
 const PLACE_KINDS: [EntityKind, string][] = [
@@ -98,7 +101,7 @@ const FACT_FIELDS = [
  * through the core's rename, an age through the core's confirmation.
  * "Approve" waits for no gap and no pending save.
  */
-export default function SeedReview({ view, onApproved, onBack, debug = false, client = api }: Props) {
+export default function SeedReview({ view, onApproved, onBack, debug = false, client = api, explicitPack = null }: Props) {
   const [form, setForm] = useState<ReviewForm>(() => formOfView(view));
   const [gaps, setGaps] = useState<Gap[]>(view.gaps);
   const [ages, setAges] = useState<AgeLine[]>(view.ages);
@@ -720,6 +723,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
             </option>
           ))}
         </select>
+        <p className="review-hint">{detailHelp(selectedDetail(seed), explicitPack)}</p>
         <p className="review-hint">{DETAIL_HINT}</p>
       </>
     ),

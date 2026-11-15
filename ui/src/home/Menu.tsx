@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import type { PackLine } from "../api";
-import { modelState, modelText, packLineText } from "./logic";
+import type { DetailLevel, PackLine } from "../api";
+import { DETAIL_LEVELS, detailOf } from "../newCampaign";
+import { DETAIL_NAMES, detailSetText, modelState, modelText, packLineText } from "./logic";
 
 interface Props {
   /** "Campaign" in a Campaign, "Menu" elsewhere. */
@@ -13,6 +14,12 @@ interface Props {
   canCorrect?: boolean;
   /** Why it cannot, said next to the item. */
   correctHint?: string;
+  /** The stored Detail Level: shown in a Campaign. */
+  detail?: DetailLevel;
+  /** The core writes a new Detail Level; the error text, or null when it did. */
+  onDetail?: (level: DetailLevel) => Promise<string | null>;
+  /** A Turn runs: the Detail Level cannot change until it ends. */
+  detailLocked?: boolean;
   debug: boolean;
   onDebug: (on: boolean) => void;
   /** Opens the debug view: shown while debug mode is on. */
@@ -26,8 +33,9 @@ interface Props {
 }
 
 /**
- * The Campaign menu of the top bar: Home, Correct last Turn, debug mode and
- * the model status. Arrow keys move between items; Escape closes it.
+ * The Campaign menu of the top bar: Home, Correct last Turn, the Detail
+ * Level, debug mode and the model status. Arrow keys move between items;
+ * Escape closes it.
  */
 export default function Menu(props: Props) {
   const { label, debug, model } = props;
@@ -35,6 +43,16 @@ export default function Menu(props: Props) {
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const menuId = useId();
+  const detailId = useId();
+  // The line under the select after a change: the new level, or the error.
+  const [detailSaid, setDetailSaid] = useState<{ text: string; problem: boolean } | null>(null);
+
+  const changeDetail = async (level: DetailLevel) => {
+    if (!props.onDetail) return;
+    setDetailSaid(null);
+    const problem = await props.onDetail(level);
+    setDetailSaid(problem === null ? { text: detailSetText(level), problem: false } : { text: problem, problem: true });
+  };
 
   // A click outside closes it.
   useEffect(() => {
@@ -64,6 +82,8 @@ export default function Menu(props: Props) {
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    // The arrow keys of the Detail Level select change its value.
+    if (e.target instanceof HTMLSelectElement) return;
     e.preventDefault();
     const items = Array.from(root.current?.querySelectorAll<HTMLElement>("[role^=menuitem]:not(:disabled)") ?? []);
     const at = items.indexOf(document.activeElement as HTMLElement);
@@ -108,6 +128,40 @@ export default function Menu(props: Props) {
                 {props.canCorrect ? "Say what you meant; the GM plays it again" : props.correctHint}
               </span>
             </button>
+          )}
+          {props.detail !== undefined && props.onDetail && (
+            <>
+              <div className="app-menu__rule" role="separator" />
+              <div className="app-menu__detail">
+                <label htmlFor={detailId}>
+                  Detail Level
+                  <span className="app-menu__sub">
+                    {props.detailLocked ? "Wait until the GM is done" : "For intimate scenes"}
+                  </span>
+                </label>
+                <select
+                  id={detailId}
+                  className="play-ooc-field app-menu__select"
+                  value={props.detail}
+                  disabled={props.detailLocked}
+                  onChange={(e) => void changeDetail(detailOf(e.target.value))}
+                >
+                  {DETAIL_LEVELS.map(([level]) => (
+                    <option key={level} value={level}>
+                      {DETAIL_NAMES[level]}
+                    </option>
+                  ))}
+                </select>
+                {detailSaid && (
+                  <p
+                    className={detailSaid.problem ? "app-menu__sub app-menu__sub--problem" : "app-menu__sub"}
+                    role="status"
+                  >
+                    {detailSaid.text}
+                  </p>
+                )}
+              </div>
+            </>
           )}
           <div className="app-menu__rule" role="separator" />
           <button

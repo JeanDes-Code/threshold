@@ -20,6 +20,7 @@ describe("the Play fixture", () => {
     expect(playView.story.some((turn) => turn.reverted)).toBe(true);
     expect(playView.story.some((turn) => turn.roll !== null)).toBe(true);
     expect(playView.story.some((turn) => turn.body.kind === "missing")).toBe(true);
+    expect(playView.story.some((turn) => turn.scene_end !== null)).toBe(true);
     expect(streamText).toMatch(/^[A-Z][\p{L} ]*: ["“«]/mu);
   });
 
@@ -65,5 +66,6 @@ describe("the core's PlayView", () => {
     expect(core.has(".story[].body.blocks[] {kind,parts,speaker,stage}")).toBe(true);
     expect(core.has(".story[].body.blocks[].parts[] {entity_id,kind,text}")).toBe(true);
     expect(core.has(".story[].body {kind}")).toBe(true);
+    expect([...core].some((shape) => shape.startsWith(".story[] {") && shape.includes("scene_end"))).toBe(true);
   });
 });

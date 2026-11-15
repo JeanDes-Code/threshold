@@ -932,6 +932,39 @@ mod screens {
         assert!(scene.learned.iter().all(|l| !l.text.contains("mule")));
     }
 
+    /// QA m5 (2026-11-15): the notice listed "Lost Coin", and looking
+    /// closer at the slip listed it again. The Journal lists a title once
+    /// per Scene; an entry with nothing new is left out. The story keeps
+    /// both cards.
+    #[test]
+    fn the_journal_lists_a_found_title_once_per_scene() {
+        let mut w = HiddenWorld::new();
+        let first = read(&mut w);
+        let slip = Finds {
+            source: "the hand-drawn slip".into(),
+            items: vec![item("lost: a grey mule", "Answers to Pell.")],
+            ..notices()
+        };
+        let again = w.play(
+            "I look closer at the slip.",
+            &finding(&slip, Intimacy::None),
+            5,
+            vec![],
+        );
+        w.narrate(again, "You read the slip.");
+        let sight = w.sight();
+        let journal = journal_view(&sight, &Marks::default());
+        let scene = journal
+            .scenes
+            .iter()
+            .find(|s| s.acts.iter().any(|a| a.turn_id == again))
+            .expect("the Scene of the Turns");
+        assert_eq!(scene.found.len(), 1, "{:?}", scene.found);
+        assert_eq!(scene.found[0].turn_id, first);
+        let view = play_view(&sight, &Marks::default());
+        assert_eq!(view.story.iter().filter(|t| t.found.is_some()).count(), 2);
+    }
+
     #[test]
     fn the_ooc_sheet_holds_what_recent_turns_found() {
         let mut w = HiddenWorld::new();

@@ -623,7 +623,7 @@ fn set_detail_level_changes_the_play_view() {
     gm.push_proposal(support::intimate_with_hessa(&db));
     let refused = refusal_view(&mut s, "op-1");
     assert_eq!(refused.text, REFUSAL_EXCLUDED);
-    assert!(refused.text.contains("Ask the GM"));
+    assert!(refused.text.contains("Campaign menu"));
     assert!(refused.to_confirm.is_empty());
 }
 

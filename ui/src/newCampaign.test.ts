@@ -18,6 +18,9 @@ import {
   draftScreen,
   entryOf,
   parseAge,
+  AGE_PROBLEM,
+  detailHelp,
+  explicitPackLoaded,
   parseHour,
   factEditFields,
   cutSections,
@@ -223,7 +226,7 @@ describe("gapSentence", () => {
 
   it("speaks of a fact by its sentence, never by its internal fields", () => {
     expect(sentence("slot_conflict", "knowledge[0]")).toBe(
-      "The fact “Agathe runs the inn.” says something about the same thing as another fact. Delete one of them, or merge them.",
+      "The fact “Agathe runs the inn.” says something about the same thing as another fact. Delete one of them.",
     );
     expect(sentence("missing", "knowledge[0].value")).toBe(
       "“Value” in the fact “Agathe runs the inn.” is empty. Write it in.",
@@ -284,22 +287,22 @@ describe("pair gaps", () => {
 
   it("names both facts of a conflict", () => {
     expect(gapSentence(conflict, paired())).toBe(
-      "The fact “Agathe brews the beer.” and the fact “Agathe runs the inn.” say something about the same thing. Delete one of them, or merge them.",
+      "The fact “Agathe brews the beer.” and the fact “Agathe runs the inn.” say something about the same thing. Delete one of them.",
     );
     // A fact with no sentence goes by its number.
     const blank = paired();
     blank.knowledge = replaceAt(blank.knowledge, 0, { text: " " });
     expect(gapSentence(conflict, blank)).toBe(
-      "The fact “Agathe brews the beer.” and fact 1 say something about the same thing. Delete one of them, or merge them.",
+      "The fact “Agathe brews the beer.” and fact 1 say something about the same thing. Delete one of them.",
     );
     // A fact on the slot of an other name names that name.
     expect(gapSentence({ ...conflict, with: "pc.other_names[0]" }, paired())).toBe(
-      "The fact “Agathe brews the beer.” and the other name “Wick” of your character say something about the same thing. Delete one of them, or merge them.",
+      "The fact “Agathe brews the beer.” and the other name “Wick” of your character say something about the same thing. Delete one of them.",
     );
   });
 
   it("keeps the old sentence when the other entry is unknown", () => {
-    const old = "The fact “Agathe brews the beer.” says something about the same thing as another fact. Delete one of them, or merge them.";
+    const old = "The fact “Agathe brews the beer.” says something about the same thing as another fact. Delete one of them.";
     // Older data: no `with`.
     expect(gapSentence({ kind: "slot_conflict", at: "knowledge[2]" }, paired())).toBe(old);
     // A seed fact the review does not show, or a row that is gone.
@@ -473,10 +476,12 @@ describe("ages", () => {
     expect(parseAge(" 40 ")).toBe(40);
     expect(parseAge("")).toBeNull();
     expect(parseAge("   ")).toBeNull();
-    for (const text of ["0x10", "1e1", "16.0", "16.5", "-3", "+16", "1_0", "١٦", "16a", "65536"]) {
+    for (const text of ["0x10", "1e1", "16.0", "16.5", "-3", "+16", "1_0", "١٦", "16a", "65536", "151", "65535"]) {
       expect(parseAge(text), text).toBeUndefined();
     }
-    expect(parseAge("65535")).toBe(65535);
+    expect(parseAge("150")).toBe(150);
+    expect(parseAge("0")).toBe(0);
+    expect(AGE_PROBLEM).toBe("Enter an age in whole years, from 0 to 150.");
   });
 
   it("edits a fact's sentence only, outside debug mode", () => {
@@ -970,5 +975,21 @@ describe("the Detail Level select", () => {
     expect(saveArgs(withDetail(f, detailOf("explicit"))).seed.detail).toBe("explicit");
     // A value the select never offers changes nothing to the safe default.
     expect(detailOf("everything")).toBe("excluded");
+  });
+});
+
+describe("the Intimate scenes help (QA m8)", () => {
+  it("says one plain line per level", () => {
+    expect(detailHelp("excluded", null)).toBe("Left out: intimate scenes never happen in the story.");
+    expect(detailHelp("implied", true)).toBe("Implied: an intimate scene happens off the page; the story moves on.");
+  });
+
+  it("says whether a Content Pack that allows explicit is loaded", () => {
+    expect(detailHelp("explicit", true)).toContain("One is loaded.");
+    expect(detailHelp("explicit", false)).toContain("None is loaded now");
+    expect(explicitPackLoaded(null)).toBeNull();
+    expect(explicitPackLoaded([])).toBe(false);
+    expect(explicitPackLoaded([{ explicit: true, problem: "refused" }])).toBe(false);
+    expect(explicitPackLoaded([{ explicit: false, problem: null }, { explicit: true, problem: null }])).toBe(true);
   });
 });

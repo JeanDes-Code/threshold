@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { DetailLevel, NameRef, SceneState } from "../api";
+import type { NameRef, SceneState } from "../api";
 import NoteField from "../marks/NoteField";
-import { DETAIL_LEVELS, detailOf } from "../newCampaign";
 import {
   NOT_CONFIRMED_HEAD,
   PHASE_TEXT,
@@ -43,10 +42,6 @@ interface Props {
   toConfirm?: NameRef[];
   /** "Confirm": the core confirms that one character is an adult. */
   onConfirm?: (entityId: number) => void;
-  /** The stored Detail Level: the select of the "Ask the GM" panel shows it. */
-  detail?: DetailLevel;
-  /** The Player changes the Detail Level in play; the core writes it. */
-  onDetail?: (level: DetailLevel) => void;
   /** A Turn that committed with a problem, such as an interrupted narration. */
   notice: string | null;
   /**
@@ -113,7 +108,6 @@ export default function ActionBar(props: Props) {
   const oocId = useId();
   const fixId = useId();
   const noteId = useId();
-  const detailId = useId();
   const busy = phase !== "idle";
   const confirms = confirmButtons(props.toConfirm ?? []);
   // The text a failed Turn gave back to the field: a Retry that commits
@@ -407,26 +401,6 @@ export default function ActionBar(props: Props) {
           >
             Ask
           </button>
-        </div>
-      )}
-      {asking && props.detail !== undefined && (
-        <div className="play-bar__row play-bar__row--ooc">
-          <label className="play-bar__label" htmlFor={detailId}>
-            Detail Level for intimate scenes
-          </label>
-          <select
-            id={detailId}
-            className="play-ooc-field play-detail-select"
-            value={props.detail}
-            disabled={busy || !props.onDetail}
-            onChange={(e) => props.onDetail?.(detailOf(e.target.value))}
-          >
-            {DETAIL_LEVELS.map(([level, label]) => (
-              <option key={level} value={level}>
-                {label}
-              </option>
-            ))}
-          </select>
         </div>
       )}
     </footer>

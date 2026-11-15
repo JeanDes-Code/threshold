@@ -2530,3 +2530,21 @@ fn the_act_is_refused_at_excluded_whatever_the_model_tags() {
         play(Intimacy::Advance, intent).expect(intent);
     }
 }
+
+/// QA m6 (2026-11-15): the home card shows the last Intent, the clock and
+/// the Detail Level. An intimate Turn gives no Intent to the home screen.
+#[test]
+fn peek_shows_the_last_plain_intent_and_never_an_intimate_one() {
+    let mut rig = Rig::new("peek-intent");
+    let p = rig.plain();
+    rig.played("t1", &p, "Dusk falls.");
+    let peek = threshold_core::store::peek(&rig.path).unwrap();
+    assert_eq!(peek.last_intent.as_deref(), Some("I stay with Brann."));
+    assert_eq!(peek.detail, DetailLevel::Implied);
+    assert!(peek.clock_min >= 5, "{}", peek.clock_min);
+
+    let q = rig.intimate();
+    rig.played("t2", &q, "Brann nods.");
+    let peek = threshold_core::store::peek(&rig.path).unwrap();
+    assert_eq!(peek.last_intent, None);
+}

@@ -131,12 +131,17 @@ export function lookCloserDraft(title: string): string {
   return `I look closer at "${shown}".`;
 }
 
+/** A draft that a found row put in the field, anywhere in it. */
+const LOOK_CLOSER = /\s*I look closer at "[^"]*"\./g;
+
 /**
  * The Intent field after a draft: the draft alone in an empty field, else
- * after what the Player typed, so no typed word is lost.
+ * after what the Player typed, so no typed word is lost. A click sets the
+ * draft (QA m3, 2026-11-15): an earlier draft of a found row in the field,
+ * this one or another, goes, so a double click never holds it twice.
  */
 export function intentWithDraft(typed: string, draft: string): string {
-  const kept = typed.trim();
+  const kept = typed.replace(LOOK_CLOSER, "").trim();
   return kept === "" ? draft : `${kept} ${draft}`;
 }
 

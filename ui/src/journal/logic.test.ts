@@ -3,6 +3,7 @@ import type { FactLine, JournalView, NameRef } from "../api";
 import { journalView } from "../fixtures/journalView";
 import {
   aboutText,
+  actText,
   bySubject,
   clockSpan,
   closedText,
@@ -135,5 +136,13 @@ describe("aboutText", () => {
     expect(aboutText(fixture, { kind: "entity", entity_id: 2 })).toBe("About Maren");
     expect(aboutText(fixture, { kind: "entity", entity_id: 7 })).toBe("About someone you know");
     expect(aboutText(fixture, { kind: "scene", turn_id: 9999 })).toBe("A scene");
+  });
+});
+
+describe("actText", () => {
+  it("a faded Turn is a neutral \"(skipped)\", never its skip line (QA m5)", () => {
+    const act = { turn_id: 4, intent: "", decision: false, closed: [] };
+    expect(actText({ ...act, faded: "This part of the story is skipped (10 minutes)." })).toBe("(skipped)");
+    expect(actText({ ...act, intent: "I wait.", faded: null })).toBe("I wait.");
   });
 });

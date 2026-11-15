@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { CampaignCard } from "../api";
 import {
   cardLine,
+  cardState,
+  detailSetText,
   fileName,
   createdMs,
   startedText,
@@ -27,6 +29,9 @@ const card = (extra: Partial<CampaignCard> = {}): CampaignCard => ({
   last_played_ms: now,
   turn_count: 12,
   needs_begin: false,
+  clock_min: 1440 + 9 * 60 + 5,
+  detail: "excluded",
+  last_intent: "I ask Orsel for the missing page.",
   problem: null,
   ...extra,
 });
@@ -49,6 +54,13 @@ describe("home cards", () => {
     expect(cardLine(card({ turn_count: 0, needs_begin: true }))).toBe("Not begun yet");
     const old = "made by an older version of Threshold: import its Source Text again";
     expect(cardLine(card({ problem: old }))).toBe(old);
+  });
+
+  it("two cards of one Source Text differ by clock and level (QA m6)", () => {
+    expect(cardState(card())).toBe("Day 2, 09:05 · Intimate scenes: Left out");
+    expect(cardState(card({ clock_min: 30, detail: "implied" }))).toBe("Day 1, 00:30 · Intimate scenes: Implied");
+    expect(cardState(card({ needs_begin: true }))).toBeNull();
+    expect(cardState(card({ problem: "this file cannot be opened" }))).toBeNull();
   });
 
   it("a card without a name shows its file name", () => {
@@ -156,5 +168,13 @@ describe("content packs", () => {
       detail: problem,
       refused: true,
     });
+  });
+});
+
+describe("the Detail Level in the Campaign menu", () => {
+  it("says the level the core wrote (QA m1)", () => {
+    expect(detailSetText("excluded")).toBe("Detail Level set to Left out.");
+    expect(detailSetText("implied")).toBe("Detail Level set to Implied.");
+    expect(detailSetText("explicit")).toBe("Detail Level set to Explicit.");
   });
 });

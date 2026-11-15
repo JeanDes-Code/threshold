@@ -18,6 +18,9 @@ export const homeCards: CampaignCard[] = [
     last_played_ms: homeNow - 2 * HOUR,
     turn_count: 48,
     needs_begin: false,
+    clock_min: 3 * 1440 + 22 * 60 + 15,
+    detail: "implied",
+    last_intent: "I ask the harbour master which ship is late.",
     problem: null,
   },
   {
@@ -28,6 +31,9 @@ export const homeCards: CampaignCard[] = [
     last_played_ms: homeNow - 3 * 24 * HOUR,
     turn_count: 12,
     needs_begin: false,
+    clock_min: 14 * 60 + 40,
+    detail: "excluded",
+    last_intent: null,
     problem: null,
   },
   {
@@ -38,6 +44,9 @@ export const homeCards: CampaignCard[] = [
     last_played_ms: homeNow - 26 * HOUR,
     turn_count: 0,
     needs_begin: true,
+    clock_min: 0,
+    detail: "excluded",
+    last_intent: null,
     problem: null,
   },
   {
@@ -48,6 +57,9 @@ export const homeCards: CampaignCard[] = [
     last_played_ms: homeNow - 40 * 24 * HOUR,
     turn_count: 0,
     needs_begin: false,
+    clock_min: 0,
+    detail: "excluded",
+    last_intent: null,
     problem: "made by an older version of Threshold: import its Source Text again",
   },
 ];

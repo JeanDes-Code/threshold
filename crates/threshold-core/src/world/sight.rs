@@ -14,7 +14,7 @@ use crate::{
     context::seen_present,
     domain::{
         Canon, ClockMin, DetailLevel, EntityId, EntityKind, FactSource, Finds, Key, Knowing,
-        is_alias_key,
+        SceneWhy, is_alias_key,
     },
     mature::{TurnText, turn_text},
     normalize,
@@ -100,6 +100,11 @@ pub struct SightTurn {
     /// record (`turn::stored_found`), for a Turn that stands, is not faded
     /// and is read in full (`line` is `None`). `None` on any other Turn.
     pub found: Option<Finds>,
+    /// The Intimate Scene ended in this Turn, and why (QA M3, 2026-11-15):
+    /// the Turn's own `SetScene { open: false }`, or that of an OOC Turn
+    /// right after it (a Detail Level change to `excluded`). `None` on a
+    /// reverted Turn.
+    pub scene_end: Option<SceneWhy>,
 }
 
 /// One line of a Narration, as the PC can read it.
@@ -364,6 +369,22 @@ pub fn pc_sight(
         .map(|b| (b.subject, b.value.clone()))
         .collect();
 
+    // The scene end of each standing story Turn. An OOC Turn tells
+    // nothing: its end goes under the last standing story Turn before it.
+    let mut scene_ends: HashMap<TurnId, SceneWhy> = HashMap::new();
+    let mut last_story: Option<TurnId> = None;
+    for t in &ordered {
+        if is_story(t.record.kind) {
+            if reverted.contains(&t.id) {
+                continue;
+            }
+            last_story = Some(t.id);
+        }
+        if let (Some(why), Some(at)) = (t.scene_closed, last_story) {
+            scene_ends.entry(at).or_insert(why);
+        }
+    }
+
     let story: Vec<SightTurn> = ordered
         .iter()
         .filter(|t| is_story(t.record.kind))
@@ -425,6 +446,7 @@ pub fn pc_sight(
                 line,
                 faded: t.faded,
                 found,
+                scene_end: scene_ends.get(&t.id).copied(),
             }
         })
         .collect();

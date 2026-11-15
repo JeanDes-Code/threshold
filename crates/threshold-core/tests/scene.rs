@@ -1763,6 +1763,7 @@ fn the_plain_run_stops_at_a_turn_with_no_intent() {
         narration: None,
         faded: false,
         told: None,
+        scene_closed: None,
     };
     let mut view = WorldView {
         scene_open: Some(1),
@@ -1986,4 +1987,122 @@ fn a_minor_who_arrives_unseen_in_a_plain_turn_ends_the_scene_by_g1() {
     let t4 = plain_turns(&mut rig, &["t4"])[0];
     assert_eq!(rig.scene_ops(t4), [(false, SceneWhy::Gate)]);
     assert_eq!(rig.scene(), None);
+}
+
+// --- QA M3 (2026-11-15): every scene end shows one line ----------------------
+
+/// The scene end line of each Turn of the Play story, by Turn id.
+fn end_lines(rig: &Rig) -> Vec<(TurnId, Option<String>)> {
+    play_view(&rig.sight(), &Default::default())
+        .story
+        .into_iter()
+        .map(|t| (t.turn_id, t.scene_end))
+        .collect()
+}
+
+/// The one Turn of the story that shows a scene end line, and the line.
+fn the_end_line(rig: &Rig) -> (TurnId, String) {
+    let ends: Vec<(TurnId, String)> = end_lines(rig)
+        .into_iter()
+        .filter_map(|(t, line)| Some((t, line?)))
+        .collect();
+    assert_eq!(ends.len(), 1, "{ends:?}");
+    ends.into_iter().next().unwrap()
+}
+
+/// Each automatic end and "End scene" puts one neutral line under the Turn
+/// that closed the scene. The line names nobody.
+#[test]
+fn every_scene_end_shows_one_line_under_its_turn() {
+    // The third plain Turn.
+    let mut rig = Rig::new("end-line-plain");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let ts = plain_turns(&mut rig, &["t2", "t3", "t4"]);
+    assert_eq!(
+        the_end_line(&rig),
+        (ts[2], "The scene ends: the moment has passed.".to_owned())
+    );
+
+    // "End scene".
+    let mut rig = Rig::new("end-line-button");
+    rig.played("t1", &p, "Brann nods.");
+    let close = rig.closing();
+    let end = rig
+        .end_scene("end", &close, "The evening goes on.")
+        .unwrap();
+    assert_eq!(
+        the_end_line(&rig),
+        (end.turn_id, "The scene ends.".to_owned())
+    );
+
+    // A move.
+    let mut rig = Rig::new("end-line-move");
+    let yard = rig.place("Mill Yard");
+    rig.played("t1", &p, "Brann nods.");
+    let mv = rig.intimate_move(yard);
+    let t2 = rig.played("t2", &mv, "The yard is quiet.");
+    assert_eq!(
+        the_end_line(&rig),
+        (t2, "The scene ends: you left.".to_owned())
+    );
+
+    // An arrival the PC sees: the line names nobody.
+    let mut rig = Rig::new("end-line-arrival");
+    let kett = rig.add_npc("Kett", 34, true, "far road");
+    rig.played("t1", &p, "Brann nods.");
+    rig.arrival(kett);
+    let t2 = rig.played("t2", &p, "Someone comes.");
+    let (turn, line) = the_end_line(&rig);
+    assert_eq!(
+        (turn, line.as_str()),
+        (t2, "The scene ends: someone arrived.")
+    );
+    assert!(!line.contains("Kett"));
+}
+
+/// An arrival the PC does not see keeps the scene open: no line.
+#[test]
+fn a_hidden_arrival_shows_no_end_line() {
+    let mut rig = Rig::new("end-line-hidden");
+    let vale = rig.vale;
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    rig.arrival(vale);
+    rig.played("t2", &p, "Brann stays.");
+    assert!(end_lines(&rig).iter().all(|(_, line)| line.is_none()));
+}
+
+/// G1: the line says no cause, since the cause may be a character the PC
+/// does not see.
+#[test]
+fn a_gate_end_says_no_cause() {
+    let mut rig = Rig::new("end-line-gate");
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    rig.add_npc("Kett", 34, false, "gate square");
+    let plain = rig.plain();
+    let t2 = rig.played("t2", &plain, "Dusk falls.");
+    assert_eq!(rig.scene_ops(t2), [(false, SceneWhy::Gate)]);
+    assert_eq!(the_end_line(&rig), (t2, "The scene ends.".to_owned()));
+}
+
+/// A level change to `excluded` closes the scene in an OOC Turn, which is
+/// in no story: the line goes under the last story Turn before it.
+#[test]
+fn an_excluded_end_shows_under_the_last_story_turn() {
+    let mut rig = Rig::with("end-line-excluded", DetailLevel::Explicit, Vec::new());
+    let p = rig.intimate();
+    rig.played("t1", &p, "Brann nods.");
+    let t2 = rig.played("t2", &p, "Brann stays.");
+    rig.engine()
+        .set_detail_level("lvl".into(), DetailLevel::Excluded)
+        .unwrap();
+    assert_eq!(
+        the_end_line(&rig),
+        (
+            t2,
+            "The scene ends: Intimate Scenes are now left out.".to_owned()
+        )
+    );
 }

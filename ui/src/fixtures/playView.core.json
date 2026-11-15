@@ -116,6 +116,7 @@
       "kind": "opening",
       "reverted": false,
       "roll": null,
+      "scene_end": null,
       "turn_id": 3
     },
     {
@@ -147,6 +148,7 @@
       "kind": "play",
       "reverted": false,
       "roll": null,
+      "scene_end": null,
       "turn_id": 4
     },
     {
@@ -183,6 +185,7 @@
       "kind": "play",
       "reverted": false,
       "roll": null,
+      "scene_end": null,
       "turn_id": 5
     },
     {
@@ -234,6 +237,7 @@
       "kind": "play",
       "reverted": false,
       "roll": null,
+      "scene_end": null,
       "turn_id": 6
     },
     {
@@ -268,6 +272,7 @@
       "kind": "play",
       "reverted": false,
       "roll": null,
+      "scene_end": null,
       "turn_id": 7
     },
     {
@@ -279,6 +284,7 @@
       "kind": "play",
       "reverted": false,
       "roll": null,
+      "scene_end": null,
       "turn_id": 8
     }
   ],

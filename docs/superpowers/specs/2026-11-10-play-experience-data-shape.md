@@ -218,7 +218,8 @@ Changed and new commands. Every other command stays as it is.
 
 ```rust
 pub struct CampaignCard { id: String, db_path: String, pc_name: String, premise: String, last_played_ms: u64,
-                          turn_count: u32, needs_begin: bool, problem: Option<String> }
+                          turn_count: u32, needs_begin: bool, clock_min: u64, detail: DetailLevel,
+                          last_intent: Option<String>, problem: Option<String> }
 
 pub struct PlayView { pc_name: String, place: Option<PlaceLine>, clock_min: ClockMin, needs_begin: bool,
                       can_correct: bool, scene: SceneState, story: Vec<StoryTurn>, here: Vec<NameRef>,
@@ -254,7 +255,7 @@ pub struct EntityCard  { who: NameRef, other_names: Vec<String>, here: bool, fac
 
 Rules:
 
-- `CampaignCard.last_played_ms` is the change time of the file. `turn_count` counts the Play and Correction Turns that stand. `pc_name` and `premise` come from the Adventure Seed. A file of schema 2 gives a card with `problem` set and cannot open. *Changed after QA (2026-11-10):* such a card has a "Remove from list" action. After a confirm step, `remove_campaign` moves the file (and its SQLite side files) into `<data_dir>/archive/`; it never deletes. It takes the card's own `id` (the file name), never a path, so only a file the list shows can move, and it refuses the open Campaign. *Changed after review (2026-11-10):* the shell, not the UI, refuses a card with no `problem`: a Campaign file that opens never moves. A side file that cannot move is reported as an error, never ignored.
+- `CampaignCard.last_played_ms` is the change time of the file. `turn_count` counts the Play and Correction Turns that stand. `pc_name` and `premise` come from the Adventure Seed. A file of schema 2 gives a card with `problem` set and cannot open. *Changed after QA (2026-11-10):* such a card has a "Remove from list" action. After a confirm step, `remove_campaign` moves the file (and its SQLite side files) into `<data_dir>/archive/`; it never deletes. It takes the card's own `id` (the file name), never a path, so only a file the list shows can move, and it refuses the open Campaign. *Changed after review (2026-11-10):* the shell, not the UI, refuses a card with no `problem`: a Campaign file that opens never moves. A side file that cannot move is reported as an error, never ignored. *Changed after QA (2026-11-15, m6):* two cards of one Source Text showed the same name and premise. A card now also carries the story clock, the Detail Level and `last_intent`: the Intent of the latest standing Play or Correction Turn. A faded Turn, a Turn told as an Intimate Scene, or a Turn that closed one gives no `last_intent`, so the home screen shows no intimate text.
 - `YouCard.state` holds the PC Beliefs about the PC on a state key. The panel shows no other gauge.
 - `PlayView.open` holds the Open Items with `closed_in: None`. The core holds no Lead today (section 8).
 - The Decisions tab is each `Act` with `decision: true`, with the place and time of its `SceneEntry`.
@@ -351,6 +352,7 @@ pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), R
 
 - A mark counts for a row only while the row holds a character with the mark's exact main name and kind, and its age equals `confirmed`. An age changed and set back to the confirmed value on the same entry is confirmed again.
 - `EntryRef` names one row, with its exact main name and kind as a check. `confirm_age` and `rename` refuse an entry that its row does not hold (`UnknownName`): the screen is out of date. So a rename moves only the mark of its own row.
+- *Changed after QA (2026-11-15):* references hold names, not rows. A rename of one of two entries with the same name moved every fact, sentence, "who is present" and "who knows" of the other to the new name. A reference now follows only when the renamed entry is the one entry it can name: `start.place` names a place, `start.present` and `known_to` a character, a fact or a sentence any entry. While another entry keeps the old name, those references stay with it.
 - `apply_edit` keeps a mark only while its row still fits it. A renamed entry, an entry that became a place, and a name that comes back are new entries. Marks follow rows by position. A save that removes exactly one row and leaves the others as they were moves the later marks up by one. Any other change of the row count keeps the positions, so a later row whose entry changed loses its mark: a delete and an add in one save leave both unconfirmed. Limit: deleting the last row and adding the same name, kind and age in its place in one save gives the same data, and the core cannot see it.
 - `approve` and `build_world` compute the gaps again. A draft with any gap is refused with its gaps, and an `Approved` draft goes back to `Draft`. `start_build` saves it back in `Draft` and returns the gaps; the UI opens the review, not the build.
 - The UI shows "confirmed", and enables "Confirm age", only while the age field shows the very age that the store holds: no waiting or failed save, and no text in the field that differs from the stored age. The age field takes decimal digits only. `newCampaign.ts` holds this rule (`ageStatus`).

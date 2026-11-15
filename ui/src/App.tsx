@@ -3,6 +3,7 @@ import {
   errorText,
   type CampaignCard,
   type CampaignSummary,
+  type DetailLevel,
   type DraftLine,
   type NarrationChunk,
   type PackLine,
@@ -18,6 +19,7 @@ import { createTurnStore } from "./play/session";
 import { api, play, turns, useEvent } from "./tauri";
 import Character from "./views/Character";
 import Debug from "./views/Debug";
+import { explicitPackLoaded } from "./newCampaign";
 import NewCampaign from "./views/NewCampaign";
 import ScreenFrame from "./views/ScreenFrame";
 
@@ -145,6 +147,17 @@ export default function App() {
     }
   };
 
+  /** The menu's Detail Level select: the core writes it and answers with the Play view. */
+  const changeDetail = async (level: DetailLevel): Promise<string | null> => {
+    if (turnBusy) return "Wait until the GM is done.";
+    try {
+      setView(await api.setDetailLevel(level, crypto.randomUUID()));
+      return null;
+    } catch (e) {
+      return `Could not change the Detail Level: ${errorText(e)}`;
+    }
+  };
+
   const story = view?.story ?? [];
   const canCorrect = canOpenCorrection(view?.can_correct ?? false, turnBusy);
   const tab: CampaignTab | null = screen.kind === "campaign" ? screen.tab : null;
@@ -163,6 +176,9 @@ export default function App() {
       }
       canCorrect={canCorrect}
       correctHint={turnBusy ? "Wait until the GM is done" : "Only the latest Turn, when you played it"}
+      detail={inCampaign ? view?.detail.stored : undefined}
+      onDetail={changeDetail}
+      detailLocked={turnBusy}
       debug={debug}
       onDebug={(on) => void toggleDebug(on)}
       onDebugView={() => go({ to: "debug" })}
@@ -232,6 +248,7 @@ export default function App() {
                 locked={turnBusy}
                 onJob={setJob}
                 debug={debug}
+                explicitPack={explicitPackLoaded(packs)}
               />
             </ScreenFrame>
           </div>
@@ -273,7 +290,7 @@ export default function App() {
         )}
         {campaign && tab === "character" && (
           <ScreenFrame label="Character" title={campaign.pc_name} tools={tools}>
-            <Character revision={story.length} />
+            <Character revision={story.length} campaign={campaign.db_path} running={turnBusy} />
           </ScreenFrame>
         )}
         {campaign && tab === "debug" && debug && (

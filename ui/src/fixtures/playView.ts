@@ -46,6 +46,7 @@ export const playView: PlayView = {
       intent: "",
       roll: null,
       reverted: false,
+      scene_end: null,
       found: null,
       body: {
         kind: "narration",
@@ -79,6 +80,7 @@ export const playView: PlayView = {
       intent: "I hand Maren the sealed manifest and ask whether the Gull has docked.",
       roll: null,
       reverted: false,
+      scene_end: "The scene ends: you left.",
       found: null,
       body: {
         kind: "narration",
@@ -117,6 +119,7 @@ export const playView: PlayView = {
       intent: "I ask who keeps the berth roster at night.",
       roll: null,
       reverted: false,
+      scene_end: null,
       found: null,
       body: { kind: "missing" },
     },
@@ -126,6 +129,7 @@ export const playView: PlayView = {
       intent: "I climb over the counter to read the ledger myself.",
       roll: { seed: 41, difficulty: 14, value: 6, success: false },
       reverted: true,
+      scene_end: null,
       found: null,
       body: {
         kind: "narration",
@@ -147,6 +151,7 @@ export const playView: PlayView = {
       intent: "I ask Maren to let me read the ledger, politely.",
       roll: { seed: 77, difficulty: 12, value: 15, success: true },
       reverted: false,
+      scene_end: null,
       found: {
         source: "the harbour ledger",
         items: [

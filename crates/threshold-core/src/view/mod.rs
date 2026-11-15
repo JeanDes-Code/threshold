@@ -7,8 +7,8 @@ use serde::Serialize;
 
 use crate::{
     domain::{
-        ClockMin, CloseOutcome, DetailLevel, EntityId, EntityKind, Finds, STATE_KEYS, is_open_key,
-        is_state_key, outcome_key, slot_sentence, you_sentence,
+        ClockMin, CloseOutcome, DetailLevel, EntityId, EntityKind, Finds, STATE_KEYS, SceneWhy,
+        is_open_key, is_state_key, outcome_key, slot_sentence, you_sentence,
     },
     mature::effective,
     normalize,
@@ -27,7 +27,7 @@ pub const PLAY_VIEW_MAX_MS: u64 = 50;
 /// where the Player changes the level in play: the select of the "Ask the
 /// GM" panel (Task 8).
 pub const REFUSAL_EXCLUDED: &str =
-    "This Campaign excludes Intimate Scenes. You can change the Detail Level under Ask the GM.";
+    "This Campaign excludes Intimate Scenes. You can change the Detail Level in the Campaign menu.";
 
 /// The Player's sentence for a Refusal by the age rule. It names nobody: a
 /// hidden character or a minor may be the one who blocks, and the sentence
@@ -46,6 +46,22 @@ pub const NOT_CONFIRMED_HEAD: &str = "Not confirmed as an adult:";
 /// (data shape 5). The same for a character under 18, one the PC does not
 /// know, and anything that is no character: it says neither which nor why.
 pub const CANNOT_CONFIRM: &str = "This character cannot be confirmed as an adult.";
+
+/// The line under the Turn that ended an Intimate Scene (QA M3,
+/// 2026-11-15): a short, neutral cause. It names nobody and tells nothing
+/// of the scene. `Gate` says no cause: its cause may be a character the PC
+/// does not see. `FadeToBlack` has none: its Closing Turn already shows the
+/// Neutral Line "The intimate scene ends (...)". `Opened` is no end.
+pub fn scene_end_line(why: SceneWhy) -> Option<&'static str> {
+    Some(match why {
+        SceneWhy::Opened | SceneWhy::FadeToBlack => return None,
+        SceneWhy::EndScene | SceneWhy::Gate => "The scene ends.",
+        SceneWhy::NotIntimate => "The scene ends: the moment has passed.",
+        SceneWhy::Moved => "The scene ends: you left.",
+        SceneWhy::Arrival => "The scene ends: someone arrived.",
+        SceneWhy::Excluded => "The scene ends: Intimate Scenes are now left out.",
+    })
+}
 
 /// A Refusal as the Play screen shows it (data shape 3.11): its kind, its
 /// one fixed sentence, and the characters the Player may confirm as adults
@@ -220,6 +236,9 @@ pub struct StoryTurn {
     /// What the PC found in this Turn (`SightTurn::found`), shown under the
     /// Narration as a small card list (ADR 0007, 2026-11-12).
     pub found: Option<FoundCard>,
+    /// The Intimate Scene ended with this Turn: one neutral line, shown
+    /// under it (`scene_end_line`).
+    pub scene_end: Option<String>,
 }
 
 /// What the PC found in one Turn, as a screen shows it: the source, and one
@@ -607,22 +626,43 @@ fn scene_entry(sight: &PcSight, scene: &[Moment]) -> Option<SceneEntry> {
             .filter(|b| learned_line(sight, b))
             .filter_map(|b| fact_line(sight, b))
             .collect(),
-        found: scene
-            .iter()
-            .filter_map(|m| {
-                let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
-                let card = found_card(turn.found.as_ref()?);
-                Some(FoundEntry {
-                    turn_id: m.turn,
-                    source: card.source,
-                    items: card.items,
-                })
-            })
-            .collect(),
+        found: scene_found(sight, scene),
     })
 }
 
 /// True when `belief` belongs under "What you learned" (bug pass 4): not
+/// What the PC found in a Scene's Turns, oldest first, for the Journal. A
+/// title the Scene already listed is left out, and an entry left with no
+/// item is dropped (QA m5, 2026-11-15: a notice and the slip it pointed
+/// to listed "Lost Coin" twice). Titles match through `normalize::name`.
+fn scene_found(sight: &PcSight, scene: &[Moment]) -> Vec<FoundEntry> {
+    let mut seen: Vec<String> = Vec::new();
+    scene
+        .iter()
+        .filter_map(|m| {
+            let turn = sight.story.iter().find(|t| t.turn == m.turn)?;
+            let card = found_card(turn.found.as_ref()?);
+            let items: Vec<FoundRow> = card
+                .items
+                .into_iter()
+                .filter(|row| {
+                    let key = normalize::name(&row.title);
+                    let new = !seen.contains(&key);
+                    if new {
+                        seen.push(key);
+                    }
+                    new
+                })
+                .collect();
+            (!items.is_empty()).then_some(FoundEntry {
+                turn_id: m.turn,
+                source: card.source,
+                items,
+            })
+        })
+        .collect()
+}
+
 /// the PC's own place, which the Scene's title already gives, and not the
 /// outcome line the core built for a `settles` ("Refused: …"), which the
 /// Decisions and the closed list show as "Refused · …". Anything else on
@@ -1082,6 +1122,7 @@ fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {
         reverted: turn.reverted,
         body,
         found: turn.found.as_ref().map(found_card),
+        scene_end: turn.scene_end.and_then(scene_end_line).map(str::to_owned),
     }
 }
 
