@@ -29,6 +29,7 @@ pub fn base() -> DecisionProposal {
         unknown_place: false,
         companions: vec![],
         left_behind: vec![],
+        not_reached: None,
         leaves: vec![],
         settles: None,
         finds: Default::default(),

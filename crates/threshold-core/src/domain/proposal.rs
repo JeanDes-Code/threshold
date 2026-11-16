@@ -28,6 +28,16 @@ pub struct DecisionProposal {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[schemars(skip)]
     pub unknown_place: bool,
+    /// Set by the core only, never by the model: a known place the Intent
+    /// names that the PC does not reach this Turn (`checks::named_destination`,
+    /// ADR 0007, final review 2026-11-16). The retry still sent another
+    /// place, so the PC stays. Unlike `unknown_place`, the place is known:
+    /// the narrator tells the PC does not get there
+    /// (`context::NOT_REACHED_LINE`), and the Player gets no note. Stored
+    /// with the Turn when set; not in the schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub not_reached: Option<Handle>,
     /// Set by the core only, never by the model: the present NPCs who come
     /// along on this move (`checks::companions`, ADR 0007, 2026-11-16).
     /// The Intent names each as going with the PC, and its reaction says

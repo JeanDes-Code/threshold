@@ -352,6 +352,7 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         unknown_place: false,
         companions: vec![],
         left_behind: vec![],
+        not_reached: None,
         leaves: vec![],
         settles: None,
         finds: Default::default(),

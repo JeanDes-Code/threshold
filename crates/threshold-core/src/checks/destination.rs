@@ -60,8 +60,11 @@ const GOES: &[&str] = &[
 ///   sets a place the model did not judge (review M2, 2026-11-16). A model
 ///   that said `unknown_place`, or another known place, gets the first
 ///   proposal back with a note, whatever its verdict. A retry that still
-///   says another place stays put, as for `unknown_place`, with the verdict
-///   `allowed` and no check: they were judged for the other place. A
+///   does not go there stays put with `not_reached` (the place is known:
+///   never `unknown_place`), and no Check. A retry that sent another known
+///   place loses its verdict and blockers: they were judged for that
+///   place. A retry that said `unknown_place` with `impossible` keeps them:
+///   it judged the Intent's own words. A
 ///   model that kept the PC in place (`null`, not `unknown_place`) is kept:
 ///   a name in the Intent is no move ("I watch Tobin reach the Cooper
 ///   house"). A place phrase that names the PC's own place removes the
@@ -134,17 +137,32 @@ pub fn named_destination(
                 Some(Rejection::new(CheckKind::Destination, Some(handle), reason)),
             );
         }
-        // The retry still names another place: the PC stays, and nothing
-        // judged for that other place is kept.
+        // The retry still does not go to the named place: the PC stays. The
+        // place is known, so this is `not_reached`, never `unknown_place`
+        // (final review, 2026-11-16). No Check and no Roll: there is no move
+        // to win.
+        let judged_elsewhere = p.move_to.is_some();
         p.move_to = None;
-        p.unknown_place = true;
-        p.verdict = Verdict::Allowed;
+        p.unknown_place = false;
+        p.not_reached = Some(handle);
         p.contested = false;
         p.check = None;
-        p.blockers.clear();
-        notes.push(format!(
-            "removed move_to {was}, the verdict and the check: the retry still does not go to {handle}, the place the intent names"
-        ));
+        if judged_elsewhere || p.verdict != Verdict::Impossible {
+            // The verdict and blockers were judged for another known place,
+            // or were a Check: none of them is kept.
+            p.verdict = Verdict::Allowed;
+            p.blockers.clear();
+            notes.push(format!(
+                "removed move_to {was}, the verdict and the check: the retry still does not go to {handle}, the place the intent names; the PC does not reach it"
+            ));
+        } else {
+            // `unknown_place` with `impossible`: the model judged the
+            // Intent's own words, so its blockers tell why the PC does not
+            // get there.
+            notes.push(format!(
+                "kept the verdict impossible and its blockers: the retry called {handle}, the place the intent names, unknown; the PC does not reach it"
+            ));
+        }
         return (notes, None);
     }
     let Some(place) = p.move_to else {

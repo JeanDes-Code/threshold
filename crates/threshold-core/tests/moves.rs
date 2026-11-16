@@ -204,44 +204,102 @@ fn an_impossible_move_to_a_known_place_called_unknown_is_asked_again() {
     assert!(retry.recent.contains("ferry house"), "{}", retry.recent);
 }
 
-/// The stored verdict of the last Turn.
-fn stored_verdict(engine: &Engine, w: &World) -> String {
+/// The stored proposal of the last Turn.
+fn stored_proposal(engine: &Engine, w: &World) -> serde_json::Value {
     let stored = engine.store().turns(w.campaign).unwrap();
     let record: serde_json::Value =
         serde_json::from_str(&stored.last().unwrap().record.proposal_json).unwrap();
-    record["proposal"]["verdict"].as_str().unwrap().to_owned()
+    record["proposal"].clone()
 }
 
-/// Review M2 and its Minor (2026-11-16): a retry that still does not go to
-/// the place the Intent names stays put, as for `unknown_place`. Its
-/// verdict was judged for another place, so it is not kept: the narrator
-/// gets no impossible act and no Check.
+/// The narrator's line for a known place the PC does not reach.
+fn not_reached(place: &str) -> String {
+    format!(
+        "{}{place}{}",
+        threshold_core::context::NOT_REACHED_LINE,
+        threshold_core::context::NOT_REACHED_END
+    )
+}
+
+/// Final review (2026-11-16): a retry that still sends another known place
+/// stays put. The ferry house is known, so the PC does not reach it:
+/// never "you do not know the place you named". The verdict and blockers
+/// were judged for the other place, so they are not kept.
 #[test]
-fn a_retry_that_still_names_another_place_stays_put() {
+fn a_retry_that_still_goes_elsewhere_does_not_reach_the_known_place() {
     let p0 = places();
     let cooper = p0.cooper;
-    for retry in [
-        unknown(&a_move(Verdict::Impossible)),
-        json(&{
-            let mut p = move_to(cooper);
-            p.verdict = Verdict::Impossible;
-            p
-        }),
-        json(&move_to(cooper)),
+    let impossible_there = {
+        let mut p = move_to(cooper);
+        p.verdict = Verdict::Impossible;
+        p
+    };
+    for (first, retry) in [
+        (json(&move_to(cooper)), json(&move_to(cooper))),
+        (json(&impossible_there), json(&impossible_there)),
+        (
+            unknown(&a_move(Verdict::Impossible)),
+            json(&move_to(cooper)),
+        ),
     ] {
-        let (mut engine, p, gm) = engine(
-            places(),
-            vec![unknown(&a_move(Verdict::Impossible)), retry.clone()],
-        );
+        let (mut engine, p, gm) = engine(places(), vec![first, retry.clone()]);
         let before = location(&engine, &p.w, p.w.ada);
         play(&mut engine, "I walk down to the ferry house.").unwrap();
         assert_eq!(location(&engine, &p.w, p.w.ada), before, "{retry}");
+        let told = narration(&gm);
         assert!(
-            narration(&gm).contains(threshold_core::context::UNKNOWN_PLACE_LINE),
+            told.contains(&not_reached("ferry house")),
+            "{retry}: {told}"
+        );
+        assert!(
+            !told.contains(threshold_core::context::UNKNOWN_PLACE_LINE),
             "{retry}"
         );
-        assert_eq!(stored_verdict(&engine, &p.w), "allowed", "{retry}");
+        assert!(
+            !told.contains(threshold_core::context::IMPOSSIBLE_LINE),
+            "{retry}"
+        );
+        let stored = stored_proposal(&engine, &p.w);
+        assert_eq!(stored["verdict"], "allowed", "{retry}");
+        assert_eq!(stored["not_reached"], format!("E{}", p.ferry), "{retry}");
+        assert!(stored.get("unknown_place").is_none(), "{retry}");
     }
+}
+
+/// Final review (2026-11-16): a retry that calls the named place
+/// `unknown_place` with `impossible` and a blocker judged the Intent's own
+/// words. The PC stays, the verdict and the blocker are kept for the
+/// narrator, and the place is still told as known.
+#[test]
+fn a_retry_that_calls_the_named_place_unknown_keeps_its_obstacle() {
+    let p0 = places();
+    let gate_locked = p0.w.gate_locked;
+    let blocked = {
+        let mut p = a_move(Verdict::Impossible);
+        p.blockers = vec![f(gate_locked)];
+        p
+    };
+    let (mut engine, p, gm) = engine(places(), vec![unknown(&blocked), unknown(&blocked)]);
+    let before = location(&engine, &p.w, p.w.ada);
+    play(&mut engine, "I walk down to the ferry house.").unwrap();
+    assert_eq!(location(&engine, &p.w, p.w.ada), before);
+    let told = narration(&gm);
+    assert!(
+        told.contains(threshold_core::context::IMPOSSIBLE_LINE),
+        "{told}"
+    );
+    assert!(told.contains(&not_reached("ferry house")), "{told}");
+    assert!(
+        !told.contains(threshold_core::context::UNKNOWN_PLACE_LINE),
+        "{told}"
+    );
+    let stored = stored_proposal(&engine, &p.w);
+    assert_eq!(stored["verdict"], "impossible");
+    assert_eq!(
+        stored["blockers"],
+        serde_json::json!([format!("F{gate_locked}")])
+    );
+    assert!(stored.get("unknown_place").is_none());
 }
 
 /// Review M2, case (a), from the QA view: "I walk to the Copper Kettle."

@@ -21,9 +21,10 @@ use crate::{
     checks::{self, CheckKind, Rejection, Validated},
     closing_schema_for,
     context::{
-        ADVANCE_LINE, QUIET_EVENT_LINE, UNKNOWN_PLACE_LINE, adventure_block, closing_context,
-        found_lines, guard_events, guard_plans, narration_prompt_with, one_line, opening_prompt,
-        perceived_by_pc, proposal_context, seen_present,
+        ADVANCE_LINE, NOT_REACHED_END, NOT_REACHED_LINE, QUIET_EVENT_LINE, UNKNOWN_PLACE_LINE,
+        adventure_block, closing_context, found_lines, guard_events, guard_plans,
+        narration_prompt_with, one_line, opening_prompt, perceived_by_pc, proposal_context,
+        seen_present,
     },
     domain::{
         ActionKind, AdventureSeed, ClockMin, ConfirmedAges, DecisionProposal, DetailLevel,
@@ -812,6 +813,7 @@ impl Engine {
                     &stored.record.proposal_json,
                 )))
                 .chain(unknown_place_line(&stored.record.proposal_json))
+                .chain(not_reached_line(&view_after, &stored.record.proposal_json))
                 .chain(left_behind_lines(&view_after, &stored.record.proposal_json))
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
@@ -1091,6 +1093,7 @@ impl Engine {
                 .chain(planned.found.as_ref().map(found_lines))
                 .chain(advance_line(planned.intimacy))
                 .chain(unknown_place_line(&planned.proposal_json))
+                .chain(not_reached_line(&view_after, &planned.proposal_json))
                 .chain(left_behind_lines(&view_after, &planned.proposal_json))
                 .collect(),
             intimate: planned.intimacy.intimate(),
@@ -1941,6 +1944,17 @@ fn left_behind_lines(view: &WorldView, proposal_json: &str) -> Vec<String> {
 /// know (`context::UNKNOWN_PLACE_LINE`, QA run 3), from the Turn's record.
 fn unknown_place_line(proposal_json: &str) -> Option<String> {
     stored_unknown_place(proposal_json).then(|| UNKNOWN_PLACE_LINE.to_owned())
+}
+
+/// The narrator's outcome line of a move to a known place the PC does not
+/// reach (`DecisionProposal::not_reached`, `context::NOT_REACHED_LINE`),
+/// from the Turn's record.
+fn not_reached_line(view: &WorldView, proposal_json: &str) -> Option<String> {
+    let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
+    let place: Handle =
+        serde_json::from_value(record.pointer("/proposal/not_reached")?.clone()).ok()?;
+    let name = &view.entity(place)?.name;
+    Some(format!("{NOT_REACHED_LINE}{name}{NOT_REACHED_END}"))
 }
 
 /// True when the Turn's stored proposal moved to a place the world does not

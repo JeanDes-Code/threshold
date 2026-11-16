@@ -554,6 +554,16 @@ pub const NOT_MOVED_LINE: &str =
 /// place where the PC still is.
 pub const UNKNOWN_PLACE_LINE: &str = "- The PC does not know the place the player names: the PC does not find it and does not go there. Do not say whether such a place exists.\n";
 
+/// The start of the outcome line of a move to a known place the PC does
+/// not reach (`DecisionProposal::not_reached`, ADR 0007, final review
+/// 2026-11-16). The place's name and `NOT_REACHED_END` follow. The place
+/// is known, so the line never says the PC does not know it.
+pub const NOT_REACHED_LINE: &str = "- The PC does not reach ";
+
+/// The end of the `NOT_REACHED_LINE` line, after the place's name.
+pub const NOT_REACHED_END: &str =
+    " this Turn: tell why from the outcome, or as a plain delay. The PC stays where they are.\n";
+
 /// The words after a lost Check's result line.
 pub const FAILED_CHECK_LINE: &str =
     " Tell the attempt and how it fails. Nothing changes beyond what is listed here.";

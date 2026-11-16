@@ -116,9 +116,9 @@ pub(crate) use narration_prompt::intimate_rule_text;
 pub use narration_prompt::{
     ADVANCE_LINE, CLOSING_LINE, EXPLICIT_LINE, FAILED_CHECK_LINE, FOUND_LINE, HERE_AFTER_LINE,
     IMPLIED_LINE, IMPOSSIBLE_LINE, INTIMATE_RULE, NARRATION_RULES, NO_STAKE_LINE, NOBODY_HERE_LINE,
-    NOT_MOVED_LINE, PC_PLACE_LINE, QUIET_EVENT_LINE, TIME_LINE, UNKNOWN_PLACE_LINE, WON_CHECK_LINE,
-    found_lines, guard_events, guard_found, guard_plans, names_unheard, narration_prompt,
-    narration_prompt_with, opening_prompt, perceived_by_pc,
+    NOT_MOVED_LINE, NOT_REACHED_END, NOT_REACHED_LINE, PC_PLACE_LINE, QUIET_EVENT_LINE, TIME_LINE,
+    UNKNOWN_PLACE_LINE, WON_CHECK_LINE, found_lines, guard_events, guard_found, guard_plans,
+    names_unheard, narration_prompt, narration_prompt_with, opening_prompt, perceived_by_pc,
 };
 pub use proposal_prompt::{
     CLOSING_ASK, FINDS_FIELD_LINE, INTIMACY_FIELD_LINE, PROPOSAL_RULES, ProposalContext,

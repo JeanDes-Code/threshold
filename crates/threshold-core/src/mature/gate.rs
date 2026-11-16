@@ -644,6 +644,8 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         move_to,
         // No handle: the PC stays where it is.
         unknown_place: _,
+        // Set by the core: a known place the PC does not reach.
+        not_reached,
         // Set by the core: present NPCs who walk with the PC, or stay.
         companions,
         left_behind,
@@ -671,6 +673,9 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
     let mut add = |handle: Handle, field: &'static str| out.push((Some(handle), field));
     if let Some(place) = move_to {
         add(*place, "move_to");
+    }
+    if let Some(place) = not_reached {
+        add(*place, "not_reached");
     }
     for npc in companions {
         add(*npc, "companions");
