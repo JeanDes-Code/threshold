@@ -352,3 +352,19 @@ The re-check also found that the proposal prompt read only the Intent's words to
 The cost: inside an open scene, the Player cannot call anyone in through `arrives`, and a first name alone does not show an absent character in the prompt. We accept it, for the same reason as above: the Player can end the scene first.
 
 Tests: `tests/drift.rs` (`an_open_scene_offers_no_arriver`, the probe; `a_first_word_is_no_name_in_an_open_scene`, "a little longer" with Little Wren).
+
+### Changed after the r5 second re-check (2026-11-17): an open Intimate Scene drops no arrival
+
+The second re-check found that the section above left a hole in the age gate. In an open scene, the Intent "I call Pip over." came back `none` with `arrives: [Pip]` (Pip is 17, at the market). The open scene gated the prompt, so the schema offered nobody and `may_arrive` was empty. `settle` keeps every entry only when the Turn's final tag gates it, and `none` does not. So `settle` dropped Pip as not offered, and the Turn committed. Pip stayed away, and the narrator got "Player intent: I call Pip over." with no "Pip is not here" line. The next intimate Turn on Brann passed, and its narrator read the call to Pip in the recent Turns. At 94bb48e, Pip arrived in the state and the gate refused that Turn.
+
+The rule stays: the age gate fails closed, and the story and the state agree on who is here, above all while an Intimate Scene is open.
+
+- **`settle` keeps every `arrives` entry in an open scene** (`settle_arrivals`: the Turn's final tag gates it, or `view.scene_open` is set before the Turn). The schema offered nobody, so the references check rejects each entry. The Turn is retried, then rejected. It never commits with the arrival taken out, and the gate can read the name.
+- **The narrator still hears who does not come, in a Turn of an Intimate Scene** (`away_lines`, `Retrieval::in_scene`, set from `turn::scene_turn`: the scene is open right after the Turn, or its Commit opened or closed it). A gated Turn there gets the "X is not here and does not come in this Turn: do not show X here." line for an NPC the Intent names by a full name: the main name, or an alias the PC holds (`checks::characters_named_in_full`). A first word is still no name: "a little longer" gives no line for Little Wren. This replaces "Then the outcome block has no 'is not here' line" in the second bullet of the section above, for Turns of a scene.
+- **Outside a scene, nothing changes.** A gated Turn gets no "is not here" line, and a plain Turn gets one for a first word too.
+
+The cost: a model that fills `arrives` inside a scene, where the schema had no such field, now spends the retry and can fail the Turn. We accept it, for the same reason as the section "a gated Turn keeps every arrival".
+
+Limit: the line is a request to the narrator. The narrator can still ignore it. A Turn that opens a scene also counts as a Turn of the scene, so its narrator gets the line for a full name too.
+
+Tests: `tests/drift.rs` (`an_arrival_in_an_open_scene_is_never_dropped_silently`, the probe; `a_full_name_in_an_open_scene_gets_the_not_here_line`; `a_first_word_gets_no_not_here_line_in_an_open_scene`; `an_open_scene_offers_no_arriver`, which now asserts the "Pip is not here" line). Each goes through the engine with `RecordedGm`, with no hand-set `may_arrive`.
