@@ -25,7 +25,7 @@ A Adventure Seed before the Player approves it, with the list of characters and 
 _Avoid_: Proposal (a Decision Proposal is something else), preview
 
 **World Build**:
-The step that creates the hidden part of the world from an approved Adventure Seed: NPC goals, secrets, Voice Cards, World Events and the Inside Link of each Place. The Player does not read its result.
+The step that creates the hidden part of the world from an approved Adventure Seed: NPC goals, secrets, Voice Cards, World Events. It writes the Inside Links the Player confirmed in the Seed review. The Player does not read its result.
 _Avoid_: Generation, worldgen, import
 
 **Content Boundary**:
@@ -209,7 +209,7 @@ A World Event whose changes everyone at its place sees or hears, such as an anno
 _Avoid_: Announcement (for the flag), visible event
 
 **Inside Link**:
-The one Place that a Place sits inside, stored on the Place (`Entity::inside`): another Place, "top level" (inside no Place), or unknown. A Place has one link, and the links make no cycle. The World Build states them; a version 4 Campaign gets them once, from its facts, when it opens; a Place created in play has an unknown link. The age gate reads them: a character in the PC's Place, a Place around it or a Place inside it may be here, and only a character in a Place on another branch, with every link known, is away.
+The one Place that a Place sits inside, stored on the Place (`Entity::inside`): another Place, "top level" (inside no Place), or unknown. A Place has one link, and the links make no cycle. The draft proposes them, a fact check doubts the ones the facts contradict, and the Player confirms each one in the Seed review ("Not sure" leaves it unknown); the World Build writes only the confirmed ones (ADR 0008, 2026-11-16). A version 4 Campaign gets them once, from its facts, when it opens; a Place created in play has an unknown link. The age gate reads them: a character in the PC's Place, a Place around it or a Place inside it may be here, and only a character in a Place on another branch, with every link known, is away.
 _Avoid_: Parent place, containment, region
 
 **Offscreen**:
