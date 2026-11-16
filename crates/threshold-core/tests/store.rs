@@ -2226,6 +2226,51 @@ fn a_version_4_file_migrates_and_infers_the_ferry_house_link() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// Review minor (2026-11-16): a link whose two Places have no `AddEntity`
+/// row in the ledger (a file another program changed) has no Turn to join.
+/// The migration skips that one link, which stays unknown, and the file
+/// still opens as version 5. Before, the whole migration rolled back and
+/// the file did not open.
+#[test]
+fn a_link_with_no_add_entity_row_is_skipped_and_the_file_opens() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("version-4-no-add-row");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.sqlite");
+    let c = qa_shaped_version_4_file(&path);
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let id = |name: &str| -> u64 {
+        sql.query_row(
+            "SELECT id FROM entity WHERE name=?1",
+            rusqlite::params![name],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let (ferry_house, ostley) = (id("the ferry house"), id("Ostley Crossing"));
+    let removed = sql
+        .execute(
+            "DELETE FROM ledger WHERE json_type(op_json,'$.op.add_entity') IS NOT NULL \
+             AND CAST(json_extract(op_json,'$.id') AS INTEGER) IN (?1,?2)",
+            rusqlite::params![ferry_house, ostley],
+        )
+        .unwrap();
+    assert_eq!(removed, 2, "the test removes both AddEntity rows");
+    drop(sql);
+
+    let db = Store::open_existing(&path).expect("the file opens");
+    let view = db.snapshot(c).unwrap();
+    assert_eq!(link(&view, "the ferry house"), Inside::Unknown);
+    drop(db);
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    let version: u32 = sql
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 5);
+    drop(sql);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// ADR 0008 (Inside Links): a link survives a reopen and a rebuild of the
 /// projections, because it lives in the ledger.
 #[test]

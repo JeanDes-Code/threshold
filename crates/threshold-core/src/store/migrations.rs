@@ -1,6 +1,6 @@
 use super::{SCHEMA_VERSION, StoreError, project};
 use crate::domain::{EntityId, Inside, LedgerOp};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 /// The oldest schema version this build migrates. Version 4 files are the
 /// Campaigns of QA run 3 (ADR 0008, Inside Links); an older file is
@@ -49,7 +49,13 @@ fn to_v5(db: &Connection) -> Result<(), StoreError> {
     for c in campaigns {
         let view = project::snapshot(db, c)?;
         for (place, parent) in crate::world::presence::inferred_links(&view) {
-            let turn = later_turn(db, place, parent)?;
+            // No `AddEntity` row for either Place (a file another program
+            // changed): the link has no Turn to join, so it is skipped and
+            // the Place keeps an unknown link. The rest of the file still
+            // migrates (review minor, 2026-11-16).
+            let Some(turn) = later_turn(db, place, parent)? else {
+                continue;
+            };
             project::append(
                 db,
                 c,
@@ -65,16 +71,19 @@ fn to_v5(db: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// The Turn of the later `AddEntity` op of `a` and `b` (by Turn seq).
-fn later_turn(db: &Connection, a: EntityId, b: EntityId) -> Result<u64, StoreError> {
-    Ok(db.query_row(
-        "SELECT l.turn_id FROM ledger l JOIN turn t ON t.id=l.turn_id \
-         WHERE json_type(l.op_json,'$.op.add_entity') IS NOT NULL \
-         AND CAST(json_extract(l.op_json,'$.id') AS INTEGER) IN (?1,?2) \
-         ORDER BY t.seq DESC LIMIT 1",
-        params![a, b],
-        |r| r.get(0),
-    )?)
+/// The Turn of the later `AddEntity` op of `a` and `b` (by Turn seq), or
+/// `None` when the ledger holds neither.
+fn later_turn(db: &Connection, a: EntityId, b: EntityId) -> Result<Option<u64>, StoreError> {
+    Ok(db
+        .query_row(
+            "SELECT l.turn_id FROM ledger l JOIN turn t ON t.id=l.turn_id \
+             WHERE json_type(l.op_json,'$.op.add_entity') IS NOT NULL \
+             AND CAST(json_extract(l.op_json,'$.id') AS INTEGER) IN (?1,?2) \
+             ORDER BY t.seq DESC LIMIT 1",
+            params![a, b],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 /// Schema 5 adds the Inside Link of a Place (projection: `SetInside`):
