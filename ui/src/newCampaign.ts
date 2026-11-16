@@ -678,9 +678,15 @@ export interface ApproveState {
   state: DraftState;
   /** Every age field shows the age the form holds. */
   agesShown: boolean;
+  /** No confirmed "Inside" row shows another pick (`placesShown`). */
+  placesShown: boolean;
 }
 
-/** "Approve" waits for the store to hold every edit, for no gap, and for each age field to show its age. */
+/**
+ * "Approve" waits for the store to hold every edit, for no gap, for each
+ * age field to show its age, and for each confirmed "Inside" row to show
+ * its confirmed link.
+ */
 export const canApprove = (a: ApproveState): boolean =>
   !a.pending &&
   !a.busy &&
@@ -689,6 +695,7 @@ export const canApprove = (a: ApproveState): boolean =>
   a.error === null &&
   a.gaps.length === 0 &&
   a.agesShown &&
+  a.placesShown &&
   a.state !== "built";
 
 /** A core action on the draft. The store first takes every pending edit, so the core acts on what the Player sees. */
@@ -721,8 +728,29 @@ export function ageLabel(line: AgeLine | undefined): string {
 /** How many ages still wait for the Player's confirmation. */
 export const agesLeft = (ages: AgeLine[]): number => ages.filter((l) => !l.confirmed).length;
 
-/** How many Places still wait for the Player to confirm where they are. */
-export const placesLeft = (places: InsideLine[]): number => places.filter((l) => !l.confirmed).length;
+/** The Player's picks in the "Inside" selects, by `pickKey`, until "Confirm". */
+export type InsidePicks = Partial<Record<string, string>>;
+
+/** The key of a line's pick: its row and its name, so a rename starts a new pick. */
+export const pickKey = (line: InsideLine): string => `${line.index}/${line.name}`;
+
+/** The line is confirmed, and its select still shows the confirmed link. */
+const confirmedAsShown = (line: InsideLine, picks: InsidePicks): boolean => {
+  const pick = picks[pickKey(line)];
+  return line.confirmed && (pick === undefined || pick === insideKey(line.inside));
+};
+
+/**
+ * How many Places still wait for the Player to confirm where they are. A
+ * confirmed link whose select the Player changed counts as left: the row
+ * shows "Confirm" again (QA run 4).
+ */
+export const placesLeft = (places: InsideLine[], picks: InsidePicks = {}): number =>
+  places.filter((l) => !confirmedAsShown(l, picks)).length;
+
+/** No confirmed row shows a pick other than its confirmed link. */
+export const placesShown = (places: InsideLine[], picks: InsidePicks): boolean =>
+  places.every((l) => !l.confirmed || confirmedAsShown(l, picks));
 
 /** The core's place line of row `i`, while it is about the Place the row holds. */
 export function placeLineOf(places: InsideLine[], form: ReviewForm, i: number): InsideLine | undefined {
@@ -759,13 +787,30 @@ export function insideStart(line: InsideLine): string {
 /**
  * The model's guess for a link no fact backs, as a quiet hint: "Suggested:
  * inside X". None for a guess of "top level" (it would lead the Player to
- * the link that makes two Places apart), on a doubted link, and once the
- * link is confirmed.
+ * the link that makes two Places apart), on a doubted link, once the link
+ * is confirmed, and for a place the select no longer offers.
  */
-export function suggestionText(line: InsideLine): string | null {
+export function suggestionText(line: InsideLine, places: InsideLine[]): string | null {
   if (line.confirmed || line.doubted || line.suggested === null || typeof line.suggested === "string") return null;
+  // A guess the select no longer offers (it would close a loop) is no hint.
+  if (!insideChoices(places, line).includes(line.suggested.place)) return null;
   return `Suggested: inside ${line.suggested.place}`;
 }
+
+/**
+ * The place a pick names when the select no longer offers it: another
+ * link put that place inside this one, so the pick would close a loop.
+ * Null for any other pick.
+ */
+export function staleParent(places: InsideLine[], line: InsideLine, pick: string): string | null {
+  const link = insideOfKey(pick);
+  if (link === null || typeof link === "string") return null;
+  return insideChoices(places, line).includes(link.place) ? null : link.place;
+}
+
+/** Why a pick would close a loop, in the Player's words. */
+export const loopText = (place: string, parent: string): string =>
+  `${parent} is inside ${place} now, so ${place} cannot be inside ${parent}. Choose another place.`;
 
 /**
  * The places a Place can be inside: every other Place of the core's lines,

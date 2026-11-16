@@ -16,8 +16,8 @@ const client: ReviewClient = {
 const rowOf = (name: string) => seedDraftView.seed.entities.findIndex((e) => e.name === name);
 
 /** The review of the fixture draft with these place lines, as static HTML. */
-function render(places: InsideLine[]): string {
-  const view: DraftView = { ...seedDraftView, places };
+function render(places: InsideLine[], gaps: DraftView["gaps"] = []): string {
+  const view: DraftView = { ...seedDraftView, places, gaps };
   return renderToStaticMarkup(
     <SeedReview view={view} client={client} onApproved={() => undefined} onBack={() => undefined} />,
   );
@@ -94,5 +94,14 @@ describe("the Inside row of the Seed review (ADR 0008, 2026-11-16)", () => {
     const crossing = insideRow(html, "Ostley Crossing");
     expect(selected(crossing)).toBe("unknown");
     expect(crossing).not.toContain("Suggested:");
+  });
+
+  it("counts the places left in the footer (QA run 4, 307)", () => {
+    const html = render([
+      line("Ostley Crossing", { inside: "top", confirmed: true }),
+      line("The Copper Kettle", { suggested: { place: "Ostley Crossing" } }),
+    ], [{ kind: "place_unconfirmed", at: `entities[${rowOf("The Copper Kettle")}].inside` }]);
+    const footer = html.slice(html.indexOf('class="review-bar__status"'));
+    expect(footer).toMatch(/1 place to confirm/);
   });
 });

@@ -38,6 +38,11 @@ import {
   insideStatus,
   placeLineOf,
   placesLeft,
+  pickKey,
+  staleParent,
+  loopText,
+  suggestionText,
+  placesShown,
   otherButton,
   otherOf,
   pairMarks,
@@ -597,6 +602,7 @@ describe("review actions", () => {
       gaps: [],
       state: "draft" as const,
       agesShown: true,
+      placesShown: true,
     };
     expect(canApprove(ready)).toBe(true);
     expect(canApprove({ ...ready, pending: true })).toBe(false);
@@ -607,6 +613,7 @@ describe("review actions", () => {
     expect(canApprove({ ...ready, gaps: [{ kind: "age_unconfirmed", at: "pc.age" }] })).toBe(false);
     expect(canApprove({ ...ready, gaps: [{ kind: "place_unconfirmed", at: "entities[2].inside" }] })).toBe(false);
     expect(canApprove({ ...ready, agesShown: false })).toBe(false);
+    expect(canApprove({ ...ready, placesShown: false })).toBe(false);
     expect(canApprove({ ...ready, state: "built" })).toBe(false);
   });
 
@@ -1103,5 +1110,43 @@ describe("the place tree review (ADR 0008, 2026-11-16)", () => {
     expect(placeLineOf(lines, f, 0)).toBeUndefined();
     expect(placesLeft(tree)).toBe(4);
     expect(placesLeft([{ ...at("Ostley Crossing"), confirmed: true }])).toBe(0);
+  });
+
+  it("counts a confirmed link the Player changed and did not confirm as left (QA run 4, 312)", () => {
+    const crossing = { ...at("Ostley Crossing"), confirmed: true };
+    expect(placesLeft([crossing], {})).toBe(0);
+    expect(placesLeft([crossing], { [pickKey(crossing)]: "top" })).toBe(0);
+    expect(placesLeft([crossing], { [pickKey(crossing)]: "unknown" })).toBe(1);
+    // A pick on a link not yet confirmed changes nothing: it is left anyway.
+    expect(placesLeft([at("The Ferry House")], { [pickKey(at("The Ferry House"))]: "top" })).toBe(1);
+    // Approve waits while a confirmed row shows another pick.
+    expect(placesShown([crossing], { [pickKey(crossing)]: "top" })).toBe(true);
+    expect(placesShown([crossing], { [pickKey(crossing)]: "unknown" })).toBe(false);
+    expect(placesShown([at("The Ferry House")], { [pickKey(at("The Ferry House"))]: "top" })).toBe(true);
+  });
+
+  // QA run 4 (309-311): the inn inside the ferry house, the village inside
+  // the inn. The ferry house's earlier pick, the village, would now close a loop.
+  const loop = [
+    line(0, "Brindle Ford", { place: "Lantern Inn" }, { confirmed: true }),
+    line(1, "Lantern Inn", { place: "ferry house" }, { confirmed: true }),
+    line(2, "ferry house", "unknown", { suggested: { place: "Brindle Ford" } }),
+  ];
+  const ferry = loop[2] as InsideLine;
+
+  it("finds a pick that would now close a loop, and says why in the Player's words", () => {
+    expect(staleParent(loop, ferry, "place:Brindle Ford")).toBe("Brindle Ford");
+    expect(staleParent(loop, ferry, "top")).toBeNull();
+    expect(staleParent(loop, ferry, "")).toBeNull();
+    expect(staleParent(tree, at("The Copper Kettle"), "place:Ostley Crossing")).toBeNull();
+    expect(loopText("ferry house", "Brindle Ford")).toBe(
+      "Brindle Ford is inside ferry house now, so ferry house cannot be inside Brindle Ford. Choose another place.",
+    );
+  });
+
+  it("shows no hint for a guess the select no longer offers", () => {
+    expect(suggestionText(ferry, loop)).toBeNull();
+    const kettle = line(4, "The Copper Kettle", "unknown", { suggested: { place: "Ostley Crossing" } });
+    expect(suggestionText(kettle, [at("Ostley Crossing"), kettle])).toBe("Suggested: inside Ostley Crossing");
   });
 });

@@ -44,6 +44,11 @@ import {
   insideOfKey,
   insideStart,
   insideStatus,
+  loopText,
+  pickKey,
+  placesShown,
+  staleParent,
+  type InsidePicks,
   isCharacter,
   nameChange,
   otherButton,
@@ -118,7 +123,9 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const [ages, setAges] = useState<AgeLine[]>(view.ages);
   const [placeLines, setPlaceLines] = useState<InsideLine[]>(view.places);
   // The Player's pick in each "Inside" select, by row and name, until "Confirm".
-  const [insidePicks, setInsidePicks] = useState<Partial<Record<string, string>>>({});
+  const [insidePicks, setInsidePicks] = useState<InsidePicks>({});
+  // A refused "Confirm" of an "Inside" row, by `pickKey`, shown next to that row.
+  const [placeErrors, setPlaceErrors] = useState<Partial<Record<string, string>>>({});
   const [cut] = useState<Cut[]>(view.cut);
   const [state, setState] = useState(view.state);
   const [pending, setPending] = useState(false);
@@ -276,11 +283,12 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
     const inside = insideOfKey(pick);
     if (inside === null) return;
     const entry = { index: line.index, name: line.name, kind: "place" as const };
+    const key = pickKey(line);
     const failure = await core(
       (flush) => afterFlush(flush, () => client.confirmInside(draftId, entry, inside)),
-      () => setInsidePicks((p) => ({ ...p, [`${line.index}/${line.name}`]: undefined })),
+      () => setInsidePicks((p) => ({ ...p, [key]: undefined })),
     );
-    setError(failure);
+    setPlaceErrors((e) => ({ ...e, [key]: failure ?? undefined }));
   };
 
   /** Leaves only once the store holds the last edit; a failed save stays on screen. */
@@ -399,11 +407,15 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const inside = (i: number) => {
     const path = `entities[${i}].inside`;
     const line = placeLineOf(placeLines, form, i);
-    const key = line ? `${line.index}/${line.name}` : "";
-    const pick = (line && insidePicks[key]) ?? (line ? insideStart(line) : "");
+    const key = line ? pickKey(line) : "";
+    const picked = (line && insidePicks[key]) ?? (line ? insideStart(line) : "");
+    // A pick the select no longer offers shows "Choose…", and why, next to the row.
+    const stale = line ? staleParent(placeLines, line, picked) : null;
+    const pick = stale === null ? picked : "";
     const shown = insideStatus({ choice: pick, line, pending, saveFailed, busy });
-    const hint = line ? suggestionText(line) : null;
+    const hint = line ? suggestionText(line, placeLines) : null;
     const where = line?.name || "this place";
+    const rowError = line ? (stale !== null ? loopText(line.name, stale) : placeErrors[key]) : undefined;
     return (
       <div className="review-age review-inside">
         <label htmlFor={fieldId(path)}>Inside</label>
@@ -413,9 +425,11 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
             aria-label={`Where ${where} is`}
             value={pick}
             disabled={line === undefined || locked}
+            aria-invalid={rowError ? true : undefined}
             onChange={(ev) => {
               const value = ev.target.value;
               setInsidePicks((p) => ({ ...p, [key]: value }));
+              setPlaceErrors((e) => ({ ...e, [key]: undefined }));
             }}
           >
             <option value="">Choose…</option>
@@ -446,7 +460,13 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
             )}
           </span>
         </div>
-        {hint !== null && <p className="review-hint">{hint}</p>}
+        {rowError ? (
+          <p className="review-gap" role="alert">
+            {rowError}
+          </p>
+        ) : (
+          hint !== null && <p className="review-hint">{hint}</p>
+        )}
         {toFix(path)}
       </div>
     );
@@ -566,6 +586,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const details = seed.open_details;
   const placeNames = places.filter(({ e }) => e.kind === "place").map(({ e }) => e.name);
   const left = agesLeft(ages);
+  const placesToConfirm = placesLeft(placeLines, insidePicks);
   const others = gaps.filter((g) => g.kind !== "age_unconfirmed" && g.kind !== "place_unconfirmed").length;
   const ageRows: [Row, number | null][] = [
     ["pc", seed.pc.age],
@@ -574,7 +595,17 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const agesShown = ageRows.every(([row, value]) =>
     ageTextMatches(ageTexts[`${rowPath(row)}.age`] ?? null, value),
   );
-  const canApprove = approvable({ pending, busy, approving, saveFailed, error, gaps, state, agesShown });
+  const canApprove = approvable({
+    pending,
+    busy,
+    approving,
+    saveFailed,
+    error,
+    gaps,
+    state,
+    agesShown,
+    placesShown: placesShown(placeLines, insidePicks),
+  });
 
   const add = (entry: SeedEntity) => {
     update((f) => addEntry(f, entry), true);
@@ -831,7 +862,11 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
       ? "Working…"
       : gaps.length === 0
         ? "Everything is checked. Approve to prepare the world."
-        : [left > 0 ? `${left} ${left === 1 ? "age" : "ages"} to confirm` : null, others > 0 ? `${others} more to fix` : null]
+        : [
+            left > 0 ? `${left} ${left === 1 ? "age" : "ages"} to confirm` : null,
+            placesToConfirm > 0 ? `${placesToConfirm} ${placesToConfirm === 1 ? "place" : "places"} to confirm` : null,
+            others > 0 ? `${others} more to fix` : null,
+          ]
             .filter(Boolean)
             .join(" · ");
 
@@ -874,7 +909,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
           {state === "built" && (
             <p className="review-notice">A campaign was already built from this draft. Change something to build a new one.</p>
           )}
-          <Progress ages={ages} places={placeLines} others={others} />
+          <Progress ages={ages} places={placeLines} picks={insidePicks} others={others} />
           <NextGap gaps={gaps} form={form} index={gapIndex} onIndex={setGapIndex} onShow={show} />
           {cut.length > 0 && (
             <ul className="review-cuts">
@@ -941,12 +976,22 @@ function createGuard() {
 }
 
 /** How far the check is: the ages and place links the Player confirmed, and what is left to fix. */
-function Progress({ ages, places, others }: { ages: AgeLine[]; places: InsideLine[]; others: number }) {
+function Progress({
+  ages,
+  places,
+  picks,
+  others,
+}: {
+  ages: AgeLine[];
+  places: InsideLine[];
+  picks: InsidePicks;
+  others: number;
+}) {
   return (
     <div className="review-progress">
       <Meter label="Ages confirmed" done={ages.length - agesLeft(ages)} total={ages.length} />
       {places.length > 0 && (
-        <Meter label="Places confirmed" done={places.length - placesLeft(places)} total={places.length} />
+        <Meter label="Places confirmed" done={places.length - placesLeft(places, picks)} total={places.length} />
       )}
       <div className="review-progress__item">
         <p className="play-label">Other things to fix</p>

@@ -237,8 +237,12 @@ impl Drafts {
         inside: Inside<String>,
     ) -> Result<DraftView, AppError> {
         self.change(draft_id, |draft| {
+            let parent = match &inside {
+                Inside::Place(parent) => Some(parent.clone()),
+                Inside::Top | Inside::Unknown => None,
+            };
             build::confirm_inside(draft, entry, inside)
-                .map_err(|e| failed(inside_sentence(e, &entry.name)))
+                .map_err(|e| failed(inside_sentence(e, &entry.name, parent.as_deref())))
         })
     }
 
@@ -460,12 +464,19 @@ fn rename_sentence(e: ReviewError, from: &str, to: &str) -> String {
 }
 
 /// The Player's sentence for a refused Inside Link.
-fn inside_sentence(e: ReviewError, name: &str) -> String {
-    match e {
-        ReviewError::Loop => format!(
-            "{name} cannot be inside that place: that place is already inside {name}. Choose another place."
+fn inside_sentence(e: ReviewError, name: &str, parent: Option<&str>) -> String {
+    match (e, parent) {
+        (ReviewError::Loop, Some(parent)) if parent == name => {
+            format!("{name} cannot be inside itself. Choose another place.")
+        }
+        // The review shows it next to the row (QA run 4): it names both places.
+        (ReviewError::Loop, Some(parent)) => format!(
+            "{parent} is inside {name} now, so {name} cannot be inside {parent}. Choose another place."
         ),
-        ReviewError::UnknownName | ReviewError::NameInUse | ReviewError::Empty => format!(
+        (ReviewError::Loop, None) => {
+            format!("{name} cannot be inside that place. Choose another place.")
+        }
+        (ReviewError::UnknownName | ReviewError::NameInUse | ReviewError::Empty, _) => format!(
             "No place of this draft is called “{name}”, or the chosen parent is no place any more. Open the draft again, then choose."
         ),
     }
@@ -540,4 +551,23 @@ fn job_error(failure: BuildFailure) -> AppError {
         BuildCheck::NotApproved => "the draft is not approved",
     };
     AppError::Failed(format!("{job} stopped at {step}: {check}."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// QA run 4 (311): the loop error said "that place" and named no
+    /// parent. It now names both places, in the words the row shows.
+    #[test]
+    fn a_refused_loop_names_both_places() {
+        assert_eq!(
+            inside_sentence(ReviewError::Loop, "ferry house", Some("Brindle Ford")),
+            "Brindle Ford is inside ferry house now, so ferry house cannot be inside Brindle Ford. Choose another place."
+        );
+        assert_eq!(
+            inside_sentence(ReviewError::Loop, "ferry house", Some("ferry house")),
+            "ferry house cannot be inside itself. Choose another place."
+        );
+    }
 }
