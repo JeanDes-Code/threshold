@@ -269,6 +269,10 @@ struct Committed<'a> {
     /// (`told_gated`): the narrator gets no "is not here" line (review r5,
     /// M1 and MJ1).
     gated: bool,
+    /// A Turn of an Intimate Scene (`scene_turn`): a gated one still gets
+    /// the "is not here" line for a full name (review r5 second re-check,
+    /// N1).
+    in_scene: bool,
     /// A Closing Turn: told plain under `context::CLOSING_LINE`, with no
     /// Intent and `mature::CLOSING_NARRATION_MAX_TOKENS`.
     closing: bool,
@@ -827,6 +831,7 @@ impl Engine {
                 &view_after,
                 &ops,
             ),
+            in_scene: scene_turn(&view_after, &ops),
             closing: stored.record.kind == TurnKind::Closing,
         };
         let narrated = self.narrate(
@@ -1108,6 +1113,7 @@ impl Engine {
                 .collect(),
             intimate: planned.intimacy.intimate(),
             gated: told_gated(planned.intimacy, &view_after, &ops),
+            in_scene: scene_turn(&view_after, &ops),
             closing,
         };
         let narrated = self
@@ -1220,6 +1226,7 @@ impl Engine {
             committed.closing,
             level,
             committed.gated,
+            committed.in_scene,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
@@ -1929,9 +1936,14 @@ pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
 /// (`mature::gated_before_answer`, review r5 re-check MJ1), and adds the
 /// model's own tag.
 fn told_gated(intimacy: Intimacy, view_after: &WorldView, ops: &[LedgerOp]) -> bool {
-    intimacy.gated()
-        || view_after.scene_open.is_some()
-        || ops.iter().any(|op| matches!(op, LedgerOp::SetScene { .. }))
+    intimacy.gated() || scene_turn(view_after, ops)
+}
+
+/// A Turn of an Intimate Scene: the scene is open right after the Turn
+/// (`view_after`), or the Turn's own Commit opened or closed it (a
+/// `SetScene` op in `ops`).
+fn scene_turn(view_after: &WorldView, ops: &[LedgerOp]) -> bool {
+    view_after.scene_open.is_some() || ops.iter().any(|op| matches!(op, LedgerOp::SetScene { .. }))
 }
 
 /// The narrator's lines for the NPCs the Intent took along who stay

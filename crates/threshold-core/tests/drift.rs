@@ -815,7 +815,8 @@ fn last_schema(gm: &RecordedGm) -> serde_json::Value {
 /// no Romance Word ("think of little Pip") offered Pip, a minor away at
 /// the market, for `arrives`. A model that took him ended the Turn in a
 /// final Refusal. A Turn of an open scene is gated before the model
-/// answers: nobody is offered, and the narrator gets no "is not here" line.
+/// answers: nobody is offered. The Intent names Pip by his full name, so
+/// the narrator still hears that he is not here (r5 second re-check, N1).
 #[test]
 fn an_open_scene_offers_no_arriver() {
     let mut w = World::with_detail(DetailLevel::Implied);
@@ -830,7 +831,7 @@ fn an_open_scene_offers_no_arriver() {
         schema["properties"]["arrives"]
     );
     let n = narration(&gm);
-    assert!(!n.contains("Pip is not here"), "{n}");
+    assert!(n.contains(PIP_NOT_HERE), "{n}");
 }
 
 /// Review r5 re-check (MJ1): inside an open Intimate Scene, a first word
@@ -849,4 +850,97 @@ fn a_first_word_is_no_name_in_an_open_scene() {
             assert!(!block.contains(&format!("E{wren}")), "{block}");
         }
     }
+}
+
+// --- review r5 second re-check, N1: an open scene drops no arrival --------
+
+/// The narrator's line for Pip, away at the market, when the Intent names
+/// him and he does not come.
+const PIP_NOT_HERE: &str =
+    "- Pip is not here and does not come in this Turn: do not show Pip here.";
+
+/// The confirmed gate world at Detail Level `implied` (Pip, 17, at the
+/// market). The recorder answers an intimate t1 on Brann (it opens the
+/// Intimate Scene), then each proposal of `t2`, then an intimate t3 on
+/// Brann; it holds `narrated` narrations. t1 is played.
+fn scene_rig(t2: impl Fn(&World) -> Vec<String>, narrated: usize) -> (World, RecordedGm, Engine) {
+    let mut w = World::with_detail(DetailLevel::Implied);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    let mut proposals = vec![on_brann(&w, "intimate", &[])];
+    proposals.extend(t2(&w));
+    proposals.push(on_brann(&w, "intimate", &[]));
+    let narrations = (0..narrated).map(|i| format!("Narration {i}.")).collect();
+    let gm = RecordedGm::new(proposals, narrations);
+    let mut engine = engine_of(&mut w, &gm);
+    play(&mut engine, "I make love with Brann.").expect("the scene opens");
+    assert!(snapshot(&engine, &w).scene_open.is_some());
+    (w, gm, engine)
+}
+
+/// Plays `intent` as Turn `id`.
+fn turn(engine: &mut Engine, id: &str, intent: &str) -> Result<(), TurnError> {
+    engine
+        .play_turn(id.into(), intent, &mut |_: &str| {})
+        .map(|_| ())
+}
+
+/// Review r5 second re-check (N1), the probe: in an open scene the Intent
+/// "I call Pip over." comes back `none` with `arrives: [Pip]`. The schema
+/// offered nobody, and `settle` dropped Pip as not offered: the Turn
+/// committed, Pip stayed away, and the narrator heard nothing about him.
+/// Now `settle` keeps the entry in an open scene, so the references check
+/// rejects it on both attempts: the Turn fails and nothing is committed.
+/// The next intimate Turn reads no Turn that called Pip.
+#[test]
+fn an_arrival_in_an_open_scene_is_never_dropped_silently() {
+    let (w, gm, mut engine) = scene_rig(
+        |w| {
+            let raw = on_brann(w, "none", &[w.pip]);
+            vec![raw.clone(), raw]
+        },
+        2,
+    );
+    let before = engine.store().turns(w.campaign).unwrap().len();
+    let t2 = turn(&mut engine, "t2", "I call Pip over.");
+    assert!(matches!(t2, Err(TurnError::Rejected(_))), "{t2:?}");
+    assert_eq!(prompts(&gm, CallKind::Narrate).len(), 1);
+    assert_eq!(engine.store().turns(w.campaign).unwrap().len(), before);
+    let now = snapshot(&engine, &w);
+    assert!(now.scene_open.is_some());
+    assert!(!now.present().contains(&w.pip));
+    turn(&mut engine, "t3", "I make love with Brann again.").expect("t3 commits");
+    let n = narration(&gm);
+    assert!(!n.contains("call Pip"), "{n}");
+    assert!(!snapshot(&engine, &w).present().contains(&w.pip));
+}
+
+/// Review r5 second re-check (N1): the same Intent, and the model sends no
+/// `arrives`. Pip stays at the market, and the narrator of t2 hears it, as
+/// outside a scene: the Intent names him by his full name. The next
+/// intimate Turn commits, and Pip is still away.
+#[test]
+fn a_full_name_in_an_open_scene_gets_the_not_here_line() {
+    let (w, gm, mut engine) = scene_rig(|w| vec![on_brann(w, "none", &[])], 3);
+    turn(&mut engine, "t2", "I call Pip over.").expect("t2 commits");
+    let n = narration(&gm);
+    assert!(n.contains(PIP_NOT_HERE), "{n}");
+    let now = snapshot(&engine, &w);
+    assert!(now.scene_open.is_some());
+    assert!(!now.present().contains(&w.pip));
+    turn(&mut engine, "t3", "I make love with Brann again.").expect("t3 commits");
+    assert!(!snapshot(&engine, &w).present().contains(&w.pip));
+}
+
+/// Review r5 second re-check (N1): the "is not here" line in an open scene
+/// reads full names only. "a little longer" holds the first word of Little
+/// Wren (9): the narrator gets no line for her (review r5, M1).
+#[test]
+fn a_first_word_gets_no_not_here_line_in_an_open_scene() {
+    let (mut w, _) = wren_world();
+    let (gm, result) = in_scene(&mut w, "I stay with Brann a little longer.");
+    result.expect("the plain Turn commits");
+    let n = narration(&gm);
+    assert!(!n.contains("Wren"), "{n}");
+    assert!(!n.contains("is not here"), "{n}");
 }

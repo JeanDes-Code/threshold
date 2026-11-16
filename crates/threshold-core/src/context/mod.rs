@@ -202,8 +202,14 @@ pub(crate) struct Retrieval<'a> {
     /// MJ1); for the narrator, the Turn's final tag or a Turn of an
     /// Intimate Scene. The Intent names a character by its full name only,
     /// nobody may come (`arrives` is absent), and the narrator gets no "is
-    /// not here" line.
+    /// not here" line, except in a Turn of an Intimate Scene (`in_scene`).
     pub gated: bool,
+    /// The narrator's prompt is for a Turn of an Intimate Scene
+    /// (`turn::scene_turn`). A gated Turn there still gets the "is not
+    /// here" line for an NPC the Intent names by a full name (review r5
+    /// second re-check, N1). `false` from `Retrieval::new`; only
+    /// `narration_prompt_with` sets it.
+    pub in_scene: bool,
 }
 
 impl<'a> Retrieval<'a> {
@@ -331,6 +337,7 @@ impl<'a> Retrieval<'a> {
             mentioned,
             mentioned_facts,
             gated,
+            in_scene: false,
         }
     }
 

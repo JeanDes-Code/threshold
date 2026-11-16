@@ -49,7 +49,7 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     drop_undeclared_reactions(&mut p, &mut notes);
     settle_closes(&mut p, view, &mut notes);
     settle_leaves(&mut p, view, &mut notes);
-    settle_arrivals(&mut p, &mut notes);
+    settle_arrivals(&mut p, view, &mut notes);
     settle_finds(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
@@ -68,8 +68,15 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
 /// gate reads the entry as a name (a minor or an unconfirmed age refuses),
 /// and the references check rejects an entry not offered: the Turn fails,
 /// it never commits with the arrival quietly taken out.
-fn settle_arrivals(p: &mut DecisionProposal, notes: &mut Vec<String>) {
-    if p.intimacy.gated() {
+///
+/// A Turn of an open Intimate Scene keeps every entry too (review r5
+/// second re-check, N1). The schema offers nobody there
+/// (`mature::gated_before_answer`), so "I call Pip over." tagged `none`
+/// with `arrives: [Pip]` lost Pip here: the Turn committed with Pip away,
+/// and the next intimate Turn passed. Now the references check rejects the
+/// entry, and the Turn fails.
+fn settle_arrivals(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
+    if p.intimacy.gated() || view.scene_open.is_some() {
         return;
     }
     let moves = p.action == ActionKind::Move && p.move_to.is_some();

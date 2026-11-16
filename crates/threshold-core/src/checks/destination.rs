@@ -209,7 +209,7 @@ pub fn companions(
         if p.leaves.iter().any(|l| l.npc == handle) {
             continue;
         }
-        let taken = character_names(view, id)
+        let taken = character_names(view, id, true)
             .iter()
             .any(|name| taken_along(&said, &normalize::name_words(&normalize::name(name))));
         if !taken {
@@ -253,12 +253,24 @@ fn taken_along(said: &[String], name: &[String]) -> bool {
 /// "ask Tobin where he ran off to" names Tobin Cooper by his first name.
 /// In id order.
 pub fn characters_named(view: &WorldView, intent: &str) -> Vec<EntityId> {
+    named_by(view, intent, true)
+}
+
+/// `characters_named` by a full name only: the main name or an alias the
+/// PC holds, never the first word alone (review r5 second re-check, N1).
+/// The narrator's "is not here" lines inside an open Intimate Scene read
+/// it: "a little longer" names no Little Wren (review r5, M1).
+pub fn characters_named_in_full(view: &WorldView, intent: &str) -> Vec<EntityId> {
+    named_by(view, intent, false)
+}
+
+fn named_by(view: &WorldView, intent: &str, first_word: bool) -> Vec<EntityId> {
     let said = normalize::name_words(intent);
     view.entities
         .iter()
         .filter(|e| e.kind == EntityKind::Npc)
         .filter(|e| {
-            character_names(view, e.id).iter().any(|name| {
+            character_names(view, e.id, first_word).iter().any(|name| {
                 let name = normalize::name_words(&normalize::name(name));
                 !name.is_empty() && said.windows(name.len()).any(|w| w == name.as_slice())
             })
@@ -268,8 +280,9 @@ pub fn characters_named(view: &WorldView, intent: &str) -> Vec<EntityId> {
 }
 
 /// The names the PC can call character `id` by: its main name, its first
-/// word, and each other name the PC holds an `alias_` Belief for.
-fn character_names(view: &WorldView, id: EntityId) -> Vec<String> {
+/// word (when `first_word`), and each other name the PC holds an `alias_`
+/// Belief for.
+fn character_names(view: &WorldView, id: EntityId, first_word: bool) -> Vec<String> {
     if !world::pc_can_name(view).contains(&id) {
         return Vec::new();
     }
@@ -277,7 +290,7 @@ fn character_names(view: &WorldView, id: EntityId) -> Vec<String> {
         return Vec::new();
     };
     let mut names = vec![e.name.clone()];
-    if let Some(first) = e.name.split_whitespace().next() {
+    if let Some(first) = e.name.split_whitespace().next().filter(|_| first_word) {
         names.push(first.to_owned());
     }
     names.extend(
@@ -409,7 +422,7 @@ fn names_a_character(view: &WorldView, phrase: &[String]) -> bool {
     view.entities
         .iter()
         .filter(|e| matches!(e.kind, EntityKind::Npc | EntityKind::Pc))
-        .flat_map(|e| character_names(view, e.id))
+        .flat_map(|e| character_names(view, e.id, true))
         .any(|name| {
             let words = normalize::name_words(&normalize::name(&name));
             !words.is_empty() && phrase.windows(words.len()).any(|w| w == words.as_slice())

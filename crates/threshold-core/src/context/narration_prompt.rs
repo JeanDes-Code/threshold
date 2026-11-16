@@ -461,6 +461,7 @@ pub fn narration_prompt(
         false,
         effective(view_after.detail, packs),
         false,
+        false,
     )
 }
 
@@ -482,7 +483,9 @@ pub fn narration_prompt(
 /// intimate Turn told above it is its Neutral Line (final review M3).
 /// `gated` tells a Turn the age rule ran for (`Intimacy::gated`): the
 /// outcome block then has no "is not here" line (`away_lines`, review r5
-/// M1).
+/// M1). `in_scene` tells a Turn of an Intimate Scene
+/// (`Retrieval::in_scene`): a gated one there keeps the line for a full
+/// name (review r5 second re-check, N1).
 #[allow(clippy::too_many_arguments)]
 pub fn narration_prompt_with(
     view_after: &WorldView,
@@ -498,8 +501,10 @@ pub fn narration_prompt_with(
     closing: bool,
     level: DetailLevel,
     gated: bool,
+    in_scene: bool,
 ) -> Prompt {
-    let r = Retrieval::new(view_after, "", cleared, level, gated);
+    let mut r = Retrieval::new(view_after, "", cleared, level, gated);
+    r.in_scene = in_scene;
     let head = match told {
         Told::Plain if closing => CLOSING_LINE.to_owned(),
         Told::Plain => String::new(),
@@ -748,18 +753,24 @@ fn here_line(r: &Retrieval<'_>) -> String {
 /// leaves in this Turn has its own line. None on a Turn the age rule ran
 /// for (`Retrieval::gated`, review r5 M1): a first word there is no name,
 /// and the line would bring a child the Intent never named into the
-/// narrator's prompt.
+/// narrator's prompt. In a Turn of an Intimate Scene (`Retrieval::in_scene`)
+/// a gated Turn still gets the line for an NPC the Intent names by a full
+/// name (`checks::characters_named_in_full`, review r5 second re-check,
+/// N1): "I call Pip over." told nothing, and the story could bring in a
+/// minor the state kept away.
 fn away_lines(r: &Retrieval<'_>, intent: &str, perceived: &[LedgerOp]) -> Vec<String> {
-    if r.gated {
-        return Vec::new();
-    }
+    let named = match (r.gated, r.in_scene) {
+        (false, _) => crate::checks::characters_named(r.view, intent),
+        (true, true) => crate::checks::characters_named_in_full(r.view, intent),
+        (true, false) => return Vec::new(),
+    };
     let moved = |id: EntityId| {
         perceived.iter().any(|op| {
             matches!(op, LedgerOp::AddFact { slot, .. }
                 if slot.subject == EntityRef::Id(id) && normalize::key(&slot.key) == "location")
         })
     };
-    crate::checks::characters_named(r.view, intent)
+    named
         .into_iter()
         .filter(|id| !r.seen_present.contains(id) && !r.present.contains(id) && !moved(*id))
         .filter_map(|id| r.view.entities.iter().find(|e| e.id == id))
