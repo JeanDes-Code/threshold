@@ -1478,16 +1478,23 @@ fn play_basics_counts_each_step() {
         talk,
         go(mill),
         go(mill),
+        // The move back to the town hall: the first proposal goes back
+        // (ADR 0007, changed after review), and the retry says the mill
+        // again.
+        go(mill),
         go(mill),
         nowhere,
     ]);
     for line in [
-        // The PC already stands at the mill for the first move. For the
-        // second, the core sets the town hall the Intent names over the
-        // model's mill (ADR 0007, changed after QA run 4).
-        "- Moves that reached the asked place: 2 / 2 (100%)",
+        // The retry that still says the mill stays put (ADR 0007, changed
+        // after review): the PC never reaches the town hall.
+        "- Moves that reached the asked place: 1 / 2 (50%)",
         "- False closes / negative steps: 1 / 1 (100%)",
-        "- False moves / negative steps: 1 / 1 (100%)",
+        // "the walk down to the Varn mill takes" is a place phrase that
+        // does not name the mill (it ends on "takes"), so the core keeps
+        // the PC in place. The model's false move is still there; the
+        // phrase rule catches it here by chance.
+        "- False moves / negative steps: 0 / 1 (0%)",
         "- Pending items closed: 0 / 1 (0%)",
     ] {
         assert!(wrong.contains(line), "missing {line}:\n{wrong}");

@@ -49,17 +49,19 @@ const GOES: &[&str] = &[
 ];
 
 /// Checks `move_to` against the places the Intent names (QA run 4). Only a
-/// move is read. `retry` is true on the second proposal: the core then
-/// sets the named place itself. Returns the notes for the debug log and,
-/// on a first proposal, a rejection that asks the model again.
+/// move is read. `retry` is true on the second proposal. Returns the notes
+/// for the debug log and, on a first proposal, a rejection that asks the
+/// model again.
 ///
 /// - The Intent names a known place (main name or an other name the PC
-///   holds, any case, with or without an article) other than the PC's own:
-///   `move_to` must be one of them, or the one a place phrase names ("to
-///   the mill") when there is one. A model that said `unknown_place`, or
-///   another known place, gets the named one. When its verdict is not
-///   `allowed`, that verdict was judged for the wrong place: the first
-///   proposal is sent back with a note; the retry keeps its verdict. A
+///   holds, any case, with or without an article) other than the PC's own,
+///   inside a place phrase ("to the mill"), or anywhere when the Intent
+///   has no place phrase: `move_to` must be that place. The core never
+///   sets a place the model did not judge (review M2, 2026-11-16). A model
+///   that said `unknown_place`, or another known place, gets the first
+///   proposal back with a note, whatever its verdict. A retry that still
+///   says another place stays put, as for `unknown_place`, with the verdict
+///   `allowed` and no check: they were judged for the other place. A
 ///   model that kept the PC in place (`null`, not `unknown_place`) is kept:
 ///   a name in the Intent is no move ("I watch Tobin reach the Cooper
 ///   house"). A place phrase that names the PC's own place removes the
@@ -102,7 +104,12 @@ pub fn named_destination(
         .into_iter()
         .filter(|id| !world::is_pc_place(view, Handle::Entity(*id)))
         .collect();
-    if !named.is_empty() {
+    // A known place named outside a place phrase is a destination only when
+    // the Intent has no place phrase at all ("I head for the Cooper house").
+    // "I walk to the window and look out at the Copper Kettle" goes to the
+    // window, not to the Kettle (review M2, 2026-11-16).
+    let target = aimed.or_else(|| phrases.is_empty().then(|| named.last().copied()).flatten());
+    if let Some(target) = target {
         let fits = |h: Handle| match aimed {
             Some(id) => h == Handle::Entity(id),
             None => named.iter().any(|id| h == Handle::Entity(*id)),
@@ -110,10 +117,15 @@ pub fn named_destination(
         if p.move_to.is_some_and(fits) || (p.move_to.is_none() && !p.unknown_place) {
             return (notes, None);
         }
-        let target = aimed.unwrap_or_else(|| *named.last().expect("named is not empty"));
         let handle = Handle::Entity(target);
-        let name = place_name(view, target);
-        if !retry && p.verdict != Verdict::Allowed {
+        let was = p.move_to.map_or_else(
+            || crate::domain::UNKNOWN_PLACE.to_owned(),
+            |h| h.to_string(),
+        );
+        if !retry {
+            // The model judged its verdict for another place: the core never
+            // commits a place the model did not judge (review M2).
+            let name = place_name(view, target);
             let reason = format!(
                 "the intent names {handle} {name}, a place listed under PLACES: set move_to {handle}, and judge the verdict for that place"
             );
@@ -122,15 +134,17 @@ pub fn named_destination(
                 Some(Rejection::new(CheckKind::Destination, Some(handle), reason)),
             );
         }
-        let was = p.move_to.map_or_else(
-            || crate::domain::UNKNOWN_PLACE.to_owned(),
-            |h| h.to_string(),
-        );
+        // The retry still names another place: the PC stays, and nothing
+        // judged for that other place is kept.
+        p.move_to = None;
+        p.unknown_place = true;
+        p.verdict = Verdict::Allowed;
+        p.contested = false;
+        p.check = None;
+        p.blockers.clear();
         notes.push(format!(
-            "set move_to {handle} (was {was}): the intent names that place"
+            "removed move_to {was}, the verdict and the check: the retry still does not go to {handle}, the place the intent names"
         ));
-        p.move_to = Some(handle);
-        p.unknown_place = false;
         return (notes, None);
     }
     let Some(place) = p.move_to else {

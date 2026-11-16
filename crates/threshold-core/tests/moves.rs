@@ -129,10 +129,12 @@ fn narration(gm: &RecordedGm) -> String {
 // --- Bug 1: a known place the model called unknown ---------------------------
 
 /// QA run 4, Turn 6: `move_to: "unknown_place"`, verdict allowed, for a
-/// place listed under PLACES. The Intent names the place: the PC goes
-/// there, on the first proposal, whatever the case or the article.
+/// place listed under PLACES. The Intent names the place, whatever the case
+/// or the article: the first proposal goes back with a note that names the
+/// place, and a retry that goes there moves the PC. The core never sets the
+/// place itself (review M2, 2026-11-16).
 #[test]
-fn a_known_place_the_model_called_unknown_still_moves_the_pc() {
+fn a_known_place_the_model_called_unknown_is_asked_again() {
     for (intent, to) in [
         (
             "I get dressed and walk to the Cooper house on the lane behind the green, to ask Marta Cooper for dry kindling.",
@@ -143,14 +145,25 @@ fn a_known_place_the_model_called_unknown_still_moves_the_pc() {
         ("I walk down to The Ferry House.", "ferry house"),
         ("i walk to the cooper house", "cooper house"),
     ] {
-        let (mut engine, p, gm) = engine(places(), vec![unknown(&a_move(Verdict::Allowed))]);
+        let p0 = places();
+        let target = if to == "ferry house" {
+            p0.ferry
+        } else {
+            p0.cooper
+        };
+        let (mut engine, p, gm) = engine(
+            p0,
+            vec![unknown(&a_move(Verdict::Allowed)), json(&move_to(target))],
+        );
         play(&mut engine, intent).unwrap();
         assert_eq!(location(&engine, &p.w, p.w.ada), to, "{intent}");
         assert_eq!(
             calls(&gm),
-            [CallKind::Propose, CallKind::Narrate],
+            [CallKind::Propose, CallKind::Propose, CallKind::Narrate],
             "{intent}"
         );
+        let retry = &prompts(&gm, CallKind::Propose)[1];
+        assert!(retry.recent.contains(&format!("E{target}")), "{intent}");
         assert!(
             !narration(&gm).contains(threshold_core::context::UNKNOWN_PLACE_LINE),
             "{intent}"
@@ -191,33 +204,92 @@ fn an_impossible_move_to_a_known_place_called_unknown_is_asked_again() {
     assert!(retry.recent.contains("ferry house"), "{}", retry.recent);
 }
 
-/// The retry of that Turn says `unknown_place` again: the core sets the
-/// place the Intent names, and keeps the verdict. The PC stays, and the
-/// Player is not told that the place is unknown.
-#[test]
-fn a_retry_that_still_calls_a_named_place_unknown_keeps_its_verdict() {
-    let (mut engine, p, gm) = engine(
-        places(),
-        vec![
-            unknown(&a_move(Verdict::Impossible)),
-            unknown(&a_move(Verdict::Impossible)),
-        ],
-    );
-    let before = location(&engine, &p.w, p.w.ada);
-    play(&mut engine, "I walk down to the ferry house.").unwrap();
-    assert_eq!(location(&engine, &p.w, p.w.ada), before);
-    assert!(!narration(&gm).contains(threshold_core::context::UNKNOWN_PLACE_LINE));
+/// The stored verdict of the last Turn.
+fn stored_verdict(engine: &Engine, w: &World) -> String {
+    let stored = engine.store().turns(w.campaign).unwrap();
+    let record: serde_json::Value =
+        serde_json::from_str(&stored.last().unwrap().record.proposal_json).unwrap();
+    record["proposal"]["verdict"].as_str().unwrap().to_owned()
 }
 
-/// A move whose model `move_to` is another known place than the one the
-/// Intent names goes to the named place.
+/// Review M2 and its Minor (2026-11-16): a retry that still does not go to
+/// the place the Intent names stays put, as for `unknown_place`. Its
+/// verdict was judged for another place, so it is not kept: the narrator
+/// gets no impossible act and no Check.
 #[test]
-fn a_move_goes_to_the_known_place_the_intent_names() {
+fn a_retry_that_still_names_another_place_stays_put() {
     let p0 = places();
     let cooper = p0.cooper;
-    let (mut engine, p, _gm) = engine(p0, vec![json(&move_to(cooper))]);
+    for retry in [
+        unknown(&a_move(Verdict::Impossible)),
+        json(&{
+            let mut p = move_to(cooper);
+            p.verdict = Verdict::Impossible;
+            p
+        }),
+        json(&move_to(cooper)),
+    ] {
+        let (mut engine, p, gm) = engine(
+            places(),
+            vec![unknown(&a_move(Verdict::Impossible)), retry.clone()],
+        );
+        let before = location(&engine, &p.w, p.w.ada);
+        play(&mut engine, "I walk down to the ferry house.").unwrap();
+        assert_eq!(location(&engine, &p.w, p.w.ada), before, "{retry}");
+        assert!(
+            narration(&gm).contains(threshold_core::context::UNKNOWN_PLACE_LINE),
+            "{retry}"
+        );
+        assert_eq!(stored_verdict(&engine, &p.w), "allowed", "{retry}");
+    }
+}
+
+/// Review M2, case (a), from the QA view: "I walk to the Copper Kettle."
+/// came with `move_to` another known place, verdict allowed. That verdict
+/// was judged for the other place (a storm or a high river on the way to
+/// the named one is skipped), so the first proposal goes back; the PC
+/// moves only on a retry that judged the named place.
+#[test]
+fn a_move_to_another_known_place_is_asked_again_even_when_allowed() {
+    let p0 = places();
+    let (cooper, ferry) = (p0.cooper, p0.ferry);
+    let (mut engine, p, gm) = engine(p0, vec![json(&move_to(cooper)), json(&move_to(ferry))]);
     play(&mut engine, "I walk down to the ferry house.").unwrap();
     assert_eq!(location(&engine, &p.w, p.w.ada), "ferry house");
+    assert_eq!(
+        calls(&gm),
+        [CallKind::Propose, CallKind::Propose, CallKind::Narrate]
+    );
+    let retry = &prompts(&gm, CallKind::Propose)[1];
+    assert!(
+        retry.recent.contains(&format!("E{ferry}")),
+        "{}",
+        retry.recent
+    );
+}
+
+/// Review M2, case (b): "to the window" is a place phrase that names no
+/// known place; the Cooper house named after it is no destination. The PC
+/// stays, whatever the model sent, and no retry is asked.
+#[test]
+fn a_place_named_outside_the_place_phrase_is_no_destination() {
+    let p0 = places();
+    let cooper = p0.cooper;
+    for first in [unknown(&a_move(Verdict::Allowed)), json(&move_to(cooper))] {
+        let (mut engine, p, gm) = engine(places(), vec![first.clone()]);
+        let before = location(&engine, &p.w, p.w.ada);
+        play(
+            &mut engine,
+            "I walk to the window and look out at the Cooper house.",
+        )
+        .unwrap();
+        assert_eq!(location(&engine, &p.w, p.w.ada), before, "{first}");
+        assert_eq!(
+            calls(&gm),
+            [CallKind::Propose, CallKind::Narrate],
+            "{first}"
+        );
+    }
 }
 
 /// Review of the eval counts (2026-11-16): a place the Intent names is not
@@ -227,14 +299,20 @@ fn a_move_goes_to_the_known_place_the_intent_names() {
 #[test]
 fn the_place_after_to_is_where_the_pc_goes() {
     let p0 = places();
-    let ferry = p0.ferry;
-    let (mut past, p, _gm) = engine(p0, vec![json(&move_to(ferry))]);
+    let (cooper, ferry) = (p0.cooper, p0.ferry);
+    let (mut past, p, gm) = engine(p0, vec![json(&move_to(ferry)), json(&move_to(cooper))]);
     play(
         &mut past,
         "I walk to the Cooper house, past the ferry house.",
     )
     .unwrap();
     assert_eq!(location(&past, &p.w, p.w.ada), "cooper house");
+    let retry = &prompts(&gm, CallKind::Propose)[1];
+    assert!(
+        retry.recent.contains(&format!("E{cooper}")),
+        "{}",
+        retry.recent
+    );
 
     let p0 = places();
     let cooper = p0.cooper;

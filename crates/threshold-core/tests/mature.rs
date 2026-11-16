@@ -169,6 +169,30 @@ fn a_minor_in_the_place_refuses() {
     assert_eq!(adults_only(&errs), [Some(e(w.pip))]);
 }
 
+/// Review (2026-11-16): `companions` and `left_behind` name characters. A
+/// minor named there refuses an intimate move, even one who stands at
+/// another place: Pip is at the market, so only the field reaches Pip.
+#[test]
+fn a_minor_companion_refuses_an_intimate_move() {
+    let w = confirmed_gate();
+    for field in ["companions", "left_behind"] {
+        let mut p = intimate(&w, Stance::Comply);
+        p.action = ActionKind::Move;
+        let pip = vec![e(w.pip)];
+        if field == "companions" {
+            p.companions = pip;
+        } else {
+            p.left_behind = pip;
+        }
+        let errs = validate(&p, &w.view).expect_err(field);
+        assert!(
+            adults_only(&errs).contains(&Some(e(w.pip))),
+            "{field}: {errs:?}"
+        );
+        assert!(errs.iter().any(|r| r.check.is_final()), "{field}");
+    }
+}
+
 #[test]
 fn an_unconfirmed_adult_refuses() {
     let mut w = World::with_detail(DetailLevel::Implied);
