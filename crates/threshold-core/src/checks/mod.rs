@@ -20,7 +20,7 @@ use crate::{
 
 pub(crate) use agency::is_involuntary_key;
 pub use contest::{checks_now, contest_note, default_check, oppose};
-pub use destination::{companions, named_destination};
+pub use destination::{characters_named, companions, named_destination};
 pub use ops::{Resolved, found, to_ops};
 pub use settle::{settle, settle_closing};
 

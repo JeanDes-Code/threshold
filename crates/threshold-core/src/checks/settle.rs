@@ -46,11 +46,36 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
             p.action
         ));
     }
+    drop_undeclared_reactions(&mut p, &mut notes);
     settle_closes(&mut p, view, &mut notes);
     settle_leaves(&mut p, view, &mut notes);
     settle_finds(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
+}
+
+/// A reaction on an N handle that `new_npcs` does not declare (QA run 5,
+/// 2026-11-16): the model made up a handle for a character the prompt did
+/// not show, and the Turn failed three times on it. The reaction goes: it
+/// is an NPC's stance, not a PC act, and the Turn keeps what else it says.
+/// A Turn the age rule runs for (`intimacy` not `none`) keeps it, so the
+/// references check still rejects it: the gate reads handles, and it fails
+/// closed.
+fn drop_undeclared_reactions(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+    if p.intimacy != Intimacy::None {
+        return;
+    }
+    let declared: Vec<Handle> = p.new_npcs.iter().map(|n| n.id).collect();
+    p.reactions.retain(|r| {
+        let undeclared = matches!(r.npc, Handle::NewNpc(_)) && !declared.contains(&r.npc);
+        if undeclared {
+            notes.push(format!(
+                "removed the reaction of {}: the N handle is not declared in new_npcs",
+                r.npc
+            ));
+        }
+        !undeclared
+    });
 }
 
 /// `finds` (ADR 0007, 2026-11-12). A Turn the age rule runs for keeps none:

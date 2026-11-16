@@ -19,7 +19,7 @@ mod support;
 use support::*;
 use threshold_core::{
     CallKind, Prompt, RecordedGm,
-    domain::{EntityRef, Knowing, LedgerOp, Verdict},
+    domain::{EntityRef, Intimacy, Knowing, LedgerOp, Stance, Verdict},
     store::{Store, WorldView},
     turn::{Engine, TurnError},
 };
@@ -214,4 +214,57 @@ fn a_schedule_due_now_that_sends_a_present_npc_away_moves_it_this_turn() {
         ooc.recent
     );
     assert!(!ooc.scene.contains("Here with you: Tobin"), "{}", ooc.scene);
+}
+
+// --- 3: the Player cannot talk to him ---------------------------------------
+
+/// QA run 5, the failed Turn after Turn 45: "I kneel by the fire and ask
+/// Tobin where he ran off to." Tobin is away and the Intent names him by
+/// his first name only. His handle now reaches the prompt, and a reaction
+/// on an N handle that `new_npcs` never declares is dropped instead of
+/// failing the Turn.
+#[test]
+fn a_first_name_in_the_intent_shows_the_npc_and_an_undeclared_n_handle_does_not_fail_the_turn() {
+    let mut c = coopers(false);
+    let n1 = || {
+        let mut p = serde_json::to_value(proposal(Verdict::Allowed)).unwrap();
+        p["action"] = "talk".into();
+        p["minutes"] = 5.into();
+        p["reactions"] = serde_json::json!([
+            {"npc": "N1", "plan": "check on the boy", "stance": "comply", "willing": "yes", "cause": null}
+        ]);
+        p.to_string()
+    };
+    let gm = RecordedGm::new(vec![n1(), n1()], vec!["You kneel.".into()]);
+    let mut engine = engine_of(&mut c.w, &gm);
+    play(
+        &mut engine,
+        "I kneel by the fire and ask Tobin where he ran off to.",
+    )
+    .expect("the Turn commits");
+    let first = prompts(&gm, CallKind::Propose).remove(0);
+    assert!(
+        first.recent.contains(&format!("E{} Tobin Cooper", c.tobin)),
+        "{}",
+        first.recent
+    );
+}
+
+/// The age gate reads handles: on a Turn it runs for, the reaction on an
+/// undeclared N handle stays, so the references check still rejects it
+/// (it fails closed). On a plain Turn it goes.
+#[test]
+fn an_undeclared_n_handle_stays_on_a_gated_turn() {
+    let c = coopers(false);
+    for (intimacy, kept) in [(Intimacy::None, 0), (Intimacy::Advance, 1)] {
+        let mut p = proposal(Verdict::Allowed);
+        p.intimacy = intimacy;
+        p.reactions = vec![reaction(
+            threshold_core::domain::Handle::NewNpc(1),
+            Stance::Comply,
+            None,
+        )];
+        let (p, _) = threshold_core::checks::settle(p, &c.w.view);
+        assert_eq!(p.reactions.len(), kept, "{intimacy:?}");
+    }
 }

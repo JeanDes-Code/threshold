@@ -248,6 +248,25 @@ fn taken_along(said: &[String], name: &[String]) -> bool {
         })
 }
 
+/// The NPCs the PC can name that `intent` names (QA run 5, 2026-11-16): a
+/// name of `character_names` as a run of whole words, whatever the case.
+/// "ask Tobin where he ran off to" names Tobin Cooper by his first name.
+/// In id order.
+pub fn characters_named(view: &WorldView, intent: &str) -> Vec<EntityId> {
+    let said = normalize::name_words(intent);
+    view.entities
+        .iter()
+        .filter(|e| e.kind == EntityKind::Npc)
+        .filter(|e| {
+            character_names(view, e.id).iter().any(|name| {
+                let name = normalize::name_words(&normalize::name(name));
+                !name.is_empty() && said.windows(name.len()).any(|w| w == name.as_slice())
+            })
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
 /// The names the PC can call character `id` by: its main name, its first
 /// word, and each other name the PC holds an `alias_` Belief for.
 fn character_names(view: &WorldView, id: EntityId) -> Vec<String> {
