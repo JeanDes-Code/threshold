@@ -758,11 +758,13 @@ export function insideStart(line: InsideLine): string {
 
 /**
  * The model's guess for a link no fact backs, as a quiet hint: "Suggested:
- * inside X" or "Suggested: top level". None once the link is confirmed.
+ * inside X". None for a guess of "top level" (it would lead the Player to
+ * the link that makes two Places apart), on a doubted link, and once the
+ * link is confirmed.
  */
 export function suggestionText(line: InsideLine): string | null {
-  if (line.confirmed || line.suggested === null || line.suggested === "unknown") return null;
-  return line.suggested === "top" ? "Suggested: top level" : `Suggested: inside ${line.suggested.place}`;
+  if (line.confirmed || line.doubted || line.suggested === null || typeof line.suggested === "string") return null;
+  return `Suggested: inside ${line.suggested.place}`;
 }
 
 /**

@@ -56,10 +56,23 @@ describe("the Inside row of the Seed review (ADR 0008, 2026-11-16)", () => {
     expect(kettle).toContain("Suggested: inside Ostley Crossing");
     expect(confirmDisabled(kettle)).toBe(true);
 
+    // A guess of "top level" shows no hint: it would lead the Player to
+    // the link that makes two Places apart.
     const crossing = insideRow(html, "Ostley Crossing");
     expect(selected(crossing)).toBe("");
-    expect(crossing).toContain("Suggested: top level");
+    expect(crossing).not.toContain("Suggested:");
     expect(confirmDisabled(crossing)).toBe(true);
+  });
+
+  it("shows no hint on a doubted link, whatever the model guessed", () => {
+    const html = render([
+      line("Ostley Crossing", { suggested: "top" }),
+      line("The Copper Kettle", { doubted: true, suggested: { place: "Ostley Crossing" } }),
+    ]);
+    const kettle = insideRow(html, "The Copper Kettle");
+    expect(selected(kettle)).toBe("");
+    expect(kettle).toContain("needs a choice");
+    expect(kettle).not.toContain("Suggested:");
   });
 
   it("starts a backed link on the model's choice, with no hint, and Confirm ready", () => {
