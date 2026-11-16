@@ -632,7 +632,6 @@ impl Session {
         text: &str,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
-        let debug = self.debug();
         let fade = self.fade.clone();
         let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
@@ -641,20 +640,19 @@ impl Session {
             faded: &|| fade.raised(),
         };
         let played = open.engine.play_turn_with(op_id, text, &mut ctl);
-        committed(&open.engine, played, debug)
+        committed(&open.engine, played)
     }
 
     /// Begin: the Opening Turn of the open Campaign. A second call returns
     /// the stored Turn.
     pub fn begin(&mut self, on_chunk: &mut dyn FnMut(&str)) -> Result<TurnSummary, AppError> {
-        let debug = self.debug();
         // The Opening reads no fade flag (data shape 10); it runs all the
         // same, so a fade pressed now waits for nothing.
         let fade = self.fade.clone();
         let _running = fade.start(threshold_core::turn::BEGIN_OP_ID);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         let played = open.engine.begin(on_chunk);
-        committed(&open.engine, played, debug)
+        committed(&open.engine, played)
     }
 
     pub fn correct_last(
@@ -664,7 +662,6 @@ impl Session {
         why: &str,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
-        let debug = self.debug();
         let fade = self.fade.clone();
         let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
@@ -675,7 +672,7 @@ impl Session {
         let played = open
             .engine
             .correct_last_with(op_id, clarified, why, &mut ctl);
-        committed(&open.engine, played, debug)
+        committed(&open.engine, played)
     }
 
     /// "End scene": the Closing Turn of the open Intimate Scene. Its short
@@ -685,7 +682,6 @@ impl Session {
         op_id: String,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<TurnSummary, AppError> {
-        let debug = self.debug();
         let fade = self.fade.clone();
         let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
@@ -694,7 +690,7 @@ impl Session {
             faded: &|| fade.raised(),
         };
         let played = open.engine.end_scene(op_id, &mut ctl);
-        committed(&open.engine, played, debug)
+        committed(&open.engine, played)
     }
 
     /// "Fade to black" with no Turn running (`fade_to_black` holds the
@@ -704,7 +700,6 @@ impl Session {
     /// renarration that ended before it read the flag. It then names the
     /// Turn that renarration told (review minor, 2026-11-12).
     pub fn fade(&mut self, op_id: String) -> Result<FadeResult, AppError> {
-        let debug = self.debug();
         let fade = self.fade.clone();
         let _running = fade.start(&op_id);
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
@@ -720,7 +715,7 @@ impl Session {
         };
         match open.engine.fade(op_id) {
             Ok(_) | Err(TurnError::NothingToFade) => Ok(FadeResult { pending: false }),
-            Err(e) => Err(player_error(&e, debug)),
+            Err(e) => Err(player_error(&e)),
         }
     }
 
@@ -733,11 +728,10 @@ impl Session {
         entity_id: u64,
         op_id: String,
     ) -> Result<PlayView, AppError> {
-        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         open.engine
             .confirm_age(op_id, entity_id)
-            .map_err(|e| player_error(&e, debug))?;
+            .map_err(|e| player_error(&e))?;
         self.get_play_view()
     }
 
@@ -749,20 +743,18 @@ impl Session {
         level: DetailLevel,
         op_id: String,
     ) -> Result<PlayView, AppError> {
-        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         open.engine
             .set_detail_level(op_id, level)
-            .map_err(|e| player_error(&e, debug))?;
+            .map_err(|e| player_error(&e))?;
         self.get_play_view()
     }
 
     pub fn ask_ooc(&mut self, text: &str) -> Result<String, AppError> {
-        let debug = self.debug();
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
         open.engine
             .ooc(format!("ooc-{}", clock_nanos()), text)
-            .map_err(|e| player_error(&e, debug))
+            .map_err(|e| player_error(&e))
     }
 
     pub fn renarrate(
@@ -770,7 +762,6 @@ impl Session {
         turn_id: u64,
         on_chunk: &mut dyn FnMut(&str),
     ) -> Result<String, AppError> {
-        let debug = self.debug();
         let fade = self.fade.clone();
         let _running = fade.start(&renarrate_op_id(turn_id));
         let open = self.open.as_mut().ok_or(AppError::NoCampaign)?;
@@ -780,7 +771,7 @@ impl Session {
         };
         open.engine
             .renarrate_with(turn_id, &mut ctl)
-            .map_err(|e| player_error(&e, debug))
+            .map_err(|e| player_error(&e))
     }
 
     /// The open campaign as the PC knows it: the only input of a view.
@@ -969,7 +960,6 @@ fn campaign_card(path: &Path) -> CampaignCard {
 fn committed(
     engine: &Engine,
     played: Result<TurnOutcome, TurnError>,
-    debug: bool,
 ) -> Result<TurnSummary, AppError> {
     match played {
         Ok(outcome) => Ok(turn_summary(outcome)),
@@ -991,11 +981,9 @@ fn committed(
         // A Refusal carries what the Player may confirm from it, read from
         // the state now (`Engine::refusal_view`), never who blocked.
         Err(TurnError::Refused { kind, .. }) => Err(AppError::Refused(
-            engine
-                .refusal_view(kind)
-                .map_err(|e| player_error(&e, debug))?,
+            engine.refusal_view(kind).map_err(|e| player_error(&e))?,
         )),
-        Err(e) => Err(player_error(&e, debug)),
+        Err(e) => Err(player_error(&e)),
     }
 }
 
@@ -1017,10 +1005,14 @@ pub const TURN_NOT_SETTLED: &str = "The GM could not settle this Turn. Try to sa
 
 /// The text of a Turn error that the Player may see. Rejection reasons and
 /// model or store messages can quote GM-only facts (a Persistent key, a
-/// model's echo), so a rejection shows `TURN_NOT_SETTLED` only; in debug
-/// mode the check kinds follow it. A handle would reveal that a hidden fact
-/// exists, and its id. The full reasons stay in the debug log.
-pub fn player_error(e: &TurnError, debug: bool) -> AppError {
+/// model's echo), so a rejection shows `TURN_NOT_SETTLED` only, in debug
+/// mode too (QA run 4: "Rejected twice by: - npc folds (details in the
+/// debug view)" stayed on the Play screen after Debug mode was turned off,
+/// because the text is fixed when the Turn fails). A handle would reveal
+/// that a hidden fact exists, and its id. The check kinds and the full
+/// reasons stay in the debug log, in the `validate` rows of the Turn's
+/// operation.
+pub fn player_error(e: &TurnError) -> AppError {
     let text = match e {
         TurnError::EmptyIntent
         | TurnError::IntentTooLong
@@ -1036,17 +1028,7 @@ pub fn player_error(e: &TurnError, debug: bool) -> AppError {
             "the Turn is committed, but its narration failed: {}",
             model_error(error)
         ),
-        TurnError::Rejected(errs) => {
-            let mut text = String::from(TURN_NOT_SETTLED);
-            if debug {
-                text.push_str("\nRejected twice by:");
-                for r in errs {
-                    text.push_str(&format!("\n- {}", r.check));
-                }
-                text.push_str("\n(details in the debug view)");
-            }
-            text
-        }
+        TurnError::Rejected(_) => TURN_NOT_SETTLED.to_owned(),
         TurnError::Store(_) => {
             "a storage error stopped the Turn (details in the debug view)".into()
         }

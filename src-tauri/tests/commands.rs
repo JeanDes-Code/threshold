@@ -283,7 +283,9 @@ fn rejected_turn_error_hides_gm_only_facts() {
         .to_string();
     // Outside debug mode: one plain sentence, no check name.
     assert_eq!(err, TURN_NOT_SETTLED);
-    // In debug mode the check kinds follow it, and still no secret.
+    // In debug mode too (QA run 4): the text is fixed when the Turn fails,
+    // so a check name shown in debug mode stayed after Debug mode was
+    // turned off. The check kinds stay in the debug log.
     s.set_debug(true);
     let bend = with_fact(orsel, "skims", "nothing at all", None);
     gm.push_proposal(bend.clone());
@@ -292,8 +294,8 @@ fn rejected_turn_error_hides_gm_only_facts() {
         .submit_intent("op-2".into(), "I accuse Orsel.", &mut |_| {})
         .unwrap_err()
         .to_string();
-    assert!(err.starts_with(TURN_NOT_SETTLED), "{err}");
-    assert!(err.contains("fact bends"), "{err}");
+    assert_eq!(err, TURN_NOT_SETTLED);
+    assert!(!err.contains("fact bends"), "{err}");
     for secret in ["skims", "grain tithe"] {
         assert!(!err.contains(secret), "{err}");
     }
@@ -320,6 +322,15 @@ fn rejected_turn_error_hides_gm_only_facts() {
     assert!(
         raw.iter()
             .any(|e| e.step == "validate" && e.raw.contains("skims"))
+    );
+    // The check kinds the Player no longer reads stay in the debug log.
+    let raw = Store::open(Path::new(&db))
+        .unwrap()
+        .debug_log("op-2")
+        .unwrap();
+    assert!(
+        raw.iter()
+            .any(|e| e.step == "validate" && e.raw.contains("fact bends"))
     );
 }
 
