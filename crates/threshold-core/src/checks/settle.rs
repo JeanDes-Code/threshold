@@ -60,7 +60,18 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
 /// goes; so does every entry of a move with a destination, since the PC
 /// would not be at the place the NPC comes to. Each removal only takes
 /// model output away.
+///
+/// A Turn the age rule runs for (`intimacy` not `none`) keeps every entry
+/// (review r5 re-check, B1). The schema offers nobody when the Intent's
+/// words gate the Turn, so "I call Pip over, then make love with Brann"
+/// with `arrives: [Pip]` lost Pip here, and the gate never saw him. Now the
+/// gate reads the entry as a name (a minor or an unconfirmed age refuses),
+/// and the references check rejects an entry not offered: the Turn fails,
+/// it never commits with the arrival quietly taken out.
 fn settle_arrivals(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+    if p.intimacy.gated() {
+        return;
+    }
     let moves = p.action == ActionKind::Move && p.move_to.is_some();
     let mut listed = Vec::new();
     p.arrives.retain(|npc| {

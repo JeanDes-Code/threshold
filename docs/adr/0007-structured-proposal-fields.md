@@ -326,3 +326,17 @@ The limit above was not only one more handle. On a Turn the age rule runs for, t
 Limit: a gated Turn cannot bring anyone in through `arrives`. "I call Brann over and kiss him", with Brann away, leaves him away; the narrator gets no line about him either. We accept it: the Player can call him first, in a plain Turn.
 
 Tests: `tests/drift.rs` (`a_first_word_does_not_bring_a_minor_into_a_gated_turn`, `a_first_word_still_offers_the_arriver_on_a_plain_turn`, `a_gated_intent_offers_no_arriver`, `the_gate_before_the_turn_reads_arrives_as_named`, `the_gate_after_the_ops_reads_the_arrival`, `a_minor_who_leaves_now_still_refuses_an_intimate_turn`).
+
+### Changed after the review r5 re-check (2026-11-16): a gated Turn keeps every arrival
+
+The re-check found that the fix above opened a hole in the age gate. "I call Pip over, then make love with Brann." came back `intimate` with `arrives: [Pip]` (Pip is 17, at the market). The Romance Word gated the Intent, so the schema offered nobody and `may_arrive` was empty. `settle` then dropped Pip as not offered, the gate's `named()` never saw him, G3 saw no arrival, and the Turn committed. Before the fix above it was a final `AdultsOnly` Refusal. "I wave Pip in and kiss Brann." did the same.
+
+The rule: the age gate fails closed. On a gated Turn the core never silently drops model output that names a character. It lets the gate and the references check see it. `drop_undeclared_reactions` already does this for an undeclared N handle.
+
+- **`settle` keeps every `arrives` entry on a gated Turn** (`settle_arrivals`, when the Turn's final tag is `advance` or `intimate`). It drops none: not one that was not offered, not one listed twice, not one of a move. The gate reads each entry as a name, so a minor or a character with no confirmed age refuses the Turn. The references check rejects an entry that was not offered, listed twice, or past the cap: the Turn is retried, then rejected. It never commits with the arrival taken out.
+- **Nobody arrives on a gated Turn**, as the section above says. A confirmed adult the model lists anyway fails the Turn; it does not arrive. An entry that was offered (the model alone tagged the Turn) still arrives when the act happens and the PC stays, and G3 reads it.
+- This replaces "and `settle` drops any arrival the model sends" in the first bullet of the section above.
+
+The cost: a model that fills `arrives` on a gated Turn, where the schema had no such field, now spends the retry and can fail the Turn. Before, the entry was dropped and the Turn went on. We accept it: the other choice lets a minor into an intimate Turn.
+
+Tests: `tests/drift.rs` (`a_minor_who_arrives_refuses_an_intimate_turn`, restored to "make love"; `a_minor_who_arrives_refuses_an_advance`; `an_adult_who_arrives_on_a_gated_turn_fails_the_turn`; `a_minor_the_model_brings_into_a_gated_turn_refuses_it`; `a_minor_offered_for_arrives_refuses_a_turn_the_model_tags_intimate`). Each goes through the engine with `RecordedGm` and `settle`, with no hand-set `may_arrive`.

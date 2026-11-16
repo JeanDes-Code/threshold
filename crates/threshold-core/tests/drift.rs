@@ -436,34 +436,120 @@ fn an_undeclared_n_handle_fails_a_gated_turn() {
 
 // --- the age gate reads an arrival -------------------------------------------
 
-/// A minor the Intent calls in refuses an intimate Turn: the gate reads
-/// `arrives` as names, and the arrival puts the minor in the room.
-#[test]
-fn a_minor_who_arrives_refuses_an_intimate_turn() {
+/// `result` is the final `AdultsOnly` Refusal.
+fn adults_only(result: &Result<(), TurnError>) -> bool {
+    matches!(
+        result,
+        Err(TurnError::Refused {
+            kind: threshold_core::mature::RefusalKind::AdultsOnly,
+            ..
+        })
+    )
+}
+
+/// The confirmed gate world at Detail Level `implied` (Pip, 17, is at the
+/// market), with `raw` as the only proposal: one answer for both attempts.
+fn gated_engine(raw: &str) -> (World, RecordedGm, Engine) {
     let mut w = World::with_detail(DetailLevel::Implied);
     let ids = [w.ada, w.orsel, w.brann];
     w.confirm(&ids);
+    let gm = RecordedGm::new(
+        vec![raw.to_owned(), raw.to_owned()],
+        vec!["They kiss.".into()],
+    );
+    let engine = engine_of(&mut w, &gm);
+    (w, gm, engine)
+}
+
+/// A proposal on Brann tagged `intimacy`, with `arrives` as given.
+fn on_brann(w: &World, intimacy: &str, arrives: &[u64]) -> String {
     let mut p = proposal(Verdict::Allowed);
-    p.intimacy = Intimacy::Intimate;
     p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
     let mut raw = serde_json::to_value(&p).unwrap();
-    raw["arrives"] = serde_json::json!([format!("E{}", w.pip)]);
-    let gm = RecordedGm::new(vec![raw.to_string()], vec!["They kiss.".into()]);
-    let mut engine = engine_of(&mut w, &gm);
-    // No word of the Intent gates the Turn, so the schema offers Pip; the
-    // model tags it intimate. On an Intent the words gate, nobody is
-    // offered (review r5, M1), and the two gate tests below keep the
-    // defence covered.
+    raw["intimacy"] = intimacy.into();
+    let handles: Vec<String> = arrives.iter().map(|id| format!("E{id}")).collect();
+    raw["arrives"] = serde_json::json!(handles);
+    raw.to_string()
+}
+
+/// A minor the Intent calls in refuses an intimate Turn: the gate reads
+/// `arrives` as names, and the arrival puts the minor in the room. Review
+/// r5 re-check (B1): "make love" gates the Intent, so the schema offers
+/// nobody for `arrives`; `settle` used to drop Pip as not offered, and the
+/// Turn committed. On a gated Turn `settle` now keeps every `arrives`
+/// entry, so the gate sees Pip.
+#[test]
+fn a_minor_who_arrives_refuses_an_intimate_turn() {
+    let w = World::with_detail(DetailLevel::Implied);
+    let raw = on_brann(&w, "intimate", &[w.pip]);
+    let (_w, gm, mut engine) = gated_engine(&raw);
+    let result = play(&mut engine, "I call Pip over, then make love with Brann.");
+    assert!(adults_only(&result), "{result:?}");
+    let call = gm.calls().into_iter().next().unwrap();
+    assert!(call.schema["properties"].get("arrives").is_none());
+    assert!(prompts(&gm, CallKind::Narrate).is_empty());
+}
+
+/// The same with an advance (review r5 re-check, B1): "kiss" gates the
+/// Intent, and the model brings Pip in anyway.
+#[test]
+fn a_minor_who_arrives_refuses_an_advance() {
+    let w = World::with_detail(DetailLevel::Implied);
+    let raw = on_brann(&w, "advance", &[w.pip]);
+    let (_w, gm, mut engine) = gated_engine(&raw);
+    let result = play(&mut engine, "I wave Pip in and kiss Brann.");
+    assert!(adults_only(&result), "{result:?}");
+    assert!(prompts(&gm, CallKind::Narrate).is_empty());
+}
+
+/// No word of the Intent gates the Turn, so the schema offers Pip; the
+/// model alone tags it intimate, and the gate reads the offered arrival.
+#[test]
+fn a_minor_offered_for_arrives_refuses_a_turn_the_model_tags_intimate() {
+    let w = World::with_detail(DetailLevel::Implied);
+    let raw = on_brann(&w, "intimate", &[w.pip]);
+    let (w, gm, mut engine) = gated_engine(&raw);
     let result = play(&mut engine, "I call Pip over, then lie down with Brann.");
-    assert!(
-        matches!(result, Err(TurnError::Refused { .. })),
-        "{result:?}"
-    );
+    assert!(adults_only(&result), "{result:?}");
     let call = gm.calls().into_iter().next().unwrap();
     assert_eq!(
         call.schema["properties"]["arrives"]["items"]["enum"],
         serde_json::json!([format!("E{}", w.pip)])
     );
+}
+
+/// A confirmed adult named in `arrives` on a gated Turn (review r5
+/// re-check, B1): nobody may arrive on a gated Turn, so the references
+/// check rejects the entry on both attempts. The Turn fails; it does not
+/// commit with the arrival silently taken out.
+#[test]
+fn an_adult_who_arrives_on_a_gated_turn_fails_the_turn() {
+    let mut seed = adventure_seed();
+    seed.detail = DetailLevel::Implied;
+    seed.entities.push(npc("Hal Reed", 40));
+    seed.decided
+        .push(seed_fact("Hal Reed", "location", "market"));
+    let mut w = World::with_seed(seed);
+    let hal = w.view.entity_by_name("Hal Reed").unwrap().id;
+    let know = LedgerOp::Know {
+        holder: EntityRef::Id(w.ada),
+        fact_id: Some(w.view.live_fact(hal, "location").unwrap().id),
+        claim_id: None,
+        how: Knowing::Witnessed,
+        arrives_at: 0,
+    };
+    w.commit(vec![know]);
+    let ids = [w.ada, w.orsel, w.brann, hal];
+    w.confirm(&ids);
+    let raw = on_brann(&w, "advance", &[hal]);
+    let gm = RecordedGm::new(vec![raw.clone(), raw], vec!["You kiss.".into()]);
+    let mut engine = engine_of(&mut w, &gm);
+    let before = engine.store().turns(w.campaign).unwrap().len();
+    let result = play(&mut engine, "I call Hal over and kiss Brann.");
+    assert!(matches!(result, Err(TurnError::Rejected(_))), "{result:?}");
+    assert!(prompts(&gm, CallKind::Narrate).is_empty());
+    assert_eq!(engine.store().turns(w.campaign).unwrap().len(), before);
+    assert!(!snapshot(&engine, &w).present().contains(&hal));
 }
 
 /// The confirmed gate world at Detail Level `implied`, and an intimate
@@ -624,12 +710,11 @@ const KISS: &str = "I take a little time to lean in and kiss Brann.";
 /// Review r5 (M1): "a little time" holds the first word of Little Wren.
 /// On a Turn the age rule runs for, the prompt shows no Little Wren, the
 /// schema offers no `arrives`, the narrator gets no "is not here" line for
-/// her, and an `arrives` the model sends anyway is dropped: the Turn is not
-/// refused for a child the Intent never named.
+/// her, so the Turn is not refused for a child the Intent never named.
 #[test]
 fn a_first_word_does_not_bring_a_minor_into_a_gated_turn() {
     let (mut w, wren) = wren_world();
-    let gm = RecordedGm::new(vec![kiss_brann(&w, &[wren])], vec!["You kiss.".into()]);
+    let gm = RecordedGm::new(vec![kiss_brann(&w, &[])], vec!["You kiss.".into()]);
     let mut engine = engine_of(&mut w, &gm);
     play(&mut engine, KISS).expect("the advance commits");
     let call = gm
@@ -652,6 +737,20 @@ fn a_first_word_does_not_bring_a_minor_into_a_gated_turn() {
         }
     }
     assert!(!snapshot(&engine, &w).present().contains(&wren));
+}
+
+/// A model that names Little Wren in `arrives` anyway, on that gated
+/// Turn, ends it in the final `AdultsOnly` Refusal (review r5 re-check,
+/// B1): the gate fails closed, so `settle` keeps the entry for it to read.
+#[test]
+fn a_minor_the_model_brings_into_a_gated_turn_refuses_it() {
+    let (mut w, wren) = wren_world();
+    let raw = kiss_brann(&w, &[wren]);
+    let gm = RecordedGm::new(vec![raw.clone(), raw], vec!["You kiss.".into()]);
+    let mut engine = engine_of(&mut w, &gm);
+    let result = play(&mut engine, KISS);
+    assert!(adults_only(&result), "{result:?}");
+    assert!(prompts(&gm, CallKind::Narrate).is_empty());
 }
 
 /// The same first word on a plain Turn still offers the NPC for `arrives`

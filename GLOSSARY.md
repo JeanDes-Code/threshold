@@ -93,7 +93,7 @@ An NPC present with the PC who goes with the PC on a move: the Player's Intent n
 _Avoid_: Party member, follower, escort
 
 **NPC Arrival**:
-An NPC who is not at the PC's place comes to it in this Turn, because the Player's Intent names it and calls, fetches or meets it ("I call Tobin until he comes home"). The Decision Proposal lists it in the field `arrives`. The schema offers only the NPCs the PC can name who are not here and whom the Intent names, and nobody when the Intent's words already make the Turn an Advance or intimate. When the act happens and the PC stays, the core writes the NPC's location with the PC's. An NPC Arrival is not the PC's perception when the PC arrives at a place (`world::arrival`).
+An NPC who is not at the PC's place comes to it in this Turn, because the Player's Intent names it and calls, fetches or meets it ("I call Tobin until he comes home"). The Decision Proposal lists it in the field `arrives`. The schema offers only the NPCs the PC can name who are not here and whom the Intent names, and nobody when the Intent's words already make the Turn an Advance or intimate. Nobody arrives on a Turn the age rule runs for: the core keeps every `arrives` entry of such a Turn, the age gate reads it as a name, and an entry the schema did not offer fails the Turn. When the act happens and the PC stays, the core writes the NPC's location with the PC's. An NPC Arrival is not the PC's perception when the PC arrives at a place (`world::arrival`).
 _Avoid_: Return, summon, arrival (alone)
 
 **Romance Word**:
