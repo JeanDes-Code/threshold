@@ -119,7 +119,7 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
       confirmed[to.trim()] = confirmed[from];
       // The core asks for a new choice for a renamed Place, and follows the name in other links.
       const link = links[from];
-      if (link) links[to.trim()] = { ...link, confirmed: false };
+      if (link) links[to.trim()] = { ...link, backed: false, confirmed: false };
       for (const [n, l] of Object.entries(links)) {
         if (l && typeof l.inside !== "string" && l.inside.place === from) {
           links[n] = { ...l, inside: { place: to.trim() } };

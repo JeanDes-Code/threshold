@@ -11,7 +11,7 @@ use threshold_core::{
     },
     context::ADVENTURE_BLOCK_MAX_CHARS,
     domain::{
-        AdventureSeed, ConfirmedAges, EntityKind, OtherName, PcSeed, SeedEntity, SeedFact,
+        AdventureSeed, ConfirmedAges, EntityKind, Inside, OtherName, PcSeed, SeedEntity, SeedFact,
         StartSeed, WorldSetup,
     },
     mature::{Blocked, clearance},
@@ -746,7 +746,8 @@ fn rename_updates_every_reference_and_adds_no_gap() {
     assert!(line(&draft, "Mira Vance").confirmed);
     assert_eq!(gaps(&draft), before);
 
-    // A place: the start follows, and so do the texts.
+    // A place: the start follows, and so do the texts. Its Inside Link
+    // asks for a new choice (QA run 4), and that is its only new gap.
     assert_eq!(rename_named(&mut draft, "Old Mill", "Grey Mill"), Ok(()));
     assert_eq!(draft.seed.entities[3].name, "Grey Mill");
     assert_eq!(draft.seed.start.place, "Grey Mill");
@@ -754,6 +755,15 @@ fn rename_updates_every_reference_and_adds_no_gap() {
         draft.knowledge[2].text,
         "Mira Vance grinds grain at the Grey Mill."
     );
+    let mut with_place = before.clone();
+    with_place.push(gap(GapKind::PlaceUnconfirmed, "entities[3].inside"));
+    assert_eq!(gaps(&draft), with_place);
+    let mill = place_lines(&draft)
+        .into_iter()
+        .find(|l| l.name == "Grey Mill")
+        .unwrap()
+        .entry();
+    confirm_inside(&mut draft, &mill, Inside::Top).unwrap();
     assert_eq!(gaps(&draft), before);
 
     // The PC too.

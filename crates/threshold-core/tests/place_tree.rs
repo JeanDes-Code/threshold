@@ -818,3 +818,43 @@ fn a_source_sentence_does_not_hide_a_contradicting_fact() {
         (&Inside::Unknown, true, false)
     );
 }
+
+/// QA run 4 (313-314): the review renames through `rename` (Enter or blur
+/// on the name field). A renamed Place asks for a new choice: its own link
+/// drops its confirmation and starts on "Choose…", with the old link as a
+/// hint. A link that names it as the parent follows the new name and stays
+/// confirmed.
+#[test]
+fn a_rename_asks_the_renamed_place_for_a_new_choice() {
+    let mut draft = drafted(INN, CROSSING, &ALL_NONE);
+    true_tree(&mut draft);
+    assert!(place_lines(&draft).iter().all(|l| l.confirmed));
+
+    let ferry = entry(&draft, FERRY_HOUSE);
+    rename(&mut draft, &ferry, "the ferry cottage").unwrap();
+    let lines = place_lines(&draft);
+    let cottage = line(&lines, "the ferry cottage");
+    assert_eq!(
+        (&cottage.inside, cottage.confirmed, &cottage.suggested),
+        (
+            &Inside::Unknown,
+            false,
+            &Some(Inside::Place(CROSSING.to_owned()))
+        )
+    );
+
+    let crossing = entry(&draft, CROSSING);
+    rename(&mut draft, &crossing, "Brackwater").unwrap();
+    let lines = place_lines(&draft);
+    let inn = line(&lines, INN);
+    assert_eq!(
+        (&inn.inside, inn.confirmed),
+        (&Inside::Place("Brackwater".to_owned()), true)
+    );
+    assert!(!line(&lines, "Brackwater").confirmed);
+    let waiting = gaps(&draft)
+        .into_iter()
+        .filter(|g| g.kind == GapKind::PlaceUnconfirmed)
+        .count();
+    assert_eq!(waiting, 2);
+}

@@ -33,7 +33,8 @@ use crate::{
 /// row only while the row holds a Place with the exact main name `place`,
 /// and, for `Inside::Place`, while another row holds a Place with the
 /// parent's exact main name. So an edit that renames either one, or turns
-/// either into another kind, asks for a new choice. `rename` moves both.
+/// either into another kind, asks for a new choice. `rename` moves both
+/// names, and asks the renamed Place for a new choice (`rename_links`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlaceLink {
     /// The Place's main name, exactly as written.
@@ -227,11 +228,17 @@ pub fn confirm_inside(
 }
 
 /// After `rename` of a Place from `old` to `to`: each link of `old`, and
-/// each link to `old` as a parent, now names `to`. A confirmation stays.
+/// each link to `old` as a parent, now names `to`. The renamed Place asks
+/// for a new choice (ADR 0008; QA run 4): its own link loses its
+/// confirmation and its backing, so the review starts it on "Choose…",
+/// with the old link as a hint. A link to it as a parent keeps its
+/// confirmation: the parent is the same Place under a new name.
 pub(super) fn rename_links(draft: &mut SeedDraft, old: &str, to: &str) {
     for link in &mut draft.place_links {
         if link.place == old {
             to.clone_into(&mut link.place);
+            link.confirmed = false;
+            link.backed = false;
         }
         if let Inside::Place(parent) = &mut link.inside
             && parent == old

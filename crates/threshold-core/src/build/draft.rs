@@ -709,8 +709,9 @@ pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), Review
 /// known, decided and proposed fact, and the name in its own age mark. A
 /// reference matches the old name through `normalize::name`. The old name,
 /// with the same spelling and as whole words, also changes in the text of
-/// each known fact and in `start.situation`. A Place keeps its Inside Link
-/// and its children keep theirs (`places::rename_links`). A name that another entry has,
+/// each known fact and in `start.situation`. A renamed Place asks for a new
+/// choice of its Inside Link; a link to it as a parent follows the new name
+/// and stays confirmed (`places::rename_links`). A name that another entry has,
 /// main or other, is refused, and the draft does not change. A change of
 /// case or accent of the same name is allowed. Only the mark of this very
 /// row moves to the new name.
