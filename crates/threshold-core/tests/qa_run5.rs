@@ -16,10 +16,11 @@ use std::{
     path::PathBuf,
 };
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use threshold_core::{
     Gm, GmError, Prompt, Stream,
-    build::{Control, SeedDraft, draft_from_text},
+    build::{Control, PlaceLine, SeedDraft, draft_from_text, place_lines},
+    domain::Inside,
 };
 
 /// A model that answers each draft stage from its own queue, so a test
@@ -113,6 +114,10 @@ fn after_roster() -> Vec<(&'static str, Vec<Value>)> {
     ]
 }
 
+fn line<'a>(lines: &'a [PlaceLine], name: &str) -> &'a PlaceLine {
+    lines.iter().find(|l| l.name == name).unwrap()
+}
+
 /// QA run 5 (403): the live model listed the PC, "Bran Holt", both in `pc`
 /// and in `characters`. The one-PC check sent a repair; a model that
 /// repeats the copy failed the draft ("The draft stopped at the roster
@@ -137,5 +142,66 @@ fn a_roster_that_lists_the_pc_again_drafts_on_the_first_try() {
     assert!(!names.contains(&"Bran Holt"), "{names:?}");
     for name in ["Wren Holt", "Ada Miller", "Pip Miller", "Old Tamsin"] {
         assert!(names.contains(&name), "{name} in {names:?}");
+    }
+}
+
+/// QA run 5 (404-405): "is part of Ashford" and "is inside Ashford's
+/// walls" started filled, "The Lantern Inn stands in Ashford, beside the
+/// old well." did not: it names a third Place, the old well. A trailing
+/// clause that only places it beside another Place does not change what
+/// holds it, so the sentence now backs "the Lantern Inn inside Ashford".
+#[test]
+fn the_lantern_inn_beside_the_well_starts_inside_ashford() {
+    let mut answers = vec![("roster", vec![answer("roster-repair")])];
+    answers.extend(after_roster());
+    let draft = draft(&ReplayGm::new(&answers)).unwrap();
+    let lines = place_lines(&draft);
+    let ashford = Inside::Place("Ashford".to_owned());
+    for name in ["Lantern Inn", "mill house", "chapel"] {
+        let l = line(&lines, name);
+        assert_eq!((&l.inside, l.backed), (&ashford, true), "{name}");
+    }
+    // No sentence states what holds these: they wait for a choice.
+    for name in ["old well", "ferry landing", "Harrowmere", "Ashford"] {
+        let l = line(&lines, name);
+        assert_eq!((&l.inside, l.backed), (&Inside::Unknown, false), "{name}");
+    }
+}
+
+/// "beside the old well" never backs "inside the old well", and the
+/// ferry's travel sentence backs no link, with the same live answers.
+#[test]
+fn beside_or_over_to_a_place_never_backs_inside_it() {
+    let tree = json!({"places": [
+        {"place": "Ashford", "inside": "none"},
+        {"place": "Lantern Inn", "inside": "old well"},
+        {"place": "old well", "inside": "none"},
+        {"place": "mill house", "inside": "Ashford"},
+        {"place": "chapel", "inside": "Ashford"},
+        {"place": "ferry landing", "inside": "Harrowmere"},
+        {"place": "Harrowmere", "inside": "none"},
+    ]});
+    let answers = vec![
+        ("roster", vec![answer("roster-repair")]),
+        ("seed", vec![answer("seed")]),
+        ("knowledge", vec![json!({"facts": []})]),
+        ("tree", vec![tree]),
+    ];
+    let gm = ReplayGm::new(&answers);
+    let draft = draft(&gm).unwrap();
+    // The proposal passed its checks: no repair call.
+    assert_eq!(gm.calls().iter().filter(|s| **s == "tree").count(), 1);
+    let lines = place_lines(&draft);
+    for (name, guess) in [("Lantern Inn", "old well"), ("ferry landing", "Harrowmere")] {
+        let l = line(&lines, name);
+        assert_eq!(
+            (&l.inside, l.backed, &l.suggested),
+            (
+                &Inside::Unknown,
+                false,
+                &Some(Inside::Place(guess.to_owned()))
+            ),
+            "{name}"
+        );
     }
 }
