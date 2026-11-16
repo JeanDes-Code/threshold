@@ -266,13 +266,9 @@ struct Committed<'a> {
     /// The Turn was committed with `intimate`: G4 (`mature::told`) reads it.
     intimate: bool,
     /// The age rule ran for the Turn, or it is a Turn of an Intimate Scene
-    /// (`told_gated`): the narrator gets no "is not here" line (review r5,
-    /// M1 and MJ1).
+    /// (`told_gated`): the narrator's "is not here" lines read full names
+    /// only (review r5, M1 and MJ1; MJ-a).
     gated: bool,
-    /// A Turn of an Intimate Scene (`scene_turn`): a gated one still gets
-    /// the "is not here" line for a full name (review r5 second re-check,
-    /// N1).
-    in_scene: bool,
     /// A Closing Turn: told plain under `context::CLOSING_LINE`, with no
     /// Intent and `mature::CLOSING_NARRATION_MAX_TOKENS`.
     closing: bool,
@@ -831,7 +827,6 @@ impl Engine {
                 &view_after,
                 &ops,
             ),
-            in_scene: scene_turn(&view_after, &ops),
             closing: stored.record.kind == TurnKind::Closing,
         };
         let narrated = self.narrate(
@@ -1113,7 +1108,6 @@ impl Engine {
                 .collect(),
             intimate: planned.intimacy.intimate(),
             gated: told_gated(planned.intimacy, &view_after, &ops),
-            in_scene: scene_turn(&view_after, &ops),
             closing,
         };
         let narrated = self
@@ -1226,7 +1220,6 @@ impl Engine {
             committed.closing,
             level,
             committed.gated,
-            committed.in_scene,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();

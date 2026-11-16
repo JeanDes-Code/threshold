@@ -944,3 +944,87 @@ fn a_first_word_gets_no_not_here_line_in_an_open_scene() {
     assert!(!n.contains("Wren"), "{n}");
     assert!(!n.contains("is not here"), "{n}");
 }
+
+// --- MJ-a: a gated Turn outside a scene hears who does not come -----------
+
+/// MJ-a, the probe: "I wave Pip in and kiss Brann." outside a scene. The
+/// model tags it `advance` and sends no `arrives`. Pip stays at the
+/// market, and the narrator hears it: the Intent names him by his full
+/// name. Before, a gated Turn outside a scene got no line, so the story
+/// could bring Pip in while the state kept him away.
+#[test]
+fn a_full_name_on_a_gated_turn_outside_a_scene_gets_the_not_here_line() {
+    let w = World::with_detail(DetailLevel::Implied);
+    let (w, gm, mut engine) = gated_engine(&on_brann(&w, "advance", &[]));
+    play(&mut engine, "I wave Pip in and kiss Brann.").expect("the advance commits");
+    let now = snapshot(&engine, &w);
+    assert!(now.scene_open.is_none());
+    assert!(!now.present().contains(&w.pip));
+    let n = narration(&gm);
+    assert!(n.contains(PIP_NOT_HERE), "{n}");
+}
+
+/// MJ-a: on a gated Turn outside a scene the line reads full names only.
+/// "a little time" holds the first word of Little Wren (9): the narrator
+/// gets no line for her (review r5, M1).
+#[test]
+fn a_first_word_gets_no_not_here_line_on_a_gated_turn() {
+    let (mut w, _) = wren_world();
+    let gm = RecordedGm::new(vec![kiss_brann(&w, &[])], vec!["You kiss.".into()]);
+    let mut engine = engine_of(&mut w, &gm);
+    play(&mut engine, KISS).expect("the advance commits");
+    assert!(snapshot(&engine, &w).scene_open.is_none());
+    let n = narration(&gm);
+    assert!(!n.contains("Wren"), "{n}");
+    assert!(!n.contains("is not here"), "{n}");
+}
+
+/// The gate world at Detail Level `implied` where the PC holds the
+/// `alias_sparrow` Belief: Pip is also "Sparrow".
+fn sparrow_world() -> World {
+    let mut w = World::with_detail(DetailLevel::Implied);
+    let (ada, pip) = (w.ada, w.pip);
+    w.commit(vec![LedgerOp::AddFact {
+        slot: threshold_core::domain::Slot {
+            subject: EntityRef::Id(pip),
+            key: threshold_core::domain::alias_key("Sparrow"),
+            value: "Sparrow".into(),
+        },
+        text: "Pip is also called Sparrow".into(),
+        canon: threshold_core::domain::Canon::Established,
+        source: threshold_core::domain::FactSource::Proposal,
+        seen_by: vec![EntityRef::Id(ada)],
+        causes: vec![],
+    }]);
+    let alias = w.view.live_fact(pip, "alias_sparrow").unwrap().id;
+    w.commit(vec![LedgerOp::Know {
+        holder: EntityRef::Id(ada),
+        fact_id: Some(alias),
+        claim_id: None,
+        how: Knowing::Witnessed,
+        arrives_at: 0,
+    }]);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    w
+}
+
+/// `characters_named_in_full` matches an other name the PC holds (an
+/// `alias_` Belief) as a full name, and the "is not here" line of a gated
+/// Turn outside a scene reads that match. The line names Pip by his main
+/// name.
+#[test]
+fn an_alias_on_a_gated_turn_gets_the_not_here_line() {
+    let mut w = sparrow_world();
+    let intent = "I wave Sparrow in and kiss Brann.";
+    assert_eq!(
+        threshold_core::checks::characters_named_in_full(&w.view, intent),
+        vec![w.brann, w.pip]
+    );
+    let gm = RecordedGm::new(vec![on_brann(&w, "advance", &[])], vec!["You kiss.".into()]);
+    let mut engine = engine_of(&mut w, &gm);
+    play(&mut engine, intent).expect("the advance commits");
+    assert!(!snapshot(&engine, &w).present().contains(&w.pip));
+    let n = narration(&gm);
+    assert!(n.contains(PIP_NOT_HERE), "{n}");
+}

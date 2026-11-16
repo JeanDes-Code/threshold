@@ -461,7 +461,6 @@ pub fn narration_prompt(
         false,
         effective(view_after.detail, packs),
         false,
-        false,
     )
 }
 
@@ -481,11 +480,9 @@ pub fn narration_prompt(
 /// and scene blocks depend on neither. `level` is the effective Detail
 /// Level the call reads past Turns at (`mature::reading_level`): an
 /// intimate Turn told above it is its Neutral Line (final review M3).
-/// `gated` tells a Turn the age rule ran for (`Intimacy::gated`): the
-/// outcome block then has no "is not here" line (`away_lines`, review r5
-/// M1). `in_scene` tells a Turn of an Intimate Scene
-/// (`Retrieval::in_scene`): a gated one there keeps the line for a full
-/// name (review r5 second re-check, N1).
+/// `gated` tells a Turn the age rule ran for (`Intimacy::gated`), or a
+/// Turn of an Intimate Scene: the outcome block's "is not here" lines then
+/// read full names only (`away_lines`, review r5 M1, MJ-a).
 #[allow(clippy::too_many_arguments)]
 pub fn narration_prompt_with(
     view_after: &WorldView,
@@ -501,10 +498,8 @@ pub fn narration_prompt_with(
     closing: bool,
     level: DetailLevel,
     gated: bool,
-    in_scene: bool,
 ) -> Prompt {
-    let mut r = Retrieval::new(view_after, "", cleared, level, gated);
-    r.in_scene = in_scene;
+    let r = Retrieval::new(view_after, "", cleared, level, gated);
     let head = match told {
         Told::Plain if closing => CLOSING_LINE.to_owned(),
         Told::Plain => String::new(),
@@ -750,19 +745,19 @@ fn here_line(r: &Retrieval<'_>) -> String {
 /// write: "- Tobin Cooper is not here and does not come in this Turn: do
 /// not show Tobin Cooper here." QA run 5 (2026-11-16): "until he answers
 /// and comes home" was told as a return the world never made. An NPC who
-/// leaves in this Turn has its own line. None on a Turn the age rule ran
-/// for (`Retrieval::gated`, review r5 M1): a first word there is no name,
-/// and the line would bring a child the Intent never named into the
-/// narrator's prompt. In a Turn of an Intimate Scene (`Retrieval::in_scene`)
-/// a gated Turn still gets the line for an NPC the Intent names by a full
-/// name (`checks::characters_named_in_full`, review r5 second re-check,
-/// N1): "I call Pip over." told nothing, and the story could bring in a
-/// minor the state kept away.
+/// leaves in this Turn has its own line. On a Turn the age rule ran for
+/// (`Retrieval::gated`, inside an Intimate Scene or not), only a full name
+/// counts (`checks::characters_named_in_full`: the main name or an alias
+/// the PC holds). A first word there is no name (review r5, M1): the line
+/// would bring a child the Intent never named into the narrator's prompt.
+/// A full name still gets the line (review r5 second re-check, N1, and
+/// MJ-a, 2026-11-17): "I wave Pip in and kiss Brann." told nothing, and
+/// the story could bring in a minor the state kept away.
 fn away_lines(r: &Retrieval<'_>, intent: &str, perceived: &[LedgerOp]) -> Vec<String> {
-    let named = match (r.gated, r.in_scene) {
-        (false, _) => crate::checks::characters_named(r.view, intent),
-        (true, true) => crate::checks::characters_named_in_full(r.view, intent),
-        (true, false) => return Vec::new(),
+    let named = if r.gated {
+        crate::checks::characters_named_in_full(r.view, intent)
+    } else {
+        crate::checks::characters_named(r.view, intent)
     };
     let moved = |id: EntityId| {
         perceived.iter().any(|op| {
