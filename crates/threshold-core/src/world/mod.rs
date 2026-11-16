@@ -24,6 +24,6 @@ pub use items::items_named_by;
 pub use presence::{Room, room};
 pub use sight::{
     Known, Moment, OpenItem, PcSight, SCENE_GAP_MIN, SightLine, SightTurn, name_parts, pc_can_name,
-    pc_sight, story_names, tagged, unnameable_names,
+    pc_character_names, pc_sight, story_names, tagged, unnameable_names,
 };
 pub use wait::{WAIT_DEFAULT_MIN, WAIT_MAX_MIN, asks_to_wait, intent_minutes, wait_minutes};

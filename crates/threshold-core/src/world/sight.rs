@@ -502,13 +502,55 @@ pub fn pc_sight(
 /// (`speech::TagFilter`); it never reaches a screen. Empty when the
 /// campaign has no PC.
 pub fn unnameable_names(view: &WorldView) -> HashSet<String> {
-    let Some(pc) = view.entities.iter().find(|e| e.kind == EntityKind::Pc) else {
+    let Some((named, known)) = names_held(view) else {
         return HashSet::new();
     };
+    view.entities
+        .iter()
+        .flat_map(|e| {
+            std::iter::once(e.name.clone())
+                .chain(e.other_names.iter().cloned())
+                .chain(first_names(e).map(str::to_owned))
+        })
+        .filter(|name| hides_a_name(view, name, &named, &known))
+        .map(|name| normalize::name(&name))
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The names by which the PC can call a PC or an NPC: for each character
+/// the PC can name (`pc_can_name`), its main name and each other name the
+/// PC holds the Belief for (`pc_knows_the_name`), as stored. It reads the
+/// PC's knowledge, never world truth, so a hidden other name is not in it.
+/// The Act Word phrase "take someone to bed" reads it (review minor,
+/// 2026-11-16): "i take wick to bed" holds a lower-case other name.
+pub fn pc_character_names(view: &WorldView) -> Vec<String> {
+    let Some((named, known)) = names_held(view) else {
+        return Vec::new();
+    };
+    view.entities
+        .iter()
+        .filter(|e| matches!(e.kind, EntityKind::Pc | EntityKind::Npc))
+        .filter(|e| named.contains(&e.id))
+        .flat_map(|e| {
+            std::iter::once(e.name.clone()).chain(
+                e.other_names
+                    .iter()
+                    .filter(|other| pc_knows_the_name(e, other, &named, &known))
+                    .cloned(),
+            )
+        })
+        .collect()
+}
+
+/// What the PC can name now (`named`), and the other names it holds the
+/// Belief for, as `pc_sight` lists them. `None` when the campaign has no
+/// PC.
+fn names_held(view: &WorldView) -> Option<(HashSet<EntityId>, Vec<Known>)> {
+    let pc = view.entities.iter().find(|e| e.kind == EntityKind::Pc)?;
     let rows = view.knowledge.iter().filter(|r| r.holder == pc.id);
     let now = held(view, rows, view.clock_min);
     let named = named(view, pc.id, &now);
-    // The other names the PC holds the Belief for, as `pc_sight` lists them.
     let mut known: Vec<Known> = Vec::new();
     for (b, _) in now
         .iter()
@@ -525,17 +567,7 @@ pub fn unnameable_names(view: &WorldView) -> HashSet<String> {
             }),
         }
     }
-    view.entities
-        .iter()
-        .flat_map(|e| {
-            std::iter::once(e.name.clone())
-                .chain(e.other_names.iter().cloned())
-                .chain(first_names(e).map(str::to_owned))
-        })
-        .filter(|name| hides_a_name(view, name, &named, &known))
-        .map(|name| normalize::name(&name))
-        .filter(|name| !name.is_empty())
-        .collect()
+    Some((named, known))
 }
 
 /// The leading words of a character's main name, through `normalize::name`,

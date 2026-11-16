@@ -45,6 +45,17 @@ impl Rig {
 
     /// The rig at Detail Level `detail`, with `packs` loaded.
     pub fn with(name: &str, detail: DetailLevel, packs: Vec<ContentPack>) -> Self {
+        Self::with_seed(name, detail, packs, |_| {})
+    }
+
+    /// `with`, with `edit` applied to the Adventure Seed before the
+    /// Campaign is made.
+    pub fn with_seed(
+        name: &str,
+        detail: DetailLevel,
+        packs: Vec<ContentPack>,
+        edit: impl FnOnce(&mut threshold_core::domain::AdventureSeed),
+    ) -> Self {
         let path = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join(format!("scene-{name}-{}.sqlite", std::process::id()));
         let _ = fs::remove_file(&path);
@@ -55,6 +66,7 @@ impl Rig {
         vale.hidden = true;
         seed.entities.push(vale);
         seed.decided.push(seed_fact("Vale", "location", "far road"));
+        edit(&mut seed);
         let campaign = create_campaign(&mut store, &seed, 7, None).unwrap();
         let view = store.snapshot(campaign).unwrap();
         let id = |name: &str| view.entity_by_name(name).unwrap().id;

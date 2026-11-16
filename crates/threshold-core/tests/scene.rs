@@ -2191,6 +2191,58 @@ fn an_advance_tells_the_narrator_that_no_scene_begins() {
     assert!(!narrate.prompt.recent.contains(ADVANCE_LINE));
 }
 
+/// Review minor (2026-11-16): the names the floor reads hold the other
+/// names the PC knows, so "i take wick to bed" holds the phrase when Wick
+/// is Brann's other name and the PC holds that Belief. An other name the PC
+/// does not hold stays out: "i take moss to bed" acts as "i take tea to
+/// bed", or the Player would learn the name.
+#[test]
+fn a_lower_case_other_name_the_pc_knows_opens_the_scene() {
+    use threshold_core::domain::OtherName;
+    let named = |name: &str| {
+        Rig::with_seed(name, DetailLevel::Implied, Vec::new(), |seed| {
+            let brann = seed
+                .entities
+                .iter_mut()
+                .find(|e| e.name == "Brann")
+                .unwrap();
+            brann.other_names = vec![
+                OtherName {
+                    name: "Wick".into(),
+                    known_to: vec!["Ada".into()],
+                },
+                OtherName {
+                    name: "Moss".into(),
+                    known_to: vec!["Orsel".into()],
+                },
+            ];
+        })
+    };
+    let mut rig = named("take-other-name-to-bed");
+    let mut p = rig.intimate();
+    p.intimacy = Intimacy::Advance;
+    p.action = ActionKind::Talk;
+    rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    rig.gm.push_narration("Brann nods.".into());
+    let t1 = rig
+        .engine()
+        .play_turn("t1".into(), "i take wick to bed", &mut |_| {})
+        .unwrap()
+        .turn_id;
+    assert_eq!(rig.scene(), Some(t1));
+
+    let mut rig = named("take-unknown-other-name-to-bed");
+    let mut p = rig.intimate();
+    p.intimacy = Intimacy::None;
+    p.action = ActionKind::Talk;
+    rig.gm.push_proposal(serde_json::to_string(&p).unwrap());
+    rig.gm.push_narration("The room is quiet.".into());
+    rig.engine()
+        .play_turn("t1".into(), "i take moss to bed", &mut |_| {})
+        .unwrap();
+    assert_eq!(rig.scene(), None);
+}
+
 /// QA B1: a lower-case name counts only for a character the PC can name.
 /// "i take vale to bed" names the hidden Vale: it must act as "i take tea
 /// to bed" does, or the Player would learn that Vale exists.
