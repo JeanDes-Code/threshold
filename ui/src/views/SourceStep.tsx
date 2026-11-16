@@ -11,10 +11,12 @@ interface Props {
   running: ReactNode;
   /** The shell's sentence for a refused text, or another error. */
   error: string | null;
+  /** The last draft of this text failed: the button offers "Retry". */
+  failed?: boolean;
 }
 
 /** The first step: the Source Text, pasted or read from a file. The core checks its length. */
-export default function SourceStep({ text, onText, onFile, onDraft, busy, running, error }: Props) {
+export default function SourceStep({ text, onText, onFile, onDraft, busy, running, error, failed = false }: Props) {
   const count = text.trim().length === 0 ? 0 : [...text.trim()].length;
   return (
     <div className="source-step">
@@ -50,7 +52,7 @@ export default function SourceStep({ text, onText, onFile, onDraft, busy, runnin
           }}
         />
         <button type="button" className="play-btn play-btn--primary" disabled={busy || !text.trim()} onClick={onDraft}>
-          Draft
+          {failed ? "Retry" : "Draft"}
         </button>
       </div>
       {running ?? <p className="review-hint">A draft takes a few minutes.</p>}

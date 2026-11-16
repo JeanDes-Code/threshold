@@ -97,7 +97,7 @@ export function elapsedText(ms: number): string {
 }
 
 const CHECKS: Record<string, string> = {
-  model: "the model call failed",
+  model: "the game model is not responding. Check it is running, then retry",
   model_timeout:
     "the model did not answer in time. Check that no other program is using the machine's memory, then retry",
   schema: "the model answer did not fit its form",
@@ -119,6 +119,15 @@ const CHECKS: Record<string, string> = {
 export function failureText(f: BuildFailure): string {
   const check = Object.hasOwn(CHECKS, f.check) ? CHECKS[f.check] : f.check.replace(/_/g, " ");
   return `The last build stopped at “${stageLabel(f.stage)}”: ${check}.`;
+}
+
+/**
+ * True when a draft call stopped after it reached the model, so a new try
+ * may work: the shell starts those sentences with "The draft stopped". A
+ * refused Source Text does not, and keeps the "Draft" button.
+ */
+export function draftStopped(message: string): boolean {
+  return message.startsWith("The draft stopped");
 }
 
 /** "entities[3].age" → ["entities", 3, "age"]. */

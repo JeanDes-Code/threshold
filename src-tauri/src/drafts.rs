@@ -519,7 +519,33 @@ fn commit_failure(e: Option<&SetupError>) -> BuildFailure {
 
 /// The Player's text for a failed draft or build: the stage and the check
 /// in plain words, built from the two names only. Never model text.
+///
+/// A draft names its step as the progress line does ("Reading the
+/// characters"), and a failed check points to Retry: the Player cannot
+/// fix a model answer, but a new draft often passes (QA run 5: "The draft
+/// stopped at the roster step: the one-PC check failed." used internal
+/// words and said nothing about what to do).
 fn job_error(failure: BuildFailure) -> AppError {
+    let draft_step = match failure.stage {
+        Stage::DraftRoster => Some("while reading the characters"),
+        Stage::DraftSeed => Some("while reading the story"),
+        Stage::DraftKnowledge => Some("while reading what your character knows"),
+        Stage::PlaceTree => Some("while mapping the places"),
+        _ => None,
+    };
+    if let Some(step) = draft_step {
+        let check = match failure.check {
+            BuildCheck::Model => {
+                "the game model is not responding. Check it is running, then press Retry"
+            }
+            BuildCheck::ModelTimeout => {
+                "the model did not answer in time. Check that no other program is using the machine's memory, then press Retry"
+            }
+            BuildCheck::Cancelled => "you cancelled it",
+            _ => "the model's answer did not pass the app's checks. Press Retry to draft again",
+        };
+        return AppError::Failed(format!("The draft stopped {step}: {check}."));
+    }
     let (job, step) = match failure.stage {
         Stage::DraftSeed => ("The draft", "the seed step"),
         Stage::DraftRoster => ("The draft", "the roster step"),
@@ -532,7 +558,7 @@ fn job_error(failure: BuildFailure) -> AppError {
         Stage::Commit => ("The world build", "the campaign file step"),
     };
     let check = match failure.check {
-        BuildCheck::Model => "the model call failed",
+        BuildCheck::Model => "the game model is not responding. Check it is running, then retry",
         BuildCheck::ModelTimeout => {
             "the model did not answer in time. Check that no other program is using the machine's memory, then retry"
         }

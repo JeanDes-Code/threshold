@@ -16,6 +16,7 @@ import {
   confirmRow,
   createSaver,
   draftScreen,
+  draftStopped,
   entryOf,
   parseAge,
   AGE_PROBLEM,
@@ -159,6 +160,17 @@ describe("failureText", () => {
     expect(failureText({ stage: "start_state", check: "new_check" })).toBe(
       "The last build stopped at “Preparing the start”: new check.",
     );
+  });
+});
+
+describe("draftStopped", () => {
+  it("is true for a draft that stopped at a model step, false for a refused text", () => {
+    expect(
+      draftStopped(
+        "The draft stopped while reading the characters: the game model is not responding. Check it is running, then press Retry.",
+      ),
+    ).toBe(true);
+    expect(draftStopped("This Source Text is too short to hold a premise and your character.")).toBe(false);
   });
 });
 

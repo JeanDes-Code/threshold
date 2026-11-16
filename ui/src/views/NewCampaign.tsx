@@ -12,6 +12,7 @@ import {
 import {
   CANCEL_NOTE,
   draftScreen,
+  draftStopped,
   elapsedText,
   failureText,
   progressText,
@@ -61,6 +62,8 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
   const [progress, setProgress] = useState<BuildProgress | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The last draft of this text failed: "Draft" reads "Retry" (QA run 5).
+  const [draftFailed, setDraftFailed] = useState(false);
   const [toDelete, setToDelete] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -129,10 +132,22 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
 
   const draft = () =>
     run("draft", async () => {
-      const view = await api.draftFromText(text);
+      setDraftFailed(false);
+      let view: DraftView;
+      try {
+        view = await api.draftFromText(text);
+      } catch (e) {
+        setDraftFailed(draftStopped(errorText(e)));
+        throw e;
+      }
       setText("");
       go({ kind: "review", view });
     });
+
+  const editText = (next: string) => {
+    setText(next);
+    setDraftFailed(false);
+  };
 
   const build = (view: DraftView) =>
     run("build", async () => {
@@ -183,7 +198,7 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
     try {
       const read = await readDocument(file);
       if (read.ok) {
-        setText(read.text);
+        editText(read.text);
         setError(null);
       } else {
         setError(read.message);
@@ -268,12 +283,13 @@ export default function NewCampaign({ onOpened, locked, initialDraft = null, onJ
       <SetupSteps current="source" />
       <SourceStep
         text={text}
-        onText={setText}
+        onText={editText}
         onFile={(file) => void loadFile(file)}
         onDraft={() => void draft()}
         busy={job !== null}
         running={job === "draft" ? running : null}
         error={error}
+        failed={draftFailed}
       />
 
       <h2>Saved drafts</h2>

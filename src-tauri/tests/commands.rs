@@ -925,6 +925,41 @@ fn build_error_names_stage_and_check_only() {
     }
 }
 
+/// QA run 5 (403): "The draft stopped at the roster step: the one-PC check
+/// failed." used internal words and said nothing about what to do. A
+/// failed draft now names its step as the progress line does, and points
+/// to Retry. A model error says the model is not responding.
+#[test]
+fn a_failed_draft_says_what_to_do_in_plain_words() {
+    let rig = Rig::new();
+    let mut roster = draft_outputs()[0].clone();
+    // "Tobin Reed" knows another name of the PC but is not in the roster.
+    roster["characters"] = json!([doc_npc("Ada Venn", 40, true)]);
+    rig.push(&[roster.clone(), roster]);
+    let err = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "The draft stopped while reading the characters: the model's answer did not pass \
+         the app's checks. Press Retry to draft again."
+    );
+
+    // No answer left: the model cannot be reached.
+    let err = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "The draft stopped while reading the characters: the game model is not responding. \
+         Check it is running, then press Retry."
+    );
+}
+
 #[test]
 fn source_text_is_checked_before_the_model() {
     let rig = Rig::new();
@@ -1035,7 +1070,10 @@ fn cancel_build_stops_draft_and_build() {
         .draft_from_text(&doc_source(), &mut |_| {})
         .unwrap_err()
         .to_string();
-    assert_eq!(err, "The draft stopped at the seed step: you cancelled it.");
+    assert_eq!(
+        err,
+        "The draft stopped while reading the story: you cancelled it."
+    );
     assert_eq!(rig.build.calls().len(), 1);
     assert!(rig.drafts.list_drafts().unwrap().is_empty());
     let left: Vec<_> = std::fs::read_dir(rig.dir.path().join("drafts"))
