@@ -1028,3 +1028,40 @@ fn an_alias_on_a_gated_turn_gets_the_not_here_line() {
     let n = narration(&gm);
     assert!(n.contains(PIP_NOT_HERE), "{n}");
 }
+
+// --- mn-a: a Closing Turn moves nobody, `arrives` included ----------------
+
+/// mn-a: "End scene" whose model sends `arrives: [Pip]`. A Closing Turn
+/// moves nobody, so `settle_closing` clears `arrives`. Before, the entry
+/// stayed (in an open scene `settle_arrivals` keeps every entry), the
+/// references check rejected both attempts, and the core fell back to its
+/// default closing: the model's closing was lost. Now the first answer
+/// commits: the scene closes, with the model's minutes, and Pip does not
+/// arrive.
+#[test]
+fn a_closing_turn_with_arrives_closes_the_scene_and_brings_nobody() {
+    let (w, gm, mut engine) = scene_rig(
+        |w| {
+            let mut raw: serde_json::Value =
+                serde_json::from_str(&on_brann(w, "none", &[w.pip])).unwrap();
+            raw["action"] = "wait".into();
+            raw["minutes"] = 7.into();
+            vec![raw.to_string(), raw.to_string()]
+        },
+        2,
+    );
+    let proposals_before = prompts(&gm, CallKind::Propose).len();
+    let clock = snapshot(&engine, &w).clock_min;
+    let mut ctl = threshold_core::turn::TurnControl {
+        on_chunk: &mut |_| {},
+        faded: &|| false,
+    };
+    engine
+        .end_scene("close".into(), &mut ctl)
+        .expect("End scene commits");
+    assert_eq!(prompts(&gm, CallKind::Propose).len(), proposals_before + 1);
+    let now = snapshot(&engine, &w);
+    assert!(now.scene_open.is_none());
+    assert!(!now.present().contains(&w.pip));
+    assert_eq!(now.clock_min, clock + 7);
+}

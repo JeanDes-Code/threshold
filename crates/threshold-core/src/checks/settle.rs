@@ -200,8 +200,10 @@ fn settle_finds(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Stri
 /// only takes model output away or fixes a value the core owns, so it adds
 /// no PC act. `minutes` is clamped to 1 to `mature::SCENE_CLOSE_MAX_MIN`.
 /// A Closing Turn moves nobody (review minor, 2026-11-12): `move_to`,
-/// `leaves`, the scheduled event and new NPCs go, and so does every fact on
-/// the key `location`, on any subject. One note per change.
+/// `leaves`, `arrives` (mn-a, 2026-11-17: in an open scene
+/// `settle_arrivals` keeps every entry, so the references check rejected
+/// the closing), the scheduled event and new NPCs go, and so does every
+/// fact on the key `location`, on any subject. One note per change.
 pub fn settle_closing(
     mut p: DecisionProposal,
     view: &WorldView,
@@ -244,6 +246,7 @@ pub fn settle_closing(
         ("cancel", std::mem::take(&mut p.cancel).len()),
         ("leaves", std::mem::take(&mut p.leaves).len()),
         ("blockers", std::mem::take(&mut p.blockers).len()),
+        ("arrives", std::mem::take(&mut p.arrives).len()),
     ] {
         if len > 0 {
             note(&format!("removed {len} {field}"));
