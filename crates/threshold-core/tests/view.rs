@@ -2355,6 +2355,12 @@ fn a_refusal_with_nobody_to_confirm_says_why() {
         shown.text,
         format!("{REFUSAL_ADULTS_ONLY} {REFUSAL_NOBODY_TO_CONFIRM}")
     );
+    // The exact words the Player reads (owner's decision, 2026-11-16): the
+    // doubt may come from any Place of the tree, so no "nearby".
+    assert_eq!(
+        shown.text,
+        "An Intimate Scene cannot happen here. Someone may not be a confirmed adult."
+    );
     let json = serde_json::to_string(&shown).unwrap();
     for hidden in HIDDEN {
         assert!(!json.contains(hidden), "{hidden} leaks: {json}");

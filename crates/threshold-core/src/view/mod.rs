@@ -38,8 +38,10 @@ pub const REFUSAL_ADULTS_ONLY: &str = "An Intimate Scene cannot happen here.";
 /// confirm (QA B1, 2026-11-15): without it the Player meets a dead end. It
 /// names no one and no place. The list is empty for a hidden cause, a known
 /// minor, or a character the PC cannot name, and the sentence is the same
-/// for each, so it tells nothing the list does not (ADR 0008).
-pub const REFUSAL_NOBODY_TO_CONFIRM: &str = "Someone nearby may not be a confirmed adult.";
+/// for each, so it tells nothing the list does not (ADR 0008). It says no
+/// "nearby" (owner's decision, 2026-11-16): the doubt can come from any
+/// Place whose Inside Link is unknown, not only from a near one.
+pub const REFUSAL_NOBODY_TO_CONFIRM: &str = "Someone may not be a confirmed adult.";
 
 /// The Player's sentence for a Refusal by the stance rule.
 pub const REFUSAL_UNWILLING: &str = "Nobody here goes along with this.";
