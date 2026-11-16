@@ -1,0 +1,26 @@
+{
+  "gm_agreement": "",
+  "min_age": 18,
+  "open_details": [
+    {
+      "mode": "delegated",
+      "text": "The stranger in Harrowmere"
+    }
+  ],
+  "premise": "Bran Holt and his wife Wren are staying at the Lantern Inn in Ashford. They are preparing to deliver grain to a stranger waiting in the fishing town of Harrowmere.",
+  "resolution": "",
+  "start": {
+    "hour": null,
+    "place": "Lantern Inn",
+    "present": [
+      "Wren Holt"
+    ],
+    "situation": "Bran and Wren are having a room at the inn tonight.",
+    "when": "tonight"
+  },
+  "story_language": "en",
+  "themes": [
+    "travel",
+    "trade"
+  ]
+}

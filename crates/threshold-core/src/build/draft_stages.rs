@@ -91,7 +91,8 @@ pub fn draft_from_text(
 
     report(ctl, Stage::DraftRoster, 0, 1);
     let roster = run_stage(gm, ctl, &id, &roster_call(text), check_roster)?;
-    let roster = essential(Stage::DraftRoster, roster)?;
+    let mut roster = essential(Stage::DraftRoster, roster)?;
+    drop_pc_copies(&mut roster.output, &mut roster.cut);
     let characters = roster.output.characters.len();
     note_cuts(&mut cut, &roster.cut, |path| roster_path(path, characters));
     let roster = roster.output;
@@ -565,8 +566,55 @@ fn kind_word(kind: EntityKind) -> &'static str {
 
 // ---- Checks ----------------------------------------------------------------
 
+/// True when `character` is the PC listed again: its main name and each
+/// of its other names are names of the PC. QA run 5: the live model writes
+/// the roster's keys in schema order, `characters` before `pc`, and it
+/// listed the PC under `characters` too. A draft failed when the repair
+/// listed it again: three runs in a row, the first draft failed this way.
+/// Such a copy adds no person, so the one-PC check skips it and the draft
+/// drops it (`drop_pc_copies`). An entry that gives the PC a name the PC
+/// does not have still fails the check: it may be another person.
+fn is_pc_copy(pc_names: &HashSet<String>, character: &CharacterOut) -> bool {
+    std::iter::once(&character.name)
+        .chain(character.other_names.iter().map(|o| &o.name))
+        .all(|name| pc_names.contains(&normalize::name(name)))
+}
+
+/// Drops each copy of the PC from `characters` (`is_pc_copy`), and each cut
+/// found inside a dropped entry. A cut inside a later entry follows its
+/// new index.
+fn drop_pc_copies(out: &mut RosterOut, cut: &mut Vec<CapAt>) {
+    let pc_names = pc_names(&out.pc);
+    let copies: Vec<usize> = out
+        .characters
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| is_pc_copy(&pc_names, c))
+        .map(|(i, _)| i)
+        .collect();
+    if copies.is_empty() {
+        return;
+    }
+    let mut at = 0;
+    out.characters.retain(|_| {
+        at += 1;
+        !copies.contains(&(at - 1))
+    });
+    cut.retain_mut(|(path, _)| match path.as_mut_slice() {
+        [Step::Field(list), Step::Index(i), ..] if list == "characters" => {
+            if copies.contains(i) {
+                return false;
+            }
+            *i -= copies.iter().filter(|c| **c < *i).count();
+            true
+        }
+        _ => true,
+    });
+}
+
 /// Schema, OnePc and References on the roster. Every problem is
-/// essential: the roster is.
+/// essential: the roster is. A copy of the PC in `characters`
+/// (`is_pc_copy`) is no problem: the draft drops it.
 fn check_roster(out: &RosterOut) -> Vec<Problem<()>> {
     let mut problems = vec![];
     let mut problem = |check, note: String| problems.push(Problem::essential(check, note));
@@ -575,14 +623,20 @@ fn check_roster(out: &RosterOut) -> Vec<Problem<()>> {
     if out.pc.name.trim().is_empty() {
         problem(BuildCheck::Schema, "pc.name is empty".into());
     }
-    let characters = out.characters.iter().map(|c| (&c.name, &c.other_names));
-    let others = out.others.iter().map(|o| (&o.name, &o.other_names));
+    let characters = out
+        .characters
+        .iter()
+        .map(|c| (&c.name, &c.other_names, is_pc_copy(&pc_names, c)));
+    let others = out.others.iter().map(|o| (&o.name, &o.other_names, false));
     let lists = [
         ("characters", characters.collect::<Vec<_>>()),
         ("others", others.collect()),
     ];
     for (list, entries) in lists {
-        for (i, (name, other_names)) in entries.into_iter().enumerate() {
+        for (i, (name, other_names, copy)) in entries.into_iter().enumerate() {
+            if copy {
+                continue;
+            }
             if name.trim().is_empty() {
                 problem(BuildCheck::Schema, format!("{list}[{i}].name is empty"));
             }

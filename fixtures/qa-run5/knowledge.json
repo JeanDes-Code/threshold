@@ -1,0 +1,196 @@
+{
+  "facts": [
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Ashford",
+      "text": "Ashford is a small hill village above a lake.",
+      "value": "small hill village"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Lantern Inn",
+      "text": "The Lantern Inn stands in Ashford, beside the old well.",
+      "value": "in Ashford"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "old well",
+      "text": "The Lantern Inn stands in Ashford, beside the old well.",
+      "value": "beside the Lantern Inn"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "mill house",
+      "text": "The mill house is part of Ashford, down by the stream.",
+      "value": "in Ashford"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "chapel",
+      "text": "The chapel is inside Ashford's walls.",
+      "value": "inside Ashford's walls"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "ferry landing",
+      "text": "The ferry landing is at the foot of the hill, by the lake.",
+      "value": "at the foot of the hill"
+    },
+    {
+      "key": "transportation",
+      "open": false,
+      "pc_knows": true,
+      "subject": "ferry landing",
+      "text": "The ferry carries travellers over to Harrowmere.",
+      "value": "carries travellers to Harrowmere"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Harrowmere",
+      "text": "Harrowmere is a fishing town on the far shore of the lake.",
+      "value": "fishing town"
+    },
+    {
+      "key": "age",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Bran Holt",
+      "text": "Bran Holt (38) is the player character, a carter hauling grain to Harrowmere.",
+      "value": "38"
+    },
+    {
+      "key": "occupation",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Bran Holt",
+      "text": "Bran Holt (38) is the player character, a carter hauling grain to Harrowmere.",
+      "value": "carter"
+    },
+    {
+      "key": "relation",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Wren Holt",
+      "text": "He travels with his wife, Wren Holt (36), a weaver.",
+      "value": "wife"
+    },
+    {
+      "key": "age",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Wren Holt",
+      "text": "He travels with his wife, Wren Holt (36), a weaver.",
+      "value": "36"
+    },
+    {
+      "key": "occupation",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Wren Holt",
+      "text": "He travels with his wife, Wren Holt (36), a weaver.",
+      "value": "weaver"
+    },
+    {
+      "key": "accommodation",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Bran Holt",
+      "text": "They are both adults and have a room at the Lantern Inn.",
+      "value": "room at the Lantern Inn"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Bran Holt",
+      "text": "Tonight they are at the Lantern Inn.",
+      "value": "Lantern Inn"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Wren Holt",
+      "text": "Tonight they are at the Lantern Inn.",
+      "value": "Lantern Inn"
+    },
+    {
+      "key": "occupation",
+      "open": false,
+      "pc_knows": true,
+      "subject": "Ada Miller",
+      "text": "Ada Miller (40) keeps the mill house.",
+      "value": "keeps the mill house"
+    },
+    {
+      "key": "age",
+      "open": false,
+      "pc_knows": false,
+      "subject": "Ada Miller",
+      "text": "Ada Miller (40) keeps the mill house.",
+      "value": "40"
+    },
+    {
+      "key": "relation",
+      "open": false,
+      "pc_knows": false,
+      "subject": "Pip Miller",
+      "text": "Her daughter, Pip Miller, is 10 years old and lives with her at the mill house.",
+      "value": "daughter of Ada Miller"
+    },
+    {
+      "key": "age",
+      "open": false,
+      "pc_knows": false,
+      "subject": "Pip Miller",
+      "text": "Her daughter, Pip Miller, is 10 years old and lives with her at the mill house.",
+      "value": "10 years old"
+    },
+    {
+      "key": "location",
+      "open": false,
+      "pc_knows": false,
+      "subject": "Pip Miller",
+      "text": "Her daughter, Pip Miller, is 10 years old and lives with her at the mill house.",
+      "value": "lives at the mill house with Ada Miller"
+    },
+    {
+      "key": "age",
+      "open": false,
+      "pc_knows": false,
+      "subject": "Old Tamsin",
+      "text": "Old Tamsin (70) rings the chapel bell.",
+      "value": "70"
+    },
+    {
+      "key": "occupation",
+      "open": false,
+      "pc_knows": false,
+      "subject": "Old Tamsin",
+      "text": "Old Tamsin (70) rings the chapel bell.",
+      "value": "rings the chapel bell"
+    },
+    {
+      "key": "goal",
+      "open": true,
+      "pc_knows": true,
+      "subject": "Bran Holt",
+      "text": "A stranger in Harrowmere is waiting for Bran's grain.",
+      "value": "deliver grain to a stranger in Harrowmee"
+    }
+  ]
+}

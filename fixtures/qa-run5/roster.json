@@ -1,0 +1,83 @@
+{
+  "characters": [
+    {
+      "age": 38,
+      "age_stated": true,
+      "name": "Bran Holt",
+      "other_names": []
+    },
+    {
+      "age": 36,
+      "age_stated": true,
+      "name": "Wren Holt",
+      "other_names": []
+    },
+    {
+      "age": 40,
+      "age_stated": true,
+      "name": "Ada Miller",
+      "other_names": []
+    },
+    {
+      "age": 10,
+      "age_stated": true,
+      "name": "Pip Miller",
+      "other_names": []
+    },
+    {
+      "age": 70,
+      "age_stated": true,
+      "name": "Old Tamsin",
+      "other_names": []
+    }
+  ],
+  "others": [
+    {
+      "kind": "place",
+      "name": "Ashford",
+      "other_names": []
+    },
+    {
+      "kind": "place",
+      "name": "Lantern Inn",
+      "other_names": []
+    },
+    {
+      "kind": "place",
+      "name": "old well",
+      "other_names": []
+    },
+    {
+      "kind": "place",
+      "name": "mill house",
+      "other_names": []
+    },
+    {
+      "kind": "place",
+      "name": "chapel",
+      "other_names": []
+    },
+    {
+      "kind": "place",
+      "name": "ferry landing",
+      "other_names": []
+    },
+    {
+      "kind": "place",
+      "name": "Harrowmere",
+      "other_names": []
+    },
+    {
+      "kind": "place",
+      "name": "the lake",
+      "other_names": []
+    }
+  ],
+  "pc": {
+    "age": 38,
+    "age_stated": true,
+    "concept": "A carter hauling grain to Harrowmere",
+    "name": "Bran Holt",
+    "other_names": []
+  }
+}
