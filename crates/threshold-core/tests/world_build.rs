@@ -8,7 +8,8 @@ use threshold_core::{
     RecordedGm,
     build::{
         BuildCheck, BuildFailure, Control, DebugEntry, DraftState, KnownFact, PC_CENTRED_MAX_SHARE,
-        Progress, SeedDraft, Stage, age_lines, approve, build_world, confirm_age,
+        Progress, SeedDraft, Stage, age_lines, approve, build_world, confirm_age, confirm_inside,
+        place_lines,
     },
     domain::{
         AdventureSeed, EntityKind, FactEntry, Inside, OtherName, PcSeed, SeedEntity, StartSeed,
@@ -107,9 +108,12 @@ fn known(subject: &str, key: &str, value: &str, open: bool) -> KnownFact {
 fn draft_of(seed: AdventureSeed, knowledge: Vec<KnownFact>) -> SeedDraft {
     let mut draft = SeedDraft::new(source(), seed);
     draft.knowledge = knowledge;
-    // The Player confirms every age.
+    // The Player confirms every age, and puts every Place at top level.
     for line in age_lines(&draft) {
         confirm_age(&mut draft, &line.entry()).unwrap();
+    }
+    for line in place_lines(&draft) {
+        confirm_inside(&mut draft, &line.entry(), Inside::Top).unwrap();
     }
     approve(&mut draft).unwrap();
     assert_eq!(draft.state, DraftState::Approved);
@@ -190,19 +194,6 @@ fn start(placements: &[(&str, &str)]) -> Value {
     json!({ "placements": list })
 }
 
-fn tree(links: &[(&str, &str)]) -> Value {
-    let list: Vec<Value> = links
-        .iter()
-        .map(|(place, inside)| json!({"place": place, "inside": inside}))
-        .collect();
-    json!({ "places": list })
-}
-
-/// The place tree of `draft()`: both places are top-level.
-fn plain_tree() -> Value {
-    tree(&[("Gull Point", "none"), ("Tide Hall", "none")])
-}
-
 /// Every output of a full build of `draft()`, in call order.
 fn plain() -> Vec<Value> {
     vec![
@@ -212,7 +203,6 @@ fn plain() -> Vec<Value> {
         npc_out("Ada Venn"),
         events(&[ev(60, "Tobin Reed", &[], &["Ada Venn"])]),
         start(&[("Ada Venn", "Tide Hall")]),
-        plain_tree(),
     ]
 }
 
@@ -321,7 +311,7 @@ fn full_build_commits_through_setup() {
     let draft = draft();
     let run = run(&draft, &plain());
     let world = run.world();
-    assert_eq!(run.gm.calls().len(), 7);
+    assert_eq!(run.gm.calls().len(), 6);
 
     // Code adds the known facts with the PC as holder, and the location of
     // the PC and of each name present at the start.
@@ -459,11 +449,11 @@ fn roster_without_npc_builds() {
     seed.pc.other_names[0].known_to = vec!["Mira Holt".into()];
     seed.start.present.clear();
     let draft = draft_of(seed, vec![]);
-    let run = run(&draft, &[hidden(&[]), hidden(&[]), plain_tree()]);
+    let run = run(&draft, &[hidden(&[]), hidden(&[])]);
     let world = run.world();
-    // Two hidden-facts calls and the place tree; no NPC, so no NpcState,
-    // event or placement call.
-    assert_eq!(run.gm.calls().len(), 3);
+    // Two hidden-facts calls; no NPC, so no NpcState, event or placement
+    // call. The place tree was confirmed in the review: no call.
+    assert_eq!(run.gm.calls().len(), 2);
     assert!(world.voice_cards.is_empty() && world.goals.is_empty() && world.events.is_empty());
     assert_eq!(facts_on(&world, "Mira Holt", "location").len(), 1);
     let dir = TempDir::new("no-npc");
@@ -503,8 +493,6 @@ fn progress_and_log_name_stages_and_counts_only() {
             (Stage::WorldEvents, 1, 1),
             (Stage::StartState, 0, 1),
             (Stage::StartState, 1, 1),
-            (Stage::PlaceTree, 0, 1),
-            (Stage::PlaceTree, 1, 1),
         ]
     );
     let steps: Vec<&str> = run.log.iter().map(|e| e.step.as_str()).collect();
@@ -517,7 +505,6 @@ fn progress_and_log_name_stages_and_counts_only() {
             "npc_state 2/2",
             "world_events",
             "start_state",
-            "place_tree",
         ]
     );
     assert!(run.log.iter().all(|e| e.op_id == draft.id));
@@ -580,7 +567,7 @@ fn every_world_call_sees_the_content_boundaries() {
     run.world();
     let calls = run.gm.calls();
     let stages: Vec<&str> = run.log.iter().map(|e| e.step.as_str()).collect();
-    assert_eq!(calls.len(), 7, "{stages:?}");
+    assert_eq!(calls.len(), 6, "{stages:?}");
     for (call, step) in calls.iter().zip(&stages) {
         let recent = &call.prompt.recent;
         assert!(
@@ -666,11 +653,10 @@ fn references_trap() {
         bad_events,
         start(&[("Ada Venn", "Nowhere Inn")]),
         start(&[("Ada Venn", "Nowhere Inn")]),
-        plain_tree(),
     ];
     let run = run(&draft(), &outputs);
     let world = run.world();
-    assert_eq!(run.gm.calls().len(), 11);
+    assert_eq!(run.gm.calls().len(), 10);
     let notes = repair_notes(&run.gm);
     assert_eq!(notes.len(), 4);
     assert!(notes.iter().all(|n| n.contains("References")));
@@ -731,7 +717,6 @@ fn kinds_trap() {
         bad_events,
         bad_start.clone(),
         bad_start,
-        plain_tree(),
     ];
     let run = run(&draft(), &outputs);
     let world = run.world();
@@ -814,7 +799,6 @@ fn agency_trap() {
         bad_events.clone(),
         bad_events,
         start(&[("Ada Venn", "Tide Hall")]),
-        plain_tree(),
     ];
     let run = run(&draft(), &outputs);
     let world = run.world();
@@ -848,7 +832,6 @@ fn settled_facts_trap() {
         npc_out("Ada Venn"),
         events(&[]),
         start(&[]),
-        plain_tree(),
     ];
     let run = run(&draft(), &outputs);
     let world = run.world();
@@ -1045,7 +1028,7 @@ fn world_autonomy_trap() {
     passing.insert(4, npc_out("Tobin Reed"));
     let run2 = run(&draft(), &passing);
     let world = run2.world();
-    assert_eq!(run2.gm.calls().len(), 8);
+    assert_eq!(run2.gm.calls().len(), 7);
     assert_eq!(world.goals[0].text, "Tobin Reed wants a quiet winter.");
 }
 
@@ -1146,7 +1129,6 @@ fn optional_item_is_dropped_and_the_build_goes_on() {
         bad_events.clone(),
         bad_events,
         start(&[("Ada Venn", "Tide Hall")]),
-        plain_tree(),
     ];
     let world = run(&draft(), &outputs).world();
     assert!(facts_on(&world, "Nobody Known", "savings").is_empty());
@@ -1319,7 +1301,6 @@ fn a_repair_note_never_quotes_hidden_text() {
         bad_events,
         bad_start.clone(),
         bad_start,
-        plain_tree(),
     ];
     let run = run(&draft(), &outputs);
     run.world();
@@ -1531,7 +1512,6 @@ fn every_name_field_of_each_world_stage_is_an_enum() {
             "npc_state 2/2",
             "world_events",
             "start_state",
-            "place_tree",
         ]
     );
 
@@ -1596,20 +1576,9 @@ fn every_name_field_of_each_world_stage_is_an_enum() {
         names_at(start, &["placements", "[]", "place"]),
         vec!["Tide Hall"]
     );
-
-    // The place tree: every place, and every place or none as its parent.
-    let tree = &calls[6].schema;
-    assert_eq!(
-        names_at(tree, &["places", "[]", "place"]),
-        vec!["Gull Point", "Tide Hall"]
-    );
-    assert_eq!(
-        names_at(tree, &["places", "[]", "inside"]),
-        vec!["Gull Point", "Tide Hall", "none"]
-    );
 }
 
-// ---- ADR 0008, Inside Links: the place tree stage ------------------------------
+// ---- ADR 0008, Inside Links: the confirmed place tree ---------------------------
 
 fn links_of(world: &WorldSetup) -> Vec<(&str, &str)> {
     world
@@ -1619,22 +1588,34 @@ fn links_of(world: &WorldSetup) -> Vec<(&str, &str)> {
         .collect()
 }
 
-/// Every Place states the Place that holds it, or none, and the links
-/// reach the campaign file as stored Inside Links.
+/// The World Build writes the tree the Player confirmed, with no call, and
+/// the links reach the campaign file as stored Inside Links. A Place set to
+/// "not sure" gets no link.
 #[test]
-fn the_place_tree_links_every_place_and_reaches_the_file() {
-    let draft = draft();
-    let mut outputs = plain();
-    outputs[6] = tree(&[("Tide Hall", "Gull Point"), ("gull point", "none")]);
-    let run = run(&draft, &outputs);
+fn the_confirmed_place_tree_reaches_the_file() {
+    let mut seed = seed();
+    seed.entities
+        .push(entity("The Lamp Room", EntityKind::Place, None));
+    let mut draft = draft_of(seed, vec![]);
+    let line = |draft: &SeedDraft, name: &str| {
+        place_lines(draft)
+            .into_iter()
+            .find(|l| l.name == name)
+            .unwrap()
+    };
+    let hall = line(&draft, "Tide Hall").entry();
+    confirm_inside(&mut draft, &hall, Inside::Place("Gull Point".into())).unwrap();
+    let lamp = line(&draft, "The Lamp Room").entry();
+    confirm_inside(&mut draft, &lamp, Inside::Unknown).unwrap();
+    approve(&mut draft).unwrap();
+
+    let run = run(&draft, &plain());
     let world = run.world();
     assert_eq!(
         links_of(&world),
-        [("Tide Hall", "Gull Point"), ("Gull Point", "none")]
+        [("Gull Point", "none"), ("Tide Hall", "Gull Point")]
     );
-    let prompt = &run.gm.calls()[6].prompt;
-    assert!(prompt.recent.contains("PLACES\n- Gull Point\n- Tide Hall"));
-    assert!(prompt.system.contains("none when no place"));
+    assert!(!run.log.iter().any(|e| e.step.starts_with("place_tree")));
 
     let dir = TempDir::new("tree");
     let path = dir.0.join("c.sqlite");
@@ -1645,56 +1626,30 @@ fn the_place_tree_links_every_place_and_reaches_the_file() {
     let link = |name: &str| view.entity_by_name(name).unwrap().inside;
     assert_eq!(link("Gull Point"), Inside::Top);
     assert_eq!(link("Tide Hall"), Inside::Place(id("Gull Point")));
+    assert_eq!(link("The Lamp Room"), Inside::Unknown);
 }
 
-/// A bad link is repaired once, then dropped; a Place the answer leaves
-/// out asks for the repair too. A Place with no link left keeps an unknown
-/// link: the build goes on, and the gate doubts that Place.
+/// The fact check runs again over the facts the World Build adds: a hidden
+/// fact that puts the Tide Hall on Gull Point doubts the Player's top-level
+/// links. The Tide Hall (rule 1) and Gull Point (rule 2: named in another
+/// Place's location) get no link. A draft fact the Player saw does not
+/// count again.
 #[test]
-fn a_bad_place_tree_link_is_dropped_and_the_place_stays_unknown() {
-    let bad = tree(&[
-        ("Gull Point", "Gull Point"),
-        ("Tide Hall", "none"),
-        ("Tide Hall", "Harbour Council"),
-        ("Tide Hall", "Gull Point"),
-    ]);
+fn a_world_build_fact_doubts_a_confirmed_link() {
     let mut outputs = plain();
-    outputs[6] = bad.clone();
-    outputs.push(bad);
-    let run = run(&draft(), &outputs);
-    let world = run.world();
-    assert_eq!(links_of(&world), [("Tide Hall", "none")]);
-    let notes = repair_notes(&run.gm);
-    assert_eq!(notes.len(), 1);
-    let note = &notes[0];
-    assert!(note.contains("cannot be inside itself"), "{note}");
-    assert!(note.contains("is not a place"), "{note}");
-    assert!(note.contains("this place is listed twice"), "{note}");
-    assert!(note.contains("places (Gull Point)"), "{note}");
+    outputs[1] = hidden(&[hf("Tide Hall", "location", "Gull Point", false, &[])]);
+    let world = run(&draft(), &outputs).world();
+    assert_eq!(links_of(&world), []);
 
-    let dir = TempDir::new("tree-unknown");
-    let path = dir.0.join("c.sqlite");
-    let draft = draft();
-    create_campaign_file(&path, &draft.seed, &world, 7, None).unwrap();
-    let store = Store::open(&path).unwrap();
-    let view = store.snapshot(store.campaigns().unwrap()[0]).unwrap();
-    let link = |name: &str| view.entity_by_name(name).unwrap().inside;
-    assert_eq!(link("Gull Point"), Inside::Unknown);
-}
-
-/// A loop is refused: the link that closes it is dropped.
-#[test]
-fn a_place_tree_loop_is_dropped() {
-    let bad = tree(&[("Gull Point", "Tide Hall"), ("Tide Hall", "Gull Point")]);
-    let mut outputs = plain();
-    outputs[6] = bad.clone();
-    outputs.push(bad);
-    let run = run(&draft(), &outputs);
-    let world = run.world();
-    assert_eq!(links_of(&world), [("Gull Point", "Tide Hall")]);
-    let notes = repair_notes(&run.gm);
-    assert!(notes[0].contains("makes a loop"), "{notes:?}");
-    assert!(notes[0].contains("places (Tide Hall)"), "{notes:?}");
+    let drafted = draft_of(
+        seed(),
+        vec![known("Tide Hall", "location", "Gull Point", false)],
+    );
+    let world = run(&drafted, &plain()).world();
+    assert_eq!(
+        links_of(&world),
+        [("Gull Point", "none"), ("Tide Hall", "none")]
+    );
 }
 
 #[test]
@@ -1740,14 +1695,11 @@ fn with_no_place_but_the_start_place_the_start_state_is_not_called() {
     let mut seed = seed();
     seed.entities.retain(|e| e.name != "Tide Hall");
     let draft = draft_of(seed, vec![]);
-    let run = run(
-        &draft,
-        &[&plain()[..5], &[tree(&[("Gull Point", "none")])]].concat(),
-    );
+    let run = run(&draft, &plain()[..5]);
     let world = run.world();
-    // Hidden facts, two NPC states, events, place tree: no StartState call, and the
+    // Hidden facts, two NPC states, events: no StartState call, and the
     // absent NPC gets no placement.
-    assert_eq!(run.gm.calls().len(), 6);
+    assert_eq!(run.gm.calls().len(), 5);
     assert!(!run.log.iter().any(|e| e.step.starts_with("start_state")));
     assert!(facts_on(&world, "Ada Venn", "location").is_empty());
     assert_eq!(facts_on(&world, "Tobin Reed", "location").len(), 1);
@@ -1768,8 +1720,8 @@ fn a_shared_first_name_does_not_trigger_world_autonomy() {
     outputs[2]["goals"] = json!([{"text": "Help Mira Venn mend the nets.", "against": null}]);
     let run = run(&draft, &outputs);
     let world = run.world();
-    // No WorldAutonomy call: seven calls, as in a plain build.
-    assert_eq!(run.gm.calls().len(), 7);
+    // No WorldAutonomy call: six calls, as in a plain build.
+    assert_eq!(run.gm.calls().len(), 6);
     assert!(!run.log.iter().any(|e| e.step.contains("autonomy")));
     assert_eq!(world.goals.len(), 2);
 }

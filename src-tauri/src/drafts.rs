@@ -12,10 +12,10 @@ use serde::Serialize;
 use threshold_core::{
     build::{
         self, AgeLine, BuildCheck, BuildFailure, Control, Cut, DebugEntry, DraftState, DraftStore,
-        DraftStoreError, EntryRef, Gap, KnownFact, Progress, ReviewError, SeedDraft,
+        DraftStoreError, EntryRef, Gap, KnownFact, PlaceLine, Progress, ReviewError, SeedDraft,
         SourceTextProblem, Stage,
     },
-    domain::AdventureSeed,
+    domain::{AdventureSeed, Inside},
     setup::{SetupError, create_campaign_file},
 };
 
@@ -36,6 +36,10 @@ pub struct DraftView {
     /// The age of each character: where it comes from, and whether the
     /// Player confirmed it through `confirm_age`.
     pub ages: Vec<AgeLine>,
+    /// The Inside Link of each Place: the parent, whether the fact check
+    /// doubted the model's link, and whether the Player confirmed it
+    /// through `confirm_inside` (ADR 0008).
+    pub places: Vec<PlaceLine>,
     /// The lists that the draft run cut at their cap.
     pub cut: Vec<Cut>,
     pub gaps: Vec<Gap>,
@@ -47,6 +51,7 @@ impl DraftView {
         Self {
             gaps: build::gaps(&draft),
             ages: build::age_lines(&draft),
+            places: build::place_lines(&draft),
             draft_id: draft.id,
             state: draft.state,
             seed: draft.seed,
@@ -219,6 +224,21 @@ impl Drafts {
     pub fn confirm_age(&self, draft_id: &str, entry: &EntryRef) -> Result<DraftView, AppError> {
         self.change(draft_id, |draft| {
             build::confirm_age(draft, entry).map_err(|e| failed(confirm_sentence(e, &entry.name)))
+        })
+    }
+
+    /// The Player confirms the Inside Link of one Place: another Place by
+    /// exact main name, top level, or "not sure" (`Unknown`). A refused
+    /// link changes nothing.
+    pub fn confirm_inside(
+        &self,
+        draft_id: &str,
+        entry: &EntryRef,
+        inside: Inside<String>,
+    ) -> Result<DraftView, AppError> {
+        self.change(draft_id, |draft| {
+            build::confirm_inside(draft, entry, inside)
+                .map_err(|e| failed(inside_sentence(e, &entry.name)))
         })
     }
 
@@ -435,6 +455,19 @@ fn rename_sentence(e: ReviewError, from: &str, to: &str) -> String {
             to.trim()
         ),
         ReviewError::Empty => "A name cannot be empty. Type a name.".to_owned(),
+        ReviewError::Loop => "A place cannot be inside itself.".to_owned(),
+    }
+}
+
+/// The Player's sentence for a refused Inside Link.
+fn inside_sentence(e: ReviewError, name: &str) -> String {
+    match e {
+        ReviewError::Loop => format!(
+            "{name} cannot be inside that place: that place is already inside {name}. Choose another place."
+        ),
+        ReviewError::UnknownName | ReviewError::NameInUse | ReviewError::Empty => format!(
+            "No place of this draft is called “{name}”, or the chosen parent is no place any more. Open the draft again, then choose."
+        ),
     }
 }
 
@@ -442,7 +475,7 @@ fn rename_sentence(e: ReviewError, from: &str, to: &str) -> String {
 fn confirm_sentence(e: ReviewError, name: &str) -> String {
     match e {
         ReviewError::Empty => format!("{name} has no age yet. Enter an age, then confirm it."),
-        ReviewError::UnknownName | ReviewError::NameInUse => format!(
+        ReviewError::UnknownName | ReviewError::NameInUse | ReviewError::Loop => format!(
             "No character of this draft is called “{name}” any more. Open the draft again, then confirm the age."
         ),
     }
@@ -484,7 +517,7 @@ fn job_error(failure: BuildFailure) -> AppError {
         Stage::NpcState => ("The world build", "the characters step"),
         Stage::WorldEvents => ("The world build", "the world events step"),
         Stage::StartState => ("The world build", "the start step"),
-        Stage::PlaceTree => ("The world build", "the places step"),
+        Stage::PlaceTree => ("The draft", "the places step"),
         Stage::Commit => ("The world build", "the campaign file step"),
     };
     let check = match failure.check {

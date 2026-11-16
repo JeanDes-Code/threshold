@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::BuildFailure;
+use super::{BuildFailure, places::PlaceLink};
 use crate::{
     context::{ADVENTURE_BLOCK_MAX_CHARS, adventure_block_chars},
     domain::{
@@ -42,6 +42,13 @@ pub struct SeedDraft {
     /// name) loads with no mark, so every age needs a new confirmation.
     #[serde(default)]
     pub age_marks: AgeRows,
+    /// The Inside Link of each Place, by exact main name: what the draft
+    /// run proposed after the fact check, and what the Player confirmed
+    /// (`places`, ADR 0008). Only `confirm_inside` writes a confirmation.
+    /// A draft file from before this field loads with no link, so every
+    /// Place needs a choice.
+    #[serde(default)]
+    pub place_links: Vec<PlaceLink>,
     /// The lists that the draft run cut at their cap.
     #[serde(default)]
     pub cut: Vec<Cut>,
@@ -62,6 +69,7 @@ impl SeedDraft {
             seed,
             knowledge: vec![],
             age_marks: AgeRows::default(),
+            place_links: vec![],
             cut: vec![],
             last_failure: None,
             campaign_file: None,
@@ -215,6 +223,8 @@ pub enum ReviewError {
     NameInUse,
     /// The new name is empty, or the character has no age to confirm.
     Empty,
+    /// The Inside Link would put a Place inside itself, or close a loop.
+    Loop,
 }
 
 impl fmt::Display for ReviewError {
@@ -223,6 +233,7 @@ impl fmt::Display for ReviewError {
             Self::UnknownName => "no entry of the draft has that name",
             Self::NameInUse => "another entry has that name",
             Self::Empty => "the value is empty",
+            Self::Loop => "a place cannot be inside itself, even through other places",
         })
     }
 }
@@ -261,6 +272,10 @@ pub enum GapKind {
     AgeUnconfirmed,
     /// An age is below the seed's `min_age`.
     AgeBelowMin,
+    /// The Player has not confirmed the Inside Link of a Place through
+    /// `confirm_inside` (ADR 0008, 2026-11-16). `at` is
+    /// `entities[i].inside`.
+    PlaceUnconfirmed,
     /// A name that no roster entry carries, or one of the wrong kind.
     UnknownName,
     /// A name used twice, main or other, after `normalize::name`; or the
@@ -288,7 +303,8 @@ pub enum GapKind {
 /// `pc.age`, `start.place`), an index in brackets for a list
 /// (`entities[3].age`, `entities[0].other_names[1]`,
 /// `entities[0].other_names[1].known_to[0]`, `start.present[2]`,
-/// `decided[0].subject`), `knowledge[5].subject` for PC Knowledge, and
+/// `decided[0].subject`, `entities[2].inside` for an Inside Link),
+/// `knowledge[5].subject` for PC Knowledge, and
 /// `seed` for the stable block as a whole.
 ///
 /// `with` names the other entry of a pair, in the same path form, so the
@@ -325,6 +341,7 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
     let mut pairs: Vec<(GapKind, String, String)> = Vec::new();
     let below_min = |age: u16| seed.min_age.is_some_and(|min| age < min);
     let roster = Roster::of(seed);
+    let places_waiting = super::places::unconfirmed(draft);
 
     for (text, at) in [
         (&seed.premise, "premise"),
@@ -427,6 +444,9 @@ pub fn gaps(draft: &SeedDraft) -> Vec<Gap> {
             }
             (false, Some(_)) => gap(GapKind::WrongKind, at("age")),
             (false, None) => {}
+        }
+        if places_waiting.contains(&i) {
+            gap(GapKind::PlaceUnconfirmed, at("inside"));
         }
     }
 
@@ -687,7 +707,8 @@ pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), Review
 /// known, decided and proposed fact, and the name in its own age mark. A
 /// reference matches the old name through `normalize::name`. The old name,
 /// with the same spelling and as whole words, also changes in the text of
-/// each known fact and in `start.situation`. A name that another entry has,
+/// each known fact and in `start.situation`. A Place keeps its Inside Link
+/// and its children keep theirs (`places::rename_links`). A name that another entry has,
 /// main or other, is refused, and the draft does not change. A change of
 /// case or accent of the same name is allowed. Only the mark of this very
 /// row moves to the new name.
@@ -772,6 +793,9 @@ pub fn rename(draft: &mut SeedDraft, entry: &EntryRef, to: &str) -> Result<(), R
         && let Some(mark) = draft.age_marks.slot(owner)
     {
         mark.name = to.to_owned();
+    }
+    if entry.kind == EntityKind::Place {
+        super::places::rename_links(draft, &old, to);
     }
     set_age_facts(draft, owner, true);
     edited(draft);

@@ -5,8 +5,9 @@ use std::{fs, path::PathBuf};
 use threshold_core::{
     build::{
         AgeLine, AgeMark, AgeRows, AgeSource, BuildCheck, BuildFailure, DebugEntry, DraftLine,
-        DraftState, DraftStore, EntryRef, Gap, GapKind, KnownFact, ReviewError, SeedDraft, Stage,
-        age_lines, apply_edit, approve, confirm_age, confirmed_ages, gaps, rename,
+        DraftState, DraftStore, EntryRef, Gap, GapKind, KnownFact, PlaceLink, ReviewError,
+        SeedDraft, Stage, age_lines, apply_edit, approve, confirm_age, confirm_inside,
+        confirmed_ages, gaps, place_lines, rename,
     },
     context::ADVENTURE_BLOCK_MAX_CHARS,
     domain::{
@@ -72,11 +73,15 @@ fn known(subject: &str, key: &str, value: &str) -> KnownFact {
     }
 }
 
-/// Confirms the current age of every character, as the Player would one by
-/// one. A character with no age stays as it is.
+/// Confirms the current age of every character, and the Inside Link of
+/// every Place as shown, as the Player would one by one. A character with
+/// no age stays as it is.
 fn confirm_all(draft: &mut SeedDraft) {
     for line in age_lines(draft) {
         let _ = confirm_age(draft, &line.entry());
+    }
+    for line in place_lines(draft) {
+        let _ = confirm_inside(draft, &line.entry(), line.inside.clone());
     }
 }
 
@@ -127,7 +132,8 @@ fn valid_draft() -> SeedDraft {
 }
 
 /// `valid_draft` before the Player confirmed any age: Wren's age is from
-/// the text, Jean's is proposed.
+/// the text, Jean's is proposed. The landing stage is a confirmed top-level
+/// Place.
 fn unconfirmed_draft() -> SeedDraft {
     let seed = AdventureSeed {
         premise: "A ferry crossing at night".into(),
@@ -168,6 +174,12 @@ fn unconfirmed_draft() -> SeedDraft {
         pc: Some(drafted("Wren", EntityKind::Pc, 29, true)),
         entities: vec![Some(drafted("Jean", EntityKind::Npc, 40, false)), None],
     };
+    draft.place_links = vec![PlaceLink {
+        place: "The landing stage".into(),
+        inside: threshold_core::domain::Inside::Top,
+        doubted: false,
+        confirmed: true,
+    }];
     draft
 }
 

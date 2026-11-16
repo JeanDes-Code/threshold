@@ -70,7 +70,8 @@ pub fn check_source_text(text: &str) -> Result<(), SourceTextProblem> {
 }
 
 /// Drafts a Seed Draft from a Source Text: the roster with the PC, the seed,
-/// then the PC Knowledge of each section. A text that `check_source_text`
+/// the PC Knowledge of each section, then the place tree, which the Player
+/// confirms in the review (`places::draft_tree`). A text that `check_source_text`
 /// refuses is refused before any call, as `Completeness`. A failed roster or
 /// seed fails the draft; a known fact that fails its repair is dropped. Each
 /// list that the stage runner cut at its cap is kept in `cut`.
@@ -153,6 +154,7 @@ pub fn draft_from_text(
         report(ctl, Stage::DraftKnowledge, i + 1, parts.len());
     }
     draft.cut = cut;
+    super::places::draft_tree(&mut draft, gm, ctl)?;
     Ok(draft)
 }
 
@@ -791,6 +793,7 @@ fn assemble(id: String, text: &str, seed: SeedOut, roster: RosterOut) -> SeedDra
         },
         knowledge: vec![],
         age_marks: ages,
+        place_links: vec![],
         cut: vec![],
         last_failure: None,
         campaign_file: None,

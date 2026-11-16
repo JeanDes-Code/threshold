@@ -1,4 +1,4 @@
-//! `draft_from_text`: the three draft stages, their checks and the stage
+//! `draft_from_text`: the four draft stages, their checks and the stage
 //! runner, replayed with `RecordedGm` (data shape 2 and 3.5, design 6.2).
 
 use serde_json::{Value, json};
@@ -8,9 +8,9 @@ use threshold_core::{
         AgeSource, BuildCheck, BuildFailure, Control, Cut, DebugEntry, DraftState, GapKind,
         KnownFact, Progress, SOURCE_TEXT_MAX_CHARS, SOURCE_TEXT_MIN_CHARS, SeedDraft,
         SourceTextProblem, Stage, age_lines, apply_edit, approve, build_world, check_source_text,
-        confirm_age, draft_from_text, gaps,
+        confirm_age, confirm_inside, draft_from_text, gaps, place_lines,
     },
-    domain::{DetailLevel, EntityKind, OpenMode, SeedEntity},
+    domain::{DetailLevel, EntityKind, Inside, OpenMode, SeedEntity},
 };
 
 /// What one draft returned, reported and logged.
@@ -57,11 +57,28 @@ fn waiting(draft: &SeedDraft) -> Vec<String> {
         .collect()
 }
 
-/// Confirms every age, as the Player would one by one.
+/// Confirms every age and every Inside Link as shown, as the Player would
+/// one by one.
 fn confirm_all(draft: &mut SeedDraft) {
     for line in age_lines(draft) {
         confirm_age(draft, &line.entry()).unwrap();
     }
+    confirm_places(draft);
+}
+
+/// Confirms every Inside Link as the review shows it.
+fn confirm_places(draft: &mut SeedDraft) {
+    for line in place_lines(draft) {
+        confirm_inside(draft, &line.entry(), line.inside.clone()).unwrap();
+    }
+}
+
+/// The place tree answer of `roster_out()`: both places are top level.
+fn tree_out() -> Value {
+    json!({"places": [
+        {"place": "Gull Point", "inside": "none"},
+        {"place": "Tide Hall", "inside": "none"}
+    ]})
 }
 
 fn gm(outputs: &[Value]) -> RecordedGm {
@@ -175,6 +192,7 @@ fn plain_outputs() -> Vec<Value> {
         knowledge(&[]),
         knowledge(&[]),
         knowledge(&[]),
+        tree_out(),
     ]
 }
 
@@ -310,7 +328,7 @@ fn knowledge_runs_one_call_per_section() {
     run(&text, &gm).result.unwrap();
 
     let calls = gm.calls();
-    assert_eq!(calls.len(), 5);
+    assert_eq!(calls.len(), 6);
     let titles = ["The harbour", "The council", "The storm"];
     for (call, title) in calls[2..].iter().zip(titles) {
         let recent = &call.prompt.recent;
@@ -384,6 +402,7 @@ fn an_age_the_model_calls_stated_still_needs_the_player() {
         confirm_age(&mut draft, &line.entry()).unwrap();
     }
     assert_eq!(unconfirmed(&draft), Vec::<String>::new());
+    confirm_places(&mut draft);
     assert_eq!(approve(&mut draft), Ok(()));
     assert_eq!(draft.state, DraftState::Approved);
 }
@@ -427,8 +446,9 @@ fn draft_keeps_hidden_causes_out() {
         draft.knowledge,
         vec![known("Tobin Reed", "role", "harbour master", false)]
     );
-    // A fact the PC does not know is not an error: no repair call.
-    assert_eq!(gm.calls().len(), 5);
+    // A fact the PC does not know is not an error: no repair call. The
+    // last call is the place tree, which has no recorded answer.
+    assert_eq!(gm.calls().len(), 6);
 }
 
 #[test]
@@ -494,6 +514,8 @@ fn progress_reports_stage_and_counts_only() {
             (Stage::DraftKnowledge, 1, 3),
             (Stage::DraftKnowledge, 2, 3),
             (Stage::DraftKnowledge, 3, 3),
+            (Stage::PlaceTree, 0, 1),
+            (Stage::PlaceTree, 1, 1),
         ]
     );
 }
@@ -538,6 +560,7 @@ fn every_call_is_logged() {
             "draft_knowledge 1/3",
             "draft_knowledge 2/3",
             "draft_knowledge 3/3",
+            "place_tree",
         ]
     );
 }
@@ -618,7 +641,7 @@ fn a_fact_on_an_unknown_name_is_dropped_after_one_repair() {
         vec![known("Tobin Reed", "role", "harbour master", false)]
     );
     let calls = gm.calls();
-    assert_eq!(calls.len(), 6);
+    assert_eq!(calls.len(), 7);
     assert!(calls[3].prompt.recent.contains("References"));
 }
 
@@ -655,7 +678,7 @@ fn a_roster_that_lists_the_pc_is_repaired() {
     let draft = run(&source(), &gm).result.unwrap();
     assert_eq!(draft.seed.entities.len(), 5);
     let calls = gm.calls();
-    assert_eq!(calls.len(), 6);
+    assert_eq!(calls.len(), 7);
     assert!(calls[1].prompt.recent.contains("OnePc"));
 }
 
@@ -874,7 +897,7 @@ fn character_age_is_required_by_the_roster_schema() {
 fn knowledge_subjects_are_a_roster_enum() {
     let gm = gm(&plain_outputs());
     run(&source(), &gm).result.unwrap();
-    for call in &gm.calls()[2..] {
+    for call in &gm.calls()[2..5] {
         assert_eq!(
             names_at(&call.schema, &["facts", "[]", "subject"]),
             vec![
@@ -950,12 +973,16 @@ fn a_live_shaped_answer_with_a_start_place_phrase_still_drafts() {
 
     let calls = gm.calls();
     assert!(names_at(&calls[1].schema, &["start", "place"]).contains(&"The Copper Kettle"));
-    // No repair call: two draft calls, then one call per section.
+    // No repair call: two draft calls, then one call per section, then
+    // the place tree (here the recorded answer does not fit it).
+    let tree = |c: &&threshold_core::RecordedCall| c.schema["properties"].get("places").is_some();
+    let knowledge_calls: Vec<_> = calls[2..].iter().take_while(|c| !tree(c)).collect();
     assert!(
-        calls[2..]
+        knowledge_calls
             .iter()
             .all(|c| c.schema["properties"].get("facts").is_some())
     );
+    assert!(calls[2 + knowledge_calls.len()..].iter().all(|c| tree(&c)));
     assert_eq!(draft.seed.start.place, "The Copper Kettle");
     assert_eq!(
         draft.seed.start.present,
@@ -1211,10 +1238,6 @@ fn added_character_reaches_the_world_build() {
             {"npc": "Ada Venn", "place": "Tide Hall"},
             {"npc": "Nell Quay", "place": "Tide Hall"}
         ]}),
-        json!({"places": [
-            {"place": "Gull Point", "inside": "none"},
-            {"place": "Tide Hall", "inside": "none"}
-        ]}),
     ];
     let gm_build = gm(&outputs);
     let mut progress = |_| {};
@@ -1348,9 +1371,10 @@ fn a_place_fact_is_kept_as_the_draft_files_it() {
         "{:?}",
         draft.knowledge
     );
-    // Roster, seed, and one knowledge call per section: no repair round.
+    // Roster, seed, one knowledge call per section and the place tree: no
+    // repair round.
     let calls = gm.calls();
-    assert_eq!(calls.len(), 5);
+    assert_eq!(calls.len(), 6);
     assert!(
         calls
             .iter()
@@ -1386,4 +1410,148 @@ fn the_draft_stage_cannot_set_detail() {
     assert!(schema["properties"].get("detail").is_none(), "{schema}");
     let text = schema.to_string();
     assert!(!text.contains("explicit"), "{text}");
+}
+
+// ---- ADR 0008: the place tree is a draft stage (2026-11-16) ---------------------
+
+/// The last draft call asks for the place tree, with the Source Text and
+/// the known facts. Each name field is an enum of the roster's Places. The
+/// answer is a proposal: nothing is confirmed.
+#[test]
+fn the_draft_proposes_a_place_tree_and_confirms_nothing() {
+    let mut outputs = plain_outputs();
+    outputs[5] = json!({"places": [
+        {"place": "Tide Hall", "inside": "Gull Point"},
+        {"place": "gull point", "inside": "none"}
+    ]});
+    let gm = gm(&outputs);
+    let draft = run(&source(), &gm).result.unwrap();
+    let calls = gm.calls();
+    let tree = &calls[5];
+    assert!(
+        tree.prompt
+            .recent
+            .contains("PLACES\n- Gull Point\n- Tide Hall")
+    );
+    assert!(
+        tree.prompt
+            .recent
+            .contains(&format!("SOURCE TEXT\n{}", source()))
+    );
+    assert!(tree.prompt.system.contains("none when no place"));
+    assert_eq!(
+        names_at(&tree.schema, &["places", "[]", "place"]),
+        vec!["Gull Point", "Tide Hall"]
+    );
+    assert_eq!(
+        names_at(&tree.schema, &["places", "[]", "inside"]),
+        vec!["Gull Point", "Tide Hall", "none"]
+    );
+    let lines: Vec<(String, Inside<String>, bool, bool)> = place_lines(&draft)
+        .into_iter()
+        .map(|l| (l.name, l.inside, l.doubted, l.confirmed))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            ("Gull Point".into(), Inside::Top, false, false),
+            (
+                "Tide Hall".into(),
+                Inside::Place("Gull Point".into()),
+                false,
+                false
+            ),
+        ]
+    );
+}
+
+/// A bad link is repaired once, then dropped; a Place the answer leaves
+/// out asks for the repair too. A Place with no link left shows `Unknown`
+/// and waits for the Player.
+#[test]
+fn a_bad_place_tree_link_is_dropped_and_the_place_waits() {
+    let bad = json!({"places": [
+        {"place": "Gull Point", "inside": "Gull Point"},
+        {"place": "Tide Hall", "inside": "none"},
+        {"place": "Tide Hall", "inside": "Harbour Council"},
+        {"place": "Tide Hall", "inside": "Gull Point"}
+    ]});
+    let mut outputs = plain_outputs();
+    outputs[5] = bad.clone();
+    outputs.push(bad);
+    let gm = gm(&outputs);
+    let draft = run(&source(), &gm).result.unwrap();
+    let repair = &gm.calls()[6].prompt.recent;
+    assert!(repair.contains("cannot be inside itself"), "{repair}");
+    assert!(repair.contains("is not a place"), "{repair}");
+    assert!(repair.contains("this place is listed twice"), "{repair}");
+    assert!(repair.contains("places (Gull Point)"), "{repair}");
+    let lines: Vec<(String, Inside<String>)> = place_lines(&draft)
+        .into_iter()
+        .map(|l| (l.name, l.inside))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            ("Gull Point".into(), Inside::Unknown),
+            ("Tide Hall".into(), Inside::Top),
+        ]
+    );
+}
+
+/// A loop is refused: the link that closes it is dropped.
+#[test]
+fn a_place_tree_loop_is_dropped() {
+    let bad = json!({"places": [
+        {"place": "Gull Point", "inside": "Tide Hall"},
+        {"place": "Tide Hall", "inside": "Gull Point"}
+    ]});
+    let mut outputs = plain_outputs();
+    outputs[5] = bad.clone();
+    outputs.push(bad);
+    let gm = gm(&outputs);
+    let draft = run(&source(), &gm).result.unwrap();
+    let repair = &gm.calls()[6].prompt.recent;
+    assert!(repair.contains("makes a loop"), "{repair}");
+    assert!(repair.contains("places (Tide Hall)"), "{repair}");
+    let tide = place_lines(&draft).pop().unwrap();
+    assert_eq!(
+        (tide.name.as_str(), tide.inside),
+        ("Tide Hall", Inside::Unknown)
+    );
+}
+
+/// The tree call is optional: when the model fails it, the draft is still
+/// whole and every Place waits for a choice. A cancel still stops the draft.
+#[test]
+fn a_failed_tree_call_leaves_every_place_waiting() {
+    let mut outputs = plain_outputs();
+    outputs.pop();
+    let gm = gm(&outputs);
+    let mut draft = run(&source(), &gm).result.unwrap();
+    assert!(
+        place_lines(&draft)
+            .iter()
+            .all(|l| l.inside == Inside::Unknown && !l.doubted && !l.confirmed)
+    );
+    for line in age_lines(&draft) {
+        confirm_age(&mut draft, &line.entry()).unwrap();
+    }
+    let waiting: Vec<GapKind> = gaps(&draft).into_iter().map(|g| g.kind).collect();
+    assert_eq!(
+        waiting,
+        [GapKind::PlaceUnconfirmed, GapKind::PlaceUnconfirmed]
+    );
+
+    let full = self::gm(&plain_outputs());
+    let watcher = full.clone();
+    let cancelled = move || watcher.calls().len() >= 5;
+    let run = run_until(&source(), &full, &cancelled);
+    assert_eq!(
+        run.result.unwrap_err(),
+        BuildFailure {
+            stage: Stage::PlaceTree,
+            check: BuildCheck::Cancelled
+        }
+    );
 }

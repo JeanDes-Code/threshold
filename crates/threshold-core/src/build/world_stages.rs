@@ -1,25 +1,25 @@
-//! The five World Build stages: hidden facts, the hidden state of each NPC,
-//! World Events, the start state (design 6.3, data shape 3.6) and the place
-//! tree (ADR 0008, Inside Links). Each
+//! The four World Build stages: hidden facts, the hidden state of each NPC,
+//! World Events and the start state (design 6.3, data shape 3.6). Each
 //! stage output is a private type with length caps; code checks it
-//! (`checks`) and turns it into a `WorldSetup`, which it never writes.
+//! (`checks`) and turns it into a `WorldSetup`, which it never writes. The
+//! Inside Links come from the place tree the Player confirmed in the Seed
+//! review (`places`, ADR 0008), with no call.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{
     BuildCheck, BuildFailure, Control, DraftState, SeedDraft, Stage,
-    checks::{
-        self, FactBook, Member, NpcItem, Roster, TreeItem, fact_entry, is_top_level, location,
-    },
+    checks::{self, FactBook, Member, NpcItem, Roster, fact_entry, location},
     draft::gaps,
+    places::world_places,
     stages::{Staged, essential, report, run_stage, sections},
-    world_prompts::{events_call, hidden_call, npc_call, start_call, tree_call},
+    world_prompts::{events_call, hidden_call, npc_call, start_call},
 };
 use crate::{
     domain::{
-        AttitudeEntry, EffectEntry, EntityKind, EventEntry, FactEntry, GoalEntry, PlaceEntry,
-        TOP_LEVEL, VoiceCardEntry, WorldSetup,
+        AttitudeEntry, EffectEntry, EntityKind, EventEntry, FactEntry, GoalEntry, VoiceCardEntry,
+        WorldSetup,
     },
     model::Gm,
     normalize,
@@ -53,10 +53,11 @@ pub struct Placement {
 /// Builds the hidden world of an approved draft: hidden facts, the state of
 /// each NPC, World Events and the start state. It calls the model through
 /// `gm` only and writes nothing. A failed check drops an optional item, or
-/// fails the build when the item is essential.
+/// fails the build when the item is essential. The Inside Links are the
+/// ones the Player confirmed (`places::world_places`).
 ///
 /// The state alone is not enough: a draft with any gap now (an old file
-/// that says `approved` with no age confirmation) fails as `NotApproved`
+/// that says `approved` with no age or place tree confirmation) fails as `NotApproved`
 /// before any call. The caller runs `approve` to get the gaps and to put
 /// the draft back to `Draft`.
 pub fn build_world(
@@ -69,6 +70,9 @@ pub fn build_world(
     }
     let roster = Roster::of(&draft.seed);
     let mut book = draft_facts(draft, &roster)?;
+    // The facts of the draft, which the Player saw when confirming the
+    // place tree (`places::world_places`).
+    let drafted: Vec<FactEntry> = book.facts().cloned().collect();
 
     hidden_facts(draft, gm, ctl, &roster, &mut book)?;
     let states = npc_states(draft, gm, ctl, &roster, &book)?;
@@ -84,7 +88,12 @@ pub fn build_world(
         let npc = placement.npc.clone();
         book.add(location(&npc, &placement.place, vec![npc.clone()]));
     }
-    let places = place_tree(draft, gm, ctl, &roster, &book)?;
+    let added: Vec<FactEntry> = book
+        .facts()
+        .filter(|f| !drafted.iter().any(|d| same_fact(d, f)))
+        .cloned()
+        .collect();
+    let places = world_places(draft, &roster, &added);
 
     let mut world = WorldSetup {
         facts: book.into_facts(),
@@ -98,6 +107,11 @@ pub fn build_world(
         world.voice_cards.push(state.voice_card);
     }
     Ok(world)
+}
+
+/// One fact by subject, key, value and text; its holders do not count.
+fn same_fact(a: &FactEntry, b: &FactEntry) -> bool {
+    a.subject == b.subject && a.key == b.key && a.value == b.value && a.text == b.text
 }
 
 fn fail(stage: Stage, check: BuildCheck) -> BuildFailure {
@@ -399,49 +413,6 @@ fn start_state(
         .collect())
 }
 
-/// One call when the roster holds a Place: the Inside Link of each Place
-/// (ADR 0008, Inside Links), the Place that holds it or `none`. The call
-/// is essential. A link that fails its repair is dropped, and a Place with
-/// no link left keeps an unknown link, which the age gate doubts.
-fn place_tree(
-    draft: &SeedDraft,
-    gm: &dyn Gm,
-    ctl: &mut Control,
-    roster: &Roster,
-    book: &FactBook,
-) -> Result<Vec<PlaceEntry>, BuildFailure> {
-    let places: Vec<&str> = roster
-        .members()
-        .iter()
-        .filter(|m| m.kind == EntityKind::Place)
-        .map(|m| m.main.as_str())
-        .collect();
-    if places.is_empty() {
-        return Ok(vec![]);
-    }
-    report(ctl, Stage::PlaceTree, 0, 1);
-    let call = tree_call(draft, roster, book, &places);
-    let staged = run_stage(gm, ctl, &draft.id, &call, |out| {
-        checks::place_tree(roster, out)
-    })?;
-    let Staged { output, drop, .. } = essential(Stage::PlaceTree, staged)?;
-    report(ctl, Stage::PlaceTree, 1, 1);
-    Ok(output
-        .places
-        .into_iter()
-        .enumerate()
-        .filter(|(i, _)| !drop.contains(&TreeItem::Link(*i)))
-        .map(|(_, link)| PlaceEntry {
-            place: roster.main(&link.place),
-            inside: if is_top_level(&link.inside) {
-                TOP_LEVEL.to_owned()
-            } else {
-                roster.main(&link.inside)
-            },
-        })
-        .collect())
-}
-
 /// A checked NpcState answer, without its dropped items.
 fn npc_state_of(roster: &Roster, npc: &Member, staged: Staged<NpcOut, NpcItem>) -> NpcState {
     let Staged { output, drop, .. } = staged;
@@ -632,20 +603,4 @@ pub(super) struct PlacementOut {
     pub npc: String,
     #[schemars(length(max = 60))]
     pub place: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub(super) struct TreeOut {
-    #[schemars(length(max = 80))]
-    pub places: Vec<LinkOut>,
-}
-
-/// The Inside Link of one Place.
-#[derive(Deserialize, JsonSchema)]
-pub(super) struct LinkOut {
-    #[schemars(length(max = 60))]
-    pub place: String,
-    /// The place from PLACES that directly holds `place`, or `none`.
-    #[schemars(length(max = 60))]
-    pub inside: String,
 }

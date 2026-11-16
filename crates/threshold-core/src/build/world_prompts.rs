@@ -6,8 +6,9 @@
 use super::{
     SeedDraft, Stage,
     checks::{FactBook, Member, Roster},
+    places::TreeOut,
     stages::{Need, StageCall, name_field, name_list, schema_of},
-    world_stages::{EventsOut, HiddenOut, NpcCall, NpcOut, NpcState, StartOut, TreeOut},
+    world_stages::{EventsOut, HiddenOut, NpcCall, NpcOut, NpcState, StartOut},
 };
 use crate::{
     checks::PC_INVOLUNTARY_KEYS,
@@ -419,10 +420,12 @@ You state which place holds each place of a role-playing world, as JSON. A game 
 Rules:
 - places: one entry for each name under PLACES, each name once, spelled as written there.
 - inside: the one place from PLACES that directly holds this place, spelled as written there: the town that holds a square, the house that holds a room. none when no place under PLACES holds it.
-- Use the WORLD FACTS. When a fact says or shows that a place lies in, at or within another place, use that place.
+- Use the SOURCE TEXT and the KNOWN FACTS. When they say or show that a place lies in, at or within another place, use that place.
 - Never put a place inside itself. Never make a loop: when A is inside B, B is not inside A.";
 
-/// `places`: every Place of the roster, the start place too.
+/// `places`: every Place of the roster, the start place too. A draft stage
+/// since 2026-11-16 (`places::draft_tree`): the Player confirms the answer
+/// in the Seed review, so the call is optional.
 pub(super) fn tree_call(
     draft: &SeedDraft,
     roster: &Roster,
@@ -451,13 +454,14 @@ pub(super) fn tree_call(
         prompt: prompt(
             TREE_SYSTEM.into(),
             format!(
-                "{}\n\nPLACES\n{}\n\nWORLD FACTS\n{}",
+                "{}\n\nPLACES\n{}\n\nKNOWN FACTS\n{}\n\nSOURCE TEXT\n{}",
                 context(draft, roster),
                 list.join("\n"),
-                fact_lines(book.facts(), true),
+                fact_lines(book.facts(), false),
+                draft.source_text,
             ),
         ),
         schema,
-        need: Need::Essential,
+        need: Need::Optional,
     }
 }

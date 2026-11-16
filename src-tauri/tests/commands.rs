@@ -515,13 +515,20 @@ impl Rig {
         }
     }
 
-    /// Confirms each age of `view`, one name at a time.
+    /// Confirms each age of `view`, one name at a time, then each Inside
+    /// Link as shown.
     fn confirm_all(&self, view: &DraftView) -> DraftView {
         let mut last = view.clone();
         for line in &view.ages {
             last = self
                 .drafts
                 .confirm_age(&view.draft_id, &line.entry())
+                .unwrap();
+        }
+        for line in &view.places {
+            last = self
+                .drafts
+                .confirm_inside(&view.draft_id, &line.entry(), line.inside.clone())
                 .unwrap();
         }
         last
@@ -606,8 +613,8 @@ fn doc_fact(subject: &str, key: &str, value: &str, open: bool) -> Value {
     })
 }
 
-/// The roster with the PC (one proposed age), the seed and the PC Knowledge
-/// of each section of `doc_source()`.
+/// The roster with the PC (one proposed age), the seed, the PC Knowledge
+/// of each section of `doc_source()` and the place tree.
 fn draft_outputs() -> Vec<Value> {
     vec![
         json!({
@@ -642,6 +649,10 @@ fn draft_outputs() -> Vec<Value> {
         }),
         json!({"facts": [doc_fact("Mira Holt", "occupation", "lighthouse keeper", false)]}),
         json!({"facts": [doc_fact("Harbour Council", "vote", "new pier", true)]}),
+        json!({"places": [
+            {"place": "Gull Point", "inside": "none"},
+            {"place": "Tide Hall", "inside": "Gull Point"}
+        ]}),
     ]
 }
 
@@ -699,10 +710,6 @@ fn build_outputs() -> Vec<Value> {
             "public": false
         }]}),
         json!({"placements": [{"npc": "Ada Venn", "place": "Tide Hall"}]}),
-        json!({"places": [
-            {"place": "Gull Point", "inside": "none"},
-            {"place": "Tide Hall", "inside": "Gull Point"}
-        ]}),
     ]
 }
 
@@ -1142,7 +1149,7 @@ fn get_build_debug_refused_when_debug_off() {
     ));
     rig.session().set_debug(true);
     let lines = rig.drafts.get_build_debug(&id).unwrap();
-    assert_eq!(lines.len(), 4, "one line per draft call");
+    assert_eq!(lines.len(), 5, "one line per draft call");
     assert!(
         lines
             .iter()
@@ -1153,7 +1160,7 @@ fn get_build_debug_refused_when_debug_off() {
     rig.drafts.start_build(&id, &mut |_| {}).unwrap();
     // A build replaces the records of the draft.
     let lines = rig.drafts.get_build_debug(&id).unwrap();
-    assert_eq!(lines.len(), 7, "one line per build call");
+    assert_eq!(lines.len(), 6, "one line per build call");
 
     rig.session().set_debug(false);
     assert!(matches!(

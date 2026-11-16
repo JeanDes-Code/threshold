@@ -9,8 +9,9 @@ use std::{collections::HashSet, sync::LazyLock};
 use super::{
     BuildCheck,
     draft_stages::open_key,
+    places::TreeOut,
     stages::{Problem, StageItem, Step},
-    world_stages::{EventsOut, FactOut, GoalOut, HiddenOut, NpcOut, NpcState, StartOut, TreeOut},
+    world_stages::{EventsOut, FactOut, GoalOut, HiddenOut, NpcOut, NpcState, StartOut},
 };
 use crate::{
     checks::{PC_INVOLUNTARY_KEYS, is_involuntary_key},

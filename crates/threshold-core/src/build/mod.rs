@@ -6,6 +6,7 @@
 mod checks;
 mod draft;
 mod draft_stages;
+mod places;
 mod stages;
 mod store;
 mod world_prompts;
@@ -23,12 +24,14 @@ pub use draft_stages::{
     SOURCE_TEXT_MAX_CHARS, SOURCE_TEXT_MIN_CHARS, SourceTextProblem, check_source_text,
     draft_from_text,
 };
+pub use places::{PlaceLine, PlaceLink, confirm_inside, place_lines};
 pub use stages::BUILD_TIMEOUT_S;
 pub use store::{DraftLine, DraftStore, DraftStoreError};
 pub use world_stages::{NpcState, PC_CENTRED_MAX_SHARE, Placement, build_world};
 
-/// A step of the draft or of the World Build. The first three draft the
-/// seed; the others build the hidden world.
+/// A step of the draft or of the World Build. The first three and
+/// `PlaceTree` draft the seed (the place tree since 2026-11-16, ADR 0008);
+/// the others build the hidden world.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {

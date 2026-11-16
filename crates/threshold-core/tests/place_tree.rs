@@ -1,0 +1,478 @@
+//! The place tree in the Seed review (ADR 0008, the trust boundary of
+//! 2026-11-16): the draft run proposes an Inside Link for each Place, the
+//! fact check sets each link the facts do not support to `Unknown`, the
+//! Player confirms the tree, and the World Build writes the confirmed
+//! links. The fixture has the geography of QA run 3 under neutral names: a
+//! crossing on a river, a ferry house in the crossing, an inn, and a child
+//! who lives in the crossing.
+
+use std::{fs, path::PathBuf};
+
+use serde_json::{Value, json};
+use threshold_core::{
+    RecordedGm,
+    build::{
+        Control, DraftState, EntryRef, GapKind, PlaceLine, ReviewError, SeedDraft, age_lines,
+        apply_edit, approve, build_world, confirm_age, confirm_inside, confirmed_ages,
+        draft_from_text, gaps, place_lines, rename,
+    },
+    domain::{EntityKind, Inside},
+    mature::{Blocked, clearance},
+    setup::create_campaign_file,
+    store::{Store, WorldView},
+};
+
+const CROSSING: &str = "Brackwater Crossing";
+const RIVER: &str = "Fenn";
+const FERRY_HOUSE: &str = "the ferry house";
+const INN: &str = "the Lantern Inn";
+const CHILD: &str = "Pell Durrow";
+
+/// An empty folder of its own under the system temp dir, removed on drop.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("threshold-tree-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn gm(outputs: &[Value]) -> RecordedGm {
+    RecordedGm::new(outputs.iter().map(Value::to_string).collect(), vec![])
+}
+
+/// One section of about 450 characters.
+fn source() -> String {
+    let mut body = String::from("# The crossing\n\n");
+    while body.chars().count() < 450 {
+        body.push_str(
+            "Edda Marsh keeps the ferry house in Brackwater Crossing, on the river Fenn. ",
+        );
+    }
+    body
+}
+
+fn roster_out() -> Value {
+    let thing = |name: &str, kind: &str| json!({"name": name, "kind": kind, "other_names": []});
+    json!({
+        "pc": {
+            "name": "Edda Marsh", "age": 34, "age_stated": true,
+            "other_names": [], "concept": "A ferry keeper."
+        },
+        "characters": [
+            {"name": CHILD, "age": 11, "age_stated": true, "other_names": []}
+        ],
+        "others": [
+            thing(CROSSING, "place"),
+            thing(RIVER, "place"),
+            thing(FERRY_HOUSE, "place"),
+            thing(INN, "place"),
+            thing("the ferry", "item"),
+        ]
+    })
+}
+
+fn seed_out(start: &str) -> Value {
+    json!({
+        "premise": "A ferry keeper works the night crossing.",
+        "story_language": "en",
+        "themes": [],
+        "gm_agreement": "",
+        "resolution": "",
+        "min_age": null,
+        "start": {
+            "place": start,
+            "present": [],
+            "situation": "The last crossing of the night.",
+            "when": "A spring night"
+        },
+        "open_details": []
+    })
+}
+
+fn fact(subject: &str, value: &str, text: &str) -> Value {
+    json!({
+        "subject": subject, "key": "location", "value": value, "text": text,
+        "open": false, "pc_knows": true
+    })
+}
+
+/// What the PC knows: the sentence of QA run 3 on the ferry (an item),
+/// the crossing on its river, and where the child lives.
+fn knowledge_out(child_at: &str) -> Value {
+    json!({"facts": [
+        fact("the ferry", CROSSING, "The ferry house is in Brackwater Crossing."),
+        fact(CROSSING, RIVER, "Brackwater Crossing lies on the river Fenn."),
+        fact(CHILD, child_at, &format!("{CHILD} lives at {child_at}.")),
+    ]})
+}
+
+fn tree_out(links: &[(&str, &str)]) -> Value {
+    let list: Vec<Value> = links
+        .iter()
+        .map(|(place, inside)| json!({"place": place, "inside": inside}))
+        .collect();
+    json!({ "places": list })
+}
+
+/// The draft of the fixture: the PC starts at `start`, the child lives at
+/// `child_at`, and the model answers `tree` for the place tree.
+fn drafted(start: &str, child_at: &str, tree: &[(&str, &str)]) -> SeedDraft {
+    let gm = gm(&[
+        roster_out(),
+        seed_out(start),
+        knowledge_out(child_at),
+        tree_out(tree),
+    ]);
+    let mut progress = |_| {};
+    let mut log = |_| {};
+    let mut ctl = Control::new(&mut progress, &|| false, &mut log);
+    let draft = draft_from_text(&source(), &gm, &mut ctl).unwrap();
+    assert_eq!(gm.calls().len(), 4);
+    draft
+}
+
+/// The Player confirms every age, then every Inside Link as the review
+/// shows it, then approves.
+fn confirm_as_shown(draft: &mut SeedDraft) {
+    for line in age_lines(draft) {
+        confirm_age(draft, &line.entry()).unwrap();
+    }
+    for line in place_lines(draft) {
+        confirm_inside(draft, &line.entry(), line.inside.clone()).unwrap();
+    }
+    approve(draft).unwrap();
+}
+
+/// The World Build of the fixture (one hidden-facts call, the child's
+/// state, the events, the start state) and the Campaign file it writes.
+fn built(draft: &SeedDraft, name: &str) -> WorldView {
+    let npc = json!({
+        "goals": [{"text": "Pell wants to see the far bank.", "against": null}],
+        "secret": null,
+        "attitudes": [],
+        "voice_card": {
+            "habits": "Short questions.",
+            "vocabulary": "boat, rope",
+            "samples": ["Can I row?", "Is it deep?"]
+        }
+    });
+    let gm = gm(&[
+        json!({"facts": []}),
+        npc,
+        json!({"events": []}),
+        json!({"placements": []}),
+    ]);
+    let mut progress = |_| {};
+    let mut log = |_| {};
+    let mut ctl = Control::new(&mut progress, &|| false, &mut log);
+    let world = build_world(draft, &gm, &mut ctl).unwrap();
+    // No place tree call in the World Build.
+    assert!(
+        gm.calls()
+            .iter()
+            .all(|c| c.schema["properties"].get("places").is_none())
+    );
+    let ages = confirmed_ages(draft).unwrap();
+    let dir = TempDir::new(name);
+    let path = dir.0.join("campaign.sqlite");
+    create_campaign_file(&path, &draft.seed, &world, 7, Some(&ages)).unwrap();
+    let store = Store::open_existing(&path).unwrap();
+    store.snapshot(store.campaigns().unwrap()[0]).unwrap()
+}
+
+fn id(view: &WorldView, name: &str) -> u64 {
+    view.entity_by_name(name).unwrap().id
+}
+
+fn link(view: &WorldView, name: &str) -> Inside {
+    view.entity_by_name(name).unwrap().inside
+}
+
+fn line<'a>(lines: &'a [PlaceLine], name: &str) -> &'a PlaceLine {
+    lines.iter().find(|l| l.name == name).unwrap()
+}
+
+fn entry(draft: &SeedDraft, name: &str) -> EntryRef {
+    line(&place_lines(draft), name).entry()
+}
+
+/// The gate's answer with no one else named: blocked by the child, or
+/// cleared.
+fn blocked_by_child(view: &WorldView) -> bool {
+    match clearance(view, &[]) {
+        Err(Blocked { who }) => who == vec![id(view, CHILD)],
+        Ok(_) => false,
+    }
+}
+
+// ---- The fact check ---------------------------------------------------------------
+
+/// QA run 3: a model answered "none" for every place, so the ferry house
+/// and the crossing looked like two separate top-level places, and the
+/// child in the crossing was "away" from the PC in the ferry house. The
+/// fact check sets each link the facts contradict to `Unknown`; the Player
+/// confirms the tree as shown, and the gate refuses.
+#[test]
+fn a_model_that_answers_none_for_every_place_leaves_the_gate_refusing() {
+    let all_none = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, "none"),
+        (INN, "none"),
+    ];
+    let mut draft = drafted(FERRY_HOUSE, CROSSING, &all_none);
+    let lines = place_lines(&draft);
+    // "The ferry house is in Brackwater Crossing." (the text rule) and
+    // "Brackwater Crossing lies on the river Fenn." (the subject rule, and
+    // rule 2 for the river) all disagree with the model.
+    for name in [FERRY_HOUSE, CROSSING, RIVER] {
+        let l = line(&lines, name);
+        assert_eq!(
+            (&l.inside, l.doubted, l.confirmed),
+            (&Inside::Unknown, true, false),
+            "{name}"
+        );
+    }
+    let inn = line(&lines, INN);
+    assert_eq!((&inn.inside, inn.doubted), (&Inside::Top, false));
+
+    confirm_as_shown(&mut draft);
+    let view = built(&draft, "all-none");
+    assert_eq!(link(&view, FERRY_HOUSE), Inside::Unknown);
+    assert!(blocked_by_child(&view), "{:?}", clearance(&view, &[]));
+}
+
+/// The model put the ferry house and the crossing both in the river: two
+/// siblings, so "away" from each other. The facts put the ferry house in
+/// the crossing, so its link goes to `Unknown`, and the gate refuses.
+#[test]
+fn a_wrong_parent_from_the_model_leaves_the_gate_refusing() {
+    let river_parent = [
+        (CROSSING, RIVER),
+        (RIVER, "none"),
+        (FERRY_HOUSE, RIVER),
+        (INN, "none"),
+    ];
+    let mut draft = drafted(FERRY_HOUSE, CROSSING, &river_parent);
+    let lines = place_lines(&draft);
+    let ferry = line(&lines, FERRY_HOUSE);
+    assert_eq!((&ferry.inside, ferry.doubted), (&Inside::Unknown, true));
+    // The crossing in the river agrees with its fact, and so does the
+    // river above it.
+    let crossing = line(&lines, CROSSING);
+    assert_eq!(
+        (&crossing.inside, crossing.doubted),
+        (&Inside::Place(RIVER.to_owned()), false)
+    );
+    assert!(!line(&lines, RIVER).doubted);
+
+    confirm_as_shown(&mut draft);
+    let view = built(&draft, "river");
+    assert_eq!(link(&view, FERRY_HOUSE), Inside::Unknown);
+    assert!(blocked_by_child(&view), "{:?}", clearance(&view, &[]));
+}
+
+/// The Player confirms the true tree, whatever the model said: the ferry
+/// house and the inn sit in the crossing. A child in the ferry house is
+/// away from the PC in the inn (two places of one crossing), so the gate
+/// clears. The same tree with the PC in the ferry house and the child
+/// anywhere in the crossing refuses.
+#[test]
+fn a_player_confirmed_tree_clears_a_sibling_place_and_nothing_more() {
+    let all_none = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, "none"),
+        (INN, "none"),
+    ];
+    let set_true_tree = |draft: &mut SeedDraft| {
+        for (place, inside) in [
+            (CROSSING, Inside::Top),
+            (RIVER, Inside::Top),
+            (FERRY_HOUSE, Inside::Place(CROSSING.to_owned())),
+            (INN, Inside::Place(CROSSING.to_owned())),
+        ] {
+            let entry = entry(draft, place);
+            confirm_inside(draft, &entry, inside).unwrap();
+        }
+        confirm_as_shown(draft);
+    };
+
+    let mut sibling = drafted(INN, FERRY_HOUSE, &all_none);
+    set_true_tree(&mut sibling);
+    let view = built(&sibling, "sibling");
+    assert_eq!(link(&view, INN), Inside::Place(id(&view, CROSSING)));
+    assert!(clearance(&view, &[]).is_ok(), "{:?}", clearance(&view, &[]));
+
+    let mut inside = drafted(FERRY_HOUSE, CROSSING, &all_none);
+    set_true_tree(&mut inside);
+    let view = built(&inside, "inside");
+    assert!(blocked_by_child(&view), "{:?}", clearance(&view, &[]));
+}
+
+// ---- The review ---------------------------------------------------------------------
+
+/// Approve waits for every Inside Link, as it waits for every age: a doubted
+/// link and a proposed one both need the Player.
+#[test]
+fn the_review_blocks_approval_until_the_tree_is_confirmed() {
+    let model = [
+        (CROSSING, RIVER),
+        (RIVER, "none"),
+        (FERRY_HOUSE, CROSSING),
+        (INN, "none"),
+    ];
+    let mut draft = drafted(INN, CROSSING, &model);
+    for line in age_lines(&draft) {
+        confirm_age(&mut draft, &line.entry()).unwrap();
+    }
+    let waiting = |draft: &SeedDraft| -> Vec<String> {
+        gaps(draft)
+            .into_iter()
+            .filter(|g| g.kind == GapKind::PlaceUnconfirmed)
+            .map(|g| g.at)
+            .collect()
+    };
+    assert_eq!(
+        waiting(&draft),
+        [
+            "entities[1].inside",
+            "entities[2].inside",
+            "entities[3].inside",
+            "entities[4].inside"
+        ]
+    );
+    for line in place_lines(&draft) {
+        assert!(approve(&mut draft).is_err());
+        assert_eq!(draft.state, DraftState::Draft);
+        confirm_inside(&mut draft, &line.entry(), line.inside.clone()).unwrap();
+    }
+    assert_eq!(waiting(&draft), Vec::<String>::new());
+    assert_eq!(approve(&mut draft), Ok(()));
+
+    // A file that says `approved` with a link the Player never confirmed
+    // goes back to `Draft`, and builds nothing.
+    draft.place_links[0].confirmed = false;
+    assert!(approve(&mut draft).is_err());
+    assert_eq!(draft.state, DraftState::Draft);
+    assert!(confirmed_ages(&draft).is_err());
+}
+
+/// The Player's changes reach the Campaign file: a new parent, "not sure",
+/// and a rename of the parent, which the link follows.
+#[test]
+fn review_edits_reach_the_stored_links() {
+    let all_none = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, "none"),
+        (INN, "none"),
+    ];
+    let mut draft = drafted(INN, CROSSING, &all_none);
+    let ferry = entry(&draft, FERRY_HOUSE);
+    confirm_inside(&mut draft, &ferry, Inside::Place(CROSSING.to_owned())).unwrap();
+    let inn = entry(&draft, INN);
+    confirm_inside(&mut draft, &inn, Inside::Unknown).unwrap();
+    let crossing = entry(&draft, CROSSING);
+    rename(&mut draft, &crossing, "Brackwater").unwrap();
+    let line = line(&place_lines(&draft), FERRY_HOUSE).clone();
+    assert_eq!(
+        (line.inside, line.confirmed),
+        (Inside::Place("Brackwater".to_owned()), true)
+    );
+    // The fact check doubted the crossing (it lies on the river); the
+    // Player puts it at top level.
+    let renamed = entry(&draft, "Brackwater");
+    confirm_inside(&mut draft, &renamed, Inside::Top).unwrap();
+    confirm_as_shown(&mut draft);
+
+    let view = built(&draft, "edits");
+    assert_eq!(
+        link(&view, FERRY_HOUSE),
+        Inside::Place(id(&view, "Brackwater"))
+    );
+    assert_eq!(link(&view, INN), Inside::Unknown);
+    assert_eq!(link(&view, "Brackwater"), Inside::Top);
+}
+
+/// `confirm_inside` takes a Place, and a parent that is another Place of
+/// the draft. It refuses a Place inside itself and a loop; the draft does
+/// not change.
+#[test]
+fn confirm_inside_refuses_a_loop_and_a_parent_that_is_no_place() {
+    let model = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, CROSSING),
+        (INN, "none"),
+    ];
+    let mut draft = drafted(INN, CROSSING, &model);
+    let before = draft.clone();
+    let crossing = entry(&draft, CROSSING);
+    let ferry = entry(&draft, FERRY_HOUSE);
+    assert_eq!(
+        confirm_inside(&mut draft, &crossing, Inside::Place(CROSSING.to_owned())),
+        Err(ReviewError::Loop)
+    );
+    assert_eq!(
+        confirm_inside(&mut draft, &crossing, Inside::Place(FERRY_HOUSE.to_owned())),
+        Err(ReviewError::Loop)
+    );
+    for parent in ["the ferry", CHILD, "Nowhere"] {
+        assert_eq!(
+            confirm_inside(&mut draft, &ferry, Inside::Place(parent.to_owned())),
+            Err(ReviewError::UnknownName),
+            "{parent}"
+        );
+    }
+    let child = EntryRef::entity(0, CHILD, EntityKind::Npc);
+    assert_eq!(
+        confirm_inside(&mut draft, &child, Inside::Top),
+        Err(ReviewError::UnknownName)
+    );
+    let stale = EntryRef::entity(1, "Old name", EntityKind::Place);
+    assert_eq!(
+        confirm_inside(&mut draft, &stale, Inside::Top),
+        Err(ReviewError::UnknownName)
+    );
+    assert_eq!(draft, before);
+}
+
+/// A save that renames a Place or its parent by hand drops the
+/// confirmation: the link names the old entry, so the Player chooses again.
+#[test]
+fn an_edit_that_renames_a_place_asks_for_a_new_choice() {
+    let model = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, CROSSING),
+        (INN, "none"),
+    ];
+    let mut draft = drafted(INN, CROSSING, &model);
+    confirm_as_shown(&mut draft);
+    let mut seed = draft.seed.clone();
+    let crossing = seed
+        .entities
+        .iter_mut()
+        .find(|e| e.name == CROSSING)
+        .unwrap();
+    crossing.name = "Brackwater".into();
+    let knowledge = draft.knowledge.clone();
+    apply_edit(&mut draft, seed, knowledge);
+    let lines = place_lines(&draft);
+    let ferry = line(&lines, FERRY_HOUSE);
+    assert_eq!((&ferry.inside, ferry.confirmed), (&Inside::Unknown, false));
+    assert!(!line(&lines, "Brackwater").confirmed);
+    assert!(line(&lines, INN).confirmed);
+}

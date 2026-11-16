@@ -25,7 +25,7 @@ use session::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use threshold_core::{
     build::{BUILD_TIMEOUT_S, EntryRef, KnownFact, Progress},
-    domain::{AdventureSeed, DetailLevel},
+    domain::{AdventureSeed, DetailLevel, Inside},
     mature::RefusalKind,
     player::{Note, Target},
     rules::RollResult,
@@ -433,6 +433,22 @@ async fn confirm_age(
     drafting(&drafts, move |d| d.confirm_age(&draft_id, &entry)).await
 }
 
+/// The Player confirms the Inside Link of one Place (its row, name and
+/// kind): another Place, top level, or "not sure". The core owns every
+/// confirmation and refuses a loop.
+#[tauri::command(rename_all = "snake_case")]
+async fn confirm_inside(
+    drafts: State<'_, Drafts>,
+    draft_id: String,
+    entry: EntryRef,
+    inside: Inside<String>,
+) -> Result<DraftView, AppError> {
+    drafting(&drafts, move |d| {
+        d.confirm_inside(&draft_id, &entry, inside)
+    })
+    .await
+}
+
 /// A rename of one entry (its row, name and kind) that follows every
 /// reference of the draft.
 #[tauri::command(rename_all = "snake_case")]
@@ -569,6 +585,7 @@ pub fn run() {
             get_draft,
             save_draft,
             confirm_age,
+            confirm_inside,
             rename_draft_entity,
             approve_draft,
             start_build,

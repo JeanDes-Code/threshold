@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 use threshold_core::{
     build::{
         BuildFailure, Control, DebugEntry, Gap, PC_CENTRED_MAX_SHARE, Progress, SeedDraft,
-        age_lines, approve, build_world, centres_on_pc, confirm_age, draft_from_text,
+        age_lines, approve, build_world, centres_on_pc, confirm_age, confirm_inside,
+        draft_from_text, place_lines,
     },
     domain::{AdventureSeed, EntityKind, FactEntry, GoalEntry, OtherName, WorldSetup, is_adult},
     normalize,
@@ -1151,9 +1152,14 @@ fn one_run(ctx: &mut Ctx, text: &str, run: usize) -> BuildRun {
     out.draft_ms = Some(ms_since(started));
     (ctx.log)(&format!("{tag} draft ok {}", secs(out.draft_ms)));
 
-    // The evaluation stands in for the Player: it confirms every age.
+    // The evaluation stands in for the Player: it confirms every age, and
+    // every Inside Link as the review shows it (a doubted link stays "not
+    // sure").
     for line in age_lines(&draft) {
         let _ = confirm_age(&mut draft, &line.entry());
+    }
+    for line in place_lines(&draft) {
+        let _ = confirm_inside(&mut draft, &line.entry(), line.inside.clone());
     }
     if let Err(gaps) = approve(&mut draft) {
         let kinds: Vec<String> = gaps.iter().map(|g| label(g.kind)).collect();
