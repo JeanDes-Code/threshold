@@ -634,3 +634,187 @@ fn an_edit_that_renames_a_place_asks_for_a_new_choice() {
     assert!(!line(&lines, "Brackwater").confirmed);
     assert!(line(&lines, INN).confirmed);
 }
+
+// ---- QA run 4: the Source Text backs a link --------------------------------------
+
+/// The Source Text of QA run 4, as the Player pasted it.
+const QA4_TEXT: &str = "The Lantern Road — campaign notes
+
+Brindle Ford is a small river village. Three places in the village matter. The Lantern Inn is a two-storey inn on the village green of Brindle Ford, with rooms upstairs. The ferry house sits at the river's edge in Brindle Ford, where the ferry crosses. The Cooper house is a narrow cottage on the lane behind the green, also in Brindle Ford.
+
+Wexmoor is a market town a day's ride north of Brindle Ford. The Salt Exchange is a stone hall in Wexmoor where merchants trade.
+
+Edric Vale (35) is the player character, a courier carrying a sealed message to Wexmoor. He travels with his wife, Ilse Vale (33), a herbalist. They are both adults and have a room upstairs at the Lantern Inn. Tonight they are at the Lantern Inn.
+
+Marta Cooper (41) is a widow who keeps the Cooper house. Her son, Tobin Cooper, is 10 years old. Tobin lives with his mother at the Cooper house and is at home there tonight.
+
+Old Hal (62) runs the ferry and lives in the ferry house. He says the river is too high to cross until morning.
+
+Rook Danner (50) is a salt merchant who waits at the Salt Exchange in Wexmoor for Edric's message. Someone in Brindle Ford wants that message to never arrive.
+";
+
+/// The draft of QA run 4 (`draft-1794841722723334641`): the live model's
+/// roster, its known facts (every subject is the PC or an NPC, and no key
+/// is `location`), and its place tree.
+fn qa4_drafted() -> SeedDraft {
+    let person = |name: &str, age: u16| json!({"name": name, "age": age, "age_stated": true, "other_names": []});
+    let place = |name: &str| json!({"name": name, "kind": "place", "other_names": []});
+    let roster = json!({
+        "pc": {
+            "name": "Edric Vale", "age": 35, "age_stated": true,
+            "other_names": [], "concept": "A courier carrying a sealed message to Wexmoor"
+        },
+        "characters": [
+            person("Ilse Vale", 33),
+            person("Tobin Cooper", 10),
+            person("Old Hal", 62),
+            person("Marta Cooper", 41),
+            person("Rook Danner", 50),
+        ],
+        "others": [
+            place("Brindle Ford"),
+            place("Lantern Inn"),
+            place("ferry house"),
+            place("Cooper house"),
+            place("Wexmoor"),
+            place("Salt Exchange"),
+        ]
+    });
+    let mut seed = seed_out("Lantern Inn");
+    seed["start"]["present"] = json!(["Ilse Vale"]);
+    let known = |subject: &str, key: &str, value: &str, text: &str| {
+        json!({
+            "subject": subject, "key": key, "value": value, "text": text,
+            "open": false, "pc_knows": true
+        })
+    };
+    let knowledge = json!({"facts": [
+        known("Edric Vale", "occupation", "courier", "Edric Vale is a courier."),
+        known("Edric Vale", "spouse", "Ilse Vale", "Edric Vale travels with his wife, Ilse Vale."),
+        known("Edric Vale", "current_location", "Lantern Inn", "Edric Vale and Ilse Vale are staying at the Lantern Inn in Brindle Ford."),
+        known("Edric Vale", "recipient", "Rook Danner", "Rook Danner is waiting at the Salt Exchange in Wexmoor for Edric's message."),
+        known("Edric Vale", "village_description", "small river village", "Brindle Ford is a small river village."),
+        known("Edric Vale", "location_description", "narrow cottage on the lane behind the de", "The Cooper house is a narrow cottage on the lane behind the green, also in Brindle Ford."),
+        known("Edric Vale", "destination_info", "market town a day's ride north", "Wexmoor is a market town a day's ride north of Brindle Ford."),
+        known("Edric Vale", "destination_location", "stone hall in Wexmoor", "The Salt Exchange is a stone hall in Wexmoor where merchants trade."),
+        known("Edric Vale", "neighbor_info", "at home tonight", "Tobin Cooper is at home tonight."),
+        known("Edric Vale", "ferry_operator", "runs the ferry, lives in ferry house", "Old Hal runs the ferry and lives in the ferry house."),
+    ]});
+    let tree = tree_out(&[
+        ("Brindle Ford", "none"),
+        ("Lantern Inn", "Brindle Ford"),
+        ("ferry house", "Brindle Ford"),
+        ("Cooper house", "Brindle Ford"),
+        ("Wexmoor", "none"),
+        ("Salt Exchange", "Wexmoor"),
+    ]);
+    let gm = gm(&[roster, seed, knowledge, tree]);
+    let mut progress = |_| {};
+    let mut log = |_| {};
+    let mut ctl = Control::new(&mut progress, &|| false, &mut log);
+    let draft = draft_from_text(QA4_TEXT, &gm, &mut ctl).unwrap();
+    assert_eq!(gm.calls().len(), 4);
+    draft
+}
+
+/// QA run 4: all six links started on "Choose…", even the ones the Source
+/// Text states ("The Cooper house is ... also in Brindle Ford."). The live
+/// model wrote no `location` fact: it gave every known fact to the PC, under
+/// keys such as `destination_location`. A sentence of the Source Text that
+/// names the Place and the proposed parent, and no other Place, now backs
+/// the link. A top-level guess is never backed.
+#[test]
+fn a_sentence_of_the_source_text_backs_a_link() {
+    let draft = qa4_drafted();
+    let lines = place_lines(&draft);
+    let place = |p: &str| Inside::Place(p.to_owned());
+    for (name, parent) in [
+        ("Lantern Inn", "Brindle Ford"),
+        ("ferry house", "Brindle Ford"),
+        ("Cooper house", "Brindle Ford"),
+        ("Salt Exchange", "Wexmoor"),
+    ] {
+        let l = line(&lines, name);
+        assert_eq!(
+            (&l.inside, l.backed, l.doubted, l.confirmed),
+            (&place(parent), true, false, false),
+            "{name}"
+        );
+    }
+    for name in ["Brindle Ford", "Wexmoor"] {
+        let l = line(&lines, name);
+        assert_eq!(
+            (&l.inside, l.backed, &l.suggested),
+            (&Inside::Unknown, false, &Some(Inside::Top)),
+            "{name}"
+        );
+    }
+    // Backed or not, every Place still waits for the Player.
+    let waiting = gaps(&draft)
+        .into_iter()
+        .filter(|g| g.kind == GapKind::PlaceUnconfirmed)
+        .count();
+    assert_eq!(waiting, 6);
+}
+
+/// A sentence backs only the link it states: the Place and the parent,
+/// and no third Place. "Edda Marsh keeps the ferry house in Brackwater
+/// Crossing, on the river Fenn." names three Places, so it backs neither
+/// "the ferry house in the Fenn" nor "the ferry house in the crossing";
+/// a guess the text never states stays a hint.
+#[test]
+fn a_sentence_that_names_a_third_place_backs_nothing() {
+    let model = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, RIVER),
+        (INN, CROSSING),
+    ];
+    let mut gm_outputs = vec![roster_out(), seed_out(INN)];
+    // No known fact: only the Source Text could back a link.
+    gm_outputs.push(json!({"facts": []}));
+    gm_outputs.push(tree_out(&model));
+    let gm = gm(&gm_outputs);
+    let mut progress = |_| {};
+    let mut log = |_| {};
+    let mut ctl = Control::new(&mut progress, &|| false, &mut log);
+    let draft = draft_from_text(&source(), &gm, &mut ctl).unwrap();
+    let lines = place_lines(&draft);
+    for name in [FERRY_HOUSE, INN] {
+        let l = line(&lines, name);
+        assert_eq!((&l.inside, l.backed), (&Inside::Unknown, false), "{name}");
+    }
+}
+
+/// A sentence of the Source Text never hides a fact that contradicts the
+/// link. The text says the inn stands on the river; a known fact puts it in
+/// the crossing. The model's "the inn in the Fenn" is doubted, not backed.
+#[test]
+fn a_source_sentence_does_not_hide_a_contradicting_fact() {
+    let mut text = String::from("# The crossing\n\n");
+    while text.chars().count() < 450 {
+        text.push_str("The Lantern Inn stands on the river Fenn. ");
+    }
+    let model = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, "none"),
+        (INN, RIVER),
+    ];
+    let gm = gm(&[
+        roster_out(),
+        seed_out(INN),
+        json!({"facts": [fact("the ferry", CROSSING, "The Lantern Inn is in Brackwater Crossing.")]}),
+        tree_out(&model),
+    ]);
+    let mut progress = |_| {};
+    let mut log = |_| {};
+    let mut ctl = Control::new(&mut progress, &|| false, &mut log);
+    let draft = draft_from_text(&text, &gm, &mut ctl).unwrap();
+    let lines = place_lines(&draft);
+    let inn = line(&lines, INN);
+    assert_eq!(
+        (&inn.inside, inn.doubted, inn.backed),
+        (&Inside::Unknown, true, false)
+    );
+}

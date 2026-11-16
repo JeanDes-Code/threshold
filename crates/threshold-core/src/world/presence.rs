@@ -640,14 +640,14 @@ fn tree_in(view: &WorldView) -> (Vec<TreeNode<EntityId>>, Vec<PlaceFact<'_, Enti
 }
 
 /// True when `words` holds `run` as consecutive items.
-fn has_run(words: &[String], run: &[String]) -> bool {
+pub(crate) fn has_run(words: &[String], run: &[String]) -> bool {
     !run.is_empty() && words.windows(run.len()).any(|w| w == run)
 }
 
 /// The words of a location value for `near_place`: `normalize::name_words`
 /// (lower case, no accents, split on every character that is not a letter
 /// or a digit), with a leading article left out.
-fn place_words(value: &str) -> Vec<String> {
+pub(crate) fn place_words(value: &str) -> Vec<String> {
     let mut words = normalize::name_words(value);
     if words.len() > 1 && ["the", "a", "an"].contains(&words[0].as_str()) {
         words.remove(0);

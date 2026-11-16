@@ -26,7 +26,7 @@ use crate::{
     domain::{EntityKind, FactEntry, Inside, PlaceEntry, TOP_LEVEL},
     model::Gm,
     normalize,
-    world::presence::{PlaceFact, TreeNode, backed_places, doubted_places},
+    world::presence::{PlaceFact, TreeNode, backed_places, doubted_places, has_run, place_words},
 };
 
 /// The Inside Link of one Place in a Seed Draft. A link counts for a Place
@@ -308,8 +308,71 @@ pub(super) fn draft_tree(
         })
         .unwrap_or_default();
     let facts = draft_location_facts(draft);
-    draft.place_links = propose(&roster, &proposed, &facts);
+    let evidence = source_facts(&roster, &proposed, &draft.source_text);
+    draft.place_links = propose(&roster, &proposed, &facts, &evidence);
     Ok(())
+}
+
+/// The `location` facts that the Source Text gives the proposed links
+/// (QA run 4): for each link "`P` inside `Q`", the first sentence of the
+/// text that names `P` and `Q`, and no other Place, as whole words. The
+/// fact is `P`, location `Q`, with that sentence as its text. The live
+/// model rarely writes a `location` fact about a Place: it gives its facts
+/// to the PC, under keys such as `destination_location`. So a link that
+/// the Player's own text states had nothing to back it.
+///
+/// These facts back a link only (`backed_places`). They never take part in
+/// the doubt check, and the draft does not keep them: built from the
+/// proposal, they would hide a fact that contradicts it, since the subject
+/// rule wins over the text rule. A sentence with a third Place backs
+/// nothing: "the inn in the crossing, on the river" does not say which
+/// one holds the inn.
+fn source_facts(
+    roster: &Roster,
+    proposed: &[(String, Inside<String>)],
+    text: &str,
+) -> Vec<(String, String, String)> {
+    let places: Vec<(&str, Vec<Vec<String>>)> = roster
+        .members()
+        .iter()
+        .filter(|m| m.kind == EntityKind::Place)
+        .map(|m| {
+            let names = std::iter::once(&m.main)
+                .chain(&m.others)
+                .map(|n| place_words(n))
+                .filter(|w| !w.is_empty())
+                .collect();
+            (m.main.as_str(), names)
+        })
+        .collect();
+    let sentences: Vec<(&str, Vec<&str>)> = text
+        .split_inclusive(['.', '!', '?', '\n'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|sentence| {
+            let words = normalize::name_words(sentence);
+            let named = places
+                .iter()
+                .filter(|(_, names)| names.iter().any(|n| has_run(&words, n)))
+                .map(|(main, _)| *main)
+                .collect();
+            (sentence, named)
+        })
+        .collect();
+    proposed
+        .iter()
+        .filter_map(|(place, inside)| {
+            let Inside::Place(parent) = inside else {
+                return None;
+            };
+            let (sentence, _) = sentences.iter().find(|(_, named)| {
+                named.len() == 2
+                    && named.contains(&place.as_str())
+                    && named.contains(&parent.as_str())
+            })?;
+            Some((place.clone(), parent.clone(), (*sentence).to_owned()))
+        })
+        .collect()
 }
 
 /// The `location` facts of the draft for the fact check: each known fact,
@@ -335,13 +398,15 @@ fn draft_location_facts(draft: &SeedDraft) -> Vec<(String, String, String)> {
 /// The fact check of a proposed tree over `roster`: each Place gets its
 /// proposed link, or `Unknown` when the proposal has none or when
 /// `doubted_places` finds it at odds with `facts` (subject, value, text).
+/// A link that `facts` or `evidence` back starts on the model's choice.
 /// No link is confirmed.
 fn propose(
     roster: &Roster,
     proposed: &[(String, Inside<String>)],
     facts: &[(String, String, String)],
+    evidence: &[(String, String, String)],
 ) -> Vec<PlaceLink> {
-    let checked = check(roster, proposed, facts);
+    let checked = check(roster, proposed, facts, evidence);
     roster
         .members()
         .iter()
@@ -372,10 +437,13 @@ struct Checked {
 }
 
 /// The fact check of `links` over a roster. Keys are roster positions.
+/// `facts` doubt and back a link; `evidence` (`source_facts`) only backs
+/// one.
 fn check(
     roster: &Roster,
     links: &[(String, Inside<String>)],
     facts: &[(String, String, String)],
+    evidence: &[(String, String, String)],
 ) -> Checked {
     let members = roster.members();
     let position: HashMap<&str, usize> = members
@@ -402,8 +470,22 @@ fn check(
             },
         })
         .collect();
-    let facts: Vec<PlaceFact<usize>> = facts
-        .iter()
+    let facts = place_facts(&key, facts);
+    let mut backing = facts.clone();
+    backing.extend(place_facts(&key, evidence));
+    let names = |set: BTreeSet<usize>| set.into_iter().map(|i| members[i].main.clone()).collect();
+    Checked {
+        doubted: names(doubted_places(&nodes, &facts)),
+        backed: names(backed_places(&nodes, &backing)),
+    }
+}
+
+/// Each fact of `list` (subject, value, text) whose subject has a key.
+fn place_facts<'a>(
+    key: &impl Fn(&str) -> Option<usize>,
+    list: &'a [(String, String, String)],
+) -> Vec<PlaceFact<'a, usize>> {
+    list.iter()
         .filter_map(|(subject, value, text)| {
             Some(PlaceFact {
                 subject: key(subject)?,
@@ -411,12 +493,7 @@ fn check(
                 text,
             })
         })
-        .collect();
-    let names = |set: BTreeSet<usize>| set.into_iter().map(|i| members[i].main.clone()).collect();
-    Checked {
-        doubted: names(doubted_places(&nodes, &facts)),
-        backed: names(backed_places(&nodes, &facts)),
-    }
+        .collect()
 }
 
 /// The Inside Links the World Build writes: each confirmed link of the
@@ -440,7 +517,7 @@ pub(super) fn world_places(
         .filter(|f| normalize::key(&f.key) == "location")
         .map(|f| (f.subject.clone(), f.value.clone(), f.text.clone()))
         .collect();
-    let doubted = check(roster, &links, &facts).doubted;
+    let doubted = check(roster, &links, &facts, &[]).doubted;
     links
         .into_iter()
         .filter(|(place, _)| !doubted.contains(place))
