@@ -722,6 +722,26 @@ fn a_copy_of_the_pc_in_the_roster_is_dropped() {
     assert_eq!(draft.seed.pc.name, "Mira Holt");
 }
 
+/// Review r5 (m2): an entry with only names of the PC but another age is
+/// not a copy. It may be the PC's daughter, called by the PC's other
+/// name. The draft keeps it, so the one-PC check sends a repair instead
+/// of dropping a person silently.
+#[test]
+fn a_namesake_of_the_pc_with_another_age_is_not_dropped() {
+    let mut with_namesake = roster_out();
+    with_namesake["characters"]
+        .as_array_mut()
+        .unwrap()
+        .push(npc("the Keeper", 8, true));
+    let mut outputs = plain_outputs();
+    outputs.insert(0, with_namesake);
+    let gm = gm(&outputs);
+    run(&source(), &gm).result.unwrap();
+    let calls = gm.calls();
+    assert_eq!(calls.len(), 7);
+    assert!(calls[1].prompt.recent.contains("OnePc"));
+}
+
 #[test]
 fn a_roster_check_that_fails_twice_fails_the_draft() {
     // A character with no age no longer fits the roster shape: `age` is a

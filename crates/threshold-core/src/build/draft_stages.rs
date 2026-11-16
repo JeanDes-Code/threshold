@@ -574,10 +574,18 @@ fn kind_word(kind: EntityKind) -> &'static str {
 /// Such a copy adds no person, so the one-PC check skips it and the draft
 /// drops it (`drop_pc_copies`). An entry that gives the PC a name the PC
 /// does not have still fails the check: it may be another person.
-fn is_pc_copy(pc_names: &HashSet<String>, character: &CharacterOut) -> bool {
-    std::iter::once(&character.name)
-        .chain(character.other_names.iter().map(|o| &o.name))
-        .all(|name| pc_names.contains(&normalize::name(name)))
+///
+/// Review r5 (m2): the names are not enough. The PC "Ada Vane", other name
+/// "Ada", and an entry "Ada" aged 8 may be the PC's daughter. A copy also
+/// has the PC's age: every entry of the roster gives one, stated or
+/// proposed. Its kind is the PC's by construction: only `characters`, the
+/// people, are read. Any other entry stays, and the one-PC check sends
+/// its repair.
+fn is_pc_copy(pc: &PcOut, pc_names: &HashSet<String>, character: &CharacterOut) -> bool {
+    character.age == pc.age
+        && std::iter::once(&character.name)
+            .chain(character.other_names.iter().map(|o| &o.name))
+            .all(|name| pc_names.contains(&normalize::name(name)))
 }
 
 /// Drops each copy of the PC from `characters` (`is_pc_copy`), and each cut
@@ -589,7 +597,7 @@ fn drop_pc_copies(out: &mut RosterOut, cut: &mut Vec<CapAt>) {
         .characters
         .iter()
         .enumerate()
-        .filter(|(_, c)| is_pc_copy(&pc_names, c))
+        .filter(|(_, c)| is_pc_copy(&out.pc, &pc_names, c))
         .map(|(i, _)| i)
         .collect();
     if copies.is_empty() {
@@ -626,7 +634,7 @@ fn check_roster(out: &RosterOut) -> Vec<Problem<()>> {
     let characters = out
         .characters
         .iter()
-        .map(|c| (&c.name, &c.other_names, is_pc_copy(&pc_names, c)));
+        .map(|c| (&c.name, &c.other_names, is_pc_copy(&out.pc, &pc_names, c)));
     let others = out.others.iter().map(|o| (&o.name, &o.other_names, false));
     let lists = [
         ("characters", characters.collect::<Vec<_>>()),
