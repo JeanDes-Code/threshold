@@ -530,6 +530,40 @@ fn review_edits_reach_the_stored_links() {
     assert_eq!(link(&view, "Brackwater"), Inside::Top);
 }
 
+/// A confirmation is a review edit (review minor, 2026-11-16): on a built
+/// draft, `confirm_inside` and `confirm_age` return it to `Draft` and drop
+/// the old Campaign file, so the review no longer says "Change something
+/// to build a new one".
+#[test]
+fn a_confirmation_on_a_built_draft_is_an_edit() {
+    let mut draft = drafted(INN, CROSSING, &ALL_NONE);
+    true_tree(&mut draft);
+    confirm_as_shown(&mut draft);
+    let as_built = |draft: &mut SeedDraft| {
+        draft.state = DraftState::Built;
+        draft.campaign_file = Some("campaign.sqlite".to_owned());
+    };
+
+    as_built(&mut draft);
+    let inn = entry(&draft, INN);
+    confirm_inside(&mut draft, &inn, Inside::Unknown).unwrap();
+    assert_eq!(
+        (draft.state, draft.campaign_file.as_deref()),
+        (DraftState::Draft, None)
+    );
+
+    as_built(&mut draft);
+    let child = age_lines(&draft)
+        .into_iter()
+        .find(|l| l.name == CHILD)
+        .unwrap();
+    confirm_age(&mut draft, &child.entry()).unwrap();
+    assert_eq!(
+        (draft.state, draft.campaign_file.as_deref()),
+        (DraftState::Draft, None)
+    );
+}
+
 /// `confirm_inside` takes a Place, and a parent that is another Place of
 /// the draft. It refuses a Place inside itself and a loop; the draft does
 /// not change.

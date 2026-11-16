@@ -677,6 +677,7 @@ fn old_rows(old: &[SeedEntity], new: &[SeedEntity]) -> Vec<Option<usize>> {
 
 /// Confirms the current age of one character entry. The only writer of
 /// `AgeMark.confirmed`. The entry must match its row exactly (`EntryRef`).
+/// It is an edit (`edited`): a built draft goes back to `Draft`.
 pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), ReviewError> {
     let row = resolve(&draft.seed, entry)?;
     let (name, kind, age) = row_of(&draft.seed, row).ok_or(ReviewError::UnknownName)?;
@@ -699,6 +700,7 @@ pub fn confirm_age(draft: &mut SeedDraft, entry: &EntryRef) -> Result<(), Review
         }
     }
     set_age_facts(draft, row, true);
+    edited(draft);
     Ok(())
 }
 
@@ -828,8 +830,10 @@ pub fn age_lines(draft: &SeedDraft) -> Vec<AgeLine> {
 }
 
 /// A Player edit returns the draft to `Draft`. The last failure and the
-/// Campaign file belong to the content it replaces.
-fn edited(draft: &mut SeedDraft) {
+/// Campaign file belong to the content it replaces. A confirmation of an
+/// age or an Inside Link is an edit too: the Campaign file holds the
+/// choices made before it.
+pub(super) fn edited(draft: &mut SeedDraft) {
     draft.state = DraftState::Draft;
     draft.last_failure = None;
     draft.campaign_file = None;

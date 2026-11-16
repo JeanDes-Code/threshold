@@ -177,6 +177,8 @@ pub(super) fn unconfirmed(draft: &SeedDraft) -> Vec<usize> {
 /// (`EntryRef`) and be a Place. A parent that is no other Place of the
 /// draft is refused (`UnknownName`), and so is a link that makes a loop
 /// (`Loop`); the draft does not change.
+/// A confirmation is an edit (`draft::edited`): a built draft goes back to
+/// `Draft`.
 pub fn confirm_inside(
     draft: &mut SeedDraft,
     entry: &EntryRef,
@@ -220,6 +222,7 @@ pub fn confirm_inside(
         backed: false,
         confirmed: true,
     });
+    super::draft::edited(draft);
     Ok(())
 }
 
