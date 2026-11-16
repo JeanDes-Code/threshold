@@ -1,7 +1,7 @@
 // An invented Seed Draft for the review preview. Every name and fact here is
 // made up, after the fixture chronicle of Ostley Crossing.
 
-import type { AdventureSeed, DraftView, Gap, KnownFact } from "../api";
+import type { AdventureSeed, DraftView, Gap, InsideLink, KnownFact } from "../api";
 
 const seed: AdventureSeed = {
   premise:
@@ -66,6 +66,16 @@ export const draftedAges: Record<string, { age: number; stated: boolean }> = {
 /** The ages the Player already confirmed in the preview. */
 export const confirmedAges: Record<string, number> = { "Agathe Morrow": 67, "Pim Quast": 11 };
 
+/**
+ * The model's place links after the fact check: the crossing is proposed at
+ * the top level; a fact doubted the Copper Kettle's link, so it waits for a
+ * choice.
+ */
+export const draftedLinks: Record<string, { inside: InsideLink; doubted: boolean }> = {
+  "Ostley Crossing": { inside: "top", doubted: false },
+  "The Copper Kettle": { inside: "unknown", doubted: true },
+};
+
 /** The gaps that are not about ages; the preview derives the age gaps. */
 export const otherGaps: Gap[] = [
   { kind: "unknown_name", at: "start.present[2]" },
@@ -78,6 +88,7 @@ export const seedDraftView: DraftView = {
   seed,
   knowledge,
   ages: [],
+  places: [],
   cut: [{ at: "entities", cap: 30 }],
   gaps: [],
   last_failure: null,

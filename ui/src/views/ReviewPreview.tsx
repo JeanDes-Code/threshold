@@ -4,8 +4,15 @@
 // debug mode on.
 
 import { useState } from "react";
-import type { AgeLine, DraftView, Gap, SeedEntity } from "../api";
-import { confirmedAges, draftedAges, otherGaps, seedDraftView, shortSource } from "../fixtures/seedDraft";
+import type { AgeLine, DraftView, Gap, InsideLine, InsideLink, SeedEntity } from "../api";
+import {
+  confirmedAges,
+  draftedAges,
+  draftedLinks,
+  otherGaps,
+  seedDraftView,
+  shortSource,
+} from "../fixtures/seedDraft";
 import { isCharacter } from "../newCampaign";
 import ScreenFrame from "./ScreenFrame";
 import SeedReview, { type ReviewClient } from "./SeedReview";
@@ -17,6 +24,8 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
   let view = seedDraftView;
   const drafted = { ...draftedAges };
   const confirmed: Record<string, number | undefined> = { ...confirmedAges };
+  const links: Record<string, { inside: InsideLink; doubted: boolean; confirmed: boolean } | undefined> =
+    Object.fromEntries(Object.entries(draftedLinks).map(([n, l]) => [n, { ...l, confirmed: false }]));
 
   const refresh = (): DraftView => {
     const rows: [string, string, number | null][] = [
@@ -39,7 +48,15 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
     const ageGaps: Gap[] = rows
       .filter((_, i) => !ages[i]?.confirmed)
       .map(([at]) => ({ kind: "age_unconfirmed", at }));
-    view = { ...view, ages, gaps: [...ageGaps, ...others] };
+    const places: InsideLine[] = view.seed.entities.flatMap((e, index) => {
+      if (e.kind !== "place") return [];
+      const link = links[e.name] ?? { inside: "unknown" as const, doubted: false, confirmed: false };
+      return [{ index, name: e.name, ...link }];
+    });
+    const placeGaps: Gap[] = places
+      .filter((l) => !l.confirmed)
+      .map((l) => ({ kind: "place_unconfirmed", at: `entities[${l.index}].inside` }));
+    view = { ...view, ages, places, gaps: [...ageGaps, ...placeGaps, ...others] };
     return view;
   };
   const first = refresh();
@@ -54,6 +71,10 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
     confirmAge: (_, { name }) => {
       const age = name === view.seed.pc.name ? view.seed.pc.age : view.seed.entities.find((e) => e.name === name)?.age;
       if (age !== null && age !== undefined) confirmed[name] = age;
+      return later(refresh());
+    },
+    confirmInside: (_, { name }, inside) => {
+      links[name] = { inside, doubted: links[name]?.doubted ?? false, confirmed: true };
       return later(refresh());
     },
     renameDraftEntity: (_, { name: from }, to) => {
@@ -84,6 +105,14 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
       const mark = drafted[from];
       if (mark) drafted[to.trim()] = mark;
       confirmed[to.trim()] = confirmed[from];
+      // The core asks for a new choice for a renamed Place, and follows the name in other links.
+      const link = links[from];
+      if (link) links[to.trim()] = { ...link, confirmed: false };
+      for (const [n, l] of Object.entries(links)) {
+        if (l && typeof l.inside !== "string" && l.inside.place === from) {
+          links[n] = { ...l, inside: { place: to.trim() } };
+        }
+      }
       return later(refresh());
     },
     approveDraft: () =>

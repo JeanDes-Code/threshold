@@ -432,7 +432,8 @@ export type GapKind =
   | "pc_in_roster"
   | "wrong_kind"
   | "seed_block_too_long"
-  | "slot_conflict";
+  | "slot_conflict"
+  | "place_unconfirmed";
 
 /**
  * One thing to fix before approval. `at` locates the field (see `Gap` in
@@ -491,6 +492,26 @@ export interface AgeLine {
   confirmed: boolean;
 }
 
+/**
+ * Where a Place sits (glossary: Inside Link): "unknown" when no one knows,
+ * "top" for a place inside no other place, else the main name of the place
+ * around it.
+ */
+export type InsideLink = "unknown" | "top" | { place: string };
+
+/** One Place's Inside Link as the core sees it, in roster order (ADR 0008, 2026-11-16). Rust: `PlaceLine`. */
+export interface InsideLine {
+  /** The row: the index in `seed.entities`. */
+  index: number;
+  /** The main name, as the seed writes it. */
+  name: string;
+  inside: InsideLink;
+  /** A fact contradicts the model's link, so the core set the link to "unknown". */
+  doubted: boolean;
+  /** The Player confirmed this very link through `confirm_inside`. */
+  confirmed: boolean;
+}
+
 /** A list the draft run cut at its cap. `at` has the path form of `Gap.at`. */
 export interface Cut {
   at: string;
@@ -503,6 +524,7 @@ export interface DraftView {
   seed: AdventureSeed;
   knowledge: KnownFact[];
   ages: AgeLine[];
+  places: InsideLine[];
   cut: Cut[];
   gaps: Gap[];
   last_failure: BuildFailure | null;
@@ -692,6 +714,9 @@ export function createApi(invoke: Invoke) {
     /** The core confirms the current age of one character entry. */
     confirmAge: (draftId: string, entry: EntryRef) =>
       invoke<DraftView>("confirm_age", { draft_id: draftId, entry }),
+    /** The core confirms the Inside Link of one Place entry. */
+    confirmInside: (draftId: string, entry: EntryRef, inside: InsideLink) =>
+      invoke<DraftView>("confirm_inside", { draft_id: draftId, entry, inside }),
     /** Renames one entry in every field of the draft that names it. */
     renameDraftEntity: (draftId: string, entry: EntryRef, to: string) =>
       invoke<DraftView>("rename_draft_entity", { draft_id: draftId, entry, to }),

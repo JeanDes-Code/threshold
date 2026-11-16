@@ -11,6 +11,7 @@ import {
   type KnownFact,
   type OpenMode,
   type PcSeed,
+  type InsideLine,
   type SeedEntity,
   type StartSeed,
 } from "../api";
@@ -39,10 +40,16 @@ import {
   formOfView,
   gapSentence,
   gapsAt,
+  insideChoices,
+  insideOfKey,
+  insideStart,
+  insideStatus,
   isCharacter,
   nameChange,
   otherButton,
   pairMarks,
+  placeLineOf,
+  placesLeft,
   removeAt,
   removeEntry,
   renamed,
@@ -64,7 +71,10 @@ import { api } from "../tauri";
 import { AgeInput, HourInput, ListInput, NameInput, OtherNames, TextInput } from "./fields";
 
 /** The commands the review calls. The dev preview passes a stand-in. */
-export type ReviewClient = Pick<Api, "saveDraft" | "confirmAge" | "renameDraftEntity" | "approveDraft">;
+export type ReviewClient = Pick<
+  Api,
+  "saveDraft" | "confirmAge" | "confirmInside" | "renameDraftEntity" | "approveDraft"
+>;
 
 interface Props {
   view: DraftView;
@@ -105,6 +115,9 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const [form, setForm] = useState<ReviewForm>(() => formOfView(view));
   const [gaps, setGaps] = useState<Gap[]>(view.gaps);
   const [ages, setAges] = useState<AgeLine[]>(view.ages);
+  const [placeLines, setPlaceLines] = useState<InsideLine[]>(view.places);
+  // The Player's pick in each "Inside" select, by row and name, until "Confirm".
+  const [insidePicks, setInsidePicks] = useState<Partial<Record<string, string>>>({});
   const [cut] = useState<Cut[]>(view.cut);
   const [state, setState] = useState(view.state);
   const [pending, setPending] = useState(false);
@@ -126,10 +139,11 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const [guard] = useState(createGuard);
   const draftId = view.draft_id;
 
-  /** What the store answered: gaps, ages and state. The form stays the Player's. */
+  /** What the store answered: gaps, ages, place links and state. The form stays the Player's. */
   const apply = (saved: DraftView) => {
     setGaps(saved.gaps);
     setAges(saved.ages);
+    setPlaceLines(saved.places);
     setState(saved.state);
   };
 
@@ -256,6 +270,18 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
     setError(failure);
   };
 
+  /** "Confirm" on an "Inside" row: the store takes every edit, then the core confirms that link for that exact Place. */
+  const confirmPlace = async (line: InsideLine, pick: string) => {
+    const inside = insideOfKey(pick);
+    if (inside === null) return;
+    const entry = { index: line.index, name: line.name, kind: "place" as const };
+    const failure = await core(
+      (flush) => afterFlush(flush, () => client.confirmInside(draftId, entry, inside)),
+      () => setInsidePicks((p) => ({ ...p, [`${line.index}/${line.name}`]: undefined })),
+    );
+    setError(failure);
+  };
+
   /** Leaves only once the store holds the last edit; a failed save stays on screen. */
   const back = async () => {
     setLeaving(true);
@@ -355,6 +381,65 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
                 onClick={() => void confirm(row)}
               >
                 Confirm age
+              </button>
+            )}
+          </span>
+        </div>
+        {toFix(path)}
+      </div>
+    );
+  };
+
+  /**
+   * Where a Place is: a select of "Choose…", "Top level", the other places
+   * and "Not sure", a "needs a choice" mark on a link the fact check
+   * doubted, and "Confirm" until the core holds the Player's choice.
+   */
+  const inside = (i: number) => {
+    const path = `entities[${i}].inside`;
+    const line = placeLineOf(placeLines, form, i);
+    const key = line ? `${line.index}/${line.name}` : "";
+    const pick = (line && insidePicks[key]) ?? (line ? insideStart(line) : "");
+    const shown = insideStatus({ choice: pick, line, pending, saveFailed, busy });
+    const where = line?.name || "this place";
+    return (
+      <div className="review-age review-inside">
+        <label htmlFor={fieldId(path)}>Inside</label>
+        <div className="review-age__row">
+          <select
+            id={fieldId(path)}
+            aria-label={`Where ${where} is`}
+            value={pick}
+            disabled={line === undefined || locked}
+            onChange={(ev) => {
+              const value = ev.target.value;
+              setInsidePicks((p) => ({ ...p, [key]: value }));
+            }}
+          >
+            <option value="">Choose…</option>
+            <option value="top">Top level: inside no other place</option>
+            {line &&
+              insideChoices(placeLines, line).map((name) => (
+                <option key={name} value={`place:${name}`}>
+                  {name}
+                </option>
+              ))}
+            <option value="unknown">Not sure</option>
+          </select>
+          {shown.needsChoice && <span className="review-tag review-tag--warn">needs a choice</span>}
+          <span className="review-age__end">
+            {shown.confirmed ? (
+              <span className="review-tag review-tag--ok">
+                <span aria-hidden="true">✓ </span>confirmed
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="play-btn play-btn--outline review-age__confirm"
+                disabled={!shown.canConfirm || line === undefined}
+                onClick={() => line && void confirmPlace(line, pick)}
+              >
+                Confirm
               </button>
             )}
           </span>
@@ -478,7 +563,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
   const details = seed.open_details;
   const placeNames = places.filter(({ e }) => e.kind === "place").map(({ e }) => e.name);
   const left = agesLeft(ages);
-  const others = gaps.filter((g) => g.kind !== "age_unconfirmed").length;
+  const others = gaps.filter((g) => g.kind !== "age_unconfirmed" && g.kind !== "place_unconfirmed").length;
   const ageRows: [Row, number | null][] = [
     ["pc", seed.pc.age],
     ...people.map(({ e, i }): [Row, number | null] => [i, e.age]),
@@ -585,6 +670,13 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
     ),
     places: (
       <>
+        {places.some(({ e }) => e.kind === "place") && (
+          <p className="review-lead">
+            For each place, confirm what it is inside. The age check uses this to know who is in another place.
+            “Not sure” is the safe choice: the age check then cannot set that place apart, so an intimate scene
+            stops more often.
+          </p>
+        )}
         {places.length === 0 && <p className="review-empty">No place or group in the draft.</p>}
         <ul className="review-entries">
           {places.map(({ e, i }) => (
@@ -599,6 +691,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
               </div>
               {toFix(`entities[${i}].name`)}
               {e.age !== null && age(i, e.age, (n) => setEntity(i, { age: n }))}
+              {e.kind === "place" && inside(i)}
               <OtherNames
                 path={`entities[${i}].other_names`}
                 owner={e.name || "this entry"}
@@ -778,7 +871,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
           {state === "built" && (
             <p className="review-notice">A campaign was already built from this draft. Change something to build a new one.</p>
           )}
-          <Progress ages={ages} others={others} />
+          <Progress ages={ages} places={placeLines} others={others} />
           <NextGap gaps={gaps} form={form} index={gapIndex} onIndex={setGapIndex} onShow={show} />
           {cut.length > 0 && (
             <ul className="review-cuts">
@@ -844,33 +937,42 @@ function createGuard() {
   };
 }
 
-/** How far the check is: the ages the Player confirmed, and what is left to fix. */
-function Progress({ ages, others }: { ages: AgeLine[]; others: number }) {
-  const done = ages.length - agesLeft(ages);
-  const share = ages.length === 0 ? 1 : done / ages.length;
+/** How far the check is: the ages and place links the Player confirmed, and what is left to fix. */
+function Progress({ ages, places, others }: { ages: AgeLine[]; places: InsideLine[]; others: number }) {
   return (
     <div className="review-progress">
-      <div className="review-progress__item">
-        <p className="play-label">Ages confirmed</p>
-        <p className="review-progress__value">
-          {done} <span>of {ages.length}</span>
-        </p>
-        <div
-          className="review-meter"
-          role="progressbar"
-          aria-label="Ages confirmed"
-          aria-valuemin={0}
-          aria-valuemax={ages.length}
-          aria-valuenow={done}
-        >
-          <span style={{ width: `${Math.round(share * 100)}%` }} />
-        </div>
-      </div>
+      <Meter label="Ages confirmed" done={ages.length - agesLeft(ages)} total={ages.length} />
+      {places.length > 0 && (
+        <Meter label="Places confirmed" done={places.length - placesLeft(places)} total={places.length} />
+      )}
       <div className="review-progress__item">
         <p className="play-label">Other things to fix</p>
         <p className={`review-progress__value${others === 0 ? " review-progress__value--ok" : ""}`}>
           {others === 0 ? "None" : others}
         </p>
+      </div>
+    </div>
+  );
+}
+
+/** One "X confirmed" count with its meter. */
+function Meter({ label, done, total }: { label: string; done: number; total: number }) {
+  const share = total === 0 ? 1 : done / total;
+  return (
+    <div className="review-progress__item">
+      <p className="play-label">{label}</p>
+      <p className="review-progress__value">
+        {done} <span>of {total}</span>
+      </p>
+      <div
+        className="review-meter"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={done}
+      >
+        <span style={{ width: `${Math.round(share * 100)}%` }} />
       </div>
     </div>
   );

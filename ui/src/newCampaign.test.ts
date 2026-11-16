@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AdventureSeed, AgeLine, DraftView, EntryRef, Gap, GapKind } from "./api";
+import type { AdventureSeed, AgeLine, DraftView, EntryRef, Gap, GapKind, InsideLine, InsideLink } from "./api";
 import {
   CANCEL_NOTE,
   DETAIL_LEVELS,
@@ -31,6 +31,13 @@ import {
   focusTarget,
   gapSentence,
   gapsAt,
+  insideChoices,
+  insideKey,
+  insideOfKey,
+  insideStart,
+  insideStatus,
+  placeLineOf,
+  placesLeft,
   otherButton,
   otherOf,
   pairMarks,
@@ -100,6 +107,7 @@ function view(f: ReviewForm, ages: AgeLine[] = []): DraftView {
     seed: f.seed,
     knowledge: f.knowledge,
     ages,
+    places: [],
     cut: [],
     gaps: [],
     last_failure: null,
@@ -257,12 +265,22 @@ describe("gapSentence", () => {
       "wrong_kind",
       "seed_block_too_long",
       "slot_conflict",
+      "place_unconfirmed",
     ];
     for (const kind of [...kinds, "new_kind"]) {
       const text = sentence(kind, "entities[0].age");
       expect(text.split(/(?<=\.) /).length, text).toBeGreaterThanOrEqual(2);
     }
     expect(sentence("new_kind", "premise")).toBe("The premise needs a fix. Check it.");
+  });
+
+  it("asks for a choice under “Inside” for a Place link that waits", () => {
+    const f = form();
+    f.seed.entities[2] = { name: "The Copper Kettle", kind: "place", age: null, other_names: [], hidden: false };
+    expect(gapSentence({ kind: "place_unconfirmed", at: "entities[2].inside" }, f)).toBe(
+      "The place around The Copper Kettle is not confirmed yet. Make a choice under “Inside”, then press “Confirm”.",
+    );
+    expect(sectionOf("entities[2].inside", f)).toBe("places");
   });
 
   it("keeps an unknown locator as it is", () => {
@@ -587,6 +605,7 @@ describe("review actions", () => {
     expect(canApprove({ ...ready, saveFailed: true })).toBe(false);
     expect(canApprove({ ...ready, error: "Could not save" })).toBe(false);
     expect(canApprove({ ...ready, gaps: [{ kind: "age_unconfirmed", at: "pc.age" }] })).toBe(false);
+    expect(canApprove({ ...ready, gaps: [{ kind: "place_unconfirmed", at: "entities[2].inside" }] })).toBe(false);
     expect(canApprove({ ...ready, agesShown: false })).toBe(false);
     expect(canApprove({ ...ready, state: "built" })).toBe(false);
   });
@@ -992,5 +1011,95 @@ describe("the Intimate scenes help (QA m8)", () => {
     expect(explicitPackLoaded([])).toBe(false);
     expect(explicitPackLoaded([{ explicit: true, problem: "refused" }])).toBe(false);
     expect(explicitPackLoaded([{ explicit: false, problem: null }, { explicit: true, problem: null }])).toBe(true);
+  });
+});
+
+describe("the place tree review (ADR 0008, 2026-11-16)", () => {
+  const line = (index: number, name: string, inside: InsideLink, more: Partial<InsideLine> = {}): InsideLine => ({
+    index,
+    name,
+    inside,
+    doubted: false,
+    confirmed: false,
+    ...more,
+  });
+  // The crossing holds the inn; the inn holds the cellar; the ferry house stands apart.
+  const tree = [
+    line(3, "Ostley Crossing", "top"),
+    line(4, "The Copper Kettle", { place: "Ostley Crossing" }),
+    line(5, "The Cellar", { place: "The Copper Kettle" }),
+    line(6, "The Ferry House", "unknown", { doubted: true }),
+  ];
+  const at = (name: string): InsideLine => {
+    const found = tree.find((l) => l.name === name);
+    if (!found) throw new Error(name);
+    return found;
+  };
+
+  it("offers every other place, but never the place itself or one inside it", () => {
+    expect(insideChoices(tree, at("Ostley Crossing"))).toEqual(["The Ferry House"]);
+    expect(insideChoices(tree, at("The Copper Kettle"))).toEqual(["Ostley Crossing", "The Ferry House"]);
+    expect(insideChoices(tree, at("The Ferry House"))).toEqual([
+      "Ostley Crossing",
+      "The Copper Kettle",
+      "The Cellar",
+    ]);
+  });
+
+  it("stops on a loop the lines hold", () => {
+    const a = line(0, "A", { place: "B" });
+    const c = line(2, "C", "top");
+    const loop = [a, line(1, "B", { place: "A" }), c];
+    expect(insideChoices(loop, c)).toEqual(["A", "B"]);
+    expect(insideChoices(loop, a)).toEqual(["C"]);
+  });
+
+  it("starts on the model's link, and on “Choose…” for a link that is unknown", () => {
+    expect(insideStart(at("Ostley Crossing"))).toBe("top");
+    expect(insideStart(at("The Copper Kettle"))).toBe("place:Ostley Crossing");
+    expect(insideStart(at("The Ferry House"))).toBe("");
+    expect(insideStart({ ...at("The Ferry House"), confirmed: true })).toBe("unknown");
+  });
+
+  it("reads a select value back as a link, and nothing for “Choose…”", () => {
+    for (const link of ["top", "unknown", { place: "The Copper Kettle" }] as InsideLink[]) {
+      expect(insideOfKey(insideKey(link))).toEqual(link);
+    }
+    expect(insideOfKey("")).toBeNull();
+    expect(insideOfKey("place:")).toBeNull();
+    expect(insideOfKey("nowhere")).toBeNull();
+  });
+
+  it("shows “confirmed” only for the link the core confirmed, and confirms only a real choice", () => {
+    const base = { pending: false, saveFailed: false, busy: false };
+    const kettle = { ...at("The Copper Kettle"), confirmed: true };
+    expect(insideStatus({ ...base, choice: "place:Ostley Crossing", line: kettle })).toEqual({
+      confirmed: true,
+      canConfirm: false,
+      needsChoice: false,
+    });
+    // Another pick drops "confirmed" at once, and "Confirm" comes back.
+    expect(insideStatus({ ...base, choice: "top", line: kettle })).toMatchObject({ confirmed: false, canConfirm: true });
+    expect(insideStatus({ ...base, choice: "", line: at("The Ferry House") })).toEqual({
+      confirmed: false,
+      canConfirm: false,
+      needsChoice: true,
+    });
+    expect(insideStatus({ ...base, choice: "unknown", line: at("The Ferry House") }).canConfirm).toBe(true);
+    for (const wait of [{ pending: true }, { saveFailed: true }, { busy: true }]) {
+      expect(insideStatus({ ...base, ...wait, choice: "top", line: at("Ostley Crossing") }).canConfirm).toBe(false);
+    }
+    expect(insideStatus({ ...base, choice: "top", line: undefined }).canConfirm).toBe(false);
+  });
+
+  it("finds a row's line only while the row holds that very Place", () => {
+    const f = form();
+    f.seed.entities[2] = { name: "The Copper Kettle", kind: "place", age: null, other_names: [], hidden: false };
+    const lines = [line(2, "The Copper Kettle", "top")];
+    expect(placeLineOf(lines, f, 2)).toEqual(lines[0]);
+    expect(placeLineOf([line(2, "Old Name", "top")], f, 2)).toBeUndefined();
+    expect(placeLineOf(lines, f, 0)).toBeUndefined();
+    expect(placesLeft(tree)).toBe(4);
+    expect(placesLeft([{ ...at("Ostley Crossing"), confirmed: true }])).toBe(0);
   });
 });

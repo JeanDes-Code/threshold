@@ -15,7 +15,9 @@ import type {
   EntryRef,
   Gap,
   GapKind,
+  InsideLink,
   KnownFact,
+  InsideLine,
   SeedEntity,
 } from "./api";
 
@@ -206,6 +208,7 @@ export function fieldLabel(at: string, form: ReviewForm): string {
     if (p.length === 3 && (c === "name" || c === "kind" || c === "age")) {
       return `The ${c} of ${entityName(b)}`;
     }
+    if (p.length === 3 && c === "inside") return `The place around ${entityName(b)}`;
     if (c === "other_names" && p.length === 4) return otherName(num(d));
     if (c === "other_names" && e === "known_to" && p.length === 6) return holderOf(num(d), num(f));
   }
@@ -284,6 +287,7 @@ export function gapSentence(gap: Gap, form: ReviewForm): string {
       other === null
         ? `${field} says something about the same thing as another fact. Delete one of them.`
         : `${field} and ${otherField} say something about the same thing. Delete one of them.`,
+    place_unconfirmed: () => `${field} is not confirmed yet. Make a choice under “Inside”, then press “Confirm”.`,
   };
   return Object.hasOwn(sentences, gap.kind)
     ? sentences[gap.kind]()
@@ -716,6 +720,91 @@ export function ageLabel(line: AgeLine | undefined): string {
 
 /** How many ages still wait for the Player's confirmation. */
 export const agesLeft = (ages: AgeLine[]): number => ages.filter((l) => !l.confirmed).length;
+
+/** How many Places still wait for the Player to confirm where they are. */
+export const placesLeft = (places: InsideLine[]): number => places.filter((l) => !l.confirmed).length;
+
+/** The core's place line of row `i`, while it is about the Place the row holds. */
+export function placeLineOf(places: InsideLine[], form: ReviewForm, i: number): InsideLine | undefined {
+  const entry = form.seed.entities[i];
+  if (entry?.kind !== "place") return undefined;
+  return places.find((line) => line.index === i && line.name === entry.name);
+}
+
+/**
+ * The value of an "Inside" select: "" for "Choose…", "top", "unknown" for
+ * "Not sure", else "place:" and the name of the place around it.
+ */
+export function insideKey(link: InsideLink): string {
+  return typeof link === "string" ? link : `place:${link.place}`;
+}
+
+/** The link a select value stands for; null for "Choose…" and any value it does not know. */
+export function insideOfKey(key: string): InsideLink | null {
+  if (key === "top" || key === "unknown") return key;
+  return key.startsWith("place:") && key.length > 6 ? { place: key.slice(6) } : null;
+}
+
+/**
+ * What the select shows before the Player picks: the confirmed link, else
+ * the model's proposal. A link that is "unknown" and not confirmed shows
+ * "Choose…": the model gave none, or the fact check doubted it.
+ */
+export function insideStart(line: InsideLine): string {
+  if (!line.confirmed && line.inside === "unknown") return "";
+  return insideKey(line.inside);
+}
+
+/**
+ * The places a Place can be inside: every other Place of the core's lines,
+ * but not one inside it, at any depth, since the core refuses a loop.
+ */
+export function insideChoices(places: InsideLine[], line: InsideLine): string[] {
+  const parentOf = new Map<string, string | null>(
+    places.map((l) => [l.name, typeof l.inside === "string" ? null : l.inside.place]),
+  );
+  const isInside = (name: string): boolean => {
+    const seen = new Set<string>();
+    let at = parentOf.get(name) ?? null;
+    while (at !== null && !seen.has(at)) {
+      if (at === line.name) return true;
+      seen.add(at);
+      at = parentOf.get(at) ?? null;
+    }
+    return false;
+  };
+  return places.map((l) => l.name).filter((name) => name !== line.name && !isInside(name));
+}
+
+export interface InsideField {
+  /** The select value: see `insideKey`. */
+  choice: string;
+  /** The core's line for the row. */
+  line: InsideLine | undefined;
+  /** A save of the draft waits or runs. */
+  pending: boolean;
+  /** The last save of the draft failed. */
+  saveFailed: boolean;
+  /** A core action runs. */
+  busy: boolean;
+}
+
+/**
+ * What an "Inside" row shows. "confirmed" shows only while the select shows
+ * the link the core holds as confirmed. "Confirm" works only on a real
+ * choice, once the store holds every edit. "needs a choice" marks a link
+ * the fact check doubted, until the Player confirms one.
+ */
+export function insideStatus(f: InsideField): { confirmed: boolean; canConfirm: boolean; needsChoice: boolean } {
+  const settled = !f.pending && !f.saveFailed && f.line !== undefined;
+  const confirmed =
+    settled && f.line?.confirmed === true && f.choice === insideKey(f.line.inside);
+  return {
+    confirmed,
+    canConfirm: settled && !confirmed && !f.busy && insideOfKey(f.choice) !== null,
+    needsChoice: f.line?.doubted === true && !f.line.confirmed,
+  };
+}
 
 /** The form with one more roster entry, as "Add a character" or "Add a place" makes it. */
 export function addEntry(form: ReviewForm, entry: SeedEntity): ReviewForm {
