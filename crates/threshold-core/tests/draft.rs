@@ -178,6 +178,7 @@ fn unconfirmed_draft() -> SeedDraft {
         place: "The landing stage".into(),
         inside: threshold_core::domain::Inside::Top,
         doubted: false,
+        backed: false,
         confirmed: true,
     }];
     draft

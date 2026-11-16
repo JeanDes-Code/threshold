@@ -244,13 +244,60 @@ fn a_model_that_answers_none_for_every_place_leaves_the_gate_refusing() {
             "{name}"
         );
     }
+    // No fact says where the inn is, and none can back "none": the inn
+    // starts on "Choose…", with the model's guess as a hint.
     let inn = line(&lines, INN);
-    assert_eq!((&inn.inside, inn.doubted), (&Inside::Top, false));
+    assert_eq!(
+        (&inn.inside, inn.doubted, &inn.suggested),
+        (&Inside::Unknown, false, &Some(Inside::Top))
+    );
 
     confirm_as_shown(&mut draft);
     let view = built(&draft, "all-none");
     assert_eq!(link(&view, FERRY_HOUSE), Inside::Unknown);
     assert!(blocked_by_child(&view), "{:?}", clearance(&view, &[]));
+}
+
+/// The review starts only a link that a fact backs on the model's choice
+/// (ADR 0008, 2026-11-16). The fact check cannot doubt a wrong link that
+/// no fact contradicts, so every other link starts on "Choose…", with the
+/// model's guess as a hint. The approval gaps do not change.
+#[test]
+fn only_a_link_a_fact_backs_starts_on_the_model_choice() {
+    let model = [
+        (CROSSING, RIVER),
+        (RIVER, "none"),
+        (FERRY_HOUSE, CROSSING),
+        (INN, CROSSING),
+    ];
+    let draft = drafted(INN, CROSSING, &model);
+    let lines = place_lines(&draft);
+    let shown = |name: &str| {
+        let l = line(&lines, name);
+        (l.inside.clone(), l.backed, l.suggested.clone(), l.doubted)
+    };
+    let place = |p: &str| Inside::Place(p.to_owned());
+    // Backed parents: "Brackwater Crossing lies on the river Fenn." (the
+    // subject rule) and "The ferry house is in Brackwater Crossing." (the
+    // text rule).
+    assert_eq!(shown(CROSSING), (place(RIVER), true, None, false));
+    assert_eq!(shown(FERRY_HOUSE), (place(CROSSING), true, None, false));
+    // An unbacked Top, and an unbacked parent: no fact puts the inn anywhere.
+    assert_eq!(
+        shown(RIVER),
+        (Inside::Unknown, false, Some(Inside::Top), false)
+    );
+    assert_eq!(
+        shown(INN),
+        (Inside::Unknown, false, Some(place(CROSSING)), false)
+    );
+    // Every Place still waits for the Player, backed or not.
+    let waiting: Vec<String> = gaps(&draft)
+        .into_iter()
+        .filter(|g| g.kind == GapKind::PlaceUnconfirmed)
+        .map(|g| g.at)
+        .collect();
+    assert_eq!(waiting.len(), 4, "{waiting:?}");
 }
 
 /// The model put the ferry house and the crossing both in the river: two

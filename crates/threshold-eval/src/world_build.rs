@@ -1153,8 +1153,8 @@ fn one_run(ctx: &mut Ctx, text: &str, run: usize) -> BuildRun {
     (ctx.log)(&format!("{tag} draft ok {}", secs(out.draft_ms)));
 
     // The evaluation stands in for the Player: it confirms every age, and
-    // every Inside Link as the review shows it (a doubted link stays "not
-    // sure").
+    // every Inside Link as the review shows it (a doubted link, and a link
+    // no fact backs, stays "not sure").
     for line in age_lines(&draft) {
         let _ = confirm_age(&mut draft, &line.entry());
     }

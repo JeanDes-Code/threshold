@@ -1416,7 +1416,8 @@ fn the_draft_stage_cannot_set_detail() {
 
 /// The last draft call asks for the place tree, with the Source Text and
 /// the known facts. Each name field is an enum of the roster's Places. The
-/// answer is a proposal: nothing is confirmed.
+/// answer is a proposal: nothing is confirmed. No fact backs either link,
+/// so both start on "Choose…" with the model's guess as a hint.
 #[test]
 fn the_draft_proposes_a_place_tree_and_confirms_nothing() {
     let mut outputs = plain_outputs();
@@ -1447,17 +1448,25 @@ fn the_draft_proposes_a_place_tree_and_confirms_nothing() {
         names_at(&tree.schema, &["places", "[]", "inside"]),
         vec!["Gull Point", "Tide Hall", "none"]
     );
-    let lines: Vec<(String, Inside<String>, bool, bool)> = place_lines(&draft)
+    type Line = (String, Inside<String>, Option<Inside<String>>, bool, bool);
+    let lines: Vec<Line> = place_lines(&draft)
         .into_iter()
-        .map(|l| (l.name, l.inside, l.doubted, l.confirmed))
+        .map(|l| (l.name, l.inside, l.suggested, l.doubted, l.confirmed))
         .collect();
     assert_eq!(
         lines,
         [
-            ("Gull Point".into(), Inside::Top, false, false),
+            (
+                "Gull Point".into(),
+                Inside::Unknown,
+                Some(Inside::Top),
+                false,
+                false
+            ),
             (
                 "Tide Hall".into(),
-                Inside::Place("Gull Point".into()),
+                Inside::Unknown,
+                Some(Inside::Place("Gull Point".into())),
                 false,
                 false
             ),
@@ -1486,15 +1495,15 @@ fn a_bad_place_tree_link_is_dropped_and_the_place_waits() {
     assert!(repair.contains("is not a place"), "{repair}");
     assert!(repair.contains("this place is listed twice"), "{repair}");
     assert!(repair.contains("places (Gull Point)"), "{repair}");
-    let lines: Vec<(String, Inside<String>)> = place_lines(&draft)
+    let lines: Vec<(String, Inside<String>, Option<Inside<String>>)> = place_lines(&draft)
         .into_iter()
-        .map(|l| (l.name, l.inside))
+        .map(|l| (l.name, l.inside, l.suggested))
         .collect();
     assert_eq!(
         lines,
         [
-            ("Gull Point".into(), Inside::Unknown),
-            ("Tide Hall".into(), Inside::Top),
+            ("Gull Point".into(), Inside::Unknown, None),
+            ("Tide Hall".into(), Inside::Unknown, Some(Inside::Top)),
         ]
     );
 }

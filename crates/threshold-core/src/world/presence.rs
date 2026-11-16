@@ -468,22 +468,6 @@ pub fn doubted_places<K: Copy + Ord + std::hash::Hash>(
     nodes: &[TreeNode<K>],
     facts: &[PlaceFact<K>],
 ) -> BTreeSet<K> {
-    let mut index: HashMap<Vec<String>, Vec<K>> = HashMap::new();
-    for node in nodes {
-        for name in &node.names {
-            let words = place_words(name);
-            if !words.is_empty() {
-                let ids = index.entry(words).or_default();
-                if !ids.contains(&node.id) {
-                    ids.push(node.id);
-                }
-            }
-        }
-    }
-    let resolve = |value: &str| match index.get(&place_words(value)).map(Vec::as_slice) {
-        Some([one]) => Some(*one),
-        _ => None,
-    };
     let links: HashMap<K, Inside<K>> = nodes.iter().map(|n| (n.id, n.inside)).collect();
     // The proposed ancestors of a Place, as far as the links are known.
     let above = |place: K| -> Vec<K> {
@@ -498,10 +482,7 @@ pub fn doubted_places<K: Copy + Ord + std::hash::Hash>(
         }
         up
     };
-    let resolved: Vec<(K, K, &str)> = facts
-        .iter()
-        .filter_map(|f| resolve(f.value).map(|q| (f.subject, q, f.text)))
-        .collect();
+    let resolved = resolve_facts(nodes, facts);
     let mut out = BTreeSet::new();
     for node in nodes {
         let names: Vec<&str> = node.names.iter().map(String::as_str).collect();
@@ -531,10 +512,76 @@ pub fn doubted_places<K: Copy + Ord + std::hash::Hash>(
     out
 }
 
+/// The Places whose proposed link a fact backs (ADR 0008, 2026-11-16):
+/// the link is `Inside::Place(p)`, and the rules of `inferred_links`
+/// (subject rule, else text rule) give `p` itself as a parent. An
+/// ancestor of `p` does not back the link. `Top` is never backed: no fact
+/// can say that a Place is inside nothing. The Seed review starts a link
+/// that is not backed on "Choose…", so the Player must choose it.
+pub fn backed_places<K: Copy + Ord + std::hash::Hash>(
+    nodes: &[TreeNode<K>],
+    facts: &[PlaceFact<K>],
+) -> BTreeSet<K> {
+    let resolved = resolve_facts(nodes, facts);
+    nodes
+        .iter()
+        .filter(|node| {
+            let Inside::Place(parent) = node.inside else {
+                return false;
+            };
+            let names: Vec<&str> = node.names.iter().map(String::as_str).collect();
+            fact_parents(node.id, &names, &resolved).contains(&parent)
+        })
+        .map(|node| node.id)
+        .collect()
+}
+
+/// Each fact whose value names exactly one Place of `nodes`: its subject,
+/// that Place and its text. A value names a Place as `PlaceTree::resolve`
+/// reads it: the words of exactly one Place name.
+fn resolve_facts<'a, K: Copy + Ord + std::hash::Hash>(
+    nodes: &[TreeNode<K>],
+    facts: &[PlaceFact<'a, K>],
+) -> Vec<(K, K, &'a str)> {
+    let mut index: HashMap<Vec<String>, Vec<K>> = HashMap::new();
+    for node in nodes {
+        for name in &node.names {
+            let words = place_words(name);
+            if !words.is_empty() {
+                let ids = index.entry(words).or_default();
+                if !ids.contains(&node.id) {
+                    ids.push(node.id);
+                }
+            }
+        }
+    }
+    let resolve = |value: &str| match index.get(&place_words(value)).map(Vec::as_slice) {
+        Some([one]) => Some(*one),
+        _ => None,
+    };
+    facts
+        .iter()
+        .filter_map(|f| resolve(f.value).map(|q| (f.subject, q, f.text)))
+        .collect()
+}
+
 /// `doubted_places` over a Campaign: its Places with their stored links,
 /// and every live `location` fact. For a check of a stored tree (the QA
 /// probes); the gate never calls it.
 pub fn doubted_in(view: &WorldView) -> BTreeSet<EntityId> {
+    let (nodes, facts) = tree_in(view);
+    doubted_places(&nodes, &facts)
+}
+
+/// `backed_places` over a Campaign, as `doubted_in`. For the QA probes.
+pub fn backed_in(view: &WorldView) -> BTreeSet<EntityId> {
+    let (nodes, facts) = tree_in(view);
+    backed_places(&nodes, &facts)
+}
+
+/// The Places of a Campaign with their stored links, and every live
+/// `location` fact.
+fn tree_in(view: &WorldView) -> (Vec<TreeNode<EntityId>>, Vec<PlaceFact<'_, EntityId>>) {
     let nodes: Vec<TreeNode<EntityId>> = view
         .entities
         .iter()
@@ -558,7 +605,7 @@ pub fn doubted_in(view: &WorldView) -> BTreeSet<EntityId> {
             text: &f.text,
         })
         .collect();
-    doubted_places(&nodes, &facts)
+    (nodes, facts)
 }
 
 /// True when `words` holds `run` as consecutive items.

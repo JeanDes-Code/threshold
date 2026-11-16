@@ -2,7 +2,10 @@
 //! boundary of 2026-11-16). The draft run asks the model for the Inside
 //! Link of each Place (`draft_tree`), then the fact check
 //! (`world::presence::doubted_places`) sets each link the facts do not
-//! support to `Unknown`. The Seed review shows each link (`place_lines`);
+//! support to `Unknown`. A link that a fact backs
+//! (`world::presence::backed_places`) is the review's starting choice;
+//! any other link starts on "Choose…", with the model's guess as a hint.
+//! The Seed review shows each link (`place_lines`);
 //! the Player confirms or changes it (`confirm_inside`), and `gaps` blocks
 //! approval until every Place has a confirmed link. The World Build uses
 //! the confirmed links (`world_places`) and never asks the model again.
@@ -23,7 +26,7 @@ use crate::{
     domain::{EntityKind, FactEntry, Inside, PlaceEntry, TOP_LEVEL},
     model::Gm,
     normalize,
-    world::presence::{PlaceFact, TreeNode, doubted_places},
+    world::presence::{PlaceFact, TreeNode, backed_places, doubted_places},
 };
 
 /// The Inside Link of one Place in a Seed Draft. A link counts for a Place
@@ -41,6 +44,12 @@ pub struct PlaceLink {
     /// set it to `Unknown`.
     #[serde(default)]
     pub doubted: bool,
+    /// A fact backs the model's link (`backed_places`): the review starts
+    /// on it. An unconfirmed link that is not backed starts on "Choose…".
+    /// False on a draft saved before the field existed, so its links start
+    /// blank too.
+    #[serde(default)]
+    pub backed: bool,
     /// The Player confirmed `inside` through `confirm_inside`.
     #[serde(default)]
     pub confirmed: bool,
@@ -53,9 +62,15 @@ pub struct PlaceLine {
     pub index: usize,
     /// The main name, as the seed writes it.
     pub name: String,
+    /// The review's starting choice: the confirmed link, else a backed
+    /// link, else `Unknown` ("Choose…").
     pub inside: Inside<String>,
     pub doubted: bool,
+    pub backed: bool,
     pub confirmed: bool,
+    /// The model's link that no fact backs, for a hint only; `None` once
+    /// confirmed, for a backed link, and for no proposal.
+    pub suggested: Option<Inside<String>>,
 }
 
 impl PlaceLine {
@@ -82,12 +97,24 @@ pub fn place_lines(draft: &SeedDraft) -> Vec<PlaceLine> {
                     Inside::Place(parent) => parent != name && is_place(parent),
                     _ => true,
                 });
+            let stored = link.map_or(Inside::Unknown, |l| l.inside.clone());
+            let backed = link.is_some_and(|l| l.backed);
+            let confirmed = link.is_some_and(|l| l.confirmed);
+            let (inside, suggested) = if confirmed || backed {
+                (stored, None)
+            } else if stored == Inside::Unknown {
+                (Inside::Unknown, None)
+            } else {
+                (Inside::Unknown, Some(stored))
+            };
             PlaceLine {
                 index,
                 name: name.to_owned(),
-                inside: link.map_or(Inside::Unknown, |l| l.inside.clone()),
+                inside,
                 doubted: link.is_some_and(|l| l.doubted),
-                confirmed: link.is_some_and(|l| l.confirmed),
+                backed,
+                confirmed,
+                suggested,
             }
         })
         .collect();
@@ -190,6 +217,7 @@ pub fn confirm_inside(
         place: name,
         inside,
         doubted,
+        backed: false,
         confirmed: true,
     });
     Ok(())
@@ -317,7 +345,7 @@ fn propose(
         .filter(|m| m.kind == EntityKind::Place)
         .map(|m| {
             let model = proposed.iter().find(|(p, _)| *p == m.main).map(|(_, i)| i);
-            let doubted = model.is_some() && checked.contains(&m.main);
+            let doubted = model.is_some() && checked.doubted.contains(&m.main);
             PlaceLink {
                 place: m.main.clone(),
                 inside: match model {
@@ -325,19 +353,27 @@ fn propose(
                     _ => Inside::Unknown,
                 },
                 doubted,
+                backed: !doubted && checked.backed.contains(&m.main),
                 confirmed: false,
             }
         })
         .collect()
 }
 
-/// `doubted_places` over a roster: the main names of the Places whose link
-/// in `links` the facts do not support. Keys are roster positions.
+/// What the fact check says of a tree, by main name.
+struct Checked {
+    /// The Places whose link the facts do not support (`doubted_places`).
+    doubted: BTreeSet<String>,
+    /// The Places whose link a fact backs (`backed_places`).
+    backed: BTreeSet<String>,
+}
+
+/// The fact check of `links` over a roster. Keys are roster positions.
 fn check(
     roster: &Roster,
     links: &[(String, Inside<String>)],
     facts: &[(String, String, String)],
-) -> BTreeSet<String> {
+) -> Checked {
     let members = roster.members();
     let position: HashMap<&str, usize> = members
         .iter()
@@ -373,10 +409,11 @@ fn check(
             })
         })
         .collect();
-    doubted_places(&nodes, &facts)
-        .into_iter()
-        .map(|i| members[i].main.clone())
-        .collect()
+    let names = |set: BTreeSet<usize>| set.into_iter().map(|i| members[i].main.clone()).collect();
+    Checked {
+        doubted: names(doubted_places(&nodes, &facts)),
+        backed: names(backed_places(&nodes, &facts)),
+    }
 }
 
 /// The Inside Links the World Build writes: each confirmed link of the
@@ -400,7 +437,7 @@ pub(super) fn world_places(
         .filter(|f| normalize::key(&f.key) == "location")
         .map(|f| (f.subject.clone(), f.value.clone(), f.text.clone()))
         .collect();
-    let doubted = check(roster, &links, &facts);
+    let doubted = check(roster, &links, &facts).doubted;
     links
         .into_iter()
         .filter(|(place, _)| !doubted.contains(place))
