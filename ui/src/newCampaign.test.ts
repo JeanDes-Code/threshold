@@ -1020,6 +1020,8 @@ describe("the place tree review (ADR 0008, 2026-11-16)", () => {
     name,
     inside,
     doubted: false,
+    backed: false,
+    suggested: null,
     confirmed: false,
     ...more,
   });

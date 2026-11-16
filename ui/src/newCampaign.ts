@@ -746,13 +746,23 @@ export function insideOfKey(key: string): InsideLink | null {
 }
 
 /**
- * What the select shows before the Player picks: the confirmed link, else
- * the model's proposal. A link that is "unknown" and not confirmed shows
- * "Choose…": the model gave none, or the fact check doubted it.
+ * What the select shows before the Player picks: the core's `inside`, the
+ * confirmed link or a link a fact backs. A link that is "unknown" and not
+ * confirmed shows "Choose…": the model gave none, no fact backs it, or the
+ * fact check doubted it.
  */
 export function insideStart(line: InsideLine): string {
   if (!line.confirmed && line.inside === "unknown") return "";
   return insideKey(line.inside);
+}
+
+/**
+ * The model's guess for a link no fact backs, as a quiet hint: "Suggested:
+ * inside X" or "Suggested: top level". None once the link is confirmed.
+ */
+export function suggestionText(line: InsideLine): string | null {
+  if (line.confirmed || line.suggested === null || line.suggested === "unknown") return null;
+  return line.suggested === "top" ? "Suggested: top level" : `Suggested: inside ${line.suggested.place}`;
 }
 
 /**

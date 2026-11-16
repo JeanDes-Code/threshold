@@ -505,11 +505,19 @@ export interface InsideLine {
   index: number;
   /** The main name, as the seed writes it. */
   name: string;
+  /**
+   * Where the review starts: the confirmed link, else a link a fact backs,
+   * else "unknown" ("Choose…").
+   */
   inside: InsideLink;
   /** A fact contradicts the model's link, so the core set the link to "unknown". */
   doubted: boolean;
+  /** A fact backs the model's link, so the review starts on it. */
+  backed: boolean;
   /** The Player confirmed this very link through `confirm_inside`. */
   confirmed: boolean;
+  /** The model's link that no fact backs: a hint only, never a starting choice. */
+  suggested: InsideLink | null;
 }
 
 /** A list the draft run cut at its cap. `at` has the path form of `Gap.at`. */

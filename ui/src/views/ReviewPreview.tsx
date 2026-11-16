@@ -24,8 +24,10 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
   let view = seedDraftView;
   const drafted = { ...draftedAges };
   const confirmed: Record<string, number | undefined> = { ...confirmedAges };
-  const links: Record<string, { inside: InsideLink; doubted: boolean; confirmed: boolean } | undefined> =
-    Object.fromEntries(Object.entries(draftedLinks).map(([n, l]) => [n, { ...l, confirmed: false }]));
+  type Link = { inside: InsideLink; doubted: boolean; backed: boolean; confirmed: boolean };
+  const links: Record<string, Link | undefined> = Object.fromEntries(
+    Object.entries(draftedLinks).map(([n, l]) => [n, { ...l, confirmed: false }]),
+  );
 
   const refresh = (): DraftView => {
     const rows: [string, string, number | null][] = [
@@ -50,8 +52,18 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
       .map(([at]) => ({ kind: "age_unconfirmed", at }));
     const places: InsideLine[] = view.seed.entities.flatMap((e, index) => {
       if (e.kind !== "place") return [];
-      const link = links[e.name] ?? { inside: "unknown" as const, doubted: false, confirmed: false };
-      return [{ index, name: e.name, ...link }];
+      const link = links[e.name] ?? { inside: "unknown" as const, doubted: false, backed: false, confirmed: false };
+      // As the core's `place_lines`: a link no fact backs starts on "Choose…", its guess a hint.
+      const shown = link.confirmed || link.backed;
+      return [
+        {
+          index,
+          name: e.name,
+          ...link,
+          inside: shown ? link.inside : ("unknown" as const),
+          suggested: shown || link.inside === "unknown" ? null : link.inside,
+        },
+      ];
     });
     const placeGaps: Gap[] = places
       .filter((l) => !l.confirmed)
@@ -74,7 +86,7 @@ function fakeClient(): { client: ReviewClient; first: DraftView } {
       return later(refresh());
     },
     confirmInside: (_, { name }, inside) => {
-      links[name] = { inside, doubted: links[name]?.doubted ?? false, confirmed: true };
+      links[name] = { inside, doubted: links[name]?.doubted ?? false, backed: false, confirmed: true };
       return later(refresh());
     },
     renameDraftEntity: (_, { name: from }, to) => {

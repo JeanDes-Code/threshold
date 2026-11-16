@@ -60,6 +60,7 @@ import {
   sectionOf,
   selectedDetail,
   shownName,
+  suggestionText,
   typeName,
   withDetail,
   withStoredAges,
@@ -401,6 +402,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
     const key = line ? `${line.index}/${line.name}` : "";
     const pick = (line && insidePicks[key]) ?? (line ? insideStart(line) : "");
     const shown = insideStatus({ choice: pick, line, pending, saveFailed, busy });
+    const hint = line ? suggestionText(line) : null;
     const where = line?.name || "this place";
     return (
       <div className="review-age review-inside">
@@ -444,6 +446,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
             )}
           </span>
         </div>
+        {hint !== null && <p className="review-hint">{hint}</p>}
         {toFix(path)}
       </div>
     );

@@ -67,13 +67,14 @@ export const draftedAges: Record<string, { age: number; stated: boolean }> = {
 export const confirmedAges: Record<string, number> = { "Agathe Morrow": 67, "Pim Quast": 11 };
 
 /**
- * The model's place links after the fact check: the crossing is proposed at
- * the top level; a fact doubted the Copper Kettle's link, so it waits for a
+ * The model's place links after the fact check, as the core stores them:
+ * no fact backs the crossing at the top level, so it starts on "Choose…"
+ * with a hint; a fact doubted the Copper Kettle's link, so it waits for a
  * choice.
  */
-export const draftedLinks: Record<string, { inside: InsideLink; doubted: boolean }> = {
-  "Ostley Crossing": { inside: "top", doubted: false },
-  "The Copper Kettle": { inside: "unknown", doubted: true },
+export const draftedLinks: Record<string, { inside: InsideLink; doubted: boolean; backed: boolean }> = {
+  "Ostley Crossing": { inside: "top", doubted: false, backed: false },
+  "The Copper Kettle": { inside: "unknown", doubted: true, backed: false },
 };
 
 /** The gaps that are not about ages; the preview derives the age gaps. */
