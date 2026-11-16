@@ -210,6 +210,15 @@ pub fn to_ops(
             b.leave(npc, to);
         }
     }
+    // QA run 5 (2026-11-16): each NPC Arrival, when the act happens and the
+    // PC stays where it is.
+    if lets_happen && moved_to.is_none() {
+        for npc in &p.arrives {
+            if let Handle::Entity(npc) = npc {
+                b.arrive(*npc);
+            }
+        }
+    }
     b.open_blockers();
     for cancel in &p.cancel {
         if let (Handle::WorldEvent(event_id), Some(cause)) = (cancel.event, fact_id(cancel.because))
@@ -606,6 +615,28 @@ impl Builder<'_> {
                 causes: Vec::new(),
             });
         }
+    }
+
+    /// Writes the `location` of an NPC who comes to the PC's place (an NPC
+    /// Arrival, QA run 5) as the PC's own value, witnessed by everyone
+    /// present, the PC included, and by the NPC.
+    fn arrive(&mut self, npc: EntityId) {
+        let Some(place) = pc(self.view)
+            .and_then(|pc| self.view.live_fact(pc, "location"))
+            .map(|f| f.slot.value.clone())
+        else {
+            return;
+        };
+        let name = self.name(Handle::Entity(npc));
+        let mut witnesses = self.holders(Seen::Present);
+        witnesses.push(EntityRef::Id(npc));
+        let draft = SlotDraft {
+            subject: Handle::Entity(npc),
+            key: "location".into(),
+            value: place.clone(),
+        };
+        let text = crate::domain::arrival_sentence(&name, &place);
+        self.write_text(&draft, text, FactSource::Proposal, witnesses, Vec::new());
     }
 
     /// The main name of an entity handle, or the handle.

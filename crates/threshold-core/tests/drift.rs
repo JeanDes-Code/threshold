@@ -19,7 +19,7 @@ mod support;
 use support::*;
 use threshold_core::{
     CallKind, Prompt, RecordedGm,
-    domain::{EntityRef, Intimacy, Knowing, LedgerOp, Stance, Verdict},
+    domain::{DetailLevel, EntityRef, Intimacy, Knowing, LedgerOp, Stance, Verdict},
     store::{Store, WorldView},
     turn::{Engine, TurnError},
 };
@@ -158,6 +158,26 @@ fn bolts(c: &Coopers) -> String {
     p.to_string()
 }
 
+/// The Turn 44 proposal of QA run 5: a talk, Marta's reaction, nothing
+/// else. `arrives` adds the field the fix gives the model.
+fn calls_home(c: &Coopers, arrives: &[u64]) -> String {
+    let mut p = serde_json::to_value(proposal(Verdict::Allowed)).unwrap();
+    p["action"] = "talk".into();
+    p["minutes"] = 5.into();
+    p["reactions"] = serde_json::json!([
+        {"npc": format!("E{}", c.marta), "plan": "Continue watching the dark lane for Tobin",
+         "stance": "neutral", "willing": "yes", "cause": null}
+    ]);
+    if !arrives.is_empty() {
+        let handles: Vec<String> = arrives.iter().map(|id| format!("E{id}")).collect();
+        p["arrives"] = serde_json::json!(handles);
+    }
+    p.to_string()
+}
+
+const CALL_HOME: &str =
+    "I call Tobin's name loudly down the lane, again and again, until he answers and comes home.";
+
 // --- 1: the story removes the child, the state keeps him -------------------
 
 /// QA run 5, Turn 38: a schedule due at once (`in_minutes: 0`) that sends a
@@ -216,6 +236,101 @@ fn a_schedule_due_now_that_sends_a_present_npc_away_moves_it_this_turn() {
     assert!(!ooc.scene.contains("Here with you: Tobin"), "{}", ooc.scene);
 }
 
+// --- 2: the story brings the child back, the state does not ----------------
+
+/// QA run 5, Turn 44: an NPC the Intent names, who is not here, can come
+/// back through `arrives`. The schema offers him, the prompt shows his
+/// handle, and the core writes his `location`: HERE, the narrator, the card
+/// and Ask the GM all have him here.
+#[test]
+fn an_npc_the_intent_calls_home_arrives_through_the_proposal() {
+    let mut c = coopers(false);
+    let gm = RecordedGm::new(
+        vec![calls_home(&c, &[c.tobin])],
+        vec![
+            "Tobin stumbles in.".into(),
+            "Tobin Cooper is here with you.".into(),
+        ],
+    );
+    let mut engine = engine_of(&mut c.w, &gm);
+    assert_eq!(here_everywhere(&engine, &c.w, c.tobin)[..3], [false; 3]);
+    play(&mut engine, CALL_HOME).unwrap();
+    let call = gm
+        .calls()
+        .into_iter()
+        .find(|c| c.kind == CallKind::Propose)
+        .unwrap();
+    let tobin = format!("E{}", c.tobin);
+    assert_eq!(
+        call.schema["properties"]["arrives"]["items"]["enum"],
+        serde_json::json!([tobin]),
+        "{}",
+        call.schema["properties"]
+    );
+    assert!(
+        call.prompt
+            .recent
+            .contains(&format!("{tobin} Tobin Cooper")),
+        "{}",
+        call.prompt.recent
+    );
+    assert_eq!(here_everywhere(&engine, &c.w, c.tobin), [true; 4]);
+    let n = narration(&gm);
+    assert!(n.contains("Tobin Cooper"), "{n}");
+    assert!(!n.contains("Tobin Cooper is not here"), "{n}");
+    engine
+        .ooc("ooc-1".into(), "Where is Tobin Cooper right now?")
+        .unwrap();
+    let ooc = prompts(&gm, CallKind::Narrate).pop().unwrap();
+    assert!(
+        ooc.recent.contains("Tobin Cooper: here with you."),
+        "{}",
+        ooc.recent
+    );
+}
+
+/// The same Turn when the model sends no arrival (QA run 5's own proposal):
+/// Tobin stays away, and the narrator is told so by name, so the story
+/// does not bring him in.
+#[test]
+fn the_narrator_hears_that_a_named_npc_who_did_not_come_is_not_here() {
+    let mut c = coopers(false);
+    let gm = RecordedGm::new(vec![calls_home(&c, &[])], vec!["You call.".into()]);
+    let mut engine = engine_of(&mut c.w, &gm);
+    play(&mut engine, CALL_HOME).unwrap();
+    assert_eq!(here_everywhere(&engine, &c.w, c.tobin)[..3], [false; 3]);
+    let n = narration(&gm);
+    assert!(
+        n.contains("- Tobin Cooper is not here and does not come in this Turn: do not show Tobin Cooper here.\n"),
+        "{n}"
+    );
+}
+
+/// An arrival applies only when the act happens: a lost Check or an
+/// impossible verdict brings nobody, as for `move_to`.
+#[test]
+fn an_arrival_needs_the_act_to_happen() {
+    let mut c = coopers(false);
+    let mut p: serde_json::Value = serde_json::from_str(&calls_home(&c, &[c.tobin])).unwrap();
+    p["verdict"] = "impossible".into();
+    let gm = RecordedGm::new(vec![p.to_string()], vec!["Nobody comes.".into()]);
+    let mut engine = engine_of(&mut c.w, &gm);
+    play(&mut engine, CALL_HOME).unwrap();
+    assert_eq!(here_everywhere(&engine, &c.w, c.tobin)[..3], [false; 3]);
+}
+
+/// The model may only bring an NPC the Intent names: an arrival of anyone
+/// else is dropped (here Pip, whom the Intent does not name).
+#[test]
+fn an_arrival_the_intent_does_not_name_is_dropped() {
+    let mut c = coopers(false);
+    let pip = c.w.pip;
+    let gm = RecordedGm::new(vec![calls_home(&c, &[pip])], vec!["You call.".into()]);
+    let mut engine = engine_of(&mut c.w, &gm);
+    play(&mut engine, CALL_HOME).unwrap();
+    assert!(!snapshot(&engine, &c.w).present().contains(&pip));
+}
+
 // --- 3: the Player cannot talk to him ---------------------------------------
 
 /// QA run 5, the failed Turn after Turn 45: "I kneel by the fire and ask
@@ -267,4 +382,27 @@ fn an_undeclared_n_handle_stays_on_a_gated_turn() {
         let (p, _) = threshold_core::checks::settle(p, &c.w.view);
         assert_eq!(p.reactions.len(), kept, "{intimacy:?}");
     }
+}
+
+// --- the age gate reads an arrival -------------------------------------------
+
+/// A minor the Intent calls in refuses an intimate Turn: the gate reads
+/// `arrives` as names, and the arrival puts the minor in the room.
+#[test]
+fn a_minor_who_arrives_refuses_an_intimate_turn() {
+    let mut w = World::with_detail(DetailLevel::Implied);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    let mut p = proposal(Verdict::Allowed);
+    p.intimacy = Intimacy::Intimate;
+    p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
+    let mut raw = serde_json::to_value(&p).unwrap();
+    raw["arrives"] = serde_json::json!([format!("E{}", w.pip)]);
+    let gm = RecordedGm::new(vec![raw.to_string()], vec!["They kiss.".into()]);
+    let mut engine = engine_of(&mut w, &gm);
+    let result = play(&mut engine, "I call Pip over, then make love with Brann.");
+    assert!(
+        matches!(result, Err(TurnError::Refused { .. })),
+        "{result:?}"
+    );
 }

@@ -94,7 +94,8 @@ LATER ACTIONS
 - A slot is subject (a handle), key (a plain word such as mood or suspicion, never a handle) and value. On the PC, only write condition, injury, fatigue, carrying, reputation, standing or debt; put other consequences on NPCs, places or things.
 - This holds for schedule effects too. A grudge or a complaint lives on the NPC: subject = the NPC's handle, key = grudge, value = the PC's name.
 - move_to: when the player moves the PC to a place listed under PLACES, that place's handle; unknown_place when the player names a place that is not listed there, never another place in its stead; else null, and the PC stays. Never write the PC's location in facts or stakes.
-- leaves: each NPC who walks out of the PC's place in this Turn, with to = the handle of the place under ALL PLACES they go to, or away. Empty when nobody leaves. An NPC not listed stays here, whatever their plan says.
+- leaves: each NPC who walks out of the PC's place in this Turn, with to = the handle of the place under ALL PLACES they go to, or away. Empty when nobody leaves. An NPC not listed stays here, whatever their plan says. An NPC who leaves now goes in leaves, never in a schedule.
+- arrives: each NPC offered for it who comes to the PC's place in this Turn, because the player's intent calls, fetches or meets them. Empty when nobody comes. An NPC not listed does not come here in this Turn.
 - settles: what the player's intent of THIS Turn does to one item under OPEN ITEMS. item none when the intent settles none of them. Else that item, with outcome accepted, refused, done, failed or dropped when this intent accepts, refuses, does, fails or gives it up; outcome open when it only asks about it, talks about it or asks for more time. An item settled in an earlier Turn is not listed.
 ",
     finds_field_text!(),
@@ -227,6 +228,10 @@ fn handles(r: &Retrieval<'_>, intent: &str, scene: bool) -> HandleContext {
         new_slots: 1,
         places: places.into_iter().map(Handle::Entity).collect(),
         leavers: leavers(r).into_iter().map(Handle::Entity).collect(),
+        arrivers: arrivers(r, intent)
+            .into_iter()
+            .map(Handle::Entity)
+            .collect(),
         destinations: destinations(r).into_iter().map(Handle::Entity).collect(),
         open_items: offered(r, intent)
             .into_iter()
@@ -244,6 +249,17 @@ fn leavers(r: &Retrieval<'_>) -> Vec<EntityId> {
         .copied()
         .filter(|id| r.present.contains(id))
         .filter(|id| r.entity(*id).is_some_and(|e| e.kind == EntityKind::Npc))
+        .collect()
+}
+
+/// The NPCs who may come to the PC's place this Turn (`arrives`, QA run
+/// 5): the NPCs the PC can name that the Intent names
+/// (`checks::characters_named`) and that are not here, in truth or as the
+/// PC sees it. The prompt shows each one: `Retrieval` lists them.
+fn arrivers(r: &Retrieval<'_>, intent: &str) -> Vec<EntityId> {
+    crate::checks::characters_named(r.view, intent)
+        .into_iter()
+        .filter(|id| !r.present.contains(id) && !r.seen_present.contains(id))
         .collect()
 }
 

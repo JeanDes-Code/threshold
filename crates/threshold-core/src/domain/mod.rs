@@ -20,8 +20,8 @@ pub(crate) use proposal::{finds_definition_text, intimacy_definition_text};
 pub use types::{
     ALIAS_KEY_PREFIX, Canon, ClaimDraft, ClockMin, Effect, EntityId, EntityKind, EntityRef,
     FactDraft, FactSource, GoalStatus, Inside, Key, Knowing, LedgerOp, OPEN_KEY_PREFIX, STATE_KEYS,
-    SceneWhy, Slot, Stance, Trigger, Value, alias_key, is_alias_key, is_open_key, is_state_key,
-    location_sentence, outcome_key, slot_sentence, you_sentence,
+    SceneWhy, Slot, Stance, Trigger, Value, alias_key, arrival_sentence, is_alias_key, is_open_key,
+    is_state_key, location_sentence, outcome_key, slot_sentence, you_sentence,
 };
 pub use world_setup::{
     AttitudeEntry, EffectEntry, EventEntry, FactEntry, GoalEntry, ObstacleEntry, PlaceEntry,

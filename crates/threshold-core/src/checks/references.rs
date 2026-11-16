@@ -228,6 +228,21 @@ pub(super) fn check(p: &DecisionProposal, view: &WorldView) -> Vec<Rejection> {
             );
         }
     }
+    // QA run 5 (2026-11-16): an NPC Arrival only of an NPC the schema
+    // offered, once, and not one who also leaves.
+    if p.arrives.len() > 2 {
+        err(
+            None,
+            format!("arrives has {} items; the cap is 2", p.arrives.len()),
+        );
+    }
+    for (i, npc) in p.arrives.iter().enumerate() {
+        if !p.may_arrive.contains(npc) {
+            err(Some(*npc), "arrives: not an NPC this Turn offered".into());
+        } else if p.arrives[..i].contains(npc) || p.leaves.iter().any(|l| l.npc == *npc) {
+            err(Some(*npc), "arrives: the NPC is listed twice".into());
+        }
+    }
     if let Some(to) = p
         .schedule
         .as_ref()

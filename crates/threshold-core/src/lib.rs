@@ -42,6 +42,10 @@ pub struct HandleContext {
     /// The NPCs who may leave the PC's place this Turn: the present NPCs the
     /// PC perceives (bug pass 5, M1). The values of `leaves.npc`.
     pub leavers: Vec<domain::Handle>,
+    /// The NPCs who may come to the PC's place this Turn (QA run 5,
+    /// 2026-11-16): the NPCs the PC can name who are not here and whom the
+    /// Intent names (`checks::characters_named`). The values of `arrives`.
+    pub arrivers: Vec<domain::Handle>,
     /// Every place entity, in id order: the values of `leaves.to` and of
     /// `schedule.moves_actor_to` besides `away` (bug pass 5, M1).
     pub destinations: Vec<domain::Handle>,
@@ -261,6 +265,26 @@ pub fn proposal_schema_for(ctx: &HandleContext) -> serde_json::Value {
             },
         });
         require(&mut schema, "", "leaves");
+    }
+    // QA run 5 (2026-11-16): who comes to the PC's place is a required
+    // field when the Intent names an NPC who is not here, so the narrator
+    // never has to invent the NPC Arrival. With nobody to come, the field
+    // is absent.
+    let arrivers: Vec<String> = ctx
+        .arrivers
+        .iter()
+        .filter(|h| matches!(h, Handle::Entity(_)))
+        .map(ToString::to_string)
+        .collect();
+    if arrivers.is_empty() {
+        omit(&mut schema, "/properties", "arrives");
+    } else {
+        schema["properties"]["arrives"] = json!({
+            "type": "array",
+            "maxItems": 2,
+            "items": {"type": "string", "enum": arrivers},
+        });
+        require(&mut schema, "", "arrives");
     }
     if schema.pointer("/$defs/EventDraft/properties").is_some() {
         let moves: Vec<serde_json::Value> = destinations

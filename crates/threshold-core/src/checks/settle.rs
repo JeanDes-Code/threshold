@@ -49,9 +49,50 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
     drop_undeclared_reactions(&mut p, &mut notes);
     settle_closes(&mut p, view, &mut notes);
     settle_leaves(&mut p, view, &mut notes);
+    settle_arrivals(&mut p, &mut notes);
     settle_finds(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
+}
+
+/// `arrives` (QA run 5, 2026-11-16): an entry the schema did not offer
+/// (`may_arrive`), that names the NPC twice, or whose NPC also leaves
+/// goes; so does every entry of a move with a destination, since the PC
+/// would not be at the place the NPC comes to. Each removal only takes
+/// model output away.
+fn settle_arrivals(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+    let moves = p.action == ActionKind::Move && p.move_to.is_some();
+    let mut listed = Vec::new();
+    p.arrives.retain(|npc| {
+        let why = if moves {
+            Some("the PC moves away in this Turn")
+        } else if !p.may_arrive.contains(npc) {
+            Some("not offered this Turn: the Intent does not name it, or it is here")
+        } else if listed.contains(npc) {
+            Some("the NPC is listed twice")
+        } else if p.leaves.iter().any(|l| l.npc == *npc) {
+            Some("the NPC also leaves")
+        } else {
+            None
+        };
+        match why {
+            Some(why) => {
+                notes.push(format!("removed arrives {npc}: {why}"));
+                false
+            }
+            None => {
+                listed.push(*npc);
+                true
+            }
+        }
+    });
+    if p.arrives.len() > 2 {
+        notes.push(format!(
+            "removed {} arrives past the cap of 2",
+            p.arrives.len() - 2
+        ));
+        p.arrives.truncate(2);
+    }
 }
 
 /// A reaction on an N handle that `new_npcs` does not declare (QA run 5,

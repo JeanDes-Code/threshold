@@ -1404,6 +1404,8 @@ fn schema_paths(
 /// destructures the proposal with no `..`, so the compiler asks too.
 const PROPOSAL_FIELDS: &[(&str, bool)] = &[
     ("action", false),
+    // An NPC Arrival puts the NPC in the room (QA run 5).
+    ("arrives[]", true),
     ("blockers[]", true),
     ("cancel[].because", true),
     ("cancel[].event", true),

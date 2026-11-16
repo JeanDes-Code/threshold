@@ -735,6 +735,32 @@ fn here_line(r: &Retrieval<'_>) -> String {
     }
 }
 
+/// One line for each NPC the Intent names (`checks::characters_named`)
+/// who is not here after the Turn and whose `location` this Turn did not
+/// write: "- Tobin Cooper is not here and does not come in this Turn: do
+/// not show Tobin Cooper here." QA run 5 (2026-11-16): "until he answers
+/// and comes home" was told as a return the world never made. An NPC who
+/// leaves in this Turn has its own line.
+fn away_lines(r: &Retrieval<'_>, intent: &str, perceived: &[LedgerOp]) -> Vec<String> {
+    let moved = |id: EntityId| {
+        perceived.iter().any(|op| {
+            matches!(op, LedgerOp::AddFact { slot, .. }
+                if slot.subject == EntityRef::Id(id) && normalize::key(&slot.key) == "location")
+        })
+    };
+    crate::checks::characters_named(r.view, intent)
+        .into_iter()
+        .filter(|id| !r.seen_present.contains(id) && !r.present.contains(id) && !moved(*id))
+        .filter_map(|id| r.view.entities.iter().find(|e| e.id == id))
+        .map(|e| {
+            let name = one_line(&e.name);
+            format!(
+                "- {name} is not here and does not come in this Turn: do not show {name} here.\n"
+            )
+        })
+        .collect()
+}
+
 fn outcome_line(r: &Retrieval<'_>, op: &LedgerOp, perceived: &[LedgerOp]) -> Option<String> {
     let slot = match op {
         LedgerOp::AddFact { slot, .. } => Some(slot),
@@ -860,6 +886,7 @@ fn recent(
         outcome.push(line);
     }
     outcome.push(here_line(r));
+    outcome.extend(away_lines(r, &intent, perceived));
     if !outcome.is_empty() {
         tail.push_str("Outcome:\n");
         tail.push_str(&outcome.concat());

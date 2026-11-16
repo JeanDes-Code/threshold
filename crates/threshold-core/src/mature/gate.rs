@@ -650,6 +650,9 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         companions,
         left_behind,
         leaves,
+        // An NPC Arrival puts the NPC in the room: the gate reads it as named
+        // (QA run 5, 2026-11-16).
+        arrives,
         settles,
         // Free text, never a handle, so this collector cannot read it: a
         // found item could name a character the gate never sees. So a
@@ -668,6 +671,8 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         intimacy: _,
         facts_on_win: _,
         offered: _,
+        // Set by the core: the candidates `arrives` was checked against.
+        may_arrive: _,
     } = p;
     let mut out: Vec<(Option<Handle>, &'static str)> = Vec::new();
     let mut add = |handle: Handle, field: &'static str| out.push((Some(handle), field));
@@ -685,6 +690,9 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
     }
     for Leave { npc, to: _ } in leaves {
         add(*npc, "leaves.npc");
+    }
+    for npc in arrives {
+        add(*npc, "arrives");
     }
     for blocker in blockers {
         add(*blocker, "blockers");

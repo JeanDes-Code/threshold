@@ -1017,6 +1017,7 @@ fn the_closing_schema_pins_what_code_does_not_want() {
         places: vec![Handle::Entity(3)],
         open_items: vec!["E1.pending_meet".into()],
         leavers: vec![Handle::Entity(2)],
+        arrivers: vec![],
         destinations: vec![Handle::Entity(3)],
         scene: true,
     };
