@@ -44,7 +44,9 @@ pub use text::{
     CLOSING_TEMPLATE, FADED_TEMPLATE, INTIMATE_TEMPLATE, Told, TurnText, effective, neutral_line,
     reading_level, stored_intimacy, stored_intimate, told, told_level, turn_text,
 };
-pub use words::{ACT_WORDS, Floor, ROMANCE_WORDS, folded, intimacy_floor, romance_floor};
+pub use words::{
+    ACT_WORDS, Floor, ROMANCE_WORDS, folded, intent_floor, intimacy_floor, romance_floor,
+};
 
 use crate::{
     checks::{CheckKind, Rejection},

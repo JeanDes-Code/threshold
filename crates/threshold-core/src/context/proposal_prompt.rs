@@ -8,7 +8,7 @@ use super::{
 use crate::{
     HandleContext,
     domain::{Canon, DetailLevel, EntityId, EntityKind, Handle, Trigger, is_open_key},
-    mature::{Cleared, effective},
+    mature::{Cleared, effective, intent_floor},
     model::Prompt,
     pack::{ContentPack, Target, scene_fragments},
     store::{Entity, Fact},
@@ -129,8 +129,9 @@ pub fn proposal_prompt(
 /// The handles that `proposal_prompt(view, _, intent)` shows. Packs never
 /// change them.
 pub fn handle_context(view: &crate::store::WorldView, intent: &str) -> HandleContext {
+    let gated = intent_floor(view, intent, &[]).0.gated();
     handles(
-        &Retrieval::new(view, intent, None, DetailLevel::Excluded),
+        &Retrieval::new(view, intent, None, DetailLevel::Excluded, gated),
         intent,
         false,
     )
@@ -151,7 +152,11 @@ pub fn proposal_context(
     intent: &str,
     cleared: Option<&Cleared>,
 ) -> ProposalContext {
-    let r = Retrieval::new(view, intent, cleared, effective(view.detail, packs));
+    // Review r5 (M1): the Intent's words tell, before the model answers,
+    // that the age rule runs. Then a first word is no name, and nobody is
+    // offered for `arrives`.
+    let gated = intent_floor(view, intent, packs).0.gated();
+    let r = Retrieval::new(view, intent, cleared, effective(view.detail, packs), gated);
     let prompt = Prompt {
         system: system(packs),
         stable: format!(
@@ -182,7 +187,7 @@ pub fn closing_context(
     cleared: Option<&Cleared>,
 ) -> ProposalContext {
     let level = effective(view.detail, packs);
-    let r = Retrieval::new(view, "", cleared, level);
+    let r = Retrieval::new(view, "", cleared, level, false);
     let prompt = Prompt {
         system: PROPOSAL_RULES.to_owned(),
         stable: format!(
@@ -255,8 +260,14 @@ fn leavers(r: &Retrieval<'_>) -> Vec<EntityId> {
 /// The NPCs who may come to the PC's place this Turn (`arrives`, QA run
 /// 5): the NPCs the PC can name that the Intent names
 /// (`checks::characters_named`) and that are not here, in truth or as the
-/// PC sees it. The prompt shows each one: `Retrieval` lists them.
+/// PC sees it. The prompt shows each one: `Retrieval` lists them. Nobody
+/// on a Turn the Intent's words gate (`Retrieval::gated`, review r5 M1):
+/// "a little time to kiss Brann" offered only Little Wren, a child, and a
+/// model that took her ended the Turn in a Refusal for nothing.
 fn arrivers(r: &Retrieval<'_>, intent: &str) -> Vec<EntityId> {
+    if r.gated {
+        return Vec::new();
+    }
     crate::checks::characters_named(r.view, intent)
         .into_iter()
         .filter(|id| !r.present.contains(id) && !r.seen_present.contains(id))

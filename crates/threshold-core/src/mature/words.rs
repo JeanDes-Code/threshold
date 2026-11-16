@@ -209,6 +209,22 @@ pub fn intimacy_floor(intent: &str, packs: &[ContentPack], names: &[&str]) -> (I
     }
 }
 
+/// `intimacy_floor` of a Play Intent in `view`: the names it reads are the
+/// names the PC can name, main or other (`world::pc_character_names`). A
+/// lower-case name of a hidden character would tell the Player it exists
+/// (QA B1). The engine raises the Turn's tag with it, and the proposal
+/// prompt reads it to know, before the model answers, that the age rule
+/// runs (review r5, M1).
+pub fn intent_floor(
+    view: &crate::store::WorldView,
+    intent: &str,
+    packs: &[ContentPack],
+) -> (Intimacy, Floor) {
+    let known = crate::world::pc_character_names(view);
+    let names: Vec<&str> = known.iter().map(String::as_str).collect();
+    intimacy_floor(intent, packs, &names)
+}
+
 /// Which list raised the tag. The debug log names the list, never the word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Floor {

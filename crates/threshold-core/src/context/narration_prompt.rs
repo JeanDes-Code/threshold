@@ -460,6 +460,7 @@ pub fn narration_prompt(
         None,
         false,
         effective(view_after.detail, packs),
+        false,
     )
 }
 
@@ -479,6 +480,9 @@ pub fn narration_prompt(
 /// and scene blocks depend on neither. `level` is the effective Detail
 /// Level the call reads past Turns at (`mature::reading_level`): an
 /// intimate Turn told above it is its Neutral Line (final review M3).
+/// `gated` tells a Turn the age rule ran for (`Intimacy::gated`): the
+/// outcome block then has no "is not here" line (`away_lines`, review r5
+/// M1).
 #[allow(clippy::too_many_arguments)]
 pub fn narration_prompt_with(
     view_after: &WorldView,
@@ -493,8 +497,9 @@ pub fn narration_prompt_with(
     cleared: Option<&Cleared>,
     closing: bool,
     level: DetailLevel,
+    gated: bool,
 ) -> Prompt {
-    let r = Retrieval::new(view_after, "", cleared, level);
+    let r = Retrieval::new(view_after, "", cleared, level, gated);
     let head = match told {
         Told::Plain if closing => CLOSING_LINE.to_owned(),
         Told::Plain => String::new(),
@@ -586,7 +591,7 @@ pub const TIME_LINE: &str = "Time this Turn takes: ";
 /// outcome: Begin commits nothing for the PC. An empty situation or time
 /// leaves its line out.
 pub fn opening_prompt(view: &WorldView, packs: &[ContentPack]) -> Prompt {
-    let r = Retrieval::new(view, "", None, DetailLevel::Excluded);
+    let r = Retrieval::new(view, "", None, DetailLevel::Excluded, false);
     let mut recent = String::from("OPENING\n");
     if let Some(start) = view.adventure_seed.as_ref().map(|seed| &seed.start) {
         for (label, text) in [("Situation", &start.situation), ("When", &start.when)] {
@@ -740,8 +745,14 @@ fn here_line(r: &Retrieval<'_>) -> String {
 /// write: "- Tobin Cooper is not here and does not come in this Turn: do
 /// not show Tobin Cooper here." QA run 5 (2026-11-16): "until he answers
 /// and comes home" was told as a return the world never made. An NPC who
-/// leaves in this Turn has its own line.
+/// leaves in this Turn has its own line. None on a Turn the age rule ran
+/// for (`Retrieval::gated`, review r5 M1): a first word there is no name,
+/// and the line would bring a child the Intent never named into the
+/// narrator's prompt.
 fn away_lines(r: &Retrieval<'_>, intent: &str, perceived: &[LedgerOp]) -> Vec<String> {
+    if r.gated {
+        return Vec::new();
+    }
     let moved = |id: EntityId| {
         perceived.iter().any(|op| {
             matches!(op, LedgerOp::AddFact { slot, .. }

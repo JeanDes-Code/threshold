@@ -312,3 +312,17 @@ What still depends on the model:
 - An NPC sent `away` has no known place, so the age gate still counts it as maybe here (`world::presence`, `unsure`). That is the gate's fail-closed design, not drift: HERE, the card and Ask the GM do not show it.
 
 Tests: `tests/drift.rs`, built from the run's debug-log shapes with `RecordedGm`.
+
+### Changed after review r5 (2026-11-16): a first word is no name on a gated Turn
+
+The limit above was not only one more handle. On a Turn the age rule runs for, the first word brought a child into the Turn. The review's probe: NPC "Little Wren" (9) at another place, the Intent "I take a little time to lean in and kiss Brann.". "little" matched her first word. The proposal prompt listed her, `arrives` became a required field whose only value was her handle, and the narrator got "Little Wren is not here and does not come in this Turn". A model that filled the field ended the Turn in a final `AdultsOnly` Refusal for a child the Intent never named.
+
+- **The Intent's words decide it before the model answers.** `mature::intent_floor` is the floor `turn::plan` already applies (a Romance Word, an Act Word, a Content Pack term). When it is `advance` or `intimate`, the proposal prompt (`Retrieval::gated`) adds no `characters_named` match: the Intent names a character by its full name only, as before QA run 5. `arrives` offers nobody, so the field is absent, and `settle` drops any arrival the model sends.
+- **The narrator gets no "is not here" line on a gated Turn** (`away_lines`). It reads the Turn's final tag (`Intimacy::gated`), the model's included, so an `advance` the model chose alone gets no line either.
+- **`arrives` never forces a value.** The field stays required when it is offered, and an empty list is always a valid answer: it has no `minItems`.
+- **The gate keeps reading `arrives`.** A Turn the model alone tags `advance` or `intimate` still has the field offered, so G2 reads it as named and G3 reads the arrival's `location` op. Tests feed such a proposal to `mature::check` and to `mature::check_after` directly, so each defence fails a test when it goes.
+- **A plain Turn is as before.** "I call Little home." still offers Little Wren.
+
+Limit: a gated Turn cannot bring anyone in through `arrives`. "I call Brann over and kiss him", with Brann away, leaves him away; the narrator gets no line about him either. We accept it: the Player can call him first, in a plain Turn.
+
+Tests: `tests/drift.rs` (`a_first_word_does_not_bring_a_minor_into_a_gated_turn`, `a_first_word_still_offers_the_arriver_on_a_plain_turn`, `a_gated_intent_offers_no_arriver`, `the_gate_before_the_turn_reads_arrives_as_named`, `the_gate_after_the_ops_reads_the_arrival`, `a_minor_who_leaves_now_still_refuses_an_intimate_turn`).

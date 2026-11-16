@@ -196,6 +196,11 @@ pub(crate) struct Retrieval<'a> {
     pub mentioned: Vec<EntityId>,
     /// Live facts of `mentioned` entities.
     pub mentioned_facts: Vec<&'a Fact>,
+    /// The age rule runs for this Turn, as the Intent's words tell before
+    /// the model answers (`mature::intent_floor`, review r5 M1): the
+    /// Intent names a character by its full name only, and nobody may
+    /// come (`arrives` is absent).
+    pub gated: bool,
 }
 
 impl<'a> Retrieval<'a> {
@@ -203,12 +208,13 @@ impl<'a> Retrieval<'a> {
     /// clearance (G1 or `mature::narration_clearance`) and `level` its
     /// effective Detail Level now: the names of the past Turns are read
     /// through `mature::turn_text` with both, as the `recent` block shows
-    /// those Turns.
+    /// those Turns. `gated` is `Retrieval::gated`.
     pub fn new(
         view: &'a WorldView,
         intent: &str,
         cleared: Option<&Cleared>,
         level: DetailLevel,
+        gated: bool,
     ) -> Self {
         let pc = view
             .entities
@@ -278,8 +284,15 @@ impl<'a> Retrieval<'a> {
         let texts: Vec<Vec<String>> = named_text.iter().map(|t| words(t)).collect();
         // QA run 5 (2026-11-16): the Intent also names a character by a
         // name the PC holds for it ("ask Tobin"), so the prompt shows the
-        // character and its handle.
-        let named = crate::checks::characters_named(view, intent);
+        // character and its handle. Review r5 (M1): not on a Turn the age
+        // rule runs for. "a little time" holds the first word of Little
+        // Wren, and the prompt would show a child the Intent never named;
+        // there the Intent names a character by its full name only.
+        let named = if gated {
+            Vec::new()
+        } else {
+            crate::checks::characters_named(view, intent)
+        };
         let mentioned: Vec<EntityId> = view
             .entities
             .iter()
@@ -314,6 +327,7 @@ impl<'a> Retrieval<'a> {
             events,
             mentioned,
             mentioned_facts,
+            gated,
         }
     }
 

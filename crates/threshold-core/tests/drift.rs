@@ -36,7 +36,13 @@ struct Coopers {
 }
 
 fn coopers(tobin_here: bool) -> Coopers {
+    coopers_at(tobin_here, DetailLevel::default())
+}
+
+/// `coopers` at Detail Level `level`.
+fn coopers_at(tobin_here: bool, level: DetailLevel) -> Coopers {
     let mut seed = adventure_seed();
+    seed.detail = level;
     for (name, age) in [
         ("Tobin Cooper", 10),
         ("Marta Cooper", 41),
@@ -390,7 +396,42 @@ fn an_undeclared_n_handle_stays_on_a_gated_turn() {
         )];
         let (p, _) = threshold_core::checks::settle(p, &c.w.view);
         assert_eq!(p.reactions.len(), kept, "{intimacy:?}");
+        // Review r5 (m5): kept is not enough. The gated Turn is then
+        // rejected on that handle; the plain one passes.
+        let result = threshold_core::checks::validate(&p, &c.w.view);
+        if kept == 0 {
+            assert!(result.is_ok(), "{intimacy:?}: {:?}", result.err());
+        } else {
+            let errs = result.err().expect("the N handle is rejected");
+            assert!(
+                errs.iter()
+                    .any(|r| r.handle == Some(threshold_core::domain::Handle::NewNpc(1))),
+                "{errs:?}"
+            );
+        }
     }
+}
+
+/// The same N reaction, through the engine, on a Turn the Intent's words
+/// gate: both attempts keep it, so the Turn fails and nothing is committed.
+#[test]
+fn an_undeclared_n_handle_fails_a_gated_turn() {
+    let mut c = coopers(false);
+    let n1 = || {
+        let mut p = serde_json::to_value(proposal(Verdict::Allowed)).unwrap();
+        p["intimacy"] = "advance".into();
+        p["reactions"] = serde_json::json!([
+            {"npc": "N1", "plan": "lean in", "stance": "comply", "willing": "yes", "cause": null}
+        ]);
+        p.to_string()
+    };
+    let gm = RecordedGm::new(vec![n1(), n1()], vec!["You kiss.".into()]);
+    let mut engine = engine_of(&mut c.w, &gm);
+    let before = engine.store().turns(c.w.campaign).unwrap().len();
+    let result = play(&mut engine, "I kiss the stranger by the fire.");
+    assert!(result.is_err(), "{result:?}");
+    assert!(prompts(&gm, CallKind::Narrate).is_empty());
+    assert_eq!(engine.store().turns(c.w.campaign).unwrap().len(), before);
 }
 
 // --- the age gate reads an arrival -------------------------------------------
@@ -409,11 +450,105 @@ fn a_minor_who_arrives_refuses_an_intimate_turn() {
     raw["arrives"] = serde_json::json!([format!("E{}", w.pip)]);
     let gm = RecordedGm::new(vec![raw.to_string()], vec!["They kiss.".into()]);
     let mut engine = engine_of(&mut w, &gm);
-    let result = play(&mut engine, "I call Pip over, then make love with Brann.");
+    // No word of the Intent gates the Turn, so the schema offers Pip; the
+    // model tags it intimate. On an Intent the words gate, nobody is
+    // offered (review r5, M1), and the two gate tests below keep the
+    // defence covered.
+    let result = play(&mut engine, "I call Pip over, then lie down with Brann.");
     assert!(
         matches!(result, Err(TurnError::Refused { .. })),
         "{result:?}"
     );
+    let call = gm.calls().into_iter().next().unwrap();
+    assert_eq!(
+        call.schema["properties"]["arrives"]["items"]["enum"],
+        serde_json::json!([format!("E{}", w.pip)])
+    );
+}
+
+/// The confirmed gate world at Detail Level `implied`, and an intimate
+/// proposal on Brann that brings Pip (17, at the market) in.
+fn pip_arrives() -> (World, threshold_core::domain::DecisionProposal) {
+    let mut w = World::with_detail(DetailLevel::Implied);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    let mut p = proposal(Verdict::Allowed);
+    p.intimacy = Intimacy::Intimate;
+    p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
+    p.arrives = vec![e(w.pip)];
+    p.may_arrive = vec![e(w.pip)];
+    (w, p)
+}
+
+/// G2 reads `arrives` as named (review r5, m5): Pip is away before the
+/// Turn, so only the name refuses. Without `arrives` in the gate's list,
+/// this passes.
+#[test]
+fn the_gate_before_the_turn_reads_arrives_as_named() {
+    let (w, p) = pip_arrives();
+    let mut errs = Vec::new();
+    threshold_core::mature::check(&p, &w.view, &mut errs);
+    assert!(errs.iter().any(|r| r.handle == Some(e(w.pip))), "{errs:?}");
+}
+
+/// G3 reads the arrival's `location` op (review r5, m5): the ops of the
+/// proposal put Pip at the PC's place, so the gate after the Turn's ops
+/// blocks him. Without the arrival in `to_ops`, Pip stays at the market
+/// and this passes.
+#[test]
+fn the_gate_after_the_ops_reads_the_arrival() {
+    let (w, gated) = pip_arrives();
+    // `validate` runs G2, which already refuses Pip: build the ops from
+    // the same proposal untagged, then ask G3 with the tag.
+    let mut plain = gated.clone();
+    plain.intimacy = Intimacy::None;
+    let valid = threshold_core::checks::validate(&plain, &w.view).unwrap();
+    let ops = threshold_core::checks::to_ops(valid, None, &w.view).ops;
+    let after = threshold_core::mature::after(&w.view, &ops);
+    assert!(after.checked.contains(&w.pip), "{:?}", after.checked);
+    let blocked = threshold_core::mature::check_after(&gated, &w.view, &after)
+        .expect_err("Pip is here after the ops");
+    assert_eq!(blocked.who, vec![w.pip]);
+}
+
+/// A minor who leaves through a schedule due now (`leave_now`, QA run 5)
+/// on an intimate Turn is still counted: G2 reads the place before the
+/// Turn, so the Turn is refused (review r5, m5).
+#[test]
+fn a_minor_who_leaves_now_still_refuses_an_intimate_turn() {
+    let mut c = coopers_at(true, DetailLevel::Implied);
+    let ids = [c.w.ada, c.w.orsel, c.w.brann, c.marta, c.ilse];
+    c.w.confirm(&ids);
+    let mut p: serde_json::Value = serde_json::from_str(&bolts(&c)).unwrap();
+    p["intimacy"] = "intimate".into();
+    p["check"] = serde_json::Value::Null;
+    p["verdict"] = "allowed".into();
+    p["reactions"] = serde_json::json!([
+        {"npc": format!("E{}", c.w.brann), "plan": "go along", "stance": "comply", "willing": "yes", "cause": null}
+    ]);
+    // The settled proposal moves Tobin out in THIS Turn.
+    let parsed: threshold_core::domain::DecisionProposal =
+        serde_json::from_value(p.clone()).unwrap();
+    let (settled, _) = threshold_core::checks::settle(parsed, &c.w.view);
+    assert!(
+        settled.leaves.iter().any(|l| l.npc == e(c.tobin)),
+        "{:?}",
+        settled.leaves
+    );
+    let gm = RecordedGm::new(vec![p.to_string()], vec!["They kiss.".into()]);
+    let mut engine = engine_of(&mut c.w, &gm);
+    let result = play(&mut engine, "I make love with Brann while Tobin runs off.");
+    assert!(
+        matches!(
+            &result,
+            Err(TurnError::Refused {
+                kind: threshold_core::mature::RefusalKind::AdultsOnly,
+                ..
+            })
+        ),
+        "{result:?}"
+    );
+    assert!(prompts(&gm, CallKind::Narrate).is_empty());
 }
 
 // --- 4: a companion missed ----------------------------------------------------
@@ -444,4 +579,106 @@ fn a_named_companion_who_stays_behind_gets_a_note_for_the_player() {
         serde_json::json!("Ilse Vale stays behind."),
         "{last}"
     );
+}
+
+// --- review r5, M1: a first word is not a name on a gated Turn ---------------
+
+/// The gate world with Little Wren (9), a child at the market whose place
+/// the PC knows, so the PC can name her. Ada, Orsel and Brann are
+/// confirmed adults, at Detail Level `implied`.
+fn wren_world() -> (World, u64) {
+    let mut seed = adventure_seed();
+    seed.detail = DetailLevel::Implied;
+    seed.entities.push(npc("Little Wren", 9));
+    seed.decided
+        .push(seed_fact("Little Wren", "location", "market"));
+    let mut w = World::with_seed(seed);
+    let wren = w.view.entity_by_name("Little Wren").unwrap().id;
+    let ada = w.ada;
+    let know = LedgerOp::Know {
+        holder: EntityRef::Id(ada),
+        fact_id: Some(w.view.live_fact(wren, "location").unwrap().id),
+        claim_id: None,
+        how: Knowing::Witnessed,
+        arrives_at: 0,
+    };
+    w.commit(vec![know]);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    (w, wren)
+}
+
+/// An advance on Brann, with `arrives` as given.
+fn kiss_brann(w: &World, arrives: &[u64]) -> String {
+    let mut p = proposal(Verdict::Allowed);
+    p.intimacy = Intimacy::Advance;
+    p.reactions = vec![reaction(e(w.brann), Stance::Comply, None)];
+    let mut raw = serde_json::to_value(&p).unwrap();
+    let handles: Vec<String> = arrives.iter().map(|id| format!("E{id}")).collect();
+    raw["arrives"] = serde_json::json!(handles);
+    raw.to_string()
+}
+
+const KISS: &str = "I take a little time to lean in and kiss Brann.";
+
+/// Review r5 (M1): "a little time" holds the first word of Little Wren.
+/// On a Turn the age rule runs for, the prompt shows no Little Wren, the
+/// schema offers no `arrives`, the narrator gets no "is not here" line for
+/// her, and an `arrives` the model sends anyway is dropped: the Turn is not
+/// refused for a child the Intent never named.
+#[test]
+fn a_first_word_does_not_bring_a_minor_into_a_gated_turn() {
+    let (mut w, wren) = wren_world();
+    let gm = RecordedGm::new(vec![kiss_brann(&w, &[wren])], vec!["You kiss.".into()]);
+    let mut engine = engine_of(&mut w, &gm);
+    play(&mut engine, KISS).expect("the advance commits");
+    let call = gm
+        .calls()
+        .into_iter()
+        .find(|c| c.kind == CallKind::Propose)
+        .unwrap();
+    assert!(
+        call.schema["properties"].get("arrives").is_none(),
+        "{}",
+        call.schema["properties"]["arrives"]
+    );
+    for prompt in prompts(&gm, CallKind::Propose)
+        .into_iter()
+        .chain(prompts(&gm, CallKind::Narrate))
+    {
+        for block in [&prompt.scene, &prompt.recent] {
+            assert!(!block.contains("Wren"), "{block}");
+            assert!(!block.contains(&format!("E{wren}")), "{block}");
+        }
+    }
+    assert!(!snapshot(&engine, &w).present().contains(&wren));
+}
+
+/// The same first word on a plain Turn still offers the NPC for `arrives`
+/// (ADR 0007, QA run 5): the age rule does not run, so the cost is one
+/// more offered handle.
+#[test]
+fn a_first_word_still_offers_the_arriver_on_a_plain_turn() {
+    let (w, wren) = wren_world();
+    let handles = threshold_core::context::handle_context(&w.view, "I call Little home.");
+    assert_eq!(handles.arrivers, vec![e(wren)]);
+    let schema = threshold_core::proposal_schema_for(&handles);
+    let arrives = &schema["properties"]["arrives"];
+    assert_eq!(
+        arrives["items"]["enum"],
+        serde_json::json!([format!("E{wren}")])
+    );
+    // One offered handle is never forced: an empty list is a valid answer.
+    assert!(arrives.get("minItems").is_none_or(|m| m == 0), "{arrives}");
+}
+
+/// The prompt helpers read the Intent's words as the core does: on a
+/// gated Intent (a Romance Word here), `handle_context` offers nobody.
+#[test]
+fn a_gated_intent_offers_no_arriver() {
+    let (w, _) = wren_world();
+    let handles = threshold_core::context::handle_context(&w.view, KISS);
+    assert!(handles.arrivers.is_empty(), "{:?}", handles.arrivers);
+    let schema = threshold_core::proposal_schema_for(&handles);
+    assert!(schema["properties"].get("arrives").is_none());
 }

@@ -265,6 +265,9 @@ struct Committed<'a> {
     extra: Vec<String>,
     /// The Turn was committed with `intimate`: G4 (`mature::told`) reads it.
     intimate: bool,
+    /// The age rule ran for the Turn (`Intimacy::gated`): the narrator
+    /// gets no "is not here" line (review r5, M1).
+    gated: bool,
     /// A Closing Turn: told plain under `context::CLOSING_LINE`, with no
     /// Intent and `mature::CLOSING_NARRATION_MAX_TOKENS`.
     closing: bool,
@@ -818,6 +821,7 @@ impl Engine {
                 .chain(left_behind_lines(&view_after, &stored.record.proposal_json))
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
+            gated: mature::stored_intimacy(&stored.record.proposal_json).gated(),
             closing: stored.record.kind == TurnKind::Closing,
         };
         let narrated = self.narrate(
@@ -1098,6 +1102,7 @@ impl Engine {
                 .chain(left_behind_lines(&view_after, &planned.proposal_json))
                 .collect(),
             intimate: planned.intimacy.intimate(),
+            gated: planned.intimacy.gated(),
             closing,
         };
         let narrated = self
@@ -1209,6 +1214,7 @@ impl Engine {
             cleared.as_ref(),
             committed.closing,
             level,
+            committed.gated,
         );
         let hidden = self.unnameable_names(now)?;
         let start = Instant::now();
@@ -1347,15 +1353,10 @@ impl Engine {
         // the tag before the gate, never lower it. A Closing Turn has no
         // Intent.
         let (floor, source) = match ask {
-            Ask::Play { intent } => {
-                // Only names the PC can name, main or other: a lower-case
-                // name of a hidden character would tell the Player it
-                // exists (QA B1). An other name counts when the PC holds its
-                // Belief (review minor, 2026-11-16).
-                let known = crate::world::pc_character_names(view);
-                let names: Vec<&str> = known.iter().map(String::as_str).collect();
-                mature::intimacy_floor(intent, &self.packs, &names)
-            }
+            // Only names the PC can name, main or other (QA B1); an other
+            // name counts when the PC holds its Belief (review minor,
+            // 2026-11-16).
+            Ask::Play { intent } => mature::intent_floor(view, intent, &self.packs),
             Ask::Closing { .. } => (Intimacy::None, mature::Floor::Nothing),
         };
         for attempt in ["propose", "propose_retry"] {
