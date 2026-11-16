@@ -137,14 +137,14 @@ describe("turnNotice", () => {
     turn_id: 7,
     roll: null,
     narration,
-    narration_error: narration === null ? "the game model request timed out" : null,
+    narration_error: narration === null ? "The game model took too long to answer. Try again." : null,
     total_ms: 1,
     faded: false,
   });
 
   it("tells that a Turn is committed when its narration failed", () => {
     expect(turnNotice(summary(null))).toBe(
-      "Committed, narration interrupted: the game model request timed out",
+      "The Turn is committed, but its narration stopped. The game model took too long to answer. Try again.",
     );
   });
 
