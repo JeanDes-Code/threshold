@@ -279,3 +279,14 @@ The review found that `named_destination` replaced the model's place with no ret
 - **The gate reads both companion lists.** `companions` and `left_behind` are names for the adults-only gate (`mature/gate.rs`, `named`). So a minor the Intent names as coming along refuses an intimate Turn even when the minor stays behind or stands at another place. This widens what the gate checks and over-blocks by design: the gate fails closed.
 
 The cost: a move to a named place the model called unknown now always spends the retry, and lands only if the retry agrees. That part depends on the model. Tests: `tests/moves.rs` (the two review cases, the retry that still disagrees) and `tests/mature.rs` (`a_minor_companion_refuses_an_intimate_move`).
+
+### Changed after the final review (2026-11-16): a known place the PC does not reach
+
+The final review found that the stay-put retry above set `unknown_place` for any place, including a place PLACES lists and the Intent names. The Player then read "you do not know the place you named", the QA run 4 error again. The narrator was told to hide a place the PC knows. And a real obstacle the model gave (a locked gate, `impossible` with blockers) was dropped.
+
+- **`unknown_place` is only for a place the PC does not know.** A retry that still does not go to a known place the Intent names now sets `not_reached` to that place (core-only, stored with the Turn, not in the schema; the age gate reads it as a name). This replaces "with `unknown_place`, the narrator's line and the Player's note" in the bullet above.
+- **The narrator's line:** "- The PC does not reach <place> this Turn: tell why from the outcome, or as a plain delay. The PC stays where they are." The Player gets no note: the Narration tells it, and no note can then say something false.
+- **The verdict depends on what the retry judged.** A retry that sent another known place judged that place: its verdict and blockers go, and the verdict becomes `allowed`. A retry that said `unknown_place` with `impossible` judged the Intent's own words, so its verdict and blockers stay, and the narrator gets the impossible line. The core cannot tell whether a blocker concerns the way there or something else, so it decides from the retry's place, not from the blocker.
+- **No Check and no move**, as before: `contested` and the Check go in every case, so the core never rolls for a move it will not make.
+
+Tests: `tests/moves.rs` (`a_retry_that_still_goes_elsewhere_does_not_reach_the_known_place`, `a_retry_that_calls_the_named_place_unknown_keeps_its_obstacle`; `a_place_the_pc_does_not_know_never_lands_in_a_known_place` keeps the unknown note).
