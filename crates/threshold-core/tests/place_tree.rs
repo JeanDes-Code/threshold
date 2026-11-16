@@ -718,26 +718,33 @@ fn qa4_drafted() -> SeedDraft {
 }
 
 /// QA run 4: all six links started on "Choose…", even the ones the Source
-/// Text states ("The Cooper house is ... also in Brindle Ford."). The live
-/// model wrote no `location` fact: it gave every known fact to the PC, under
-/// keys such as `destination_location`. A sentence of the Source Text that
-/// names the Place and the proposed parent, and no other Place, now backs
-/// the link. A top-level guess is never backed.
+/// Text states. The live model wrote no `location` fact: it gave every
+/// known fact to the PC, under keys such as `destination_location`. A
+/// sentence of the Source Text that states containment backs a link
+/// (review M1): "The Salt Exchange is a stone hall in Wexmoor" does. "The
+/// Lantern Inn is a two-storey inn on the village green of Brindle Ford",
+/// "The ferry house sits at the river's edge in Brindle Ford" and "The
+/// Cooper house is a narrow cottage on the lane behind the green, also in
+/// Brindle Ford" use forms the short list leaves out: they start blank,
+/// with the guess as a hint. A top-level guess is never backed.
 #[test]
 fn a_sentence_of_the_source_text_backs_a_link() {
     let draft = qa4_drafted();
     let lines = place_lines(&draft);
-    let place = |p: &str| Inside::Place(p.to_owned());
-    for (name, parent) in [
-        ("Lantern Inn", "Brindle Ford"),
-        ("ferry house", "Brindle Ford"),
-        ("Cooper house", "Brindle Ford"),
-        ("Salt Exchange", "Wexmoor"),
-    ] {
+    let salt = line(&lines, "Salt Exchange");
+    assert_eq!(
+        (&salt.inside, salt.backed, salt.doubted, salt.confirmed),
+        (&Inside::Place("Wexmoor".to_owned()), true, false, false)
+    );
+    for name in ["Lantern Inn", "ferry house", "Cooper house"] {
         let l = line(&lines, name);
         assert_eq!(
-            (&l.inside, l.backed, l.doubted, l.confirmed),
-            (&place(parent), true, false, false),
+            (&l.inside, l.backed, &l.suggested),
+            (
+                &Inside::Unknown,
+                false,
+                &Some(Inside::Place("Brindle Ford".to_owned()))
+            ),
             "{name}"
         );
     }
@@ -857,4 +864,135 @@ fn a_rename_asks_the_renamed_place_for_a_new_choice() {
         .filter(|g| g.kind == GapKind::PlaceUnconfirmed)
         .count();
     assert_eq!(waiting, 2);
+}
+
+// ---- Review M1: only a sentence of containment backs a link ------------------------
+
+/// A draft of the fixture roster from `text`, with `facts` as what the PC
+/// knows and `tree` as the model's place tree. The PC starts at `start`.
+fn drafted_from(text: &str, start: &str, facts: Value, tree: &[(&str, &str)]) -> SeedDraft {
+    let gm = gm(&[roster_out(), seed_out(start), facts, tree_out(tree)]);
+    let mut progress = |_| {};
+    let mut log = |_| {};
+    let mut ctl = Control::new(&mut progress, &|| false, &mut log);
+    draft_from_text(text, &gm, &mut ctl).unwrap()
+}
+
+/// A Source Text of about 450 characters: `sentence`, then filler that
+/// names no Place.
+fn text_with(sentence: &str) -> String {
+    let mut text = format!("# The crossing\n\n{sentence} ");
+    while text.chars().count() < 450 {
+        text.push_str("Edda Marsh works the night shift. ");
+    }
+    text
+}
+
+/// The ferry house's line when the model puts it in the inn and the
+/// Source Text holds `sentence`.
+fn ferry_in_inn(sentence: &str) -> PlaceLine {
+    let model = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, INN),
+        (INN, "none"),
+    ];
+    let draft = drafted_from(&text_with(sentence), INN, json!({"facts": []}), &model);
+    line(&place_lines(&draft), FERRY_HOUSE).clone()
+}
+
+/// Review M1: "The ferry house carries travellers over to Harrowmere." named
+/// the two places and nothing else, so it backed "the ferry house inside
+/// Harrowmere". A sentence of travel or direction backs nothing.
+#[test]
+fn a_sentence_of_travel_or_direction_backs_nothing() {
+    for sentence in [
+        "The ferry house carries travellers over to the Lantern Inn.",
+        "The ferry house is a short walk from the Lantern Inn.",
+        "The ferry house lies north of the Lantern Inn.",
+        "From the ferry house the road runs to the Lantern Inn.",
+        "The ferry house is not in the Lantern Inn.",
+        "The ferry house is a day's ride from the Lantern Inn.",
+    ] {
+        let ferry = ferry_in_inn(sentence);
+        assert_eq!(
+            (&ferry.inside, ferry.backed),
+            (&Inside::Unknown, false),
+            "{sentence}"
+        );
+        assert_eq!(
+            ferry.suggested,
+            Some(Inside::Place(INN.to_owned())),
+            "{sentence}"
+        );
+    }
+}
+
+/// A sentence that states containment, the Place first, backs the link.
+#[test]
+fn a_sentence_of_containment_backs_the_link() {
+    for sentence in [
+        "The ferry house stands in the Lantern Inn.",
+        "The ferry house is in the Lantern Inn.",
+        "The ferry house, in the Lantern Inn, is old.",
+        "The ferry house is inside the Lantern Inn.",
+        "The ferry house is part of the Lantern Inn.",
+        "The ferry house is a stone room within the Lantern Inn.",
+    ] {
+        let ferry = ferry_in_inn(sentence);
+        assert_eq!(
+            (&ferry.inside, ferry.backed),
+            (&Inside::Place(INN.to_owned()), true),
+            "{sentence}"
+        );
+    }
+}
+
+/// The reverse order never backs: "The Lantern Inn, where the ferry house
+/// is, ..." names the parent first. Reading it would need the words after
+/// the second name too, and the short list keeps to one order. The link
+/// starts blank, with the guess as a hint.
+#[test]
+fn the_parent_named_first_backs_nothing() {
+    for sentence in [
+        "The Lantern Inn, where the ferry house is, keeps a fire lit.",
+        "In the Lantern Inn is the ferry house.",
+    ] {
+        let ferry = ferry_in_inn(sentence);
+        assert_eq!(
+            (&ferry.inside, ferry.backed),
+            (&Inside::Unknown, false),
+            "{sentence}"
+        );
+    }
+}
+
+/// Review M1, end to end: the model puts the ferry house in the inn, a
+/// place on another branch than the crossing where the child is. The
+/// Source Text says only that the ferry carries travellers over to the
+/// inn, and no fact doubts the link. The Player sets the other three
+/// places at top level and confirms the ferry house's row as shown. The
+/// row must not start on the inn, so the gate still refuses with the PC
+/// in the ferry house.
+#[test]
+fn a_travel_sentence_never_prefills_a_parent_off_the_true_line() {
+    let model = [
+        (CROSSING, "none"),
+        (RIVER, "none"),
+        (FERRY_HOUSE, INN),
+        (INN, "none"),
+    ];
+    let facts = json!({"facts": [
+        fact(CHILD, CROSSING, &format!("{CHILD} lives at {CROSSING}.")),
+    ]});
+    let text = text_with("The ferry house carries travellers over to the Lantern Inn.");
+    let mut draft = drafted_from(&text, FERRY_HOUSE, facts, &model);
+    for place in [CROSSING, RIVER, INN] {
+        let entry = entry(&draft, place);
+        confirm_inside(&mut draft, &entry, Inside::Top).unwrap();
+    }
+    confirm_as_shown(&mut draft);
+    let view = built(&draft, "travel-sentence");
+    assert_ne!(link(&view, FERRY_HOUSE), Inside::Place(id(&view, INN)));
+    assert!(blocked_by_child(&view), "{:?}", clearance(&view, &[]));
 }

@@ -328,6 +328,15 @@ pub(super) fn draft_tree(
 /// to the PC, under keys such as `destination_location`. So a link that
 /// the Player's own text states had nothing to back it.
 ///
+/// The sentence must state containment, `P` before `Q`
+/// (`states_containment`): "P is in Q", "P, in Q", "P stands in Q",
+/// "P is a stone hall in Q", "P is part of Q". A sentence of travel or
+/// direction ("P carries travellers over to Q", "P is north of Q") backs
+/// nothing, and so does the reverse order ("Q, where P is"): a wrong
+/// backed link can take `P` off its true parent's chain, and the gate then
+/// counts a minor there as away (review M1). When in doubt, the link
+/// starts blank, with the model's guess as a hint.
+///
 /// These facts back a link only (`backed_places`). They never take part in
 /// the doubt check, and the draft does not keep them: built from the
 /// proposal, they would hide a fact that contradicts it, since the subject
@@ -352,7 +361,7 @@ fn source_facts(
             (m.main.as_str(), names)
         })
         .collect();
-    let sentences: Vec<(&str, Vec<&str>)> = text
+    let sentences: Vec<(&str, Vec<String>, Vec<&str>)> = text
         .split_inclusive(['.', '!', '?', '\n'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -363,23 +372,107 @@ fn source_facts(
                 .filter(|(_, names)| names.iter().any(|n| has_run(&words, n)))
                 .map(|(main, _)| *main)
                 .collect();
-            (sentence, named)
+            (sentence, words, named)
         })
         .collect();
+    let names_of = |main: &str| {
+        places
+            .iter()
+            .find(|(m, _)| *m == main)
+            .map(|(_, names)| names.clone())
+            .unwrap_or_default()
+    };
     proposed
         .iter()
         .filter_map(|(place, inside)| {
             let Inside::Place(parent) = inside else {
                 return None;
             };
-            let (sentence, _) = sentences.iter().find(|(_, named)| {
+            let (inner, outer) = (names_of(place), names_of(parent));
+            let (sentence, _, _) = sentences.iter().find(|(_, words, named)| {
                 named.len() == 2
                     && named.contains(&place.as_str())
                     && named.contains(&parent.as_str())
+                    && states_containment(words, &inner, &outer)
             })?;
             Some((place.clone(), parent.clone(), (*sentence).to_owned()))
         })
         .collect()
+}
+
+/// True when `words` (a sentence, `normalize::name_words`) names a Place
+/// by one of `inner`, then later a Place by one of `outer`, and the words
+/// between them state that the first is inside the second. The forms, with
+/// "in", "inside" or "within" before the outer name, and an optional "the":
+/// - nothing between: "P in Q", "P, in Q";
+/// - a verb of being or standing: "P is in Q", "P stands in Q", "P is
+///   also in Q", "P is located in Q";
+/// - "is" or "are", an article, and one to three plain words: "P is a
+///   stone hall in Q";
+/// - "P is part of Q".
+///
+/// Any other words between, such as "over to", "north of", "a day's ride
+/// from" or "where", back nothing. The list is short on purpose: a
+/// sentence it misses only leaves the link blank.
+fn states_containment(words: &[String], inner: &[Vec<String>], outer: &[Vec<String>]) -> bool {
+    let starts = |names: &[Vec<String>]| -> Vec<(usize, usize)> {
+        names
+            .iter()
+            .flat_map(|n| {
+                (0..words.len().saturating_sub(n.len() - 1))
+                    .filter(|&i| !n.is_empty() && words[i..i + n.len()] == n[..])
+                    .map(|i| (i, i + n.len()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+    let inner = starts(inner);
+    let outer = starts(outer);
+    inner.iter().any(|&(_, end)| {
+        outer
+            .iter()
+            .any(|&(start, _)| end <= start && containment_gap(&words[end..start]))
+    })
+}
+
+/// The words between the two names, for `states_containment`.
+fn containment_gap(gap: &[String]) -> bool {
+    const BE: [&str; 10] = [
+        "is", "are", "was", "were", "stands", "stand", "lies", "lie", "sits", "sit",
+    ];
+    const AFTER_BE: [&str; 6] = ["also", "located", "set", "found", "built", "situated"];
+    const ARTICLES: [&str; 3] = ["a", "an", "the"];
+    // A word that never sits in the plain words of "P is a stone hall in Q".
+    const NOT_PLAIN: [&str; 40] = [
+        "that", "which", "who", "whom", "whose", "where", "when", "with", "to", "from", "towards",
+        "toward", "over", "across", "near", "beyond", "outside", "past", "away", "north", "south",
+        "east", "west", "far", "ride", "walk", "journey", "miles", "day", "days", "road", "route",
+        "way", "not", "no", "never", "between", "and", "or", "of",
+    ];
+    let mut gap: Vec<&str> = gap.iter().map(String::as_str).collect();
+    if gap.last() == Some(&"the") {
+        gap.pop();
+    }
+    let head = match gap.as_slice() {
+        [head @ .., "in" | "inside" | "within"] => head,
+        [head @ .., "part", "of"] => {
+            return matches!(head, [] | ["is" | "are"] | ["is" | "are", "also"]);
+        }
+        _ => return false,
+    };
+    match head {
+        [] => true,
+        [be] => BE.contains(be),
+        [be, after] => BE.contains(be) && AFTER_BE.contains(after),
+        ["is" | "are" | "was", article, plain @ ..] => {
+            ARTICLES.contains(article)
+                && (1..=3).contains(&plain.len())
+                && plain
+                    .iter()
+                    .all(|w| !NOT_PLAIN.contains(w) && !BE.contains(w) && !ARTICLES.contains(w))
+        }
+        _ => false,
+    }
 }
 
 /// The `location` facts of the draft for the fact check: each known fact,
