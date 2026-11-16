@@ -860,7 +860,7 @@ export default function SeedReview({ view, onApproved, onBack, debug = false, cl
     ? "Saving…"
     : busy
       ? "Working…"
-      : gaps.length === 0
+      : gaps.length === 0 && placesToConfirm === 0
         ? "Everything is checked. Approve to prepare the world."
         : [
             left > 0 ? `${left} ${left === 1 ? "age" : "ages"} to confirm` : null,
