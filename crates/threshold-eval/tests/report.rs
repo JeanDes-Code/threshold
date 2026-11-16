@@ -1482,8 +1482,10 @@ fn play_basics_counts_each_step() {
         nowhere,
     ]);
     for line in [
-        // The PC already stands at the mill for the first move.
-        "- Moves that reached the asked place: 1 / 2 (50%)",
+        // The PC already stands at the mill for the first move. For the
+        // second, the core sets the town hall the Intent names over the
+        // model's mill (ADR 0007, changed after QA run 4).
+        "- Moves that reached the asked place: 2 / 2 (100%)",
         "- False closes / negative steps: 1 / 1 (100%)",
         "- False moves / negative steps: 1 / 1 (100%)",
         "- Pending items closed: 0 / 1 (0%)",

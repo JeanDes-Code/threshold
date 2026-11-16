@@ -644,6 +644,9 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
         move_to,
         // No handle: the PC stays where it is.
         unknown_place: _,
+        // Set by the core: present NPCs who walk with the PC, or stay.
+        companions,
+        left_behind,
         leaves,
         settles,
         // Free text, never a handle, so this collector cannot read it: a
@@ -668,6 +671,12 @@ fn named(p: &DecisionProposal) -> Vec<(Option<Handle>, &'static str)> {
     let mut add = |handle: Handle, field: &'static str| out.push((Some(handle), field));
     if let Some(place) = move_to {
         add(*place, "move_to");
+    }
+    for npc in companions {
+        add(*npc, "companions");
+    }
+    for npc in left_behind {
+        add(*npc, "left_behind");
     }
     for Leave { npc, to: _ } in leaves {
         add(*npc, "leaves.npc");

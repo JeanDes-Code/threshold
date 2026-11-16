@@ -4,6 +4,7 @@
 mod agency;
 mod boundary;
 mod contest;
+mod destination;
 mod ops;
 mod references;
 mod settle;
@@ -19,6 +20,7 @@ use crate::{
 
 pub(crate) use agency::is_involuntary_key;
 pub use contest::{checks_now, contest_note, default_check, oppose};
+pub use destination::{companions, named_destination};
 pub use ops::{Resolved, found, to_ops};
 pub use settle::{settle, settle_closing};
 
@@ -43,6 +45,10 @@ pub enum CheckKind {
     /// An intimate proposal with no reaction, or with a reacting NPC below
     /// comply (`mature::check`). It keeps the one retry.
     Unwilling,
+    /// A move whose `move_to` is not the known place the Intent names, with
+    /// a verdict judged for that other place (`named_destination`, QA run 4). It
+    /// keeps the one retry.
+    Destination,
 }
 
 impl CheckKind {
@@ -69,6 +75,7 @@ impl fmt::Display for CheckKind {
             Self::DetailExcluded => "detail excluded",
             Self::AdultsOnly => "adults only",
             Self::Unwilling => "unwilling",
+            Self::Destination => "destination",
         })
     }
 }

@@ -812,6 +812,7 @@ impl Engine {
                     &stored.record.proposal_json,
                 )))
                 .chain(unknown_place_line(&stored.record.proposal_json))
+                .chain(left_behind_lines(&view_after, &stored.record.proposal_json))
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
             closing: stored.record.kind == TurnKind::Closing,
@@ -1090,6 +1091,7 @@ impl Engine {
                 .chain(planned.found.as_ref().map(found_lines))
                 .chain(advance_line(planned.intimacy))
                 .chain(unknown_place_line(&planned.proposal_json))
+                .chain(left_behind_lines(&view_after, &planned.proposal_json))
                 .collect(),
             intimate: planned.intimacy.intimate(),
             closing,
@@ -1367,6 +1369,9 @@ impl Engine {
 
             let step = Instant::now();
             let retry = attempt == "propose_retry";
+            // A destination the Intent contradicts, on the first attempt
+            // (`checks::named_destination`).
+            let mut wrong_place = None;
             // The strongest tag any attempt's raw text says sticks, valid
             // JSON or not: cut, fenced, with trailing text, or with the key
             // twice (review M2). The retry is then checked with it.
@@ -1393,9 +1398,17 @@ impl Engine {
                     // `settle` first: it may drop `move_to`, and a
                     // contested move with no destination is an act for
                     // `engine_time` (review minor).
-                    let (p, mut notes) = checks::settle(p, view);
+                    let (mut p, mut notes) = checks::settle(p, view);
+                    // The place the Intent names, before `engine_time`
+                    // reads `move_to` (QA run 4).
+                    let (moved, rejection) = checks::named_destination(&mut p, view, intent, retry);
+                    notes.extend(moved);
+                    wrong_place = rejection;
                     let (mut p, asked) = engine_time(p, view, intent);
                     wait_asked = asked;
+                    // Who walks with the PC (ADR 0007, 2026-11-16), on the
+                    // final action and destination.
+                    (p.companions, p.left_behind) = checks::companions(&p, view, intent);
                     // A contested act with no Check: one repair note on the
                     // first attempt, a default Check on the retry (ADR 0007).
                     // A contested `check` verdict gets it at once.
@@ -1412,14 +1425,16 @@ impl Engine {
             };
             let checked = parsed.as_ref().map_err(Clone::clone).and_then(|p| {
                 let checked = checks::validate(p, view);
-                match (retry, checks::contest_note(p)) {
-                    (false, Some(note)) => {
-                        let mut errs = checked.err().unwrap_or_default();
-                        errs.push(note);
-                        Err(errs)
-                    }
-                    _ => checked,
+                let notes: Vec<_> = checks::contest_note(p)
+                    .into_iter()
+                    .chain(wrong_place.clone())
+                    .collect();
+                if retry || notes.is_empty() {
+                    return checked;
                 }
+                let mut errs = checked.err().unwrap_or_default();
+                errs.extend(notes);
+                Err(errs)
             });
             timings.validate_ms += ms(step);
             let errs = match checked {
@@ -1887,6 +1902,39 @@ pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)> {
 pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
     let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
     serde_json::from_value(record.get("wait_asked")?.clone()).ok()?
+}
+
+/// The narrator's lines for the NPCs the Intent took along who stay
+/// behind (`DecisionProposal::left_behind`, ADR 0007, 2026-11-16), from
+/// the Turn's record: one line each, only when the PC moved (a move, and
+/// an allowed verdict or a won Check). QA run 4: "Ilse and I walk to the
+/// ferry house" left Ilse at the inn, and the Narration walked her along.
+fn left_behind_lines(view: &WorldView, proposal_json: &str) -> Vec<String> {
+    let moved = match stored_action(proposal_json) {
+        Some((ActionKind::Move, Verdict::Allowed)) => true,
+        Some((ActionKind::Move, Verdict::Check)) => {
+            stored_roll(proposal_json).is_some_and(|r| r.success)
+        }
+        _ => false,
+    };
+    let Some(record) = moved
+        .then(|| serde_json::from_str::<serde_json::Value>(proposal_json).ok())
+        .flatten()
+    else {
+        return Vec::new();
+    };
+    let has_place = record
+        .pointer("/proposal/move_to")
+        .is_some_and(|v| !v.is_null());
+    let left: Vec<Handle> = record
+        .pointer("/proposal/left_behind")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    left.into_iter()
+        .filter(|_| has_place)
+        .filter_map(|h| view.entity(h))
+        .map(|e| format!("- {0} does not come along: {0} stays behind.\n", e.name))
+        .collect()
 }
 
 /// The narrator's outcome line of a move to a place the world does not

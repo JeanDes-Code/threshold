@@ -166,6 +166,19 @@ pub fn to_ops(
         };
         b.write(&location, FactSource::Proposal, holders, Vec::new());
     }
+    // ADR 0007 (changed after QA run 4, 2026-11-16): the companions walk
+    // with the PC, only when the PC moves. Everyone present sees them go.
+    if let Some(place) = p
+        .move_to
+        .filter(|_| moved_to.is_some())
+        .and_then(|h| view.entity(h))
+    {
+        for npc in &p.companions {
+            if let Handle::Entity(id) = npc {
+                b.leave(*id, Some(place));
+            }
+        }
+    }
     // The facts of a proposal whose Check the core built were written for a
     // success: they apply on a won Roll only (changed after review).
     let facts: &[NewFact] = if p.facts_on_win && !success {

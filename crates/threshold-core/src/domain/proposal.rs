@@ -28,6 +28,22 @@ pub struct DecisionProposal {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[schemars(skip)]
     pub unknown_place: bool,
+    /// Set by the core only, never by the model: the present NPCs who come
+    /// along on this move (`checks::companions`, ADR 0007, 2026-11-16).
+    /// The Intent names each as going with the PC, and its reaction says
+    /// `willing: yes`. When the move happens, the core writes each one's
+    /// `location` with the PC's. Stored with the Turn when not empty; not
+    /// in the schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(skip)]
+    pub companions: Vec<Handle>,
+    /// Set by the core only: the present NPCs the Intent names as going
+    /// with the PC who do not agree, or gave no reaction. They stay, and
+    /// the narrator is told so (`turn::left_behind_lines`). Stored with the
+    /// Turn when not empty; not in the schema.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(skip)]
+    pub left_behind: Vec<Handle>,
     /// The NPCs who walk out of the PC's place in this Turn, and where to
     /// (bug pass 5, M1). The core writes each one's `location`. The per-Turn
     /// schema makes it required, with the present NPCs the PC perceives and

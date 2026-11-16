@@ -350,6 +350,8 @@ pub fn proposal(verdict: Verdict) -> DecisionProposal {
         contested: false,
         move_to: None,
         unknown_place: false,
+        companions: vec![],
+        left_behind: vec![],
         leaves: vec![],
         settles: None,
         finds: Default::default(),
