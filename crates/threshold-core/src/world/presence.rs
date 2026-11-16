@@ -19,9 +19,10 @@
 //! Two place rules live here. `at_place` is the rule of play: the same
 //! `normalize::value`. `PlaceTree::away` is the rule of doubt, for
 //! `unsure` only: it reads the stored Inside Links of the Places (glossary)
-//! and never free text. `inferred_links` reads free text, once, when an
-//! old Campaign file is opened (`store::migrations`); the gate never calls
-//! it.
+//! after the fact check (`PlaceTree::checked`). The check reads the free
+//! text of `location` facts, and it can only set a link to `Unknown`.
+//! `inferred_links` reads free text, once, when an old Campaign file is
+//! opened (`store::migrations`); the gate never calls it.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -58,6 +59,8 @@ impl Room {
 /// The room of the PC now. It reads each live `location` once
 /// (`Locations`), the PC's Beliefs once and the place tree once, so its
 /// cost grows with the facts plus the characters, not with their product.
+/// The fact check of the tree (`PlaceTree::checked`) is the exception: it
+/// reads each `location` fact once per Place.
 pub fn room(view: &WorldView) -> Room {
     let pc = pc_of(view);
     let locations = Locations::of(view);
@@ -67,7 +70,7 @@ pub fn room(view: &WorldView) -> Room {
     } else {
         Vec::new()
     };
-    let tree = PlaceTree::of(view);
+    let tree = PlaceTree::checked(view);
     Room {
         pc,
         truth: truth_in(view, pc, place.as_deref(), &locations)
@@ -260,6 +263,18 @@ impl PlaceTree {
         Self { links, names }
     }
 
+    /// The tree the gate reads (ADR 0008, review of 2026-11-16): the
+    /// stored links, with each Place that `doubted_in` names set to
+    /// `Unknown`. A fact written in play after the Player confirmed a link
+    /// can only add doubt to that link; it never fills a link.
+    pub fn checked(view: &WorldView) -> Self {
+        let mut tree = Self::of(view);
+        for id in doubted_in(view) {
+            tree.links.insert(id, Inside::Unknown);
+        }
+        tree
+    }
+
     /// The Places a location value names through any of their names.
     fn named(&self, value: &str) -> &[EntityId] {
         self.names
@@ -357,13 +372,13 @@ pub fn inferred_links(view: &WorldView) -> Vec<(EntityId, EntityId)> {
         .iter()
         .filter(|e| e.kind == EntityKind::Place && e.inside == Inside::Unknown)
         .collect();
-    let locations: Vec<(EntityId, EntityId, &str)> = view
+    let locations: Vec<(EntityId, EntityId, Vec<String>)> = view
         .live_facts
         .iter()
         .filter(|f| f.slot.key == "location" && f.canon != Canon::Possible)
         .filter_map(|f| {
             tree.resolve(&f.slot.value)
-                .map(|q| (f.slot.subject, q, f.text.as_str()))
+                .map(|q| (f.slot.subject, q, normalize::name_words(&f.text)))
         })
         .collect();
     let mut links: HashMap<EntityId, EntityId> = HashMap::new();
@@ -400,11 +415,16 @@ pub fn inferred_links(view: &WorldView) -> Vec<(EntityId, EntityId)> {
 
 /// The parents the facts give `place` (the rules of `inferred_links`).
 /// `facts` holds each `location` fact whose value names one Place: its
-/// subject, that Place, and its text. The subject rule wins: the Places
+/// subject, that Place, and the words of its text (`normalize::
+/// name_words`), split once per fact. The subject rule wins: the Places
 /// that the facts about `place` itself name. Else the text rule: the
 /// Places named by each fact whose text names `place`, by any of `names`,
 /// as a run of whole words. `place` itself is never a parent.
-fn fact_parents<K: Copy + Ord>(place: K, names: &[&str], facts: &[(K, K, &str)]) -> BTreeSet<K> {
+fn fact_parents<K: Copy + Ord>(
+    place: K,
+    names: &[&str],
+    facts: &[(K, K, Vec<String>)],
+) -> BTreeSet<K> {
     let by_subject: BTreeSet<K> = facts
         .iter()
         .filter(|(subject, q, _)| *subject == place && *q != place)
@@ -421,10 +441,7 @@ fn fact_parents<K: Copy + Ord>(place: K, names: &[&str], facts: &[(K, K, &str)])
     facts
         .iter()
         .filter(|(_, q, _)| *q != place)
-        .filter(|(_, _, text)| {
-            let words = normalize::name_words(text);
-            names.iter().any(|n| has_run(&words, n))
-        })
+        .filter(|(_, _, words)| names.iter().any(|n| has_run(words, n)))
         .map(|(_, q, _)| *q)
         .collect()
 }
@@ -537,12 +554,12 @@ pub fn backed_places<K: Copy + Ord + std::hash::Hash>(
 }
 
 /// Each fact whose value names exactly one Place of `nodes`: its subject,
-/// that Place and its text. A value names a Place as `PlaceTree::resolve`
+/// that Place and the words of its text. A value names a Place as `PlaceTree::resolve`
 /// reads it: the words of exactly one Place name.
-fn resolve_facts<'a, K: Copy + Ord + std::hash::Hash>(
+fn resolve_facts<K: Copy + Ord + std::hash::Hash>(
     nodes: &[TreeNode<K>],
-    facts: &[PlaceFact<'a, K>],
-) -> Vec<(K, K, &'a str)> {
+    facts: &[PlaceFact<K>],
+) -> Vec<(K, K, Vec<String>)> {
     let mut index: HashMap<Vec<String>, Vec<K>> = HashMap::new();
     for node in nodes {
         for name in &node.names {
@@ -561,15 +578,29 @@ fn resolve_facts<'a, K: Copy + Ord + std::hash::Hash>(
     };
     facts
         .iter()
-        .filter_map(|f| resolve(f.value).map(|q| (f.subject, q, f.text)))
+        .filter_map(|f| resolve(f.value).map(|q| (f.subject, q, normalize::name_words(f.text))))
         .collect()
 }
 
 /// `doubted_places` over a Campaign: its Places with their stored links,
-/// and every live `location` fact. For a check of a stored tree (the QA
-/// probes); the gate never calls it.
+/// and every live `location` fact whose subject is not a character. The
+/// gate calls it on each `room` (`PlaceTree::checked`).
+///
+/// A fact about a character is left out. Its text often names the place
+/// the character left or passes through ("Pell went from the inn to the
+/// ferry house."), and the text rule would read that as "the inn is in the
+/// ferry house". The subject rule and rule 2 never read such a fact, since
+/// its subject is no Place. So a fact about a character that contradicts a
+/// link does not doubt it in play (ADR 0008, Limits).
 pub fn doubted_in(view: &WorldView) -> BTreeSet<EntityId> {
-    let (nodes, facts) = tree_in(view);
+    let (nodes, mut facts) = tree_in(view);
+    let characters: HashSet<EntityId> = view
+        .entities
+        .iter()
+        .filter(|e| is_character(e))
+        .map(|e| e.id)
+        .collect();
+    facts.retain(|f| !characters.contains(&f.subject));
     doubted_places(&nodes, &facts)
 }
 

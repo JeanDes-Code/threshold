@@ -27,6 +27,13 @@ const RIVER: &str = "Fenn";
 const FERRY_HOUSE: &str = "the ferry house";
 const INN: &str = "the Lantern Inn";
 const CHILD: &str = "Pell Durrow";
+/// A model that answers "none" for every place (QA run 3).
+const ALL_NONE: [(&str, &str); 4] = [
+    (CROSSING, "none"),
+    (RIVER, "none"),
+    (FERRY_HOUSE, "none"),
+    (INN, "none"),
+];
 
 /// An empty folder of its own under the system temp dir, removed on drop.
 struct TempDir(PathBuf);
@@ -344,15 +351,7 @@ fn a_player_confirmed_tree_clears_a_sibling_place_and_nothing_more() {
         (INN, "none"),
     ];
     let set_true_tree = |draft: &mut SeedDraft| {
-        for (place, inside) in [
-            (CROSSING, Inside::Top),
-            (RIVER, Inside::Top),
-            (FERRY_HOUSE, Inside::Place(CROSSING.to_owned())),
-            (INN, Inside::Place(CROSSING.to_owned())),
-        ] {
-            let entry = entry(draft, place);
-            confirm_inside(draft, &entry, inside).unwrap();
-        }
+        true_tree(draft);
         confirm_as_shown(draft);
     };
 
@@ -366,6 +365,84 @@ fn a_player_confirmed_tree_clears_a_sibling_place_and_nothing_more() {
     set_true_tree(&mut inside);
     let view = built(&inside, "inside");
     assert!(blocked_by_child(&view), "{:?}", clearance(&view, &[]));
+}
+
+/// The tree that the facts support, whatever the model said: the crossing
+/// on the river, the ferry house and the inn in the crossing.
+fn true_tree(draft: &mut SeedDraft) {
+    for (place, inside) in [
+        (CROSSING, Inside::Place(RIVER.to_owned())),
+        (RIVER, Inside::Top),
+        (FERRY_HOUSE, Inside::Place(CROSSING.to_owned())),
+        (INN, Inside::Place(CROSSING.to_owned())),
+    ] {
+        let entry = entry(draft, place);
+        confirm_inside(draft, &entry, inside).unwrap();
+    }
+}
+
+/// A `location` fact written in play: a copy of a live fact with a new
+/// subject, value and text.
+fn play_fact(view: &mut WorldView, subject: &str, value: &str, text: &str) {
+    let mut fact = view.live_facts[0].clone();
+    fact.id = view.live_facts.iter().map(|f| f.id).max().unwrap() + 1;
+    fact.slot.subject = id(view, subject);
+    "location".clone_into(&mut fact.slot.key);
+    value.clone_into(&mut fact.slot.value);
+    text.clone_into(&mut fact.text);
+    view.live_facts.push(fact);
+}
+
+/// Review M1 (2026-11-16): the gate reads the stored tree through the fact
+/// check. The Player confirms the ferry house at top level, and no live
+/// fact says otherwise: the child in the crossing is away. Then a fact
+/// written in play puts the ferry house in the crossing (QA run 3 wrote
+/// that sentence on the ferry). The confirmed link gives way to doubt, and
+/// the gate refuses.
+#[test]
+fn a_play_fact_that_contradicts_a_confirmed_top_makes_the_gate_refuse() {
+    let mut draft = drafted(FERRY_HOUSE, CROSSING, &ALL_NONE);
+    true_tree(&mut draft);
+    let ferry = entry(&draft, FERRY_HOUSE);
+    confirm_inside(&mut draft, &ferry, Inside::Top).unwrap();
+    confirm_as_shown(&mut draft);
+    let mut view = built(&draft, "play-fact");
+    assert_eq!(link(&view, FERRY_HOUSE), Inside::Top);
+    // The seed's own sentence is left out, so the confirmed tree stands.
+    let ferry_item = id(&view, "the ferry");
+    view.live_facts
+        .retain(|f| !(f.slot.subject == ferry_item && f.slot.key == "location"));
+    assert!(clearance(&view, &[]).is_ok(), "{:?}", clearance(&view, &[]));
+
+    play_fact(
+        &mut view,
+        "the ferry",
+        CROSSING,
+        "The ferry house is in Brackwater Crossing.",
+    );
+    assert!(blocked_by_child(&view), "{:?}", clearance(&view, &[]));
+}
+
+/// A character's travel names the place it left. "Pell Durrow went from the
+/// Lantern Inn to the ferry house." must not read as "the inn is in the
+/// ferry house": the gate leaves facts about characters out of the fact
+/// check, and a true tree still clears a child in a sibling place.
+#[test]
+fn a_character_travel_fact_does_not_doubt_a_true_tree() {
+    let mut draft = drafted(INN, FERRY_HOUSE, &ALL_NONE);
+    true_tree(&mut draft);
+    confirm_as_shown(&mut draft);
+    let mut view = built(&draft, "travel");
+    let child = id(&view, CHILD);
+    view.live_facts
+        .retain(|f| !(f.slot.subject == child && f.slot.key == "location"));
+    play_fact(
+        &mut view,
+        CHILD,
+        FERRY_HOUSE,
+        "Pell Durrow went from the Lantern Inn to the ferry house.",
+    );
+    assert!(clearance(&view, &[]).is_ok(), "{:?}", clearance(&view, &[]));
 }
 
 // ---- The review ---------------------------------------------------------------------
