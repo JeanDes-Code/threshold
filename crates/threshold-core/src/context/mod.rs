@@ -196,10 +196,13 @@ pub(crate) struct Retrieval<'a> {
     pub mentioned: Vec<EntityId>,
     /// Live facts of `mentioned` entities.
     pub mentioned_facts: Vec<&'a Fact>,
-    /// The age rule runs for this Turn, as the Intent's words tell before
-    /// the model answers (`mature::intent_floor`, review r5 M1): the
-    /// Intent names a character by its full name only, and nobody may
-    /// come (`arrives` is absent).
+    /// The age rule may run for this Turn. For the proposal prompt, as the
+    /// core knows before the model answers (`mature::gated_before_answer`:
+    /// the Intent's words, or an open Intimate Scene; review r5 M1 and
+    /// MJ1); for the narrator, the Turn's final tag or a Turn of an
+    /// Intimate Scene. The Intent names a character by its full name only,
+    /// nobody may come (`arrives` is absent), and the narrator gets no "is
+    /// not here" line.
     pub gated: bool,
 }
 

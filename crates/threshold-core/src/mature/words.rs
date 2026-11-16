@@ -225,6 +225,21 @@ pub fn intent_floor(
     intimacy_floor(intent, packs, &names)
 }
 
+/// The age rule may run for this Play Turn, as the core knows before the
+/// model answers: the Intent's words gate it (`intent_floor`), or an
+/// Intimate Scene is open (`view.scene_open`; G1's `Cleared` value only
+/// exists then). The proposal prompt reads it once (`Retrieval::gated`),
+/// so the first-word match, the `arrives` offer and the "is not here"
+/// lines agree (review r5 re-check, MJ1): inside an open scene, "think of
+/// little Pip" offered Pip, a minor, for `arrives`.
+pub fn gated_before_answer(
+    view: &crate::store::WorldView,
+    intent: &str,
+    packs: &[ContentPack],
+) -> bool {
+    view.scene_open.is_some() || intent_floor(view, intent, packs).0.gated()
+}
+
 /// Which list raised the tag. The debug log names the list, never the word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Floor {

@@ -8,7 +8,7 @@ use super::{
 use crate::{
     HandleContext,
     domain::{Canon, DetailLevel, EntityId, EntityKind, Handle, Trigger, is_open_key},
-    mature::{Cleared, effective, intent_floor},
+    mature::{Cleared, effective, gated_before_answer},
     model::Prompt,
     pack::{ContentPack, Target, scene_fragments},
     store::{Entity, Fact},
@@ -129,7 +129,7 @@ pub fn proposal_prompt(
 /// The handles that `proposal_prompt(view, _, intent)` shows. Packs never
 /// change them.
 pub fn handle_context(view: &crate::store::WorldView, intent: &str) -> HandleContext {
-    let gated = intent_floor(view, intent, &[]).0.gated();
+    let gated = gated_before_answer(view, intent, &[]);
     handles(
         &Retrieval::new(view, intent, None, DetailLevel::Excluded, gated),
         intent,
@@ -152,10 +152,11 @@ pub fn proposal_context(
     intent: &str,
     cleared: Option<&Cleared>,
 ) -> ProposalContext {
-    // Review r5 (M1): the Intent's words tell, before the model answers,
-    // that the age rule runs. Then a first word is no name, and nobody is
-    // offered for `arrives`.
-    let gated = intent_floor(view, intent, packs).0.gated();
+    // Review r5 (M1) and its re-check (MJ1): the Intent's words or an open
+    // Intimate Scene tell, before the model answers, that the age rule may
+    // run. Then a first word is no name, and nobody is offered for
+    // `arrives`.
+    let gated = gated_before_answer(view, intent, packs);
     let r = Retrieval::new(view, intent, cleared, effective(view.detail, packs), gated);
     let prompt = Prompt {
         system: system(packs),
@@ -261,7 +262,8 @@ fn leavers(r: &Retrieval<'_>) -> Vec<EntityId> {
 /// 5): the NPCs the PC can name that the Intent names
 /// (`checks::characters_named`) and that are not here, in truth or as the
 /// PC sees it. The prompt shows each one: `Retrieval` lists them. Nobody
-/// on a Turn the Intent's words gate (`Retrieval::gated`, review r5 M1):
+/// on a Turn the Intent's words or an open scene gate (`Retrieval::gated`,
+/// review r5 M1 and MJ1):
 /// "a little time to kiss Brann" offered only Little Wren, a child, and a
 /// model that took her ended the Turn in a Refusal for nothing.
 fn arrivers(r: &Retrieval<'_>, intent: &str) -> Vec<EntityId> {

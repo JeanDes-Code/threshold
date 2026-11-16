@@ -340,3 +340,15 @@ The rule: the age gate fails closed. On a gated Turn the core never silently dro
 The cost: a model that fills `arrives` on a gated Turn, where the schema had no such field, now spends the retry and can fail the Turn. Before, the entry was dropped and the Turn went on. We accept it: the other choice lets a minor into an intimate Turn.
 
 Tests: `tests/drift.rs` (`a_minor_who_arrives_refuses_an_intimate_turn`, restored to "make love"; `a_minor_who_arrives_refuses_an_advance`; `an_adult_who_arrives_on_a_gated_turn_fails_the_turn`; `a_minor_the_model_brings_into_a_gated_turn_refuses_it`; `a_minor_offered_for_arrives_refuses_a_turn_the_model_tags_intimate`). Each goes through the engine with `RecordedGm` and `settle`, with no hand-set `may_arrive`.
+
+### Changed after the review r5 re-check (2026-11-16): an open Intimate Scene gates the proposal prompt
+
+The re-check also found that the proposal prompt read only the Intent's words to know the Turn is gated. It ignored an open Intimate Scene, which the core knows before the model answers. The probe: a scene open after an intimate first Turn, then "I stay with Brann and think of little Pip." (no Romance Word). The prompt opened with the scene line, and the schema offered `arrives` with Pip's handle only. A model that took it ended the Turn in a final `AdultsOnly` Refusal: the r5 failure again, inside the scene.
+
+- **One helper decides it before the model answers** (`mature::gated_before_answer`): the Intent's words gate the Turn (`intent_floor`), or an Intimate Scene is open (`view.scene_open`). G1's `Cleared` value exists only when a scene is open, so the open scene covers it, and a scene G1 refused counts too: the gate fails closed. `proposal_context` and `handle_context` set `Retrieval::gated` from it, so the first-word match, the `arrives` offer and the prompt agree.
+- **The narrator reads the same** (`turn::told_gated`): the Turn's final tag gates it, or the scene is open right after the Turn, or the Turn's own Commit opened or closed a scene. Then the outcome block has no "is not here" line. This widens "It reads the Turn's final tag" in the section "Changed after review r5" above.
+- **A plain Turn outside a scene is as before.** "I call Little home." still offers Little Wren.
+
+The cost: inside an open scene, the Player cannot call anyone in through `arrives`, and a first name alone does not show an absent character in the prompt. We accept it, for the same reason as above: the Player can end the scene first.
+
+Tests: `tests/drift.rs` (`an_open_scene_offers_no_arriver`, the probe; `a_first_word_is_no_name_in_an_open_scene`, "a little longer" with Little Wren).

@@ -45,7 +45,8 @@ pub use text::{
     reading_level, stored_intimacy, stored_intimate, told, told_level, turn_text,
 };
 pub use words::{
-    ACT_WORDS, Floor, ROMANCE_WORDS, folded, intent_floor, intimacy_floor, romance_floor,
+    ACT_WORDS, Floor, ROMANCE_WORDS, folded, gated_before_answer, intent_floor, intimacy_floor,
+    romance_floor,
 };
 
 use crate::{

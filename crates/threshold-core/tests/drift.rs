@@ -781,3 +781,72 @@ fn a_gated_intent_offers_no_arriver() {
     let schema = threshold_core::proposal_schema_for(&handles);
     assert!(schema["properties"].get("arrives").is_none());
 }
+
+// --- review r5 re-check, MJ1: an open Intimate Scene gates the prompt ------
+
+/// Plays an intimate Turn on Brann in `w` ("t1"), which opens the Intimate
+/// Scene, then the plain `intent` ("t2") with a plain proposal. Returns
+/// the recorder and the result of t2.
+fn in_scene(w: &mut World, intent: &str) -> (RecordedGm, Result<(), TurnError>) {
+    let gm = RecordedGm::new(
+        vec![on_brann(w, "intimate", &[]), on_brann(w, "none", &[])],
+        vec!["You lie together.".into(), "You stay.".into()],
+    );
+    let mut engine = engine_of(w, &gm);
+    play(&mut engine, "I make love with Brann.").expect("the scene opens");
+    assert!(snapshot(&engine, w).scene_open.is_some());
+    let result = engine
+        .play_turn("t2".into(), intent, &mut |_: &str| {})
+        .map(|_| ());
+    (gm, result)
+}
+
+/// The schema of the last proposal call.
+fn last_schema(gm: &RecordedGm) -> serde_json::Value {
+    gm.calls()
+        .into_iter()
+        .filter(|c| c.kind == CallKind::Propose)
+        .next_back()
+        .unwrap()
+        .schema
+}
+
+/// Review r5 re-check (MJ1): inside an open Intimate Scene, an Intent with
+/// no Romance Word ("think of little Pip") offered Pip, a minor away at
+/// the market, for `arrives`. A model that took him ended the Turn in a
+/// final Refusal. A Turn of an open scene is gated before the model
+/// answers: nobody is offered, and the narrator gets no "is not here" line.
+#[test]
+fn an_open_scene_offers_no_arriver() {
+    let mut w = World::with_detail(DetailLevel::Implied);
+    let ids = [w.ada, w.orsel, w.brann];
+    w.confirm(&ids);
+    let (gm, result) = in_scene(&mut w, "I stay with Brann and think of little Pip.");
+    result.expect("the plain Turn commits");
+    let schema = last_schema(&gm);
+    assert!(
+        schema["properties"].get("arrives").is_none(),
+        "{}",
+        schema["properties"]["arrives"]
+    );
+    let n = narration(&gm);
+    assert!(!n.contains("Pip is not here"), "{n}");
+}
+
+/// Review r5 re-check (MJ1): inside an open Intimate Scene, a first word
+/// is no name. "a little longer" holds the first word of Little Wren (9):
+/// no prompt of that Turn shows her, and the schema offers nobody.
+#[test]
+fn a_first_word_is_no_name_in_an_open_scene() {
+    let (mut w, wren) = wren_world();
+    let (gm, result) = in_scene(&mut w, "I stay with Brann a little longer.");
+    result.expect("the plain Turn commits");
+    assert!(last_schema(&gm)["properties"].get("arrives").is_none());
+    let calls = gm.calls();
+    for call in &calls[calls.len() - 2..] {
+        for block in [&call.prompt.scene, &call.prompt.recent] {
+            assert!(!block.contains("Wren"), "{block}");
+            assert!(!block.contains(&format!("E{wren}")), "{block}");
+        }
+    }
+}

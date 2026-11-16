@@ -265,8 +265,9 @@ struct Committed<'a> {
     extra: Vec<String>,
     /// The Turn was committed with `intimate`: G4 (`mature::told`) reads it.
     intimate: bool,
-    /// The age rule ran for the Turn (`Intimacy::gated`): the narrator
-    /// gets no "is not here" line (review r5, M1).
+    /// The age rule ran for the Turn, or it is a Turn of an Intimate Scene
+    /// (`told_gated`): the narrator gets no "is not here" line (review r5,
+    /// M1 and MJ1).
     gated: bool,
     /// A Closing Turn: told plain under `context::CLOSING_LINE`, with no
     /// Intent and `mature::CLOSING_NARRATION_MAX_TOKENS`.
@@ -821,7 +822,11 @@ impl Engine {
                 .chain(left_behind_lines(&view_after, &stored.record.proposal_json))
                 .collect(),
             intimate: mature::stored_intimate(&stored.record.proposal_json),
-            gated: mature::stored_intimacy(&stored.record.proposal_json).gated(),
+            gated: told_gated(
+                mature::stored_intimacy(&stored.record.proposal_json),
+                &view_after,
+                &ops,
+            ),
             closing: stored.record.kind == TurnKind::Closing,
         };
         let narrated = self.narrate(
@@ -1102,7 +1107,7 @@ impl Engine {
                 .chain(left_behind_lines(&view_after, &planned.proposal_json))
                 .collect(),
             intimate: planned.intimacy.intimate(),
-            gated: planned.intimacy.gated(),
+            gated: told_gated(planned.intimacy, &view_after, &ops),
             closing,
         };
         let narrated = self
@@ -1914,6 +1919,19 @@ pub fn stored_action(proposal_json: &str) -> Option<(ActionKind, Verdict)> {
 pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
     let record: serde_json::Value = serde_json::from_str(proposal_json).ok()?;
     serde_json::from_value(record.get("wait_asked")?.clone()).ok()?
+}
+
+/// The narrator's `Retrieval::gated` for a committed Turn: its final tag
+/// gates it (`Intimacy::gated`), or it is a Turn of an Intimate Scene. The
+/// scene is open right after the Turn (`view_after`), or the Turn's own
+/// Commit opened or closed it (a `SetScene` op in `ops`). It matches what
+/// the proposal prompt read before the model answered
+/// (`mature::gated_before_answer`, review r5 re-check MJ1), and adds the
+/// model's own tag.
+fn told_gated(intimacy: Intimacy, view_after: &WorldView, ops: &[LedgerOp]) -> bool {
+    intimacy.gated()
+        || view_after.scene_open.is_some()
+        || ops.iter().any(|op| matches!(op, LedgerOp::SetScene { .. }))
 }
 
 /// The narrator's lines for the NPCs the Intent took along who stay
