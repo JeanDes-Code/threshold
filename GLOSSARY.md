@@ -88,6 +88,10 @@ _Avoid_: Flirt mode, pre-scene
 The value each reaction of a Decision Proposal gives its NPC, in the field `willing`: whether this NPC freely agrees, in THIS Turn, to what the PC does with it or asks of it, as its plan says: "yes" agrees and takes part; "unsure" hesitates or has not agreed yet; "no" declines or objects. Only the stance rule of an intimate Turn reads it: every reacting NPC must say "yes", or the Turn is refused after the one retry. A missing value refuses. The NPC's attitude toward the PC and its goals cap "yes" as they cap a stance: above that cap it needs a cause.
 _Avoid_: Consent flag, mood, stance (the stance rule does not read the stance)
 
+**Companion**:
+An NPC present with the PC who goes with the PC on a move: the Player's Intent names it as going along ("Ilse and I walk to the ferry house", "with Ilse", "I take Ilse"), and its reaction in the Decision Proposal says Willing "yes". When the move happens, the core moves it with the PC. A named NPC who does not agree stays behind, and the narrator is told so.
+_Avoid_: Party member, follower, escort
+
 **Romance Word**:
 A neutral word or phrase of the core's short list (`mature::ROMANCE_WORDS`), such as "kiss" or "spend the night with". When the Player's Intent holds one, the Turn is at least an Advance, whatever the model says. A Content Pack may ship its own word list; an Intent that holds one of those terms is at least intimate.
 _Avoid_: Bad word, filter list, blacklist
