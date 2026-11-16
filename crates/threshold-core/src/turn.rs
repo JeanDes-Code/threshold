@@ -725,7 +725,7 @@ impl Engine {
         let prompt = ooc_prompt(&view, sight.as_ref(), question);
         let start = Instant::now();
         let answer = self.gm.narrate(&prompt, None, &mut |_| Stream::More);
-        self.log(&op_id, "ooc", &prompt, answer_text(&answer), start)?;
+        self.log(&op_id, "ooc", &prompt, &answer_text(&answer), start)?;
         self.log_stats(&op_id, "ooc")?;
         Ok(answer?)
     }
@@ -1229,7 +1229,7 @@ impl Engine {
         } else if cut {
             format!("{}\n[generation stopped: length]", answer_text(&narration))
         } else {
-            answer_text(&narration).to_owned()
+            answer_text(&narration).into_owned()
         };
         self.log(op_id, "narrate", &prompt, &logged, start)?;
         if called {
@@ -1271,7 +1271,7 @@ impl Engine {
             faded: &never_faded,
         };
         let (narration, _) = narrate_through(self.gm.as_ref(), &prompt, None, hidden, &mut ctl);
-        self.log(op_id, "narrate", &prompt, answer_text(&narration), start)?;
+        self.log(op_id, "narrate", &prompt, &answer_text(&narration), start)?;
         self.log_stats(op_id, "narrate")?;
         Ok(narration?)
     }
@@ -1365,7 +1365,7 @@ impl Engine {
             timings.proposal_prompt_tokens = self.gm.last_prompt_tokens();
             let logged = match self.gm.last_done_reason().filter(|r| r != "stop") {
                 Some(reason) => format!("{}\n[generation stopped: {reason}]", answer_text(&raw)),
-                None => answer_text(&raw).to_owned(),
+                None => answer_text(&raw).into_owned(),
             };
             self.log(op_id, attempt, &prompt, &logged, step)?;
             self.log_stats(op_id, attempt)?;
@@ -1691,10 +1691,14 @@ fn ms(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-fn answer_text(result: &Result<String, GmError>) -> &str {
+/// A model answer as the debug log keeps it. A model error keeps its full
+/// text, with the status and the server's message: the Player sees plain
+/// copy only (QA run 5), so the debug view is where the cause stays. The
+/// draft stages log their errors the same way.
+fn answer_text(result: &Result<String, GmError>) -> std::borrow::Cow<'_, str> {
     match result {
-        Ok(text) => text,
-        Err(_) => "model error",
+        Ok(text) => text.into(),
+        Err(e) => format!("model error: {e}").into(),
     }
 }
 

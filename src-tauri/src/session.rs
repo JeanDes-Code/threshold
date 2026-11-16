@@ -987,15 +987,26 @@ fn committed(
     }
 }
 
-/// The text of a model error that the Player may see: never the server's
-/// message, which can echo the prompt.
+/// The Player's text for a model call that timed out.
+pub const MODEL_SLOW: &str = "The game model took too long to answer. Try again.";
+
+/// The Player's text for a model that cannot be reached or answers with a
+/// server error.
+pub const MODEL_DOWN: &str =
+    "The game model is not responding. Check it is running, then try again.";
+
+/// The text of a model error that the Player may see: one plain sentence
+/// with what to do, never a status code or the server's message, which
+/// can echo the prompt (QA run 5: "the game model returned HTTP 500" and
+/// "the game model request timed out" showed with Debug off). It is the
+/// same in debug mode: the text stays on screen after Debug is turned off.
+/// The raw error is in the debug log of the Turn's operation.
 fn model_error(e: &GmError) -> String {
     match e {
-        GmError::Unreachable(_) => "the game model is unreachable".into(),
-        GmError::Timeout => "the game model request timed out".into(),
-        GmError::BadStatus(status, _) => format!("the game model returned HTTP {status}"),
-        GmError::Aborted(_) => "the game model stopped with an error".into(),
-        GmError::Cancelled => "the game model call was cancelled".into(),
+        GmError::Unreachable(_) | GmError::BadStatus(..) => MODEL_DOWN.into(),
+        GmError::Timeout => MODEL_SLOW.into(),
+        GmError::Aborted(_) => "The game model stopped before it finished. Try again.".into(),
+        GmError::Cancelled => "The call to the game model was cancelled.".into(),
     }
 }
 
@@ -1025,7 +1036,7 @@ pub fn player_error(e: &TurnError) -> AppError {
         | TurnError::OpIdTaken => e.to_string(),
         TurnError::Model(error) => model_error(error),
         TurnError::NarrationFailed { error, .. } => format!(
-            "the Turn is committed, but its narration failed: {}",
+            "The Turn is committed, but its narration stopped. {}",
             model_error(error)
         ),
         TurnError::Rejected(_) => TURN_NOT_SETTLED.to_owned(),

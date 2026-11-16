@@ -826,7 +826,7 @@ export type Api = ReturnType<typeof createApi>;
  */
 export function turnNotice(turn: TurnSummary): string | null {
   return turn.narration === null
-    ? `Committed, narration interrupted: ${turn.narration_error ?? "unknown error"}`
+    ? `The Turn is committed, but its narration stopped. ${turn.narration_error ?? "Try again."}`
     : null;
 }
 

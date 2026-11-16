@@ -1,0 +1,32 @@
+{
+  "places": [
+    {
+      "inside": "none",
+      "place": "Ashford"
+    },
+    {
+      "inside": "Ashford",
+      "place": "Lantern Inn"
+    },
+    {
+      "inside": "Ashford",
+      "place": "old well"
+    },
+    {
+      "inside": "Ashford",
+      "place": "mill house"
+    },
+    {
+      "inside": "Ashford",
+      "place": "chapel"
+    },
+    {
+      "inside": "none",
+      "place": "ferry landing"
+    },
+    {
+      "inside": "none",
+      "place": "Harrowmere"
+    }
+  ]
+}

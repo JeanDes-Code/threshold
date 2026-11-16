@@ -322,7 +322,8 @@ pub(super) fn draft_tree(
 
 /// The `location` facts that the Source Text gives the proposed links
 /// (QA run 4): for each link "`P` inside `Q`", the first sentence of the
-/// text that names `P` and `Q`, and no other Place, as whole words. The
+/// text that backs it (`sentence_backs`): it names `P` and `Q` as whole
+/// words, and any other Place only in a trailing clause of nearness. The
 /// fact is `P`, location `Q`, with that sentence as its text. The live
 /// model rarely writes a `location` fact about a Place: it gives its facts
 /// to the PC, under keys such as `destination_location`. So a link that
@@ -340,9 +341,10 @@ pub(super) fn draft_tree(
 /// These facts back a link only (`backed_places`). They never take part in
 /// the doubt check, and the draft does not keep them: built from the
 /// proposal, they would hide a fact that contradicts it, since the subject
-/// rule wins over the text rule. A sentence with a third Place backs
-/// nothing: "the inn in the crossing, on the river" does not say which
-/// one holds the inn.
+/// rule wins over the text rule. A sentence with a third Place elsewhere
+/// backs nothing: "the inn in the crossing, on the river" does not say
+/// which one holds the inn. "The inn stands in the crossing, beside the
+/// well" does (QA run 5).
 fn source_facts(
     roster: &Roster,
     proposed: &[(String, Inside<String>)],
@@ -361,19 +363,10 @@ fn source_facts(
             (m.main.as_str(), names)
         })
         .collect();
-    let sentences: Vec<(&str, Vec<String>, Vec<&str>)> = text
+    let sentences: Vec<&str> = text
         .split_inclusive(['.', '!', '?', '\n'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|sentence| {
-            let words = normalize::name_words(sentence);
-            let named = places
-                .iter()
-                .filter(|(_, names)| names.iter().any(|n| has_run(&words, n)))
-                .map(|(main, _)| *main)
-                .collect();
-            (sentence, words, named)
-        })
         .collect();
     let names_of = |main: &str| {
         places
@@ -389,15 +382,66 @@ fn source_facts(
                 return None;
             };
             let (inner, outer) = (names_of(place), names_of(parent));
-            let (sentence, _, _) = sentences.iter().find(|(_, words, named)| {
-                named.len() == 2
-                    && named.contains(&place.as_str())
-                    && named.contains(&parent.as_str())
-                    && states_containment(words, &inner, &outer)
-            })?;
+            let others: Vec<&[Vec<String>]> = places
+                .iter()
+                .filter(|(m, _)| m != place && m != parent)
+                .map(|(_, names)| names.as_slice())
+                .collect();
+            let sentence = sentences
+                .iter()
+                .find(|s| sentence_backs(s, &inner, &outer, &others))?;
             Some((place.clone(), parent.clone(), (*sentence).to_owned()))
         })
         .collect()
+}
+
+/// True when `sentence` states that the Place named by `inner` is inside
+/// the Place named by `outer`, and leaves no doubt about which Place holds
+/// it. The sentence is cut at its commas into a head and a tail, at each
+/// comma in turn and not at all:
+/// - the head names the two Places and no other (`others`), and states
+///   containment (`states_containment`);
+/// - each clause of the tail names no other Place, or starts with a word
+///   that puts the Place beside another one (`beside_clause`).
+///
+/// "The Lantern Inn stands in Ashford, beside the old well." backs "the
+/// Lantern Inn inside Ashford" (QA run 5): beside a Place is not inside
+/// it. "Edda Marsh keeps the ferry house in Brackwater Crossing, on the
+/// river Fenn." backs nothing: "on" can be a parent, so the sentence does
+/// not say which Place holds the ferry house.
+fn sentence_backs(
+    sentence: &str,
+    inner: &[Vec<String>],
+    outer: &[Vec<String>],
+    others: &[&[Vec<String>]],
+) -> bool {
+    let names_other = |words: &[String]| {
+        others
+            .iter()
+            .any(|names| names.iter().any(|n| has_run(words, n)))
+    };
+    let clauses: Vec<&str> = sentence.split(',').collect();
+    (1..=clauses.len()).any(|cut| {
+        let head = normalize::name_words(&clauses[..cut].join(","));
+        !names_other(&head)
+            && states_containment(&head, inner, outer)
+            && clauses[cut..].iter().all(|clause| {
+                let words = normalize::name_words(clause);
+                !names_other(&words) || beside_clause(&words)
+            })
+    })
+}
+
+/// True when a clause (`normalize::name_words`) starts with a word of
+/// nearness: "beside", "near", "by", "next to", "opposite", "facing". Such
+/// a clause places a Place beside another, never inside it.
+fn beside_clause(words: &[String]) -> bool {
+    const BESIDE: [&str; 5] = ["beside", "near", "by", "opposite", "facing"];
+    match words {
+        [first, ..] if BESIDE.contains(&first.as_str()) => true,
+        [next, to, ..] => next == "next" && to == "to",
+        _ => false,
+    }
 }
 
 /// True when `words` (a sentence, `normalize::name_words`) names a Place
@@ -679,5 +723,93 @@ mod tests {
             "ferry house",
             "Harrowmere",
         ));
+    }
+
+    /// `sentence_backs` with the Places of the QA run 5 Source Text.
+    fn backs(sentence: &str, inner: &str, outer: &str) -> bool {
+        let places = [
+            "Ashford",
+            "Lantern Inn",
+            "old well",
+            "mill house",
+            "chapel",
+            "ferry landing",
+            "Harrowmere",
+        ];
+        let others: Vec<Vec<Vec<String>>> = places
+            .iter()
+            .filter(|p| **p != inner && **p != outer)
+            .map(|p| vec![place_words(p)])
+            .collect();
+        let others: Vec<&[Vec<String>]> = others.iter().map(Vec::as_slice).collect();
+        sentence_backs(
+            sentence,
+            &[place_words(inner)],
+            &[place_words(outer)],
+            &others,
+        )
+    }
+
+    /// QA run 5 (404): a trailing clause that puts the inn beside a third
+    /// Place does not hide the containment that the sentence states.
+    #[test]
+    fn a_trailing_beside_clause_keeps_the_containment() {
+        let lantern = "The Lantern Inn stands in Ashford, beside the old well.";
+        assert!(backs(lantern, "Lantern Inn", "Ashford"));
+        assert!(backs(
+            "The mill house is part of Ashford, down by the stream.",
+            "mill house",
+            "Ashford"
+        ));
+        assert!(backs(
+            "The chapel is inside Ashford's walls.",
+            "chapel",
+            "Ashford"
+        ));
+        assert!(backs(
+            "The chapel is in Ashford, next to the Lantern Inn.",
+            "chapel",
+            "Ashford"
+        ));
+    }
+
+    /// "beside X" never backs "inside X", and a trailing clause never makes
+    /// a sentence of travel back a link.
+    #[test]
+    fn beside_or_travel_never_backs_inside() {
+        let lantern = "The Lantern Inn stands in Ashford, beside the old well.";
+        assert!(!backs(lantern, "Lantern Inn", "old well"));
+        assert!(!backs(lantern, "old well", "Ashford"));
+        assert!(!backs(lantern, "old well", "Lantern Inn"));
+        assert!(!backs(
+            "The Lantern Inn stands beside the old well.",
+            "Lantern Inn",
+            "old well"
+        ));
+        assert!(!backs(
+            "The ferry carries travellers over to Harrowmere.",
+            "ferry landing",
+            "Harrowmere"
+        ));
+        for sentence in [
+            "The ferry landing carries travellers over to Harrowmere.",
+            "The ferry landing carries travellers over to Harrowmere, beside the old well.",
+            "The ferry landing is at the foot of the hill, by the lake.",
+        ] {
+            assert!(
+                !backs(sentence, "ferry landing", "Harrowmere"),
+                "{sentence}"
+            );
+        }
+        // A third Place anywhere but in a trailing clause of nearness
+        // still backs nothing: it may be the parent.
+        for sentence in [
+            "The Lantern Inn stands in Ashford, on the old well.",
+            "The Lantern Inn stands in Ashford, where the old well is.",
+            "The Lantern Inn stands in Ashford, inside the old well.",
+            "The Lantern Inn, beside the old well, stands in Ashford.",
+        ] {
+            assert!(!backs(sentence, "Lantern Inn", "Ashford"), "{sentence}");
+        }
     }
 }

@@ -665,13 +665,14 @@ fn a_section_that_stays_unreadable_gives_no_fact() {
     );
 }
 
+/// An entry that gives a name of the PC to someone else mixes two people:
+/// the one-PC check sends a repair.
 #[test]
 fn a_roster_that_lists_the_pc_is_repaired() {
     let mut with_pc = roster_out();
-    with_pc["characters"]
-        .as_array_mut()
-        .unwrap()
-        .push(npc("The Keeper", 31, true));
+    let mut mixed = npc("Ada Venn", 40, false);
+    mixed["other_names"] = json!([{"name": "The Keeper", "known_to": []}]);
+    with_pc["characters"][1] = mixed;
     let mut outputs = plain_outputs();
     outputs.insert(0, with_pc);
     let gm = gm(&outputs);
@@ -680,6 +681,45 @@ fn a_roster_that_lists_the_pc_is_repaired() {
     let calls = gm.calls();
     assert_eq!(calls.len(), 7);
     assert!(calls[1].prompt.recent.contains("OnePc"));
+}
+
+/// QA run 5: the PC listed again under `characters`, by the PC's names
+/// only, is the PC. The draft drops the copy with no repair call.
+#[test]
+fn a_copy_of_the_pc_in_the_roster_is_dropped() {
+    let mut with_pc = roster_out();
+    let mut copy = npc("Mira Holt", 31, true);
+    copy["other_names"] = json!([{"name": "The Keeper", "known_to": []}]);
+    with_pc["characters"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, copy);
+    with_pc["characters"]
+        .as_array_mut()
+        .unwrap()
+        .push(npc("the keeper", 31, true));
+    let mut outputs = plain_outputs();
+    outputs[0] = with_pc;
+    let gm = gm(&outputs);
+    let draft = run(&source(), &gm).result.unwrap();
+    assert_eq!(gm.calls().len(), 6);
+    let names: Vec<&str> = draft
+        .seed
+        .entities
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Tobin Reed",
+            "Ada Venn",
+            "Gull Point",
+            "Tide Hall",
+            "Harbour Council"
+        ]
+    );
+    assert_eq!(draft.seed.pc.name, "Mira Holt");
 }
 
 #[test]
