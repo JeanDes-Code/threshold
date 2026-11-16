@@ -433,10 +433,12 @@ fn sentence_backs(
 }
 
 /// True when a clause (`normalize::name_words`) starts with a word of
-/// nearness: "beside", "near", "by", "next to", "opposite", "facing". Such
-/// a clause places a Place beside another, never inside it.
+/// nearness: "beside", "near", "next to", "opposite", "facing". Such a
+/// clause places a Place beside another, never inside it. Not "by" (review
+/// r5, m1): it also opens a clause of time or of meaning, which can name
+/// the true parent ("..., by the spring it was in Harrowmere.").
 fn beside_clause(words: &[String]) -> bool {
-    const BESIDE: [&str; 5] = ["beside", "near", "by", "opposite", "facing"];
+    const BESIDE: [&str; 4] = ["beside", "near", "opposite", "facing"];
     match words {
         [first, ..] if BESIDE.contains(&first.as_str()) => true,
         [next, to, ..] => next == "next" && to == "to",
@@ -811,5 +813,24 @@ mod tests {
         ] {
             assert!(!backs(sentence, "Lantern Inn", "Ashford"), "{sentence}");
         }
+    }
+
+    /// Review r5 (m1): "by" also opens a clause of time or of meaning, and
+    /// such a clause can name the true parent. Neither sentence backs.
+    #[test]
+    fn a_trailing_by_clause_backs_nothing() {
+        for sentence in [
+            "The Lantern Inn was in Ashford, by the spring it was in Harrowmere.",
+            "The Lantern Inn is in Ashford, by which the tellers mean Harrowmere.",
+        ] {
+            assert!(!backs(sentence, "Lantern Inn", "Ashford"), "{sentence}");
+            assert!(!backs(sentence, "Lantern Inn", "Harrowmere"), "{sentence}");
+        }
+        // A clause of nearness with no other Place still leaves the head.
+        assert!(backs(
+            "The mill house is part of Ashford, down by the stream.",
+            "mill house",
+            "Ashford"
+        ));
     }
 }
