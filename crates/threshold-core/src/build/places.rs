@@ -649,3 +649,35 @@ pub(super) struct LinkOut {
     #[schemars(length(max = 60))]
     pub inside: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `states_containment` on one sentence, with `inner` and `outer` as
+    /// single names.
+    fn contains(sentence: &str, inner: &str, outer: &str) -> bool {
+        states_containment(
+            &normalize::name_words(sentence),
+            &[place_words(inner)],
+            &[place_words(outer)],
+        )
+    }
+
+    /// Final review (2026-11-16): the exact sentence of the QA seed is a
+    /// sentence of travel, not of containment, so it backs no link.
+    #[test]
+    fn a_ferry_over_to_a_place_backs_no_containment() {
+        assert!(!contains(
+            "The ferry house carries travellers over to Harrowmere.",
+            "ferry house",
+            "Harrowmere",
+        ));
+        // The same names in a containment sentence do back it.
+        assert!(contains(
+            "The ferry house is in Harrowmere.",
+            "ferry house",
+            "Harrowmere",
+        ));
+    }
+}
