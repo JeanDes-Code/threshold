@@ -89,8 +89,12 @@ The value each reaction of a Decision Proposal gives its NPC, in the field `will
 _Avoid_: Consent flag, mood, stance (the stance rule does not read the stance)
 
 **Companion**:
-An NPC present with the PC who goes with the PC on a move: the Player's Intent names it as going along ("Ilse and I walk to the ferry house", "with Ilse", "I take Ilse"), and its reaction in the Decision Proposal says Willing "yes". When the move happens, the core moves it with the PC. A named NPC who does not agree stays behind, and the narrator is told so.
+An NPC present with the PC who goes with the PC on a move: the Player's Intent names it as going along ("Ilse and I walk to the ferry house", "with Ilse", "I take Ilse"), and its reaction in the Decision Proposal says Willing "yes". When the move happens, the core moves it with the PC. A named NPC who does not agree stays behind. The narrator is told so, and the Player reads it under the Turn ("Ilse Vale stays behind.").
 _Avoid_: Party member, follower, escort
+
+**NPC Arrival**:
+An NPC who is not at the PC's place comes to it in this Turn, because the Player's Intent names it and calls, fetches or meets it ("I call Tobin until he comes home"). The Decision Proposal lists it in the field `arrives`. The schema offers only the NPCs the PC can name who are not here and whom the Intent names. When the act happens and the PC stays, the core writes the NPC's location with the PC's. An NPC Arrival is not the PC's perception when the PC arrives at a place (`world::arrival`).
+_Avoid_: Return, summon, arrival (alone)
 
 **Romance Word**:
 A neutral word or phrase of the core's short list (`mature::ROMANCE_WORDS`), such as "kiss" or "spend the night with". When the Player's Intent holds one, the Turn is at least an Advance, whatever the model says. A Content Pack may ship its own word list; an Intent that holds one of those terms is at least intimate.
