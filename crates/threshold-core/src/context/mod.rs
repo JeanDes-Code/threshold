@@ -276,16 +276,21 @@ impl<'a> Retrieval<'a> {
             }
         }
         let texts: Vec<Vec<String>> = named_text.iter().map(|t| words(t)).collect();
+        // QA run 5 (2026-11-16): the Intent also names a character by a
+        // name the PC holds for it ("ask Tobin"), so the prompt shows the
+        // character and its handle.
+        let named = crate::checks::characters_named(view, intent);
         let mentioned: Vec<EntityId> = view
             .entities
             .iter()
             .filter(|e| !scene_entities.contains(&e.id))
             .filter(|e| {
                 let name = words(&e.name);
-                !name.is_empty()
-                    && texts
-                        .iter()
-                        .any(|text| text.windows(name.len()).any(|w| w == name.as_slice()))
+                named.contains(&e.id)
+                    || !name.is_empty()
+                        && texts
+                            .iter()
+                            .any(|text| text.windows(name.len()).any(|w| w == name.as_slice()))
             })
             .map(|e| e.id)
             .collect();

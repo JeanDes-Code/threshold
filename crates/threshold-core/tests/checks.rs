@@ -727,6 +727,7 @@ fn per_turn_schema_accepts_known_handles_and_rejects_unknown() {
         places: vec![Handle::Entity(7)],
         open_items: vec!["E1 pending_trip".into()],
         leavers: vec![Handle::Entity(2)],
+        arrivers: vec![],
         destinations: vec![Handle::Entity(7), Handle::Entity(8)],
         scene: false,
     };

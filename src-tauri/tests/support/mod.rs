@@ -31,6 +31,7 @@ pub fn base() -> DecisionProposal {
         left_behind: vec![],
         not_reached: None,
         leaves: vec![],
+        arrives: vec![],
         settles: None,
         finds: Default::default(),
         blockers: vec![],
@@ -44,6 +45,7 @@ pub fn base() -> DecisionProposal {
         intimacy: Intimacy::None,
         facts_on_win: false,
         offered: vec![],
+        may_arrive: vec![],
     }
 }
 

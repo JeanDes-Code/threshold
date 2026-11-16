@@ -114,6 +114,13 @@ pub fn location_sentence(name: &str, place: Option<&str>) -> String {
     }
 }
 
+/// The text of a `location` fact the core writes for an NPC who comes to
+/// the PC's place (an NPC Arrival, QA run 5): "Tobin Cooper came to the
+/// Cooper house." Past, so it stays true on a card.
+pub fn arrival_sentence(name: &str, place: &str) -> String {
+    format!("{} came to {}.", name.trim(), place.trim())
+}
+
 /// `slot_sentence` for the PC, as the Player reads it: in the second person
 /// ("You are injured (bruised wrist).", "Your reputation is now
 /// respected."). The Player screens use it for a state of the PC that a

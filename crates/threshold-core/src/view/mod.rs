@@ -272,7 +272,8 @@ pub struct StoryTurn {
     pub scene_end: Option<String>,
     /// The Turn's move named a place the world does not know: one line
     /// that says the PC stayed and why (`UNKNOWN_PLACE_NOTE`), shown under
-    /// it.
+    /// it. Else, when the move left NPCs behind: who stays
+    /// (`left_behind_note`, QA run 5).
     pub move_note: Option<String>,
 }
 
@@ -1158,7 +1159,30 @@ fn story_turn(sight: &PcSight, links: &Links, turn: &SightTurn) -> StoryTurn {
         body,
         found: turn.found.as_ref().map(found_card),
         scene_end: turn.scene_end.and_then(scene_end_line).map(str::to_owned),
-        move_note: turn.unknown_place.then(|| UNKNOWN_PLACE_NOTE.to_owned()),
+        move_note: if turn.unknown_place {
+            Some(UNKNOWN_PLACE_NOTE.to_owned())
+        } else {
+            left_behind_note(&turn.left_behind)
+        },
+    }
+}
+
+/// The line under a move that left NPCs behind (QA run 5, 2026-11-16):
+/// "Ilse Vale stays behind." or "Ilse Vale and Brann stay behind." The
+/// Intent named them as going with the PC, and they did not agree, so the
+/// Player reads why they are not at the new place. `None` with nobody.
+fn left_behind_note(names: &[String]) -> Option<String> {
+    match names {
+        [] => None,
+        [one] => Some(format!("{} stays behind.", one_line(one))),
+        [rest @ .., last] => Some(format!(
+            "{} and {} stay behind.",
+            rest.iter()
+                .map(|n| one_line(n))
+                .collect::<Vec<_>>()
+                .join(", "),
+            one_line(last)
+        )),
     }
 }
 

@@ -21,7 +21,7 @@ use crate::{
     rules::RollResult,
     speech::{self, Line},
     store::{Entity, Fact, Knowledge, StoredTurn, TurnId, TurnKind, WorldView},
-    turn::{stored_found, stored_roll, stored_settles, stored_unknown_place},
+    turn::{stored_found, stored_left_behind, stored_roll, stored_settles, stored_unknown_place},
 };
 
 /// A Turn that moves the World Clock by more than this starts a new Scene.
@@ -109,6 +109,11 @@ pub struct SightTurn {
     /// stayed (`turn::stored_unknown_place`, QA run 3). False on a reverted
     /// Turn.
     pub unknown_place: bool,
+    /// The main names of the NPCs the Turn's move left behind
+    /// (`turn::stored_left_behind`, QA run 5): the Intent named them as
+    /// going with the PC, and they did not agree. Empty on a reverted or
+    /// faded Turn, and on a Turn not read in full.
+    pub left_behind: Vec<String>,
 }
 
 /// One line of a Narration, as the PC can read it.
@@ -439,6 +444,15 @@ pub fn pc_sight(
             let found = (!reverted && !t.faded && line.is_none())
                 .then(|| stored_found(&t.record.proposal_json))
                 .flatten();
+            let left_behind = if reverted || t.faded || line.is_some() {
+                Vec::new()
+            } else {
+                stored_left_behind(&t.record.proposal_json)
+                    .into_iter()
+                    .filter_map(|h| view.entity(h))
+                    .map(|e| e.name.clone())
+                    .collect()
+            };
             SightTurn {
                 turn: t.id,
                 kind: t.record.kind,
@@ -452,6 +466,7 @@ pub fn pc_sight(
                 found,
                 scene_end: scene_ends.get(&t.id).copied(),
                 unknown_place: !reverted && stored_unknown_place(&t.record.proposal_json),
+                left_behind,
             }
         })
         .collect();

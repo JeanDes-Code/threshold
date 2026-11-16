@@ -349,6 +349,7 @@ pub const OOC_RULES: &str = concat!(
 You answer the player's out-of-character question about a single-player tabletop role-playing game. The player plays the player character (PC): answer the player as \"you\".
 Answer only from the adventure and the blocks below. Together they hold everything the PC knows, and every block counts: a request, an offer, a plan or a promise also tells what you know about each person it names. Say that you do not know only when no block holds the answer.
 NOW: where you are, the time, and who is here with you. STILL OPEN: the requests, offers, plans and promises not answered or not done yet. ALREADY ANSWERED: each one you accepted, refused, did, failed or gave up, and how. RECENT TURNS: what the player last did and read. WHAT YOU KNOW: the other things you know about you, the people here, places and things. PEOPLE WHO ARE NOT HERE: each person who is not with you now, where you believe they are, and what you know about them.
+For where a person is now, NOW, NAMED IN THE QUESTION and PEOPLE WHO ARE NOT HERE win over RECENT TURNS: the story can tell what did not happen.
 Never invent facts about the world, and never continue the story.
 Answer briefly, in plain prose.
 ",
@@ -1398,6 +1399,9 @@ impl Engine {
                     // The items the Intent names: the only ones `settles`
                     // may close (review M1).
                     p.offered.clone_from(&ctx.handles.open_items);
+                    // The NPCs the Intent names who are not here: the only
+                    // ones `arrives` may bring (QA run 5).
+                    p.may_arrive.clone_from(&ctx.handles.arrivers);
                     // `settle` first: it may drop `move_to`, and a
                     // contested move with no destination is an act for
                     // `engine_time` (review minor).
@@ -1913,6 +1917,18 @@ pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
 /// an allowed verdict or a won Check). QA run 4: "Ilse and I walk to the
 /// ferry house" left Ilse at the inn, and the Narration walked her along.
 fn left_behind_lines(view: &WorldView, proposal_json: &str) -> Vec<String> {
+    stored_left_behind(proposal_json)
+        .into_iter()
+        .filter_map(|h| view.entity(h))
+        .map(|e| format!("- {0} does not come along: {0} stays behind.\n", e.name))
+        .collect()
+}
+
+/// The NPCs a Turn's move left behind (`DecisionProposal::left_behind`),
+/// from its `proposal_json`: only when the move happened and had a place.
+/// Empty for any other Turn. The narrator (`left_behind_lines`) and
+/// `world::pc_sight` (the Player's note, QA run 5) read it.
+pub fn stored_left_behind(proposal_json: &str) -> Vec<Handle> {
     let moved = match stored_action(proposal_json) {
         Some((ActionKind::Move, Verdict::Allowed)) => true,
         Some((ActionKind::Move, Verdict::Check)) => {
@@ -1933,11 +1949,7 @@ fn left_behind_lines(view: &WorldView, proposal_json: &str) -> Vec<String> {
         .pointer("/proposal/left_behind")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-    left.into_iter()
-        .filter(|_| has_place)
-        .filter_map(|h| view.entity(h))
-        .map(|e| format!("- {0} does not come along: {0} stays behind.\n", e.name))
-        .collect()
+    left.into_iter().filter(|_| has_place).collect()
 }
 
 /// The narrator's outcome line of a move to a place the world does not

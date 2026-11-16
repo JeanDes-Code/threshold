@@ -46,11 +46,77 @@ pub fn settle(mut p: DecisionProposal, view: &WorldView) -> (DecisionProposal, V
             p.action
         ));
     }
+    drop_undeclared_reactions(&mut p, &mut notes);
     settle_closes(&mut p, view, &mut notes);
     settle_leaves(&mut p, view, &mut notes);
+    settle_arrivals(&mut p, &mut notes);
     settle_finds(&mut p, view, &mut notes);
     spell_places(&mut p, view, &mut notes);
     (p, notes)
+}
+
+/// `arrives` (QA run 5, 2026-11-16): an entry the schema did not offer
+/// (`may_arrive`), that names the NPC twice, or whose NPC also leaves
+/// goes; so does every entry of a move with a destination, since the PC
+/// would not be at the place the NPC comes to. Each removal only takes
+/// model output away.
+fn settle_arrivals(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+    let moves = p.action == ActionKind::Move && p.move_to.is_some();
+    let mut listed = Vec::new();
+    p.arrives.retain(|npc| {
+        let why = if moves {
+            Some("the PC moves away in this Turn")
+        } else if !p.may_arrive.contains(npc) {
+            Some("not offered this Turn: the Intent does not name it, or it is here")
+        } else if listed.contains(npc) {
+            Some("the NPC is listed twice")
+        } else if p.leaves.iter().any(|l| l.npc == *npc) {
+            Some("the NPC also leaves")
+        } else {
+            None
+        };
+        match why {
+            Some(why) => {
+                notes.push(format!("removed arrives {npc}: {why}"));
+                false
+            }
+            None => {
+                listed.push(*npc);
+                true
+            }
+        }
+    });
+    if p.arrives.len() > 2 {
+        notes.push(format!(
+            "removed {} arrives past the cap of 2",
+            p.arrives.len() - 2
+        ));
+        p.arrives.truncate(2);
+    }
+}
+
+/// A reaction on an N handle that `new_npcs` does not declare (QA run 5,
+/// 2026-11-16): the model made up a handle for a character the prompt did
+/// not show, and the Turn failed three times on it. The reaction goes: it
+/// is an NPC's stance, not a PC act, and the Turn keeps what else it says.
+/// A Turn the age rule runs for (`intimacy` not `none`) keeps it, so the
+/// references check still rejects it: the gate reads handles, and it fails
+/// closed.
+fn drop_undeclared_reactions(p: &mut DecisionProposal, notes: &mut Vec<String>) {
+    if p.intimacy != Intimacy::None {
+        return;
+    }
+    let declared: Vec<Handle> = p.new_npcs.iter().map(|n| n.id).collect();
+    p.reactions.retain(|r| {
+        let undeclared = matches!(r.npc, Handle::NewNpc(_)) && !declared.contains(&r.npc);
+        if undeclared {
+            notes.push(format!(
+                "removed the reaction of {}: the N handle is not declared in new_npcs",
+                r.npc
+            ));
+        }
+        !undeclared
+    });
 }
 
 /// `finds` (ADR 0007, 2026-11-12). A Turn the age rule runs for keeps none:
@@ -320,6 +386,7 @@ fn settle_closes(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Str
 /// takes model output away.
 fn settle_leaves(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<String>) {
     let leavers = super::leavers(view);
+    leave_now(p, view, &leavers, notes);
     let mut listed = Vec::new();
     p.leaves.retain(|leave| {
         let why = match (leave.npc, super::destination(view, &leave.to)) {
@@ -375,6 +442,50 @@ fn settle_leaves(p: &mut DecisionProposal, view: &WorldView, notes: &mut Vec<Str
     if p.facts.len() < before {
         notes.push("removed a location fact of an NPC who leaves: the core writes it".into());
     }
+}
+
+/// A `schedule` due at once (`in_minutes: 0`) whose actor is an NPC the PC
+/// perceives here and whose `moves_actor_to` is a place or `away` is a
+/// departure of this Turn (QA run 5, Turn 38, 2026-11-16). As an event it
+/// fires at the end of the Turn, after the narrator told the departure and
+/// the Commit kept the NPC here. It becomes a `leaves` entry, and the
+/// schedule loses the actor's move: its `moves_actor_to` and its `location`
+/// effects on the actor. A schedule with no effect left goes. The model
+/// sent the move, so the core adds no act: it only moves it to the field
+/// that applies now. With two leaves already, or the actor already listed,
+/// the schedule stays as sent.
+fn leave_now(
+    p: &mut DecisionProposal,
+    view: &WorldView,
+    leavers: &[crate::domain::EntityId],
+    notes: &mut Vec<String>,
+) {
+    let Some(s) = p.schedule.as_mut() else {
+        return;
+    };
+    let Some(to) = s.moves_actor_to.clone() else {
+        return;
+    };
+    let now = s.in_minutes == 0
+        && matches!(s.actor, Handle::Entity(id) if leavers.contains(&id))
+        && super::destination(view, &to).is_some()
+        && p.leaves.len() < 2
+        && !p.leaves.iter().any(|l| l.npc == s.actor);
+    if !now {
+        return;
+    }
+    let actor = s.actor;
+    s.moves_actor_to = None;
+    s.effects
+        .retain(|e| !(e.subject == actor && same_key(&e.key, "location")));
+    notes.push(format!(
+        "moved schedule.moves_actor_to {to} to leaves: {actor} leaves in this Turn"
+    ));
+    if s.effects.is_empty() {
+        p.schedule = None;
+        notes.push(format!("removed the schedule of {actor}: no effect left"));
+    }
+    p.leaves.push(crate::domain::Leave { npc: actor, to });
 }
 
 /// The core writes the PC's `location` from `move_to` (ADR 0007), so a PC

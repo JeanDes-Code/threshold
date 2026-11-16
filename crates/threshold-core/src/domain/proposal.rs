@@ -61,6 +61,16 @@ pub struct DecisionProposal {
     #[serde(default)]
     #[schemars(length(max = 2))]
     pub leaves: Vec<Leave>,
+    /// The NPCs who come to the PC's place in this Turn (QA run 5,
+    /// 2026-11-16): an NPC Arrival. The per-Turn schema offers only the NPCs
+    /// the PC can name who are not here and whom the Intent names
+    /// (`HandleContext::arrivers`); with none, the field is absent. The
+    /// core writes each one's `location` with the PC's when the act
+    /// happens (allowed, or a won Check), as for `move_to`. An NPC who is
+    /// not listed does not come.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = 2))]
+    pub arrives: Vec<Handle>,
     /// The one Open Item that the Player's Intent settles in this Turn, and
     /// how (ADR 0007, changed in bug pass 3). Its `item` is `none` or an
     /// Open Item the Intent names (`world::items_named_by`), as the prompt
@@ -124,6 +134,12 @@ pub struct DecisionProposal {
     /// schema and not parsed.
     #[serde(skip)]
     pub offered: Vec<String>,
+    /// Set by the core only, never by the model: the NPCs this Turn's
+    /// schema offered for `arrives` (`HandleContext::arrivers`). `settle`
+    /// drops, and `validate` rejects, an arrival of anyone else. Not in
+    /// the schema and not parsed.
+    #[serde(skip)]
+    pub may_arrive: Vec<Handle>,
 }
 
 /// The text of `INTIMACY_DEFINITION`, as a literal, so the proposal rules
