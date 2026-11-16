@@ -16,7 +16,7 @@ const CANCEL_POLL: Duration = Duration::from_millis(100);
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use threshold_core::{CallStats, Gm, GmError, Prompt, Stream};
+use threshold_core::{CallStats, Gm, GmError, INVALID_RESPONSE, Prompt, Stream};
 use ureq::{Agent, Response};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -300,7 +300,7 @@ impl Gm for OllamaGm {
 /// when the runner stops), so it maps to `GmError::Aborted`.
 fn parse_chat(raw: &str, status: u16) -> Result<ChatResponse, GmError> {
     let value: Value = serde_json::from_str(raw)
-        .map_err(|error| GmError::BadStatus(status, format!("invalid response: {error}")))?;
+        .map_err(|error| GmError::BadStatus(status, format!("{INVALID_RESPONSE}: {error}")))?;
     if let Some(error) = value.get("error") {
         let message = error
             .as_str()
@@ -308,7 +308,7 @@ fn parse_chat(raw: &str, status: u16) -> Result<ChatResponse, GmError> {
         return Err(GmError::Aborted(message));
     }
     serde_json::from_value(value)
-        .map_err(|error| GmError::BadStatus(status, format!("invalid response: {error}")))
+        .map_err(|error| GmError::BadStatus(status, format!("{INVALID_RESPONSE}: {error}")))
 }
 
 #[derive(Debug, Deserialize)]

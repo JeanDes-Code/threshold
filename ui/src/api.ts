@@ -747,6 +747,8 @@ export function createApi(invoke: Invoke) {
     /** Reveals the hidden world: debug mode only. */
     getBuildDebug: (draftId: string) =>
       invoke<DebugLine[]>("get_build_debug", { draft_id: draftId }),
+    /** The id of the last draft that failed, whose debug records are kept; null when none. */
+    failedDraft: () => invoke<string | null>("failed_draft"),
   };
 }
 

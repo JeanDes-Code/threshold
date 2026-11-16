@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use super::{BuildCheck, BuildFailure, Control, DebugEntry, Progress, Stage};
-use crate::model::{Gm, GmError, Prompt};
+use crate::model::{Gm, GmError, ModelTrouble, Prompt};
 
 /// How many times a call that timed out is sent again, with the same
 /// prompt, before the stage fails as `Model`. About one live call in ten
@@ -441,10 +441,12 @@ where
         }
     };
     let raw = answer.map_err(|e| {
-        fail(match e {
-            GmError::Timeout => BuildCheck::ModelTimeout,
-            GmError::Cancelled => BuildCheck::Cancelled,
-            _ => BuildCheck::Model,
+        fail(match e.trouble() {
+            ModelTrouble::Timeout => BuildCheck::ModelTimeout,
+            ModelTrouble::Cancelled => BuildCheck::Cancelled,
+            ModelTrouble::NotInstalled => BuildCheck::ModelNotInstalled,
+            ModelTrouble::Unreadable => BuildCheck::ModelUnreadable,
+            ModelTrouble::Down | ModelTrouble::Aborted => BuildCheck::Model,
         })
     })?;
     if raw.len() > RAW_ANSWER_MAX_BYTES {

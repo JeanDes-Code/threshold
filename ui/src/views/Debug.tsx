@@ -79,15 +79,17 @@ function TurnDebug({ turns }: { turns: StoryTurn[] }) {
  */
 function BuildDebug() {
   const [drafts, setDrafts] = useState<DraftLine[]>([]);
+  const [failed, setFailed] = useState<string | null>(null);
   const [draftId, setDraftId] = useState("");
   const [entries, setEntries] = useState<DebugLine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.listDrafts().then(
-      (all) => {
+    Promise.all([api.listDrafts(), api.failedDraft()]).then(
+      ([all, lastFailed]) => {
         setDrafts(all);
-        setDraftId((id) => id || (all[0]?.draft_id ?? ""));
+        setFailed(lastFailed);
+        setDraftId((id) => id || (all[0]?.draft_id ?? lastFailed ?? ""));
       },
       (e: unknown) => setError(errorText(e)),
     );
@@ -102,7 +104,7 @@ function BuildDebug() {
     }
   };
 
-  if (drafts.length === 0) {
+  if (drafts.length === 0 && failed === null) {
     return error ? <p className="error">{error}</p> : <p className="muted">No draft yet.</p>;
   }
   return (
@@ -121,6 +123,7 @@ function BuildDebug() {
             {d.title || d.draft_id} ({d.state})
           </option>
         ))}
+        {failed !== null && <option value={failed}>The last draft that failed</option>}
       </select>
       {entries === null ? (
         <>

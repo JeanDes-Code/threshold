@@ -87,6 +87,9 @@ impl Drop for JobSlot {
     }
 }
 
+/// The Player's text for a draft they cancelled (review r5, m4).
+const DRAFT_CANCELLED: &str = "You cancelled the draft.";
+
 const BUSY: &str = "another draft or build is running: wait for it to end, or cancel it";
 const UNDER_BUILD: &str = "this draft is being built: wait for the build to end, or cancel it";
 
@@ -172,14 +175,21 @@ impl Drafts {
         };
         match drafted {
             Ok(draft) => {
-                lock(&self.store).save(&draft).map_err(draft_error)?;
+                let store = lock(&self.store);
+                store.save(&draft).map_err(draft_error)?;
+                // The rows of an earlier failed draft go once a draft works.
+                let _ = clear_failed_drafts(&store, None);
                 Ok(DraftView::of(draft))
             }
             Err(failure) => {
-                // No draft exists to hold these records.
-                if let Some(id) = logged_to {
-                    let _ = lock(&self.store).clear_debug(&id);
-                }
+                // Review r5 (m3): the rows of a failed draft are the only
+                // place its raw cause lives (each model call's row holds the
+                // model error). They stay, with no draft, until the next
+                // draft: a new failure replaces them and a success clears
+                // them (`failed_draft`). A cancel is no failure to read.
+                let store = lock(&self.store);
+                let keep = logged_to.filter(|_| failure.check != BuildCheck::Cancelled);
+                let _ = clear_failed_drafts(&store, keep.as_deref());
                 Err(job_error(failure))
             }
         }
@@ -351,6 +361,13 @@ impl Drafts {
         store.delete(draft_id).map_err(draft_error)
     }
 
+    /// The id of the last draft that failed, when its debug rows are kept
+    /// (review r5, m3). It has no draft file, so `list_drafts` does not
+    /// show it; `get_build_debug` reads its rows.
+    pub fn failed_draft(&self) -> Option<String> {
+        lock(&self.store).orphan_debug().ok()?.pop()
+    }
+
     /// The prompts and raw outputs of the draft's last run. Refused unless
     /// debug mode is on: they reveal the hidden world.
     pub fn get_build_debug(&self, draft_id: &str) -> Result<Vec<DebugLine>, AppError> {
@@ -427,6 +444,17 @@ impl Drafts {
         let _ = self.update(draft_id, |d| d.last_failure = Some(failure));
         job_error(failure)
     }
+}
+
+/// Removes the debug rows of every failed draft (`Drafts::failed_draft`)
+/// but `keep`.
+fn clear_failed_drafts(store: &DraftStore, keep: Option<&str>) -> Result<(), DraftStoreError> {
+    for id in store.orphan_debug()? {
+        if keep != Some(id.as_str()) {
+            store.clear_debug(&id)?;
+        }
+    }
+    Ok(())
 }
 
 /// The Player's sentence for a refused Source Text: what is wrong, with the
@@ -525,6 +553,10 @@ fn commit_failure(e: Option<&SetupError>) -> BuildFailure {
 /// fix a model answer, but a new draft often passes (QA run 5: "The draft
 /// stopped at the roster step: the one-PC check failed." used internal
 /// words and said nothing about what to do).
+///
+/// A cancelled draft is not a failed one (review r5, m4): its sentence
+/// does not start with "The draft stopped", which the UI answers with
+/// "Retry" (`draftStopped`).
 fn job_error(failure: BuildFailure) -> AppError {
     let draft_step = match failure.stage {
         Stage::DraftRoster => Some("while reading the characters"),
@@ -535,13 +567,19 @@ fn job_error(failure: BuildFailure) -> AppError {
     };
     if let Some(step) = draft_step {
         let check = match failure.check {
+            BuildCheck::Cancelled => return AppError::Failed(DRAFT_CANCELLED.to_owned()),
             BuildCheck::Model => {
                 "the game model is not responding. Check it is running, then press Retry"
+            }
+            BuildCheck::ModelNotInstalled => {
+                "the game model is not installed. Check its name in threshold.toml, then press Retry"
+            }
+            BuildCheck::ModelUnreadable => {
+                "the game model sent an answer the app could not read. Press Retry to draft again"
             }
             BuildCheck::ModelTimeout => {
                 "the model did not answer in time. Check that no other program is using the machine's memory, then press Retry"
             }
-            BuildCheck::Cancelled => "you cancelled it",
             _ => "the model's answer did not pass the app's checks. Press Retry to draft again",
         };
         return AppError::Failed(format!("The draft stopped {step}: {check}."));
@@ -561,6 +599,12 @@ fn job_error(failure: BuildFailure) -> AppError {
         BuildCheck::Model => "the game model is not responding. Check it is running, then retry",
         BuildCheck::ModelTimeout => {
             "the model did not answer in time. Check that no other program is using the machine's memory, then retry"
+        }
+        BuildCheck::ModelNotInstalled => {
+            "the game model is not installed. Check its name in threshold.toml, then retry"
+        }
+        BuildCheck::ModelUnreadable => {
+            "the game model sent an answer the app could not read. Retry"
         }
         BuildCheck::Schema => "the model answer did not fit its form",
         BuildCheck::References => "a reference check failed",

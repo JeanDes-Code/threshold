@@ -2,6 +2,7 @@
 //! every Tauri command calls.
 
 use std::{
+    collections::VecDeque,
     path::Path,
     sync::{
         Arc, Mutex,
@@ -459,16 +460,22 @@ fn opening_survives_a_restart() {
 /// Something a test runs inside a model call of the draft or the build.
 type Hook = Arc<dyn Fn() + Send + Sync>;
 
-/// A `RecordedGm` that runs the test's hook after each proposal.
+/// A `RecordedGm` that runs the test's hook after each proposal, and fails
+/// a call first when an error is queued for it.
 #[derive(Clone)]
 struct Hooked {
     inner: RecordedGm,
     hook: Arc<Mutex<Option<Hook>>>,
+    fail: Arc<Mutex<VecDeque<GmError>>>,
 }
 
 impl Gm for Hooked {
     fn propose(&self, prompt: &Prompt, schema: &Value) -> Result<String, GmError> {
-        let out = self.inner.propose(prompt, schema);
+        let failed = self.fail.lock().unwrap().pop_front();
+        let out = match failed {
+            Some(e) => Err(e),
+            None => self.inner.propose(prompt, schema),
+        };
         // Called without the slot's lock, so a hook that waits never blocks
         // another job's call.
         let hook = self.hook.lock().unwrap().clone();
@@ -497,6 +504,7 @@ struct Rig {
     build: RecordedGm,
     play: RecordedGm,
     hook: Arc<Mutex<Option<Hook>>>,
+    fail: Arc<Mutex<VecDeque<GmError>>>,
 }
 
 impl Rig {
@@ -506,9 +514,11 @@ impl Rig {
         let play = RecordedGm::new(vec![], vec![]);
         let hook: Arc<Mutex<Option<Hook>>> = Arc::new(Mutex::new(None));
         let session = Arc::new(Mutex::new(session(dir.path(), &play)));
+        let fail: Arc<Mutex<VecDeque<GmError>>> = Arc::default();
         let hooked = Hooked {
             inner: build.clone(),
             hook: hook.clone(),
+            fail: fail.clone(),
         };
         let drafts = Drafts::new(
             dir.path(),
@@ -523,7 +533,24 @@ impl Rig {
             build,
             play,
             hook,
+            fail,
         }
+    }
+
+    /// The next build model call fails with `e`.
+    fn fail_next(&self, e: GmError) {
+        self.fail.lock().unwrap().push_back(e);
+    }
+
+    /// The files in `drafts/`, by name.
+    fn draft_files(&self) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(self.dir.path().join("drafts"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
     }
 
     /// Confirms each age of `view`, one name at a time, then each Inside
@@ -1070,10 +1097,9 @@ fn cancel_build_stops_draft_and_build() {
         .draft_from_text(&doc_source(), &mut |_| {})
         .unwrap_err()
         .to_string();
-    assert_eq!(
-        err,
-        "The draft stopped while reading the story: you cancelled it."
-    );
+    // Review r5 (m4): not "The draft stopped ...", which the UI reads as a
+    // failed draft and answers with "Retry".
+    assert_eq!(err, "You cancelled the draft.");
     assert_eq!(rig.build.calls().len(), 1);
     assert!(rig.drafts.list_drafts().unwrap().is_empty());
     let left: Vec<_> = std::fs::read_dir(rig.dir.path().join("drafts"))
@@ -1639,4 +1665,95 @@ fn the_fixture_path_confirms_no_age() {
     let world = store.snapshot(store.campaigns().unwrap()[0]).unwrap();
     assert!(world.entities.iter().any(|e| e.age.is_some()));
     assert!(world.entities.iter().all(|e| !e.age_confirmed));
+}
+
+/// Ollama's answer for a model it does not have.
+fn not_installed() -> GmError {
+    GmError::BadStatus(404, "model 'gemma9' not found, try pulling it first".into())
+}
+
+/// Review r5 (m3): a failed draft keeps the debug rows of its run, with
+/// the raw model error, so the debug view can show the cause. A missing
+/// model has its own copy. The next draft that succeeds clears the rows.
+#[test]
+fn a_failed_draft_keeps_its_debug_rows_until_a_draft_succeeds() {
+    let rig = Rig::new();
+    rig.session().set_debug(true);
+    rig.fail_next(not_installed());
+    let err = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert!(err.starts_with("The draft stopped while "), "{err}");
+    assert!(
+        err.ends_with(
+            ": the game model is not installed. Check its name in threshold.toml, then press Retry."
+        ),
+        "{err}"
+    );
+    assert!(rig.drafts.list_drafts().unwrap().is_empty());
+    let failed = rig.drafts.failed_draft().expect("the failed draft's rows");
+    let lines = rig.drafts.get_build_debug(&failed).unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.raw.contains("HTTP 404") && l.raw.contains("not found")),
+        "{:?}",
+        lines.iter().map(|l| &l.raw).collect::<Vec<_>>()
+    );
+
+    // A second failure replaces the rows: they never pile up.
+    let err = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not responding"), "{err}");
+    let second = rig.drafts.failed_draft().unwrap();
+    assert_ne!(second, failed);
+    assert_eq!(rig.draft_files(), [format!("{second}.debug.jsonl")]);
+
+    // A draft that succeeds clears them.
+    let id = rig.approved_draft();
+    assert_eq!(rig.drafts.failed_draft(), None);
+    assert_eq!(
+        rig.draft_files(),
+        [format!("{id}.debug.jsonl"), format!("{id}.json")]
+    );
+}
+
+/// Review r5 (m3): an answer the adapter could not read, in a draft, and a
+/// missing model in a World Build, each with its own copy.
+#[test]
+fn a_draft_and_a_build_name_a_missing_model_and_an_unreadable_answer() {
+    let rig = Rig::new();
+    rig.fail_next(GmError::BadStatus(
+        200,
+        "invalid response: expected value at line 1 column 1".into(),
+    ));
+    let err = rig
+        .drafts
+        .draft_from_text(&doc_source(), &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.ends_with(
+            ": the game model sent an answer the app could not read. Press Retry to draft again."
+        ),
+        "{err}"
+    );
+
+    let id = rig.approved_draft();
+    rig.fail_next(not_installed());
+    let err = rig
+        .drafts
+        .start_build(&id, &mut |_| {})
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "The world build stopped at the hidden facts step: the game model is not installed. \
+         Check its name in threshold.toml, then retry."
+    );
 }

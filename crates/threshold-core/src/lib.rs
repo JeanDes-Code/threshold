@@ -16,7 +16,10 @@ pub mod turn;
 pub mod view;
 pub mod world;
 
-pub use model::{CallKind, CallStats, Gm, GmError, Prompt, RecordedCall, RecordedGm, Stream};
+pub use model::{
+    CallKind, CallStats, Gm, GmError, INVALID_RESPONSE, ModelTrouble, Prompt, RecordedCall,
+    RecordedGm, Stream,
+};
 
 use domain::DecisionProposal;
 

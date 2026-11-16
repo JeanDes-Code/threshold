@@ -16,7 +16,7 @@ use threshold_core::{
     build::Gap,
     domain::DetailLevel,
     fixture::{load_adventure_seed, load_world_setup},
-    model::GmError,
+    model::{GmError, ModelTrouble},
     pack::{self, ContentPack, PackProblem},
     player::{Marks, Note, PlayerStore, Target},
     rules::{D10, RollResult},
@@ -995,18 +995,32 @@ pub const MODEL_SLOW: &str = "The game model took too long to answer. Try again.
 pub const MODEL_DOWN: &str =
     "The game model is not responding. Check it is running, then try again.";
 
+/// The Player's text for a server that has no model by the configured
+/// name (review r5, m3). The model's name is `model` in `CONFIG_FILE`.
+pub const MODEL_NOT_INSTALLED: &str =
+    "The game model is not installed. Check its name in threshold.toml, then try again.";
+
+/// The Player's text for an answer the adapter could not read (review r5,
+/// m3).
+pub const MODEL_UNREADABLE: &str =
+    "The game model sent an answer the app could not read. Try again.";
+
 /// The text of a model error that the Player may see: one plain sentence
 /// with what to do, never a status code or the server's message, which
 /// can echo the prompt (QA run 5: "the game model returned HTTP 500" and
 /// "the game model request timed out" showed with Debug off). It is the
 /// same in debug mode: the text stays on screen after Debug is turned off.
 /// The raw error is in the debug log of the Turn's operation.
+/// A missing model and an unreadable answer have their own sentence (review
+/// r5, m3): "not responding" sent the Player to check a server that runs.
 fn model_error(e: &GmError) -> String {
-    match e {
-        GmError::Unreachable(_) | GmError::BadStatus(..) => MODEL_DOWN.into(),
-        GmError::Timeout => MODEL_SLOW.into(),
-        GmError::Aborted(_) => "The game model stopped before it finished. Try again.".into(),
-        GmError::Cancelled => "The call to the game model was cancelled.".into(),
+    match e.trouble() {
+        ModelTrouble::Down => MODEL_DOWN.into(),
+        ModelTrouble::NotInstalled => MODEL_NOT_INSTALLED.into(),
+        ModelTrouble::Unreadable => MODEL_UNREADABLE.into(),
+        ModelTrouble::Timeout => MODEL_SLOW.into(),
+        ModelTrouble::Aborted => "The game model stopped before it finished. Try again.".into(),
+        ModelTrouble::Cancelled => "The call to the game model was cancelled.".into(),
     }
 }
 

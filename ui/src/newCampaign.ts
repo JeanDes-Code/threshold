@@ -100,6 +100,8 @@ const CHECKS: Record<string, string> = {
   model: "the game model is not responding. Check it is running, then retry",
   model_timeout:
     "the model did not answer in time. Check that no other program is using the machine's memory, then retry",
+  model_not_installed: "the game model is not installed. Check its name in threshold.toml, then retry",
+  model_unreadable: "the game model sent an answer the app could not read. Retry",
   schema: "the model answer did not fit its form",
   references: "a reference check failed",
   one_pc: "the one-PC check failed",
@@ -124,7 +126,8 @@ export function failureText(f: BuildFailure): string {
 /**
  * True when a draft call stopped after it reached the model, so a new try
  * may work: the shell starts those sentences with "The draft stopped". A
- * refused Source Text does not, and keeps the "Draft" button.
+ * refused Source Text does not, and keeps the "Draft" button. Nor does a
+ * cancelled draft, "You cancelled the draft." (review r5, m4).
  */
 export function draftStopped(message: string): boolean {
   return message.startsWith("The draft stopped");

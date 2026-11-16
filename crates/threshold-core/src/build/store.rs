@@ -123,6 +123,23 @@ impl DraftStore {
         remove(&self.debug_path(id)?)
     }
 
+    /// The ids whose debug records have no draft: the runs of failed
+    /// drafts (review r5, m3), oldest first.
+    pub fn orphan_debug(&self) -> Result<Vec<String>, DraftStoreError> {
+        let mut ids = Vec::new();
+        for entry in fs::read_dir(&self.dir)? {
+            let name = entry?.file_name();
+            let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".debug.jsonl")) else {
+                continue;
+            };
+            if check_id(id).is_ok() && !self.draft_path(id)?.exists() {
+                ids.push(id.to_owned());
+            }
+        }
+        ids.sort_by(|a, b| (a.len(), a).cmp(&(b.len(), b)));
+        Ok(ids)
+    }
+
     /// Starts a new run: removes the debug records of the last one.
     pub fn clear_debug(&self, id: &str) -> Result<(), DraftStoreError> {
         remove(&self.debug_path(id)?)

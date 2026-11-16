@@ -50,9 +50,15 @@ pub enum Stage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildCheck {
+    /// The model cannot be reached, or failed in another way.
     Model,
     /// The model did not answer in time, on every attempt.
     ModelTimeout,
+    /// The server has no model by the configured name (review r5, m3).
+    ModelNotInstalled,
+    /// The server answered, and the adapter could not read the answer
+    /// (review r5, m3).
+    ModelUnreadable,
     Schema,
     References,
     OnePc,

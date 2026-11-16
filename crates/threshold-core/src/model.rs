@@ -41,6 +41,42 @@ impl fmt::Display for GmError {
 
 impl Error for GmError {}
 
+/// The start of the message of a `BadStatus` whose body the adapter could
+/// not read as an answer (`threshold-ollama`).
+pub const INVALID_RESPONSE: &str = "invalid response";
+
+/// What a model error means for the Player (review r5, m3): play, drafts
+/// and the World Build tell each one in the same words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelTrouble {
+    /// The server cannot be reached, or answers with another error.
+    Down,
+    /// The server has no model by the configured name: Ollama answers 404
+    /// "model ... not found".
+    NotInstalled,
+    /// The server answered, and the adapter could not read the answer.
+    Unreadable,
+    Timeout,
+    /// The server stopped in the middle of its answer.
+    Aborted,
+    Cancelled,
+}
+
+impl GmError {
+    pub fn trouble(&self) -> ModelTrouble {
+        match self {
+            Self::BadStatus(404, _) => ModelTrouble::NotInstalled,
+            Self::BadStatus(_, message) if message.starts_with(INVALID_RESPONSE) => {
+                ModelTrouble::Unreadable
+            }
+            Self::Unreachable(_) | Self::BadStatus(..) => ModelTrouble::Down,
+            Self::Timeout => ModelTrouble::Timeout,
+            Self::Aborted(_) => ModelTrouble::Aborted,
+            Self::Cancelled => ModelTrouble::Cancelled,
+        }
+    }
+}
+
 /// What the model server reported for one call (bug pass 5, M4). With a
 /// prompt cache, `prompt_tokens` counts only the tokens the server read
 /// fresh: Ollama's `prompt_eval_count` leaves out the cached prefix.

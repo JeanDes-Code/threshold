@@ -365,6 +365,7 @@ describe("draft commands", () => {
     await api.begin();
     await api.deleteDraft("draft-1");
     await api.getBuildDebug("draft-1");
+    await api.failedDraft();
     expect(calls).toEqual([
       { cmd: "draft_from_text", args: { text: "text" } },
       // No list of ages: the core owns each confirmation.
@@ -379,6 +380,7 @@ describe("draft commands", () => {
       { cmd: "begin", args: undefined },
       { cmd: "delete_draft", args: { draft_id: "draft-1" } },
       { cmd: "get_build_debug", args: { draft_id: "draft-1" } },
+      { cmd: "failed_draft", args: undefined },
     ]);
   });
 });

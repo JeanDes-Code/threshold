@@ -16,6 +16,22 @@ use threshold_core::{Gm, GmError, Prompt, RecordedGm, Stream, store::Store};
 
 const SLOW: &str = "The game model took too long to answer. Try again.";
 const DOWN: &str = "The game model is not responding. Check it is running, then try again.";
+const MISSING: &str =
+    "The game model is not installed. Check its name in threshold.toml, then try again.";
+const UNREADABLE: &str = "The game model sent an answer the app could not read. Try again.";
+
+/// Ollama's answer for a model it does not have.
+fn not_installed() -> GmError {
+    GmError::BadStatus(404, "model 'gemma9' not found, try pulling it first".into())
+}
+
+/// A body the adapter could not parse.
+fn unreadable() -> GmError {
+    GmError::BadStatus(
+        200,
+        "invalid response: expected value at line 1 column 1".into(),
+    )
+}
 
 /// A `RecordedGm` that fails a call first when an error is queued for it.
 #[derive(Clone)]
@@ -105,6 +121,10 @@ fn a_failed_turn_shows_plain_copy_for_a_model_error() {
         (GmError::Timeout, SLOW),
         (server_error(), DOWN),
         (GmError::Unreachable("connection refused".into()), DOWN),
+        // Review r5 (m3): a missing model and an unreadable answer are not
+        // a model that is down.
+        (not_installed(), MISSING),
+        (unreadable(), UNREADABLE),
     ] {
         gm.fail_propose(error);
         let err = text(
@@ -168,4 +188,24 @@ fn a_failed_narration_and_narrate_again_show_plain_copy() {
     let err = text(s.renarrate(turn.turn_id, &mut |_| {}).unwrap_err());
     assert_eq!(err, DOWN);
     assert_plain(&err);
+}
+
+/// Review r5 (m3): the narration and Ask the GM use the same copy.
+#[test]
+fn a_missing_model_and_an_unreadable_answer_have_their_own_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let gm = FailingGm::new(RecordedGm::new(vec![allowed()], vec![]));
+    let mut s = session(dir.path(), &gm);
+    gm.fail_narrate(not_installed());
+    let turn = s
+        .submit_intent("op-1".into(), "I look around.", &mut |_| {})
+        .unwrap();
+    assert_eq!(turn.narration_error.unwrap(), MISSING);
+    for (error, copy) in [(not_installed(), MISSING), (unreadable(), UNREADABLE)] {
+        gm.fail_propose(error.clone());
+        gm.fail_narrate(error);
+        let err = text(s.ask_ooc("Where is Ada?").unwrap_err());
+        assert_eq!(err, copy);
+        assert_plain(&err);
+    }
 }

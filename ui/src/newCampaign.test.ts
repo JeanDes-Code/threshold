@@ -172,6 +172,11 @@ describe("draftStopped", () => {
     ).toBe(true);
     expect(draftStopped("This Source Text is too short to hold a premise and your character.")).toBe(false);
   });
+
+  // Review r5 (m4): after Cancel, the button reads "Draft", not "Retry".
+  it("is false for a cancelled draft", () => {
+    expect(draftStopped("You cancelled the draft.")).toBe(false);
+  });
 });
 
 describe("parseAt", () => {

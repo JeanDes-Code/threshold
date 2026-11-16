@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { draftStopped } from "../newCampaign";
 import SourceStep from "./SourceStep";
 
 const noop = () => undefined;
@@ -29,6 +30,15 @@ describe("SourceStep", () => {
     expect(html).toContain(">Retry</button>");
     expect(html).not.toContain(">Draft</button>");
     expect(html.replaceAll("&#x27;", "'")).toContain(error);
+  });
+
+  // Review r5 (m4): the shell's sentence for a cancelled draft
+  // (`drafts::DRAFT_CANCELLED`) keeps the "Draft" button.
+  it("offers Draft after a cancelled draft", () => {
+    const error = "You cancelled the draft.";
+    const html = render(draftStopped(error), error);
+    expect(html).toContain(">Draft</button>");
+    expect(html).not.toContain(">Retry</button>");
   });
 
   it("offers Draft before any draft, and after a refused text", () => {

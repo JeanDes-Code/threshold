@@ -489,6 +489,12 @@ async fn delete_draft(drafts: State<'_, Drafts>, draft_id: String) -> Result<(),
     drafting(&drafts, move |d| d.delete_draft(&draft_id)).await
 }
 
+/// The id of the last failed draft whose debug rows are kept, if any.
+#[tauri::command(rename_all = "snake_case")]
+async fn failed_draft(drafts: State<'_, Drafts>) -> Result<Option<String>, AppError> {
+    drafting(&drafts, |d| Ok(d.failed_draft())).await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 async fn get_build_debug(
     drafts: State<'_, Drafts>,
@@ -593,6 +599,7 @@ pub fn run() {
             begin,
             delete_draft,
             get_build_debug,
+            failed_draft,
         ])
         .run(tauri::generate_context!())
         .expect("Threshold failed to start");
