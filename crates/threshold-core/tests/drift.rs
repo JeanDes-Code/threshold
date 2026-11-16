@@ -19,7 +19,7 @@ mod support;
 use support::*;
 use threshold_core::{
     CallKind, Prompt, RecordedGm,
-    domain::{DetailLevel, EntityRef, Intimacy, Knowing, LedgerOp, Stance, Verdict},
+    domain::{ActionKind, DetailLevel, EntityRef, Intimacy, Knowing, LedgerOp, Stance, Verdict},
     store::{Store, WorldView},
     turn::{Engine, TurnError},
 };
@@ -32,6 +32,7 @@ struct Coopers {
     w: World,
     tobin: u64,
     marta: u64,
+    ilse: u64,
 }
 
 fn coopers(tobin_here: bool) -> Coopers {
@@ -53,9 +54,12 @@ fn coopers(tobin_here: bool) -> Coopers {
     }
     let mut w = World::with_seed(seed);
     let id = |w: &World, name: &str| w.view.entity_by_name(name).unwrap().id;
-    let (tobin, marta) = (id(&w, "Tobin Cooper"), id(&w, "Marta Cooper"));
+    let (tobin, marta, ilse) = (
+        id(&w, "Tobin Cooper"),
+        id(&w, "Marta Cooper"),
+        id(&w, "Ilse Vale"),
+    );
     let ada = w.ada;
-    let ilse = id(&w, "Ilse Vale");
     let mut seen = vec![w.orsel, w.brann, marta, ilse];
     if tobin_here {
         seen.push(tobin);
@@ -71,7 +75,12 @@ fn coopers(tobin_here: bool) -> Coopers {
         })
         .collect();
     w.commit(know);
-    Coopers { w, tobin, marta }
+    Coopers {
+        w,
+        tobin,
+        marta,
+        ilse,
+    }
 }
 
 fn engine_of(w: &mut World, gm: &RecordedGm) -> Engine {
@@ -404,5 +413,35 @@ fn a_minor_who_arrives_refuses_an_intimate_turn() {
     assert!(
         matches!(result, Err(TurnError::Refused { .. })),
         "{result:?}"
+    );
+}
+
+// --- 4: a companion missed ----------------------------------------------------
+
+/// QA run 5, Turn 35: "Ilse and I walk to the Cooper house." came with no
+/// reaction for Ilse, so she stayed (ADR 0007). The Player now reads it
+/// under the Turn.
+#[test]
+fn a_named_companion_who_stays_behind_gets_a_note_for_the_player() {
+    let mut c = coopers(false);
+    let ferry = c.w.add_place("ferry house");
+    let mut p = proposal(Verdict::Allowed);
+    p.action = ActionKind::Move;
+    p.minutes = 15;
+    p.move_to = Some(e(ferry));
+    let gm = RecordedGm::new(
+        vec![serde_json::to_string(&p).unwrap()],
+        vec!["You walk.".into()],
+    );
+    let mut engine = engine_of(&mut c.w, &gm);
+    play(&mut engine, "Ilse and I walk to the ferry house.").unwrap();
+    assert!(!sight(&engine, &c.w).present.contains(&c.ilse));
+    let play = threshold_core::view::play_view(&sight(&engine, &c.w), &Default::default());
+    let story = serde_json::to_value(&play).unwrap()["story"].clone();
+    let last = story.as_array().unwrap().last().unwrap().clone();
+    assert_eq!(
+        last["move_note"],
+        serde_json::json!("Ilse Vale stays behind."),
+        "{last}"
     );
 }

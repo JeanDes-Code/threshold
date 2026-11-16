@@ -1917,6 +1917,18 @@ pub fn stored_wait_asked(proposal_json: &str) -> Option<u32> {
 /// an allowed verdict or a won Check). QA run 4: "Ilse and I walk to the
 /// ferry house" left Ilse at the inn, and the Narration walked her along.
 fn left_behind_lines(view: &WorldView, proposal_json: &str) -> Vec<String> {
+    stored_left_behind(proposal_json)
+        .into_iter()
+        .filter_map(|h| view.entity(h))
+        .map(|e| format!("- {0} does not come along: {0} stays behind.\n", e.name))
+        .collect()
+}
+
+/// The NPCs a Turn's move left behind (`DecisionProposal::left_behind`),
+/// from its `proposal_json`: only when the move happened and had a place.
+/// Empty for any other Turn. The narrator (`left_behind_lines`) and
+/// `world::pc_sight` (the Player's note, QA run 5) read it.
+pub fn stored_left_behind(proposal_json: &str) -> Vec<Handle> {
     let moved = match stored_action(proposal_json) {
         Some((ActionKind::Move, Verdict::Allowed)) => true,
         Some((ActionKind::Move, Verdict::Check)) => {
@@ -1937,11 +1949,7 @@ fn left_behind_lines(view: &WorldView, proposal_json: &str) -> Vec<String> {
         .pointer("/proposal/left_behind")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-    left.into_iter()
-        .filter(|_| has_place)
-        .filter_map(|h| view.entity(h))
-        .map(|e| format!("- {0} does not come along: {0} stays behind.\n", e.name))
-        .collect()
+    left.into_iter().filter(|_| has_place).collect()
 }
 
 /// The narrator's outcome line of a move to a place the world does not
